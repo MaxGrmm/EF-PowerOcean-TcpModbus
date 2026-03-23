@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EF-PowerOcean-TcpModbus",
+        "description": "Gib die IP-Adresse deines EcoFlow PowerOcean Plus Geraets ein.",
+        "data": {
+          "host": "IP-Adresse",
+          "port": "Modbus TCP Port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung fehlgeschlagen. Bitte IP-Adresse und Port pruefen."
+    },
+    "abort": {
+      "already_configured": "Dieses Geraet ist bereits konfiguriert."
+    }
+  }
+}
