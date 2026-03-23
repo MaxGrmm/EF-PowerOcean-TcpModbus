@@ -1,15 +1,11 @@
 {
   "domain": "ef_powerocean_tcpmodbus",
   "name": "EF-PowerOcean-TcpModbus",
-  "version": "1.0.1",
+  "codeowners": ["@MaxGrmm"],
+  "config_flow": true,
   "documentation": "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus",
-  "issue_tracker": "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues",
-  "requirements": [
-    "pymodbus>=3.6.9"
-  ],
-  "codeowners": [
-    "@MaxGrmm"
-  ],
   "iot_class": "local_polling",
-  "config_flow": true
+  "issue_tracker": "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues",
+  "requirements": ["pymodbus>=3.6.9"],
+  "version": "1.0.5"
 }
