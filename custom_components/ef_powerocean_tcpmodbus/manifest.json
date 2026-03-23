@@ -11,6 +11,5 @@
     "@MaxGrmm"
   ],
   "iot_class": "local_polling",
-  "config_flow": true,
-  "icon": "icon.svg"
+  "config_flow": true
 }
