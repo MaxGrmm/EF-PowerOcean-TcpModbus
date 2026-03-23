@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Background circle -->
+  <circle cx="128" cy="128" r="120" fill="#0F203C"/>
+  <!-- Green ring -->
+  <circle cx="128" cy="128" r="114" fill="none" stroke="#00D278" stroke-width="8"/>
+  <!-- Sun -->
+  <circle cx="128" cy="76" r="22" fill="#FFC832"/>
+  <!-- Sun rays -->
+  <line x1="128" y1="44" x2="128" y2="36" stroke="#FFC832" stroke-width="5" stroke-linecap="round"/>
+  <line x1="128" y1="116" x2="128" y2="108" stroke="#FFC832" stroke-width="5" stroke-linecap="round"/>
+  <line x1="96" y1="76" x2="88" y2="76" stroke="#FFC832" stroke-width="5" stroke-linecap="round"/>
+  <line x1="168" y1="76" x2="160" y2="76" stroke="#FFC832" stroke-width="5" stroke-linecap="round"/>
+  <line x1="106" y1="54" x2="100" y2="48" stroke="#FFC832" stroke-width="5" stroke-linecap="round"/>
+  <line x1="156" y1="104" x2="150" y2="98" stroke="#FFC832" stroke-width="5" stroke-linecap="round"/>
+  <line x1="150" y1="54" x2="156" y2="48" stroke="#FFC832" stroke-width="5" stroke-linecap="round"/>
+  <line x1="100" y1="104" x2="106" y2="98" stroke="#FFC832" stroke-width="5" stroke-linecap="round"/>
+  <!-- Battery body -->
+  <rect x="88" y="148" width="68" height="36" rx="6" fill="#28405A" stroke="#00D278" stroke-width="3"/>
+  <!-- Battery terminal -->
+  <rect x="156" y="160" width="10" height="12" rx="2" fill="#00D278"/>
+  <!-- Battery fill 80% -->
+  <rect x="93" y="153" width="50" height="26" rx="3" fill="#00D278"/>
+  <!-- Lightning bolt -->
+  <polygon points="132,118 120,136 128,136 118,158 140,134 130,134" fill="#FFC832"/>
+</svg>
