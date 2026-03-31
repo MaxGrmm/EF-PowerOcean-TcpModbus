@@ -100,7 +100,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             hb = self._get_client().read_holding_registers(REG_STATUS, count=1)
             if hb is None or hb.isError():
                 raise ConnectionError("Heartbeat register read failed")
-            _LOGGER.debug("Heartbeat OK (reg %s = %s)", _REG_STATUS, hb.registers[0])
+            _LOGGER.debug("Heartbeat OK (reg %s = %s)", REG_STATUS, hb.registers[0])
         except Exception as exc:
             _LOGGER.warning("PowerOcean heartbeat failed: %s – will retry next poll", exc)
             self._disconnect()
