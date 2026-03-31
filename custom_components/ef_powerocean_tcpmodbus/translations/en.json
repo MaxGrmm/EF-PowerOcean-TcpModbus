@@ -2,19 +2,54 @@
   "config": {
     "step": {
       "user": {
-        "title": "EF-PowerOcean-TcpModbus",
-        "description": "Enter the IP address of your EcoFlow PowerOcean Plus device.",
+        "title": "EcoFlow PowerOcean Plus",
+        "description": "Enter the connection details for your PowerOcean Plus.",
         "data": {
           "host": "IP Address",
-          "port": "Modbus TCP Port"
+          "port": "Modbus TCP Port",
+          "battery_capacity": "Battery Capacity (kWh)",
+          "pv_strings": "Number of PV Strings",
+          "scan_interval": "Poll Interval (seconds)"
+        },
+        "data_description": {
+          "host": "Local IP address of the PowerOcean Plus",
+          "port": "Default is 502",
+          "battery_capacity": "Usable capacity of your battery module, e.g. 5.0 for a 5 kWh module",
+          "pv_strings": "Number of PV strings connected to the inverter (1–3). Unused strings are ignored.",
+          "scan_interval": "How often values are polled (5–60 seconds)"
         }
       }
     },
     "error": {
-      "cannot_connect": "Cannot connect to device. Please check the IP address and port."
+      "cannot_connect": "Connection failed – please check IP address and port"
     },
     "abort": {
-      "already_configured": "This device is already configured."
+      "already_configured": "This device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "EcoFlow PowerOcean Plus – Settings",
+        "description": "Adjust connection and polling settings.",
+        "data": {
+          "host": "IP Address",
+          "port": "Modbus TCP Port",
+          "battery_capacity": "Battery Capacity (kWh)",
+          "pv_strings": "Number of PV Strings",
+          "scan_interval": "Poll Interval (seconds)"
+        },
+        "data_description": {
+          "host": "Local IP address of the PowerOcean Plus",
+          "port": "Default is 502",
+          "battery_capacity": "Usable capacity of your battery module, e.g. 5.0 for a 5 kWh module",
+          "pv_strings": "Number of PV strings connected to the inverter (1–3). Unused strings are ignored.",
+          "scan_interval": "How often values are polled (5–60 seconds)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Connection failed – please check IP address and port"
     }
   }
 }

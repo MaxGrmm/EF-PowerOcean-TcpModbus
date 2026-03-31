@@ -2,19 +2,54 @@
   "config": {
     "step": {
       "user": {
-        "title": "EF-PowerOcean-TcpModbus",
-        "description": "Gib die IP-Adresse deines EcoFlow PowerOcean Plus Geraets ein.",
+        "title": "EcoFlow PowerOcean Plus",
+        "description": "Verbindungsdaten des PowerOcean Plus eingeben.",
         "data": {
           "host": "IP-Adresse",
-          "port": "Modbus TCP Port"
+          "port": "Modbus TCP Port",
+          "battery_capacity": "Batteriekapazität (kWh)",
+          "pv_strings": "Anzahl PV-Strings",
+          "scan_interval": "Abfrageintervall (Sekunden)"
+        },
+        "data_description": {
+          "host": "Lokale IP-Adresse des PowerOcean Plus",
+          "port": "Standard ist 502",
+          "battery_capacity": "Nutzbare Kapazität des Batteriemoduls, z.B. 5.0 für ein 5-kWh-Modul",
+          "pv_strings": "Anzahl der am Wechselrichter angeschlossenen PV-Strings (1–3). Nicht konfigurierte Strings werden ignoriert.",
+          "scan_interval": "Wie oft Werte abgefragt werden (5–60 Sekunden)"
         }
       }
     },
     "error": {
-      "cannot_connect": "Verbindung fehlgeschlagen. Bitte IP-Adresse und Port pruefen."
+      "cannot_connect": "Verbindung fehlgeschlagen – IP-Adresse und Port prüfen"
     },
     "abort": {
-      "already_configured": "Dieses Geraet ist bereits konfiguriert."
+      "already_configured": "Dieses Gerät ist bereits eingerichtet"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "EcoFlow PowerOcean Plus – Einstellungen",
+        "description": "Verbindung und Abfrageeinstellungen anpassen.",
+        "data": {
+          "host": "IP-Adresse",
+          "port": "Modbus TCP Port",
+          "battery_capacity": "Batteriekapazität (kWh)",
+          "pv_strings": "Anzahl PV-Strings",
+          "scan_interval": "Abfrageintervall (Sekunden)"
+        },
+        "data_description": {
+          "host": "Lokale IP-Adresse des PowerOcean Plus",
+          "port": "Standard ist 502",
+          "battery_capacity": "Nutzbare Kapazität des Batteriemoduls, z.B. 5.0 für ein 5-kWh-Modul",
+          "pv_strings": "Anzahl der am Wechselrichter angeschlossenen PV-Strings (1–3). Nicht konfigurierte Strings werden ignoriert.",
+          "scan_interval": "Wie oft Werte abgefragt werden (5–60 Sekunden)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung fehlgeschlagen – IP-Adresse und Port prüfen"
     }
   }
 }
