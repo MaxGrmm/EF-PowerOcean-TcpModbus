@@ -97,7 +97,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         # ── Heartbeat: verify device is reachable before reading all blocks ──
         try:
-            hb = self._get_client().read_holding_registers(_REG_STATUS, count=1)
+            hb = self._get_client().read_holding_registers(REG_STATUS, count=1)
             if hb is None or hb.isError():
                 raise ConnectionError("Heartbeat register read failed")
             _LOGGER.debug("Heartbeat OK (reg %s = %s)", _REG_STATUS, hb.registers[0])
