@@ -7,5 +7,6 @@
   "requirements": ["pymodbus>=3.6.9"],
   "documentation": "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus",
   "issue_tracker": "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues",
+  "codeowners": ["@MaxGrmm"],
   "loggers": ["custom_components.ef_powerocean_tcpmodbus"]
 }
