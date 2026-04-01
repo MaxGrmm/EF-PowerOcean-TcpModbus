@@ -1,4 +1,4 @@
-“”“DataUpdateCoordinator for EcoFlow PowerOcean Plus.”””
+"""DataUpdateCoordinator for EcoFlow PowerOcean Plus."""
 from **future** import annotations
 
 import logging
@@ -24,9 +24,8 @@ _REG_AC_PV         = 40580   # Grid voltages/currents, frequency, apparent power
 _REG_ENERGY        = 42161   # kWh counters
 
 class EcoflowCoordinator(DataUpdateCoordinator):
-“”“Fetches data from EcoFlow PowerOcean Plus via Modbus TCP.”””
+"""Fetches data from EcoFlow PowerOcean Plus via Modbus TCP."""
 
-```
 def __init__(self, hass: HomeAssistant, host: str, port: int, battery_capacity: float, scan_interval: int, pv_strings: int) -> None:
     super().__init__(
         hass,
