@@ -382,6 +382,7 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
         self._attr_has_entity_name = True
+        self._attr_translation_key = self.entity_description.key
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name="EcoFlow PowerOcean Plus",

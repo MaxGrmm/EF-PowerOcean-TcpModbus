@@ -51,5 +51,157 @@
     "error": {
       "cannot_connect": "Verbindung fehlgeschlagen – IP-Adresse und Port prüfen"
     }
+  },
+  "entity":{
+	  "sensor": {
+		  "serial_number":{
+			  "name": "Seriennummer"
+		  },
+		  "operation_mode":{
+			  "name": "Betriebsart"
+		  },
+		  "battery_soc":{
+			  "name": "Batterie Ladezustand"
+		  },
+		  "battery_power":{
+			  "name": "Batterie Leistung aktuell"
+		  },
+		  "bat_remaining":{
+			  "name": "Batterie Verbliebene Ladung"
+		  },
+		  "battery_voltage":{
+			  "name": "Batterie Spannung"
+		  },
+		  "battery_current":{
+			  "name": "Batterie Ampere"
+		  },
+		  "battery_temperature":{
+			  "name": "Batterie Temperatur"
+		  },
+		  "battery_capacity":{
+			  "name": "Batterie Gesamt Kapazität"
+		  },
+		  "min_soc_limit":{
+			  "name": "Minimaler Ladezustand"
+		  },
+		  "bat_temp_warn_max":{
+			  "name": "Batterie Temp Warning Max"
+		  },
+		  "bat_temp_warn_min":{
+			  "name": "Batterie Temp Warning Min"
+		  },
+		  "solar_power":{
+			  "name": "Solarerzeugung Aktuell"
+		  },
+		  "pv1_power":{
+			  "name": "PV String 1 Leistung"
+		  },
+		  "pv2_power":{
+			  "name": "PV String 2 Leistung"
+		  },
+		  "pv3_power":{
+			  "name": "PV String 3 Leistung"
+		  },
+		  "pv1_current":{
+			  "name": "PV String 1 Ampere"
+		  },
+		  "pv2_current":{
+			  "name": "PV String 2 Ampere"
+		  },
+		  "pv3_current":{
+			  "name": "PV String 3 Ampere"
+		  },
+		  "pv_voltage":{
+			  "name": "PV Spannung Global"
+		  },
+		  "house_power":{
+			  "name": "Haus Verbrauch aktuell"
+		  },
+		  "grid_power":{
+			  "name": "Netz Leistung Aktuell"
+		  },
+		  "inverter_ac_power":{
+			  "name": "Wechselrichter AC Power"
+		  },
+		  "voltage_l1":{
+			  "name": "Netz Spannung L1"
+		  },
+		  "voltage_l2":{
+			  "name": "Netz Spannung L2"
+		  },
+		  "voltage_l3":{
+			  "name": "Netz Spannung L3"
+		  },
+		  "current_l1":{
+			  "name": "Netz Ampere L1"
+		  },
+		  "current_l2":{
+			  "name": "Netz Ampere L2"
+		  },
+		  "current_l3":{
+			  "name": "Netz Ampere L3"
+		  },
+		  "frequency":{
+			  "name": "Netz Frequenz"
+		  },
+		  "apparent_power":{
+			  "name": "Netz Scheinleistung VA"
+		  },
+		  "inverter_temperature":{
+			  "name": "Wechselrichter Temperatur"
+		  },
+		  "limit_inv_max":{
+			  "name": "Wechselrichter Leistungslimit"
+		  },
+		  "limit_inv_power":{
+			  "name": "Wechselrichter Current Max Power"
+		  },
+		  "limit_discharge":{
+			  "name": "Max  Batterie Entladeleistung"
+		  },
+		  "limit_charge":{
+			  "name": "Max Batterie Ladeleistung"
+		  },
+		  "house_energy_today":{
+			  "name": "Haus Verbrauch Heute"
+		  },
+		  "solar_today":{
+			  "name": "Solarerzeugung Heute"
+		  },
+		  "grid_import_today":{
+			  "name": "Netzbezug Heute"
+		  },
+		  "grid_export_today":{
+			  "name": "Netzeinspeisung Heute"
+		  },
+		  "bat_charge_today":{
+			  "name": "Batterie Ladung Heute"
+		  },
+		  "bat_discharge_today":{
+			  "name": "Batterie Entladung Heute"
+		  },
+		  "house_energy_total":{
+			  "name": "House Consumption Insgesamt"
+		  },
+		  "solar_total":{
+			  "name": "Solarerzeugung Insgesamt"
+		  },
+		  "grid_import_total":{
+			  "name": "Netzbezug Insgesamt"
+		  },
+		  "grid_export_total":{
+			  "name": "Netzeinspeisung Insgesamt"
+		  },
+		  "bat_charged_total":{
+			  "name": "Batterie Ladung Insgesamt"
+		  },
+		  "bat_discharged_total":{
+			  "name": "Batterie Entladung Insgesamt"
+		  },
+		  "bat_net_energy":{
+			  "name": "Batterie Net Energy"
+		  }
+		  
+	  }
   }
 }
