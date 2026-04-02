@@ -151,7 +151,7 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 
 To enable debug logging without editing `configuration.yaml`:
 
-**Settings → Devices & Services → EF-PowerOcean-TcpModbus → Enable debug logging**
+- Settings → Devices & Services → EF-PowerOcean-TcpModbus → Enable debug logging
 ---
 
 ## Screenshots
