@@ -30,7 +30,7 @@
 | Device | Status |
 |---|---|
 | EcoFlow PowerOcean Plus | ✅ Confirmed |
-| EcoFlow PowerOcean DC | ❓ Untested – feedback welcome |
+| EcoFlow PowerOcean |  ✅ Confirmed |
 | EcoFlow PowerOcean Connect | ❓ Untested – feedback welcome |
 
 ---
@@ -152,6 +152,14 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 To enable debug logging without editing `configuration.yaml`:
 
 **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Enable debug logging**
+---
+
+## Screenshots
+<img width="334" height="1202" alt="Screenshot 2026-04-02 132824" src="https://github.com/user-attachments/assets/dc73b934-ad8b-4610-8050-45d445dc318f" />
+<img width="326" height="1276" alt="Screenshot 2026-04-02 132833" src="https://github.com/user-attachments/assets/f5908343-ff6f-450b-9b55-8c7a0ad59859" />
+
+
+
 
 ---
 
