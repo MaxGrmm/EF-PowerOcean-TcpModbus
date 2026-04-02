@@ -51,5 +51,157 @@
     "error": {
       "cannot_connect": "Connection failed – please check IP address and port"
     }
+  },
+  "entity":{
+	  "sensor": {
+		  "serial_number":{
+			  "name": "Serial Number"
+		  },
+		  "operation_mode":{
+			  "name": "Operation Mode"
+		  },
+		  "battery_soc":{
+			  "name": "Battery SOC"
+		  },
+		  "battery_power":{
+			  "name": "Battery Power"
+		  },
+		  "bat_remaining":{
+			  "name": "Battery Remaining Energy"
+		  },
+		  "battery_voltage":{
+			  "name": "Battery Voltage"
+		  },
+		  "battery_current":{
+			  "name": "Battery Current"
+		  },
+		  "battery_temperature":{
+			  "name": "Battery Temperature"
+		  },
+		  "battery_capacity":{
+			  "name": "Battery Nominal Capacity"
+		  },
+		  "min_soc_limit":{
+			  "name": "Min SOC Limit"
+		  },
+		  "bat_temp_warn_max":{
+			  "name": "Battery Temp Warning Max"
+		  },
+		  "bat_temp_warn_min":{
+			  "name": "Battery Temp Warning Min"
+		  },
+		  "solar_power":{
+			  "name": "Solar Power"
+		  },
+		  "pv1_power":{
+			  "name": "PV String 1 Power"
+		  },
+		  "pv2_power":{
+			  "name": "PV String 2 Power"
+		  },
+		  "pv3_power":{
+			  "name": "PV String 3 Power"
+		  },
+		  "pv1_current":{
+			  "name": "PV String 1 Current"
+		  },
+		  "pv2_current":{
+			  "name": "PV String 2 Current"
+		  },
+		  "pv3_current":{
+			  "name": "PV String 3 Current"
+		  },
+		  "pv_voltage":{
+			  "name": "PV Voltage Global"
+		  },
+		  "house_power":{
+			  "name": "House Power"
+		  },
+		  "grid_power":{
+			  "name": "Grid Power"
+		  },
+		  "inverter_ac_power":{
+			  "name": "Inverter AC Power"
+		  },
+		  "voltage_l1":{
+			  "name": "Grid Voltage L1"
+		  },
+		  "voltage_l2":{
+			  "name": "Grid Voltage L2"
+		  },
+		  "voltage_l3":{
+			  "name": "Grid Voltage L3"
+		  },
+		  "current_l1":{
+			  "name": "Grid Current L1"
+		  },
+		  "current_l2":{
+			  "name": "Grid Current L2"
+		  },
+		  "current_l3":{
+			  "name": "Grid Current L3"
+		  },
+		  "frequency":{
+			  "name": "Grid Frequency"
+		  },
+		  "apparent_power":{
+			  "name": "Grid Apparent Power"
+		  },
+		  "inverter_temperature":{
+			  "name": "Inverter Temperature"
+		  },
+		  "limit_inv_max":{
+			  "name": "Inverter Nominal Power Limit"
+		  },
+		  "limit_inv_power":{
+			  "name": "Inverter Current Max Power"
+		  },
+		  "limit_discharge":{
+			  "name": "Max Battery Discharge Power"
+		  },
+		  "limit_charge":{
+			  "name": "Max Charge Power"
+		  },
+		  "house_energy_today":{
+			  "name": "House Consumption Today"
+		  },
+		  "solar_today":{
+			  "name": "Solar Yield Today"
+		  },
+		  "grid_import_today":{
+			  "name": "Grid Import Today"
+		  },
+		  "grid_export_today":{
+			  "name": "Grid Export Today"
+		  },
+		  "bat_charge_today":{
+			  "name": "Battery Charged Today"
+		  },
+		  "bat_discharge_today":{
+			  "name": "Battery Discharged Today"
+		  },
+		  "house_energy_total":{
+			  "name": "House Consumption Total"
+		  },
+		  "solar_total":{
+			  "name": "Solar Yield Total"
+		  },
+		  "grid_import_total":{
+			  "name": "Grid Import Total"
+		  },
+		  "grid_export_total":{
+			  "name": "Grid Export Total"
+		  },
+		  "bat_charged_total":{
+			  "name": "Battery Charged Total"
+		  },
+		  "bat_discharged_total":{
+			  "name": "Battery Discharged Total"
+		  },
+		  "bat_net_energy":{
+			  "name": "Battery Net Energy"
+		  }
+		  
+	  }
   }
 }
