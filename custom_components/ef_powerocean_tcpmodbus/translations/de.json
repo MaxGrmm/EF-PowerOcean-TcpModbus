@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "EcoFlow PowerOcean Plus",
+        "title": "EcoFlow PowerOcean",
         "description": "Verbindungsdaten des PowerOcean Plus eingeben.",
         "data": {
           "host": "IP-Adresse",
@@ -30,7 +30,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "EcoFlow PowerOcean Plus – Einstellungen",
+        "title": "EcoFlow PowerOcean – Einstellungen",
         "description": "Verbindung und Abfrageeinstellungen anpassen.",
         "data": {
           "host": "IP-Adresse",

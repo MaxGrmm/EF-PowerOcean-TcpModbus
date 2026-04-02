@@ -239,3 +239,5 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             return await self.hass.async_add_executor_job(self._fetch_all)
         except Exception as err:  # noqa: BLE001
             raise UpdateFailed(f"Modbus read error: {err}") from err
+        finally:
+            await self.hass.async_add_executor_job(self._disconnect)

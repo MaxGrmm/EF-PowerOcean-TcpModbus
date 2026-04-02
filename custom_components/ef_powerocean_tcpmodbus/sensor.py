@@ -384,9 +384,9 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], SensorEntity):
         self._attr_has_entity_name = True
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
-            name="EcoFlow PowerOcean Plus",
+            name="EcoFlow PowerOcean",
             manufacturer="EcoFlow",
-            model="PowerOcean Plus",
+            model="PowerOcean",
         )
 
     @property
