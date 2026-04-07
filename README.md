@@ -34,6 +34,11 @@
 | EcoFlow PowerOcean Connect | ❓ Untested – feedback welcome |
 
 ---
+## Prequesites 
+
+The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled by default! 
+
+---
 
 ## Installation
 
