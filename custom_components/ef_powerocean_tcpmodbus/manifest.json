@@ -8,5 +8,5 @@
   "issue_tracker": "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues",
   "loggers": ["custom_components.ef_powerocean_tcpmodbus"],
   "requirements": ["pymodbus>=3.6.9"],
-  "version": "2.0.1"
+  "version": "2.0.2-dev"
 }
