@@ -232,6 +232,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 0,
             )
 
+        # Plausibility check: if no solar production data at all, something is likely wrong with the readout (e.g. stale connection) – discard all data to avoid misleading values
+        if data["solar_total"] == 0:
+            raise ValueError("No solar production data read – data seems implausible and will be skipped")
+        
         return data
 
     async def _async_update_data(self) -> dict:
