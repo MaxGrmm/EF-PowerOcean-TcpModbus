@@ -154,11 +154,22 @@ SENSORS: list[EcoflowSensorDescription] = [
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     EcoflowSensorDescription(
-        key="pv_voltage", name="PV Voltage Global",
+        key="pv1_voltage", name="PV String 1 Voltage",
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    EcoflowSensorDescription(
+        key="pv2_voltage", name="PV String 2 Voltage",
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    EcoflowSensorDescription(
+        key="pv3_voltage", name="PV String 3 Voltage",
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
 
     # ── Grid & house ─────────────────────────────────────────────────────────

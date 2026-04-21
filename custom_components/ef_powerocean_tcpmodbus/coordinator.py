@@ -161,9 +161,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             data["current_l3"]           = self._f(d, 10)   # 40590 ✅
             data["inverter_temperature"] = self._f(d, 12)   # 40592 ✅
             data["frequency"]            = self._f(d, 14)   # 40594 ✅
-            data["apparent_power"]       = self._f(d, 16)   # 40596 ✅
-            v_pv_global                  = self._f(d, 18)   # 40598 ✅
-            data["pv_voltage"]           = v_pv_global
+            data["pv1_voltage"]          = self._f(d, 16)   # 40596 ✅
+            data["pv2_voltage"]          = self._f(d, 18)   # 40598 ✅
+            data["pv3_voltage"]          = self._f(d, 20)   # 40600 ⚠️ not in verified list
             # 40600–40601 (offset 20-21): not in verified register list
             # Apply threshold to filter phantom currents, zero out unconfigured strings
             def _pv_current(raw: float, string_nr: int) -> float:
@@ -175,10 +175,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             data["pv2_current"] = _pv_current(self._f(d, 24), 2)   # 40604 ✅
             data["pv3_current"] = _pv_current(self._f(d, 26), 3)   # 40606 ⚠️ not in verified list
 
-            # Calculated PV power per string (current × global PV voltage)
-            data["pv1_power"] = round(data["pv1_current"] * v_pv_global, 1)
-            data["pv2_power"] = round(data["pv2_current"] * v_pv_global, 1)
-            data["pv3_power"] = round(data["pv3_current"] * v_pv_global, 1)
+            # Calculated PV power per string (current × voltage)
+            data["pv1_power"] = round(data["pv1_current"] * data["pv1_voltage"], 1)
+            data["pv2_power"] = round(data["pv2_current"] * data["pv2_voltage"], 1)
+            data["pv3_power"] = round(data["pv3_current"] * data["pv3_voltage"], 1)
 
             # Solar power: sum of active strings only
             data["solar_power"] = round(
