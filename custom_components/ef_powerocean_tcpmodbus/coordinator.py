@@ -94,9 +94,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     # Plausibility helpers
     # ------------------------------------------------------------------
 
-    def _safe_energy(self, key: str, new: float, max_delta: float):
+    def _safe_energy(self, key: str, new: float, max_delta: float, allow_reset: bool = False, reset_max: float = 1):
         old = self._last_energy.get(key)
         if old is None:
+            self._last_energy[key] = new
+            return new
+        
+        if allow_reset and new < reset_max:
+            _LOGGER.debug("Energy counter reset detected for %s: %s -> %s", key, old, new)
             self._last_energy[key] = new
             return new
 
@@ -238,6 +243,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 "grid_import_today",
                 self._f(e, 2),
                 max_delta=0.6,
+                allow_reset=True, 
             )
             data["grid_export_total"] = self._safe_energy(
                 "grid_export_total",
@@ -248,6 +254,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 "grid_export_today",
                 self._f(e, 18),
                 max_delta=0.6,
+                allow_reset=True, 
             )
 
             # Battery (charge/discharge limited)
@@ -260,6 +267,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 "bat_charge_today",
                 self._f(e, 66),
                 max_delta=0.2,
+                allow_reset=True, 
             )
             data["bat_discharged_total"] = self._safe_energy(
                 "bat_discharged_total",
@@ -270,6 +278,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 "bat_discharge_today",
                 self._f(e, 82),
                 max_delta=0.2,
+                allow_reset=True, 
             )
 
             # Solar (inverter-limited)
@@ -282,6 +291,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 "solar_today",
                 self._f(e, 98),
                 max_delta=0.2,
+                allow_reset=True, 
             )
 
             # Derived: battery net energy
