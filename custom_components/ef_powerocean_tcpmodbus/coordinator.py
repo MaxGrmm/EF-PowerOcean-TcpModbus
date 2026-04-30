@@ -38,6 +38,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._battery_capacity = battery_capacity
         self._pv_strings = pv_strings
         self._client: ModbusTcpClient | None = None
+        self._last_energy = {}
 
     # ------------------------------------------------------------------
     # Modbus helpers
@@ -88,6 +89,40 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             return 0.0
         return round(value, 3)
 
+
+    # ------------------------------------------------------------------
+    # Plausibility helpers
+    # ------------------------------------------------------------------
+
+    def _safe_energy(self, key: str, new: float, max_delta: float, allow_reset: bool = False, reset_max: float = 1):
+        old = self._last_energy.get(key)
+        if old is None:
+            self._last_energy[key] = new
+            return new
+        
+        if allow_reset and new < reset_max:
+            _LOGGER.debug("Energy counter reset detected for %s: %s -> %s", key, old, new)
+            self._last_energy[key] = new
+            return new
+
+        if abs(new - old) > max_delta:
+            _LOGGER.debug("Rejecting spike in %s: %s -> %s", key, old, new)
+            return old
+
+        self._last_energy[key] = new
+        return new
+
+    def _read_block_stable(self, addr: int, count: int, retries: int = 2):
+        prev = None
+        for _ in range(retries):
+            curr = self._read_block(addr, count)
+            if curr is None:
+                return None
+            if prev == curr:
+                return curr
+            prev = curr
+        return prev
+
     # ------------------------------------------------------------------
     # Data fetch
     # ------------------------------------------------------------------
@@ -107,7 +142,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             raise
 
         # ── Block A: Serial number + operation mode (40004, 12 regs) ──────────
-        a = self._read_block(_REG_SERIAL, 12)
+        a = self._read_block_stable(_REG_SERIAL, 12)
         if a:
             # Serial number is ASCII-encoded across registers 0-7 (2 chars each)
             sn = "".join(
@@ -117,7 +152,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             data["operation_mode"] = a[9] if len(a) > 9 else None
 
         # ── Block B: Main power values (40519, 34 regs) ──────────────────────
-        b = self._read_block(_REG_MAIN, 30)   # 40519–40548, last needed index = 29
+        b = self._read_block_stable(_REG_MAIN, 30)   # 40519–40548, last needed index = 29
         if b:
             _LOGGER.debug(
                 "Block B raw (40519+): house=(%04X,%04X) grid=(%04X,%04X) solar=(%04X,%04X) bat=(%04X,%04X)",
@@ -144,14 +179,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             data["limit_charge"]      = round(num_modules * 2500)  # 2.5 kW per module
 
         # ── Block C: Battery detail (40574, 6 regs) ───────────────────────────
-        c = self._read_block(_REG_BAT_DETAIL, 6)
+        c = self._read_block_stable(_REG_BAT_DETAIL, 6)
         if c:
             data["battery_voltage"]     = self._f(c, 0)   # 40574 ✅
             data["battery_current"]     = self._f(c, 2)   # 40576 ✅
             data["battery_temperature"] = self._f(c, 4)   # 40578 – ⚠️ not in verified list
 
         # ── Block D: AC grid + PV strings (40580, 28 regs → up to 40607) ──────
-        d = self._read_block(_REG_AC_PV, 28)
+        d = self._read_block_stable(_REG_AC_PV, 28)
         if d:
             data["voltage_l1"]           = self._f(d, 0)    # 40580 ✅
             data["voltage_l2"]           = self._f(d, 2)    # 40582 ✅
@@ -196,18 +231,68 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         # ── Block E: Energy counters (42161, 100 regs) ────────────────────────
         # Offsets = register_address - 42161
-        e = self._read_block(_REG_ENERGY, 100)
+        e = self._read_block_stable(_REG_ENERGY, 100)
         if e:
-            data["grid_import_total"]    = self._f(e, 0)    # 42161 ✅
-            data["grid_import_today"]    = self._f(e, 2)    # 42163 ✅
-            data["grid_export_total"]    = self._f(e, 16)   # 42177 ✅
-            data["grid_export_today"]    = self._f(e, 18)   # 42179 ✅
-            data["bat_charged_total"]    = self._f(e, 64)   # 42225 ✅
-            data["bat_charge_today"]     = self._f(e, 66)   # 42227 ✅
-            data["bat_discharged_total"] = self._f(e, 80)   # 42241 ✅
-            data["bat_discharge_today"]  = self._f(e, 82)   # 42243 ✅
-            data["solar_total"]          = self._f(e, 96)   # 42257 ✅
-            data["solar_today"]          = self._f(e, 98)   # 42259 ✅
+            # Grid (can be high due to house load)
+            data["grid_import_total"] = self._safe_energy(
+                "grid_import_total",
+                self._f(e, 0),
+                max_delta=0.6,
+            )
+            data["grid_import_today"] = self._safe_energy(
+                "grid_import_today",
+                self._f(e, 2),
+                max_delta=0.6,
+                allow_reset=True, 
+            )
+            data["grid_export_total"] = self._safe_energy(
+                "grid_export_total",
+                self._f(e, 16),
+                max_delta=0.6,
+            )
+            data["grid_export_today"] = self._safe_energy(
+                "grid_export_today",
+                self._f(e, 18),
+                max_delta=0.6,
+                allow_reset=True, 
+            )
+
+            # Battery (charge/discharge limited)
+            data["bat_charged_total"] = self._safe_energy(
+                "bat_charged_total",
+                self._f(e, 64),
+                max_delta=0.2,
+            )
+            data["bat_charge_today"] = self._safe_energy(
+                "bat_charge_today",
+                self._f(e, 66),
+                max_delta=0.2,
+                allow_reset=True, 
+            )
+            data["bat_discharged_total"] = self._safe_energy(
+                "bat_discharged_total",
+                self._f(e, 80),
+                max_delta=0.2,
+            )
+            data["bat_discharge_today"] = self._safe_energy(
+                "bat_discharge_today",
+                self._f(e, 82),
+                max_delta=0.2,
+                allow_reset=True, 
+            )
+
+            # Solar (inverter-limited)
+            data["solar_total"] = self._safe_energy(
+                "solar_total",
+                self._f(e, 96),
+                max_delta=0.2,
+            )
+            data["solar_today"] = self._safe_energy(
+                "solar_today",
+                self._f(e, 98),
+                max_delta=0.2,
+                allow_reset=True, 
+            )
 
             # Derived: battery net energy
             data["bat_net_energy"] = round(
@@ -232,6 +317,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 0,
             )
 
+        # Plausibility check: if no solar production data at all, something is likely wrong with the readout (e.g. stale connection) – discard all data to avoid misleading values
+        if data["solar_total"] == 0:
+            raise ValueError("No solar production data read – data seems implausible and will be skipped")
+        
         return data
 
     async def _async_update_data(self) -> dict:
