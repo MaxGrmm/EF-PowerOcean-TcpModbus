@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from homeassistant.components.sensor import (
-    SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass,
+    SensorDeviceClass, RestoreSensor, SensorEntityDescription, SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE, UnitOfApparentPower, UnitOfElectricCurrent, UnitOfElectricPotential,
     UnitOfEnergy, UnitOfFrequency, UnitOfPower, UnitOfTemperature,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -374,7 +374,7 @@ async def async_setup_entry(
     )
 
 
-class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], SensorEntity):
+class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
     entity_description: EcoflowSensorDescription
 
     def __init__(self, coordinator, description, entry):
@@ -388,9 +388,22 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], SensorEntity):
             manufacturer="EcoFlow",
             model="PowerOcean",
         )
+        self._restored_value: float | int | str | None = None
+        self._last_written_value: float | int | str | None = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        new_value = self.native_value
+        if new_value != self._last_written_value:
+            self._last_written_value = new_value
+            self.async_write_ha_state()
 
     @property
     def native_value(self):
-        if self.coordinator.data is None:
-            return None
-        return self.coordinator.data.get(self.entity_description.key)
+        if self.coordinator.data is not None:
+            value = self.coordinator.data.get(self.entity_description.key, None)
+            if value is not None:
+                return value
+
+        return self._restored_value
