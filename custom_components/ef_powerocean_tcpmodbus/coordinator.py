@@ -104,7 +104,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         except Exception as exc:
             _LOGGER.warning("PowerOcean heartbeat failed: %s – will retry next poll", exc)
             self._disconnect()
-            raise
+            return None
 
         # ── Block A: Serial number + operation mode (40004, 12 regs) ──────────
         a = self._read_block(_REG_SERIAL, 12)
