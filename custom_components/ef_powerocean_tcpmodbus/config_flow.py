@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from pymodbus.client import ModbusTcpClient
+from pymodbus.client import AsyncModbusTcpClient
 
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
@@ -35,15 +35,17 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-def _test_connection(host: str, port: int) -> bool:
+async def async_test_connection(host: str, port: int) -> bool:
     """Try to connect and read status register."""
     try:
-        client = ModbusTcpClient(host, port=port, timeout=5)
+        client = AsyncModbusTcpClient(host, port=port, timeout=5)
         client.unit_id = 1
-        if not client.connect():
+        await client.connect()
+        if not client.connected:
             return False
-        result = client.read_holding_registers(REG_STATUS, count=1)
-        client.close()
+        
+        result = await client.read_holding_registers(REG_STATUS, count=1)
+        await client.close()
         return not result.isError()
     except Exception as e:
         _LOGGER.warning("EF-PowerOcean connection test failed: %s", e)
@@ -64,7 +66,7 @@ class EcoflowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             host = user_input["host"]
             port = user_input.get("port", DEFAULT_PORT)
 
-            ok = await self.hass.async_add_executor_job(_test_connection, host, port)
+            ok = await async_test_connection(host, port)
 
             if ok:
                 await self.async_set_unique_id(f"{host}:{port}")
@@ -106,7 +108,7 @@ class EcoflowOptionsFlow(config_entries.OptionsFlow):
             current_host = self._config_entry.data.get("host")
             current_port = self._config_entry.data.get("port", DEFAULT_PORT)
             if host != current_host or port != current_port:
-                ok = await self.hass.async_add_executor_job(_test_connection, host, port)
+                ok = await async_test_connection(host, port)
                 if not ok:
                     errors["base"] = "cannot_connect"
 
@@ -116,6 +118,7 @@ class EcoflowOptionsFlow(config_entries.OptionsFlow):
                     self._config_entry,
                     data={**self._config_entry.data, "host": host, "port": port},
                 )
+                _LOGGER.debug(f"SCAN_INTERVAL: {user_input[CONF_SCAN_INTERVAL]}")
                 return self.async_create_entry(title="", data={
                     CONF_BATTERY_CAPACITY: user_input[CONF_BATTERY_CAPACITY],
                     CONF_SCAN_INTERVAL: user_input[CONF_SCAN_INTERVAL],

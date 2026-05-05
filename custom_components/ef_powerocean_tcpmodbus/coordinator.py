@@ -39,6 +39,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._pv_strings = pv_strings
         self._client: AsyncModbusTcpClient = AsyncModbusTcpClient(self.host, port=self.port, timeout=5)
         self._client.unit_id = 1
+        _LOGGER.debug(f"Coordinator-SCAN_INTERVAL: {scan_interval}")
         
 
     # ------------------------------------------------------------------
