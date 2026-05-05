@@ -1,6 +1,7 @@
 """DataUpdateCoordinator for EcoFlow PowerOcean Plus."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import struct
 from datetime import timedelta
@@ -39,6 +40,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._pv_strings = pv_strings
         self._client: AsyncModbusTcpClient = AsyncModbusTcpClient(self.host, port=self.port, timeout=5)
         self._client.unit_id = 1
+        self._lock = asyncio.Lock()
         
 
     # ------------------------------------------------------------------
@@ -61,7 +63,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     async def _read_block(self, addr: int, count: int) -> list[int] | None:
         """Read *count* holding registers starting at *addr*.  Returns None on error."""
         try:
-            res = await self._client.read_holding_registers(addr, count=count)
+            async with self._lock:
+                res = await self._client.read_holding_registers(addr, count=count)
             if res and not res.isError():
                 _LOGGER.debug("Block 0x%04X(%d): %s", addr, count, res.registers)
                 return res.registers
@@ -93,7 +96,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         # ── Heartbeat: verify device is reachable before reading all blocks ──
         try:
-            hb = await self._client.read_holding_registers(REG_STATUS, count=1)
+            async with self._lock:
+                hb = await self._client.read_holding_registers(REG_STATUS, count=1)
             if hb is None or hb.isError():
                 _LOGGER.error("Heartbeat register read failed")
             _LOGGER.debug("Heartbeat OK (reg %s = %s)", REG_STATUS, hb.registers[0])
