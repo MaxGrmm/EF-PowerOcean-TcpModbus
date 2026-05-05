@@ -70,10 +70,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 return res.registers
             # Modbus error response – connection may be stale
             _LOGGER.warning("Modbus error response at 0x%04X, resetting connection", addr)
-            self.async_reconnect()
+            await self.async_reconnect()
         except Exception as exc:  # noqa: BLE001
             _LOGGER.error("Block read error at 0x%04X: %s – resetting connection", addr, exc)
-            self.async_reconnect()
+            await self.async_reconnect()
         return None
 
     @staticmethod
