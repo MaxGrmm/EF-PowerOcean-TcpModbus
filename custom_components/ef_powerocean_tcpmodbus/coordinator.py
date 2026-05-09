@@ -148,6 +148,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         try:
             # ── Heartbeat: verify device is reachable before reading all blocks ──
             hb = await self._read_block(REG_STATUS, 1)
+            if hb[0] != 2:
+                _LOGGER.info(
+                    f"Heartbeat not OK (reg {REG_STATUS} = {hb[0]}) -> Skip data!"
+                )
+                return None
             _LOGGER.debug("Heartbeat OK (reg %s = %s)", REG_STATUS, hb[0])
 
             # ── Block A: Serial number + operation mode (40004, 12 regs) ──────────
@@ -248,16 +253,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     sum(data[f"pv{i}_power"] for i in range(1, self._pv_strings + 1)), 1
                 )
 
-                # Grid power: if register 40521 gave 0, derive from energy balance as fallback
-                if data.get("grid_power", 0) == 0.0:
+                # Grid power: if register 40521 gave None, derive from energy balance as fallback
+                if data.get("grid_power", None) is None:
                     house = data.get("house_power", 0)
                     solar = data.get("solar_power", 0)
                     bat = data.get("battery_power", 0)
                     if any(v != 0 for v in [house, solar, bat]):
                         data["grid_power"] = round(house - solar + bat, 1)
-                        _LOGGER.debug(
-                            "grid_power derived from balance: %.1f W",
-                            data["grid_power"],
+                        _LOGGER.info(
+                            f"grid_power derived from balance: {data['grid_power']} W"
                         )
 
             # ── Block E: Energy counters (42161, 100 regs) ────────────────────────
