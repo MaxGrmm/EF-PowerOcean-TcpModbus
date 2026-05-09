@@ -118,7 +118,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         """Decode a word-swapped 32-bit IEEE 754 float from two 16-bit registers."""
         if regs is None or len(regs) < offset + 2:
             _LOGGER.info(
-                f"Return value of '{regs}' is inf ({abs(value)}) or NaN. Use last_written_value"
+                f"Return value of '{regs}' is None, because wrong length (len: {len(regs)}, offset: {offset}). Use last_written_value"
             )
             return None
         try:
@@ -150,8 +150,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             hb = await self._read_block(REG_STATUS, 1)
             if hb[0] != 2:
                 _LOGGER.info(
-                    f"Heartbeat not OK (reg {REG_STATUS} = {hb[0]}) -> Skip data!"
+                    f"Heartbeat not OK (reg {REG_STATUS} = {hb[0]}) -> Skip data! Wait 35s"
                 )
+                self._client.close()
+                asyncio.sleep(35)
                 return None
             _LOGGER.debug("Heartbeat OK (reg %s = %s)", REG_STATUS, hb[0])
 
@@ -235,7 +237,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 def _pv_current(raw: float, string_nr: int) -> float:
                     if string_nr > self._pv_strings:
                         return 0.0
-                    return raw if raw >= PV_CURRENT_THRESHOLD else 0.0
+                    return raw if raw > PV_CURRENT_THRESHOLD else 0.0
 
                 data["pv1_current"] = _pv_current(self._f(d, 22), 1)  # 40602 ✅
                 data["pv2_current"] = _pv_current(self._f(d, 24), 2)  # 40604 ✅

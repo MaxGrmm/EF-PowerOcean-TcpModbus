@@ -497,7 +497,4 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
                     )
                 else:
                     return value
-        _LOGGER.info(
-            f"No current value of '{self.entity_description.name}'. Use last_written_value: {self._last_written_value} (Restore-Value: {self._restored_value})"
-        )
         return self._last_written_value
