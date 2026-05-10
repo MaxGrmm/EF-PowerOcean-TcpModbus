@@ -140,7 +140,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         try:
             # ── Heartbeat: verify device is reachable before reading all blocks ──
             hb = await self._read_block(REG_STATUS, 1)
-            if hb[0] != 2:
+            if hb[0] == 0:
                 _LOGGER.info(
                     f"Heartbeat not OK (reg {REG_STATUS} = {hb[0]}) -> Skip data! Wait 35s for reconnect!"
                 )
