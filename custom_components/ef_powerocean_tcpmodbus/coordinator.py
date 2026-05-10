@@ -90,10 +90,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     await asyncio.sleep(delay)
 
                 _LOGGER.info(f"Modbus TCP reconnect (Attempt {i + 1}/4)...")
-                await self._client.connect()
-                if self._client.connected:
+                if await self._client.connect() and self._client.connected:
                     _LOGGER.info("Reconnect successful!")
                     return True
+                self._client.close()
 
         _LOGGER.info(
             "EF-Modbus-TCP: All reconnect attempts failed! – will retry next poll"
