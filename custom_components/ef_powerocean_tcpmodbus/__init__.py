@@ -17,6 +17,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = EcoflowCoordinator(
         hass,
+        config_entry=entry,
         host=entry.data["host"],
         port=entry.data.get("port", DEFAULT_PORT),
         battery_capacity=_get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY),

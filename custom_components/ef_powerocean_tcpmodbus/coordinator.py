@@ -7,6 +7,8 @@ from datetime import timedelta
 
 from pymodbus.client import ModbusTcpClient
 
+from homeassistant.components import persistent_notification
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -26,18 +28,20 @@ _REG_ENERGY        = 42161   # kWh counters
 class EcoflowCoordinator(DataUpdateCoordinator):
     """Fetches data from EcoFlow PowerOcean Plus via Modbus TCP."""
 
-    def __init__(self, hass: HomeAssistant, host: str, port: int, battery_capacity: float, scan_interval: int, pv_strings: int) -> None:
+    def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry, host: str, port: int, battery_capacity: float, scan_interval: int, pv_strings: int) -> None:
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=scan_interval),
+            config_entry=config_entry,
         )
         self.host = host
         self.port = port
         self._battery_capacity = battery_capacity
         self._pv_strings = pv_strings
         self._client: ModbusTcpClient | None = None
+        self._modbus_disabled_notified = False
 
     # ------------------------------------------------------------------
     # Modbus helpers
@@ -236,8 +240,32 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict:
         try:
-            return await self.hass.async_add_executor_job(self._fetch_all)
+            data = await self.hass.async_add_executor_job(self._fetch_all)
+            self._check_modbus_disabled(data)
+            return data
         except Exception as err:  # noqa: BLE001
             raise UpdateFailed(f"Modbus read error: {err}") from err
         finally:
             await self.hass.async_add_executor_job(self._disconnect)
+
+    def _check_modbus_disabled(self, data: dict) -> None:
+        serial = data.get("serial_number", "")
+        temp_warn_max = data.get("bat_temp_warn_max")
+        notification_id = f"{DOMAIN}_{self.config_entry.entry_id}_modbus_disabled"
+        disabled = bool(serial and temp_warn_max is not None and temp_warn_max == 0.0)
+
+        if disabled and not self._modbus_disabled_notified:
+            self._modbus_disabled_notified = True
+            persistent_notification.async_create(
+                self.hass,
+                (
+                    "The EcoFlow PowerOcean is reachable and the serial number was read successfully, "
+                    "but the Modbus data registers are returning 0. "
+                    "**Modbus TCP must be enabled by your EcoFlow Partner / Installer.**"
+                ),
+                title="EcoFlow PowerOcean: Modbus not enabled",
+                notification_id=notification_id,
+            )
+        elif not disabled and self._modbus_disabled_notified:
+            self._modbus_disabled_notified = False
+            persistent_notification.async_dismiss(self.hass, notification_id)
