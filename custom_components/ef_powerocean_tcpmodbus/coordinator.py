@@ -87,7 +87,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 _LOGGER.info(f"Modbus TCP reconnect (Attempt {i + 1}/4)...")
                 if await self._client.connect() and self._client.connected:
                     _LOGGER.info("Reconnect successful!")
-                    await asyncio.wait(SLEEP_TIME_AFTER_RECONNECT)
+                    await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT)
                     return True
                 self._client.close()
 
