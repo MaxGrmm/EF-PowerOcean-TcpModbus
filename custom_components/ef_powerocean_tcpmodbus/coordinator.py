@@ -9,7 +9,6 @@ from datetime import timedelta
 
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
-from pymodbus.logging import pymodbus_apply_logging_config
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -26,8 +25,8 @@ _REG_AC_PV = 40580  # Grid voltages/currents, frequency, apparent power,
 # PV global voltage, inverter temp, PV string currents
 _REG_ENERGY = 42161  # kWh counters
 
-SLEEP_TIME_AFTER_HEARTBEAT = 0.2
-SLEEP_TIME_AFTER_READ_BLOCK = 0.1
+SLEEP_TIME_AFTER_RECONNECT = 1
+SLEEP_TIME_AFTER_HEARTBEAT_FAILED = 35
 
 
 class EcoflowCoordinator(DataUpdateCoordinator):
@@ -57,14 +56,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         )
         self._client.unit_id = DEFAULT_SLAVE
         self._lock = asyncio.Lock()
-
-        # Logging von pymodbus auf CRITICAL. Hat aber auch Einfluss auf modbus.py von HA
-        # pymodbus_apply_logging_config(level=logging.CRITICAL)
-
+        
     # ------------------------------------------------------------------
     # Modbus helpers
     # ------------------------------------------------------------------
-
     async def async_client_shutdown(self) -> None:
         """Integration-Shutdown, closing connection"""
         _LOGGER.info("PowerOcean Shutdown. Closing Connection!")
@@ -80,7 +75,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     async def async_reconnect(self) -> bool:
         """Client-Reconnect"""
-        delays = [0, 5, 30, 60]
+        delays = [0, 5, 30, 120]
         _LOGGER.info("PowerOcean is not connected. Start reconnect!")
 
         for i, delay in enumerate(delays):
@@ -92,6 +87,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 _LOGGER.info(f"Modbus TCP reconnect (Attempt {i + 1}/4)...")
                 if await self._client.connect() and self._client.connected:
                     _LOGGER.info("Reconnect successful!")
+                    await asyncio.wait(SLEEP_TIME_AFTER_RECONNECT)
                     return True
                 self._client.close()
 
@@ -119,7 +115,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         try:
             raw = struct.pack("<HH", regs[offset], regs[offset + 1])
             value = struct.unpack("<f", raw)[0]
-        except struct.error, TypeError:
+        except (struct.error, TypeError):
             return None
 
         if abs(value) > 1e9 or value != value:  # guard against NaN / inf
@@ -145,12 +141,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     f"Heartbeat not OK (reg {REG_STATUS} = {hb[0]}) -> Skip data! Wait 35s for reconnect!"
                 )
                 self._client.close()
-                await asyncio.sleep(35)
+                await asyncio.sleep(SLEEP_TIME_AFTER_HEARTBEAT_FAILED)
                 return None
             _LOGGER.debug("Heartbeat OK (reg %s = %s)", REG_STATUS, hb[0])
 
             # ── Block A: Serial number + operation mode (40004, 12 regs) ──────────
-            await asyncio.sleep(SLEEP_TIME_AFTER_HEARTBEAT)
             if a := await self._read_block(_REG_SERIAL, 12):
                 # Serial number is ASCII-encoded across registers 0-7 (2 chars each)
                 sn = "".join(chr((r >> 8) & 0xFF) + chr(r & 0xFF) for r in a[0:8])
@@ -158,7 +153,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 data["operation_mode"] = a[9] if len(a) > 9 else None
 
             # ── Block B: Main power values (40519, 34 regs) ──────────────────────
-            await asyncio.sleep(SLEEP_TIME_AFTER_READ_BLOCK)
             # 40519–40548, last needed index = 29
             if b := await self._read_block(_REG_MAIN, 30):
                 _LOGGER.debug(
@@ -177,9 +171,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 data["solar_power"] = max(self._f(b, 4), 0.0)  # 40523 ✅
                 data["battery_power"] = self._f(b, 6)  # 40525 ✅
                 data["battery_soc"] = float(b[8])  # 40527 – INT16, % ✅
-                # if data["battery_soc"] < 5:
-                #     _LOGGER.info(f"Battery SoC < 5% --> {data['battery_soc']}")
-                #     _LOGGER.info("Heartbeat OK (reg %s = %s)", REG_STATUS, hb[0])
                 data["battery_capacity"] = self._battery_capacity  # user-configured kWh
                 data["bat_remaining"] = round(
                     self._battery_capacity * data["battery_soc"] / 100, 2
@@ -196,7 +187,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 data["limit_charge"] = round(num_modules * 2500)  # 2.5 kW per module
 
             # ── Block C: Battery detail (40574, 6 regs) ───────────────────────────
-            await asyncio.sleep(SLEEP_TIME_AFTER_READ_BLOCK)
             if c := await self._read_block(_REG_BAT_DETAIL, 6):
                 data["battery_voltage"] = self._f(c, 0)  # 40574 ✅
                 data["battery_current"] = self._f(c, 2)  # 40576 ✅
@@ -205,7 +195,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 )  # 40578 – ⚠️ not in verified list
 
             # ── Block D: AC grid + PV strings (40580, 28 regs → up to 40607) ──────
-            await asyncio.sleep(SLEEP_TIME_AFTER_READ_BLOCK)
             if d := await self._read_block(_REG_AC_PV, 28):
                 data["voltage_l1"] = self._f(d, 0)  # 40580 ✅
                 data["voltage_l2"] = self._f(d, 2)  # 40582 ✅
@@ -255,7 +244,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
             # ── Block E: Energy counters (42161, 100 regs) ────────────────────────
             # Offsets = register_address - 42161
-            await asyncio.sleep(SLEEP_TIME_AFTER_READ_BLOCK)
             if e := await self._read_block(_REG_ENERGY, 100):
                 data["grid_import_total"] = self._f(e, 0)  # 42161 ✅
                 data["grid_import_today"] = self._f(e, 2)  # 42163 ✅
@@ -302,6 +290,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             return await self._fetch_all()
         except UpdateFailed:  # noqa: BLE001
             raise UpdateFailed(
-                "Reconnect attempts failed! Integration stopped. Retry after 60s.",
-                retry_after=60,
+                "Reconnect attempts failed! Integration stopped. Retry after 120s.",
+                retry_after=120,
             )

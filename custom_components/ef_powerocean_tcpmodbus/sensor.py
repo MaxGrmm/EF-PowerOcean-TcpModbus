@@ -38,12 +38,12 @@ class EcoflowSensorDescription(SensorEntityDescription):
     native_unit_of_measurement: str | None = None
 
 
-VALUE_PRICISION = {
+VALUE_PRECISION = {
     PERCENTAGE: 0,
     UnitOfPower.WATT: 0,
     UnitOfEnergy.KILO_WATT_HOUR: 2,
     UnitOfTemperature.CELSIUS: 1,
-    UnitOfFrequency.HERTZ: 0,
+    UnitOfFrequency.HERTZ: 2,
     UnitOfApparentPower.VOLT_AMPERE: 0,
     UnitOfElectricPotential.VOLT: 1,
     UnitOfElectricCurrent.AMPERE: 2,
@@ -456,8 +456,8 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
         self._restored_value: float | int | str | None = None
         self._last_written_value: float | int | str | None = None
 
-        if self.entity_description.native_unit_of_measurement in VALUE_PRICISION:
-            self._attr_suggested_display_precision = VALUE_PRICISION.get(
+        if self.entity_description.native_unit_of_measurement in VALUE_PRECISION:
+            self._attr_suggested_display_precision = VALUE_PRECISION.get(
                 self.entity_description.native_unit_of_measurement
             )
 
@@ -487,7 +487,7 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
         if self.coordinator.data is not None:
             value = self.coordinator.data.get(self.entity_description.key, None)
             if value is not None:
-                if precision := VALUE_PRICISION.get(
+                if precision := VALUE_PRECISION.get(
                     self.entity_description.native_unit_of_measurement, None
                 ):
                     return (
