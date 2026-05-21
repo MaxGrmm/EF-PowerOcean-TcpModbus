@@ -61,10 +61,37 @@ SENSORS: list[EcoflowSensorDescription] = [
         entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:cog",
     ),
+    EcoflowSensorDescription(
+        key="battery_count",
+        name="Battery Module Count",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:numeric-1-box",
+    ),
     # ── Battery ──────────────────────────────────────────────────────────────
     EcoflowSensorDescription(
         key="battery_soc",
         name="Battery SOC",
+        native_unit_of_measurement=PERCENTAGE,
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    EcoflowSensorDescription(
+        key="battery1_soc",
+        name="Battery 1 SOC",
+        native_unit_of_measurement=PERCENTAGE,
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    EcoflowSensorDescription(
+        key="battery2_soc",
+        name="Battery 2 SOC",
+        native_unit_of_measurement=PERCENTAGE,
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    EcoflowSensorDescription(
+        key="battery3_soc",
+        name="Battery 3 SOC",
         native_unit_of_measurement=PERCENTAGE,
         device_class=SensorDeviceClass.BATTERY,
         state_class=SensorStateClass.MEASUREMENT,

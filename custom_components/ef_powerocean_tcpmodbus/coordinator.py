@@ -24,6 +24,7 @@ _REG_MAIN = 40519  # house_con, grid, solar, battery, soc, bat_cap, limits …
 _REG_BAT_DETAIL = 40574  # Battery voltage, current, temperature
 _REG_AC_PV = 40580  # Grid voltages/currents, frequency, apparent power,
 # PV string voltages, inverter temp, PV string currents
+_REG_BAT_MODULS = 42081  # Battery Moduls count, soc
 _REG_ENERGY = 42161  # kWh counters
 
 SLEEP_TIME_AFTER_HEARTBEAT = 0.2
@@ -249,6 +250,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                         _LOGGER.info(
                             f"grid_power derived from balance: {data['grid_power']} W"
                         )
+
+            # ── Block F: Battery Moduls (42081, 4 regs) ────────────────────────
+            await asyncio.sleep(SLEEP_TIME_AFTER_READ_BLOCK)
+            if f := await self._read_block(_REG_BAT_MODULS, 4):
+                data["battery_count"] = float(f[0])  # 42081 – INT16,
+                data["battery1_soc"] = float(f[1])  # 42082 – INT16, %
+                data["battery2_soc"] = float(f[2])  # 42083 – INT16, %
+                data["battery3_soc"] = float(f[3])  # 42084 – INT16, %
 
             # ── Block E: Energy counters (42161, 100 regs) ────────────────────────
             # Offsets = register_address - 42161
