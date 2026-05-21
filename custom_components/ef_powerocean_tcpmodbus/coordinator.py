@@ -254,7 +254,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             # ── Block F: Battery Moduls (42081, 4 regs) ────────────────────────
             await asyncio.sleep(SLEEP_TIME_AFTER_READ_BLOCK)
             if f := await self._read_block(_REG_BAT_MODULS, 4):
-                data["battery_count"] = float(f[0])  # 42081 – INT16,
+                data["battery_count"] = int(f[0])  # 42081 – INT16,
                 data["battery1_soc"] = float(f[1])  # 42082 – INT16, %
                 data["battery2_soc"] = float(f[2])  # 42083 – INT16, %
                 data["battery3_soc"] = float(f[3])  # 42084 – INT16, %

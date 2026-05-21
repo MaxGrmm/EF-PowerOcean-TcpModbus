@@ -65,7 +65,7 @@ SENSORS: list[EcoflowSensorDescription] = [
         key="battery_count",
         name="Battery Module Count",
         entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:numeric-1-box",
+        icon="mdi:battery-check-outline",
     ),
     # ── Battery ──────────────────────────────────────────────────────────────
     EcoflowSensorDescription(
