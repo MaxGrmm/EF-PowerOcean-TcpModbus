@@ -3,18 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
-from dataclasses import dataclass
-from collections.abc import Callable
 
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    RestoreSensor,
-    SensorEntityDescription,
-    SensorStateClass,
-)
+from homeassistant.components.sensor import RestoreSensor
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    EntityCategory,
     PERCENTAGE,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
@@ -24,7 +17,6 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.device_registry import DeviceInfo, DeviceEntryType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -32,20 +24,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     DOMAIN,
     SensorDef,
-    ENERGY_SENSOR_MAP,
+    EnergySensorDef,
     SENSOR_MAP,
+    ENERGY_SENSOR_MAP,
 )
 from .coordinator import EcoflowCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-
-
-# ist doppelt
-@dataclass(frozen=False)
-class EcoflowSensorDescription(SensorEntityDescription):
-    native_unit_of_measurement: str | None = None
-    get_checked_value: Callable[..., Any] | None = None
-    function_arg: Any | None = None
 
 
 VALUE_PRECISION = {
@@ -58,39 +43,6 @@ VALUE_PRECISION = {
     UnitOfElectricCurrent.AMPERE: 2,
 }
 
-SENSORS: list[EcoflowSensorDescription] = [
-    EcoflowSensorDescription(
-        key="bat_remaining",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY_STORAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    EcoflowSensorDescription(
-        key="pv1_power",
-        native_unit_of_measurement=UnitOfPower.WATT,
-        device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    EcoflowSensorDescription(
-        key="pv2_power",
-        native_unit_of_measurement=UnitOfPower.WATT,
-        device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    EcoflowSensorDescription(
-        key="pv3_power",
-        native_unit_of_measurement=UnitOfPower.WATT,
-        device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    EcoflowSensorDescription(
-        key="bat_net_energy",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL,
-    ),
-]
-
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -98,47 +50,31 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: EcoflowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities: list = []
-    async_add_entities(
-        EcoflowSensor(coordinator, description, entry, description)
-        for description in SENSORS
-    )
+    entities: list[SensorDef | EnergySensorDef] = []
 
     for sensor in SENSOR_MAP:
-        description = EcoflowSensorDescription(
-            key=sensor.key,
-            name=sensor.name,
-            native_unit_of_measurement=sensor.unit,
-            device_class=sensor.device_class,
-            state_class=sensor.state_class,
-        )
-        if sensor.entity_category == "diagnostic":
-            description.entity_category = EntityCategory.DIAGNOSTIC
-
-        entities.append(EcoflowSensor(coordinator, description, entry, sensor))
+        entities.append(EcoflowSensor(coordinator, entry, sensor))
 
     for sensor in ENERGY_SENSOR_MAP:
-        description = EcoflowSensorDescription(
-            key=sensor.key,
-            name=sensor.name,
-            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-            device_class=SensorDeviceClass.ENERGY,
-            state_class=SensorStateClass.TOTAL_INCREASING,
-        )
-        entities.append(EcoflowSensor(coordinator, description, entry, sensor))
+        entities.append(EcoflowSensor(coordinator, entry, sensor))
 
     async_add_entities(entities)
 
 
 class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
-    entity_description: EcoflowSensorDescription
-
-    def __init__(self, coordinator, description, entry, sensor_definition) -> None:
+    def __init__(
+        self,
+        coordinator: EcoflowCoordinator,
+        entry: ConfigEntry,
+        definition: SensorDef | EnergySensorDef,
+    ) -> None:
         super().__init__(coordinator)
-        self.entity_description: EcoflowSensorDescription = description
-        self.sensor_definition: SensorDef = sensor_definition
-        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_translation_key = description.key
+        self._definition = definition
+        self._attr_unique_id = f"{entry.entry_id}_{self._definition.key}"
+        self._attr_native_unit_of_measurement = self._definition.unit
+        self._attr_device_class = self._definition.device_class
+        self._attr_state_class = self._definition.state_class
+        self._attr_translation_key = self._definition.key
         self._attr_has_entity_name = True
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
@@ -146,16 +82,19 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
             manufacturer="EcoFlow",
             model="PowerOcean",
             serial_number=coordinator.serial_number,
-            sw_version=f"pymodbus: {coordinator.get_pymodbus_version()}",
+            # sw_version=f"pymodbus: {coordinator.get_pymodbus_version()}",
             entry_type=DeviceEntryType.SERVICE,
         )
         self._restored_value: float | int | str | None = None
         self._last_written_value: float | int | str | None = None
 
-        if self.entity_description.native_unit_of_measurement in VALUE_PRECISION:
+        if self._definition.unit in VALUE_PRECISION:
             self._attr_suggested_display_precision = VALUE_PRECISION.get(
-                self.entity_description.native_unit_of_measurement
+                self._definition.unit
             )
+
+        if self._definition.entity_category == "diagnostic":
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -172,7 +111,7 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
             last_value := await self.async_get_last_sensor_data()
         ) and last_value.native_value is not None:
             _LOGGER.debug(
-                f"Restore Sensor '{self.entity_description.name}' with value: {last_value.native_value}"
+                f"Restore Sensor '{self._definition.key}' with value: {last_value.native_value}"
             )
             self._restored_value = last_value.native_value
             self._last_written_value = self._restored_value
@@ -181,17 +120,15 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
     def native_value(self) -> float | int | str | None:
         """Return the sensor value from coordinator, falling back to last value"""
         if self.coordinator.data is not None:
-            value = self.coordinator.data.get(self.entity_description.key, None)
+            value = self.coordinator.data.get(self._definition.key, None)
             if value is not None:
-                # if self.sensor_definition.get_checked_value is not None:
-                #     if self.sensor_definition.function_arg:
-                #         value = self.sensor_definition.get_checked_value(
-                #             value, self.sensor_definition.function_arg
-                #         )
+                if self._definition.get_checked_value is not None:
+                    if self._definition.function_arg:
+                        value = self._definition.get_checked_value(
+                            value, self._definition.function_arg
+                        )
 
-                if precision := VALUE_PRECISION.get(
-                    self.entity_description.native_unit_of_measurement, None
-                ):
+                if precision := VALUE_PRECISION.get(self._definition.unit, None):
                     return (
                         round(value, precision)
                         if precision > 0

@@ -60,9 +60,15 @@ class SensorDef:
 class EnergySensorDef:
     key: str
     name: str | None = None
+    unit: str = "kWh"
     reset_at_midnight: bool = False
     is_calculated: bool = False
     max_power: int | None = None
+    device_class: str = "energy"
+    state_class: str = "total_increasing"
+    entity_category: str | None = None
+    get_checked_value: Callable[..., Any] | None = None
+    function_arg: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -84,9 +90,7 @@ MOD_REGISTER_MAP = {
                 RegisterDef(key="solar_power", block_index=4),
                 RegisterDef(key="battery_power", block_index=6),
                 RegisterDef(key="battery_soc", block_index=8, size=1),
-                RegisterDef(
-                    key="system_modes", block_index=11, size=1
-                ),  # Bit 3: Batteriesparmodus, Bit 4: Eigen-Modus, Bit 5: KI
+                RegisterDef(key="system_modes", block_index=11, size=1),
                 RegisterDef(key="min_soc_limit", block_index=17, size=1),
                 RegisterDef(key="bat_temp_warn_max", block_index=21, size=1),
                 RegisterDef(key="device_led_brightness", block_index=22, size=1),
@@ -149,7 +153,7 @@ SENSOR_MAP: list[SensorDef] = [
     SensorDef(
         key="system_modes",
         unit=None,
-        device_class="enum",
+        device_class=None,
         state_class="measurement",
     ),
     SensorDef(
@@ -221,7 +225,7 @@ SENSOR_MAP: list[SensorDef] = [
     SensorDef(
         key="battery_capacity",
         unit="Wh",
-        device_class="energy",
+        device_class="storage",
         state_class="measurement",
         entity_category="diagnostic",
     ),
@@ -377,6 +381,36 @@ SENSOR_MAP: list[SensorDef] = [
         device_class="battery",
         state_class="measurement",
         entity_category="diagnostic",
+    ),
+    SensorDef(
+        key="bat_remaining",
+        unit="kWh",
+        device_class="energy_storage",
+        state_class="measurement",
+    ),
+    SensorDef(
+        key="pv1_power",
+        unit="W",
+        device_class="power",
+        state_class="measurement",
+    ),
+    SensorDef(
+        key="pv2_power",
+        unit="W",
+        device_class="power",
+        state_class="measurement",
+    ),
+    SensorDef(
+        key="pv3_power",
+        unit="W",
+        device_class="power",
+        state_class="measurement",
+    ),
+    SensorDef(
+        key="bat_net_energy",
+        unit="kWh",
+        device_class="energy",
+        state_class="total",
     ),
 ]
 

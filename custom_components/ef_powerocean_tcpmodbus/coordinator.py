@@ -46,7 +46,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 SLEEP_TIME_AFTER_RECONNECT = 1
-SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED = 35
+SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED = 15
 
 
 def getBit(value: int, bitpos: int) -> bool:
@@ -123,7 +123,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         try:
             raw = struct.pack("<HH", regs[register_index], regs[register_index + 1])
             value = struct.unpack("<f", raw)[0]
-        except struct.error, TypeError:  # FIX: korrekte Python-3-Syntax
+        except struct.error, TypeError:  # ab Python 3.14 ist ohne Klammern der Standard
             return None
 
         if abs(value) > 1e9 or value != value:  # guard against NaN / inf
@@ -225,10 +225,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     data[register.key] = decode_value
 
             if data["battery_count"] != self.limits[CONF_BATTERY_COUNT]:
-                _LOGGER.info(
-                    f"Readed battery count {data['battery_count']} is unequal -> Skip data! Wait {SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED}s for reconnect!"
+                _LOGGER.debug(
+                    f"Readed battery count {data['battery_count']} is unequal -> Skip data! Wait {SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED}s."
                 )
-                # self._client.close()
                 await asyncio.sleep(SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED)
                 return None
 
@@ -293,14 +292,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     if calculated_power > limit:
                         # positiver Anstieg und Leistung über Max-Leistung
                         _LOGGER.warning(
-                            f"Skip entire data. Reason: {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} delta power: {round(energy_delta, 2)} last check: {self._last_checked_time.time()})"
+                            f"Skip entire data. Reason: {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
                         )
                         return dict(self._last_checked_data)
                     else:
                         # negativer Anstieg oder unterhalb der Max-Leistung
                         if current_energy == 0 and last_energy > 0:
                             _LOGGER.warning(
-                                f"Skip entire data. Reason: 0 kWh of {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} delta power: {round(energy_delta, 2)} last check: {self._last_checked_time.time()})"
+                                f"Skip entire data. Reason: 0 kWh of {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
                             )
                             return dict(self._last_checked_data)
                         # Rückgabe des aktuellen Wertes nur wenn der neue Wert > letzter Wert ist
@@ -311,7 +310,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                         )
                 else:
                     _LOGGER.debug(
-                        f"Time window is too large of entity {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} dt: {dt_hours} power: {int(calculated_power)} limit: {energy_sensor.max_power} delta power: {round(energy_delta, 4)} last check: {self._last_checked_time.time()})"
+                        f"Time window is too large of entity {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 4)} dt: {dt_hours} power: {int(calculated_power)} limit: {energy_sensor.max_power} last check: {self._last_checked_time.time()})"
                     )
 
         return result
@@ -346,7 +345,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         # house energy calculation
         if self._count_reset_energy_finished == self._count_reset_energy_sensor:
-            # Berechnung erst wenn alle werte zurückgesetzt werden
+            # Berechnung erst wenn alle Werte zurückgesetzt wurden
             solar_today = data.get("solar_today", None)
             grid_import_today = data.get("grid_import_today", None)
             grid_export_today = data.get("grid_export_today", None)
@@ -425,7 +424,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         system_mode = data.get("system_modes", None)
         if system_mode is not None:
-            # Bit 3: Batteriesparmodus, Bit 4: Eigenstromversorgung, Bit 5: Intelligenter Modus
+            # Bit 3: Batteriesparmodus
+            # Bit 4: Eigenstromversorgung
+            # Bit 5: Intelligenter Modus
             calc_data["battery_saver_mode_ena"] = getBit(int(system_mode), 3)
             calc_data["self_use_mode_ena"] = getBit(int(system_mode), 4)
             calc_data["intelligent_mode_ena"] = getBit(int(system_mode), 5)

@@ -35,7 +35,6 @@ class EcoFlowBinarySensor(CoordinatorEntity[EcoflowCoordinator], BinarySensorEnt
         entry: ConfigEntry,
         definition: BinarySensorDef,
     ) -> None:
-        """Initialize the binary sensor."""
         super().__init__(coordinator)
         self._definition = definition
         self._attr_unique_id = f"{entry.entry_id}_{definition.key}"
@@ -47,7 +46,7 @@ class EcoFlowBinarySensor(CoordinatorEntity[EcoflowCoordinator], BinarySensorEnt
             manufacturer="EcoFlow",
             model="PowerOcean",
             serial_number=coordinator.serial_number,
-            sw_version=f"pymodbus: {coordinator.get_pymodbus_version()}",
+            # sw_version=f"pymodbus: {coordinator.get_pymodbus_version()}",
             entry_type=DeviceEntryType.SERVICE,
         )
 
@@ -65,9 +64,6 @@ class EcoFlowBinarySensor(CoordinatorEntity[EcoflowCoordinator], BinarySensorEnt
     def is_on(self) -> bool | None:
         """Return true if the binary sensor is on."""
         if self.coordinator.data is not None:
-            value = self.coordinator.data.get(self._definition.key)
+            value = self.coordinator.data.get(self._definition.key, None)
 
-            if value is not None:
-                return bool(value)
-
-        return self._last_written_value
+        return bool(value) if value is not None else self._last_written_value
