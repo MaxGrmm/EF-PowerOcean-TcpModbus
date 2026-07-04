@@ -18,9 +18,9 @@
         "description": "Einstellungen",
         "data": {
           "battery_count": "Anzahl installierter Batterie-Module",
-          "solar_power_max": "Maximale Solar-Leistung",
-          "grid_power_max": "Maximale Netz-Leistung",
-          "scan_interval": "Abfrageintervall (Sekunden)"
+          "solar_power_max": "Maximale Solar-Leistung [W]",
+          "grid_power_max": "Maximale Netz-Leistung [W]",
+          "scan_interval": "Abfrageintervall [s]"
         },
         "data_description": {
           "battery_count": "Die Anzahl wird zur Berechnung der max. Lade- und Entladeleistung verwendet.",
@@ -56,9 +56,9 @@
         "description": "Einstellungen",
         "data": {
           "battery_count": "Anzahl installierter Batterie-Module",
-          "solar_power_max": "Maximale Solar-Leistung",
-          "grid_power_max": "Maximale Netz-Leistung",
-          "scan_interval": "Abfrageintervall (Sekunden)"
+          "solar_power_max": "Maximale Solar-Leistung [W]",
+          "grid_power_max": "Maximale Netz-Leistung [W]",
+          "scan_interval": "Abfrageintervall [s]"
         },
         "data_description": {
           "battery_count": "Die Anzahl wird zur Berechnung der max. Lade- und Entladeleistung verwendet.",
@@ -180,10 +180,10 @@
 			  "name": "Wechselrichter-Temperatur"
 		  },
 		  "limit_inv_max":{
-			  "name": "Inverter Nominal Power Limit"
+			  "name": "WR-Nennleistungsgrenze"
 		  },
 		  "limit_inv_power":{
-			  "name": "Inverter Current Max Power"
+			  "name": "WR-Maximalleistung"
 		  },
 		  "house_energy_today":{
 			  "name": "Hausenergie Heute"

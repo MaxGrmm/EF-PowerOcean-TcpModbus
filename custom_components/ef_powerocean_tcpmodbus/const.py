@@ -24,8 +24,7 @@ CONF_MAX_BATTERY_CHARGED_POWER = "battery_charged_power_max"
 CONF_MAX_BATTERY_DISCHARGED_POWER = "battery_discharged_power_max"
 CONF_SCAN_INTERVAL = "scan_interval"
 
-# A – below this value string current is treated as 0 (phantom voltage)
-PV_CURRENT_THRESHOLD = 0.06
+PV_VOLTAGE_THRESHOLD = 190
 MAX_BATTERY_CHARGED_POWER = 2500
 MAX_BATTERY_DISCHARGED_POWER = 3300
 
@@ -52,8 +51,6 @@ class SensorDef:
     device_class: str | None = None
     state_class: str | None = None
     entity_category: str | None = None
-    get_checked_value: Callable[..., Any] | None = None
-    function_arg: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -61,14 +58,12 @@ class EnergySensorDef:
     key: str
     name: str | None = None
     unit: str = "kWh"
-    reset_at_midnight: bool = False
+    reset_at_midnight: bool = False  # nur bei Sensor die aus einem Register gelesen werden, keine berechneten Sensoren
     is_calculated: bool = False
     max_power: int | None = None
     device_class: str = "energy"
     state_class: str = "total_increasing"
     entity_category: str | None = None
-    get_checked_value: Callable[..., Any] | None = None
-    function_arg: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -145,10 +140,6 @@ MOD_REGISTER_MAP = {
 }
 
 
-def set_to_zero_below_threshold(value, threshold):
-    return 0 if value < threshold else value
-
-
 SENSOR_MAP: list[SensorDef] = [
     SensorDef(
         key="system_modes",
@@ -173,8 +164,6 @@ SENSOR_MAP: list[SensorDef] = [
         unit="W",
         device_class="power",
         state_class="measurement",
-        get_checked_value=max,
-        function_arg=0,
     ),
     SensorDef(
         key="battery_power",
@@ -333,8 +322,6 @@ SENSOR_MAP: list[SensorDef] = [
         device_class="current",
         state_class="measurement",
         entity_category="diagnostic",
-        get_checked_value=set_to_zero_below_threshold,
-        function_arg=PV_CURRENT_THRESHOLD,
     ),
     SensorDef(
         key="pv2_current",
@@ -342,8 +329,6 @@ SENSOR_MAP: list[SensorDef] = [
         device_class="current",
         state_class="measurement",
         entity_category="diagnostic",
-        get_checked_value=set_to_zero_below_threshold,
-        function_arg=PV_CURRENT_THRESHOLD,
     ),
     SensorDef(
         key="pv3_current",
@@ -351,8 +336,6 @@ SENSOR_MAP: list[SensorDef] = [
         device_class="current",
         state_class="measurement",
         entity_category="diagnostic",
-        get_checked_value=set_to_zero_below_threshold,
-        function_arg=PV_CURRENT_THRESHOLD,
     ),
     SensorDef(
         key="battery_count",
@@ -444,7 +427,6 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
     ),
     EnergySensorDef(
         "house_energy_today",
-        reset_at_midnight=True,
         is_calculated=True,
         max_power=CONF_MAX_GRID_POWER,
     ),

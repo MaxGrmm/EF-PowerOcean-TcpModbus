@@ -122,12 +122,6 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
         if self.coordinator.data is not None:
             value = self.coordinator.data.get(self._definition.key, None)
             if value is not None:
-                if self._definition.get_checked_value is not None:
-                    if self._definition.function_arg:
-                        value = self._definition.get_checked_value(
-                            value, self._definition.function_arg
-                        )
-
                 if precision := VALUE_PRECISION.get(self._definition.unit, None):
                     return (
                         round(value, precision)

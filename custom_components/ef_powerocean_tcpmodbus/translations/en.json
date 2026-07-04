@@ -18,9 +18,9 @@
         "description": "Settings",
         "data": {
           "battery_count": "Battery module count",
-          "solar_power_max": "Maximum solar power",
-          "grid_power_max": "Maximum grid power",
-          "scan_interval": "Poll Interval (seconds)"
+          "solar_power_max": "Maximum solar power [W]",
+          "grid_power_max": "Maximum grid power [W]",
+          "scan_interval": "Poll Interval [s]"
         },
         "data_description": {
           "battery_count": "Count of your battery modules.",
@@ -56,9 +56,9 @@
         "description": "Settings",
         "data": {
           "battery_count": "Battery module count",
-          "solar_power_max": "Maximum solar power",
-          "grid_power_max": "Maximum grid power",
-          "scan_interval": "Poll Interval (seconds)"
+          "solar_power_max": "Maximum solar power [W]",
+          "grid_power_max": "Maximum grid power [W]",
+          "scan_interval": "Poll Interval [s]"
         },
         "data_description": {
           "battery_count": "Count of your battery modules.",

@@ -29,7 +29,7 @@ from .const import (
     CONF_MAX_GRID_POWER,
     CONF_MAX_SOLAR_POWER,
     CONF_SCAN_INTERVAL,
-    PV_CURRENT_THRESHOLD,
+    PV_VOLTAGE_THRESHOLD,
     DEFAULT_SLAVE,
     ENERGY_SENSOR_MAP,
     MOD_REGISTER_MAP,
@@ -399,7 +399,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             if pv1_current is None or pv1_voltage is None
             else (
                 0
-                if pv1_current < PV_CURRENT_THRESHOLD
+                if pv1_voltage < PV_VOLTAGE_THRESHOLD
                 else round(pv1_current * pv1_voltage, 1)
             )
         )
@@ -408,7 +408,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             if pv2_current is None or pv2_voltage is None
             else (
                 0
-                if pv2_current < PV_CURRENT_THRESHOLD
+                if pv2_voltage < PV_VOLTAGE_THRESHOLD
                 else round(pv2_current * pv2_voltage, 1)
             )
         )
@@ -417,7 +417,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             if pv3_current is None or pv3_voltage is None
             else (
                 0
-                if pv3_current < PV_CURRENT_THRESHOLD
+                if pv3_voltage < PV_VOLTAGE_THRESHOLD
                 else round(pv3_current * pv3_voltage, 1)
             )
         )
