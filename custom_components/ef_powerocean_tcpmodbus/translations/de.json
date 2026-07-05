@@ -96,7 +96,7 @@
 			  "name": "Batterieleistung"
 		  },
 		  "bat_remaining":{
-			  "name": "Verbliebene Batterieladung"
+			  "name": "Verbleibene Batterieladung"
 		  },
 		  "battery_voltage":{
 			  "name": "Batteriespannung"

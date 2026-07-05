@@ -17,27 +17,27 @@ PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.SENSOR,
 ]
-CONFIG_VERSION = 2
+# CONFIG_VERSION = 2
 
 
-async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Migrate old config entries to current schema."""
+# async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+#     """Migrate old config entries to current schema."""
 
-    if config_entry.version < CONFIG_VERSION:
-        _LOGGER.info(
-            f"Migrating config entry {config_entry.entry_id} from version {CONFIG_VERSION} to {config_entry.version}."
-        )
-        new_data = {**config_entry.data}
-        hass.config_entries.async_update_entry(
-            config_entry,
-            data=new_data,
-            version=CONFIG_VERSION,
-        )
-        _LOGGER.info(
-            f"Migration of config entry {config_entry.entry_id} to version {CONFIG_VERSION} successful!"
-        )
+#     if config_entry.version < CONFIG_VERSION:
+#         _LOGGER.info(
+#             f"Migrating config entry {config_entry.entry_id} from version {CONFIG_VERSION} to {config_entry.version}."
+#         )
+#         new_data = {**config_entry.data}
+#         hass.config_entries.async_update_entry(
+#             config_entry,
+#             data=new_data,
+#             version=CONFIG_VERSION,
+#         )
+#         _LOGGER.info(
+#             f"Migration of config entry {config_entry.entry_id} to version {CONFIG_VERSION} successful!"
+#         )
 
-    return True
+#     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

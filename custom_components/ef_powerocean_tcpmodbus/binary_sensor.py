@@ -46,7 +46,6 @@ class EcoFlowBinarySensor(CoordinatorEntity[EcoflowCoordinator], BinarySensorEnt
             manufacturer="EcoFlow",
             model="PowerOcean",
             serial_number=coordinator.serial_number,
-            # sw_version=f"pymodbus: {coordinator.get_pymodbus_version()}",
             entry_type=DeviceEntryType.SERVICE,
         )
 

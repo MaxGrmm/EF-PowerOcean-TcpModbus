@@ -82,7 +82,6 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
             manufacturer="EcoFlow",
             model="PowerOcean",
             serial_number=coordinator.serial_number,
-            # sw_version=f"pymodbus: {coordinator.get_pymodbus_version()}",
             entry_type=DeviceEntryType.SERVICE,
         )
         self._restored_value: float | int | str | None = None
