@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
 from dataclasses import dataclass
-from collections.abc import Callable
 
 DOMAIN = "ef_powerocean_tcpmodbus"
 DEFAULT_PORT = 502
