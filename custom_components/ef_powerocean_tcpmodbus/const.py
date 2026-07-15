@@ -393,6 +393,13 @@ SENSOR_MAP: list[SensorDef] = [
         device_class="energy",
         state_class="total",
     ),
+    SensorDef(
+        key="gradient_bat_charged_today",
+        unit="kWh/s",
+        device_class=None,
+        state_class="measurement",
+        entity_category="diagnostic",
+    ),
 ]
 
 

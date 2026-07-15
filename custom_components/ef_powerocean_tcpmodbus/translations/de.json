@@ -223,6 +223,9 @@
 		  },
 		  "bat_net_energy":{
 			  "name": "Batterieverlustenergie Gesamt"
+		  },
+		  "gradient_bat_charged_today":{
+			  "name": "Gradient-Koeff Batterieentl."
 		  }
 	  },
     "binary_sensor": {

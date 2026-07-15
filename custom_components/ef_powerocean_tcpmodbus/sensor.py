@@ -34,6 +34,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 VALUE_PRECISION = {
+    "kWh/s": 6,
     PERCENTAGE: 0,
     UnitOfPower.WATT: 0,
     UnitOfEnergy.KILO_WATT_HOUR: 2,

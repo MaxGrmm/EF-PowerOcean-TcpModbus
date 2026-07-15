@@ -8,6 +8,7 @@ import struct
 
 from typing import Any
 from datetime import timedelta
+from collections import deque
 
 from datetime import datetime
 from pymodbus import __version__ as pyModbusVersion
@@ -45,6 +46,8 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+BUFFER_SIZE = 10
+TIMEOUT_CLEAR_BUFFER = 120
 SLEEP_TIME_AFTER_RECONNECT = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED = 15
 
@@ -98,7 +101,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         )
         self._client_slave_id = DEFAULT_SLAVE
         self._lock = asyncio.Lock()
-
+        # self._energy_buffer: dict[str, Any] = {}
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime = None
         self._check_monotonic: bool = True
@@ -106,7 +109,12 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         for sensor in ENERGY_SENSOR_MAP:
             if sensor.reset_at_midnight:
                 self._count_reset_energy_sensor += 1
+            # if not sensor.is_calculated:
+            #     self._energy_buffer[sensor.key] = deque(maxlen=BUFFER_SIZE)
         self._count_reset_energy_finished: int = self._count_reset_energy_sensor
+
+        self._last_valid_value = None
+        self._last_valid_time = None
 
     @staticmethod
     def _decode_register(
@@ -240,6 +248,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
             return data
 
+    # def _calculated_median(self, buffer):
+    #     """Berechnet den Median (inkl. Mittelung bei gerade Anzahl von Werten)"""
+    #     # sorted_buffer = sorted(buffer)
+    #     n = len(buffer)
+    #     if n % 2 == 1:
+    #         return buffer[n // 2]
+    #     return (buffer[(n // 2) - 1] + buffer[n // 2]) / 2.0
+
     def _sanitize_energy_values(self, data: dict[str, Any]) -> dict[str, Any]:
         result: dict[str, Any] = dict(data)
         self._check_monotonic = True
@@ -283,6 +299,13 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._count_reset_energy_finished += 1
             else:
                 dt_hours = (now - self._last_checked_time).total_seconds() / 3600
+                # if dt_hours * 3600 > TIMEOUT_CLEAR_BUFFER:
+                #     _LOGGER.warning(
+                #         f"{energy_sensor.key} war für {dt_hours * 3600}s offline. Buffer wird zurückgesetzt!"
+                #     )
+                #     self._energy_buffer[energy_sensor.key].clear()
+                #     self._energy_buffer[energy_sensor.key].appent(current_energy)
+                #     continue
                 # Nur innerhalb einer 1h Stunde prüfen, danach ist das Gap zu groß
                 if 0 < dt_hours <= 1:
                     # Anstieg berechnen
@@ -442,11 +465,36 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         return data
 
+    def _get_calculate_gradient(self, new_raw_value) -> float | None:
+        now = dt.now()
+        if new_raw_value is None:
+            return None
+
+        if self._last_valid_value is None or self._last_valid_time is None:
+            self._last_valid_value = new_raw_value
+            self._last_valid_time = now
+            return None
+
+        time_delta = (now - self._last_valid_time).total_seconds()
+        if time_delta <= 1:
+            return None
+
+        current_gradient = (new_raw_value - self._last_valid_value) / time_delta
+
+        self._last_valid_value = new_raw_value
+        self._last_valid_time = now
+
+        return current_gradient
+
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             if (raw_data := await self.async_get_raw_data()) is None:
                 return None
 
+            gradient = self._get_calculate_gradient(
+                raw_data.get("bat_discharged_today", None)
+            )
+            raw_data.update({"gradient_bat_charged_today": gradient})
             result = self._sanitize_energy_values(raw_data)
             calculated_results = self._get_calculated_values(result)
             result.update(calculated_results)
