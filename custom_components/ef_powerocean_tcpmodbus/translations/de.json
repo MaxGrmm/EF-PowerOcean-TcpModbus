@@ -224,8 +224,35 @@
 		  "bat_net_energy":{
 			  "name": "Batterieverlustenergie Gesamt"
 		  },
+		  "gradient_grid_import_total":{
+			  "name": "Grad. Grid Import Total"
+		  },
+		  "gradient_grid_import_today":{
+			  "name": "Grad. Grid Import Today"
+		  },
+		  "gradient_grid_export_total":{
+			  "name": "Grad. Grid Export Total"
+		  },
+		  "gradient_grid_export_today":{
+			  "name": "Grad. Grid Export Today"
+		  },
+		  "gradient_bat_charged_total":{
+			  "name": "Grad. Bat Charged Total"
+		  },
 		  "gradient_bat_charged_today":{
-			  "name": "Gradient-Koeff Batterieentl."
+			  "name": "Grad. Bat Charged Today"
+		  },
+		  "gradient_bat_discharged_total":{
+			  "name": "Grad. Bat Discharged Total"
+		  },
+		  "gradient_bat_discharged_today":{
+			  "name": "Grad. Bat Discharged Today"
+		  },
+		  "gradient_solar_total":{
+			  "name": "Grad. Solar Total"
+		  },
+		  "gradient_solar_today":{
+			  "name": "Grad. Solar Today"
 		  }
 	  },
     "binary_sensor": {
