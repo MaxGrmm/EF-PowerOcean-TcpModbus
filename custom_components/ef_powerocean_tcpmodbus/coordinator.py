@@ -440,6 +440,20 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             )
         )
 
+        if data.get("solar_power", None) is None:
+            _LOGGER.warning(
+                f"Register of solar_power is None! Calculation is based on the individual powers!"
+            )
+            pv1_power = data.get("pv1_power", None)
+            pv2_power = data.get("pv2_power", None)
+            pv3_power = data.get("pv3_power", None)
+
+            calc_data["solar_power"] = (
+                None
+                if pv1_power is None or pv2_power is None or pv3_power is None
+                else pv1_power + pv2_power + pv3_power
+            )
+
         system_mode = data.get("system_modes", None)
         if system_mode is not None:
             # Bit 3: Batteriesparmodus
