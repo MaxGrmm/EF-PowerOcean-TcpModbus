@@ -8,5 +8,5 @@
   "issue_tracker": "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues",
   "loggers": ["custom_components.ef_powerocean_tcpmodbus"],
   "requirements": [],
-  "version": "2.1.0"
+  "version": "2.1.1"
 }
