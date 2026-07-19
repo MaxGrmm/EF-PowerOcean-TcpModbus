@@ -224,6 +224,9 @@
 		  "bat_net_energy":{
 			  "name": "Batterieverlustenergie Gesamt"
 		  },
+		  "feed_in_power_max":{
+			  "name": "Max. Einspeiseleistung"
+		  },
 		  "gradient_grid_import_total":{
 			  "name": "Grad. Grid Import Total"
 		  },
