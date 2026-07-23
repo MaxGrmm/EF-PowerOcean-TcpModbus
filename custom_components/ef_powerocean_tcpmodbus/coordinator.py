@@ -8,7 +8,6 @@ import struct
 
 from typing import Any
 from datetime import timedelta
-from collections import deque
 
 from datetime import datetime
 from pymodbus import __version__ as pyModbusVersion
