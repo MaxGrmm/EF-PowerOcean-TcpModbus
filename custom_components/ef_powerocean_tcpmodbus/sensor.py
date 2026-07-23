@@ -28,7 +28,7 @@ from .const import (
     SENSOR_MAP,
     ENERGY_SENSOR_MAP,
 )
-from .coordinator import EcoflowCoordinator, GRADIENT_KEYS
+from .coordinator import EcoflowCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,16 +57,6 @@ async def async_setup_entry(
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 
     for sensor in ENERGY_SENSOR_MAP:
-        entities.append(EcoflowSensor(coordinator, entry, sensor))
-
-    for key in GRADIENT_KEYS:
-        sensor = SensorDef(
-            key=f"gradient_{key}",
-            unit="kWh/s",
-            device_class=None,
-            state_class="measurement",
-            entity_category="diagnostic",
-        )
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 
     async_add_entities(entities)

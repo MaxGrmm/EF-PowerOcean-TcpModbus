@@ -11,6 +11,7 @@ from pymodbus.client import AsyncModbusTcpClient
 from homeassistant.core import callback
 from homeassistant.config_entries import ConfigFlow, ConfigEntry, OptionsFlow
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.selector import BooleanSelector
 
 from .const import (
     DOMAIN,
@@ -20,6 +21,7 @@ from .const import (
     CONF_MAX_GRID_POWER,
     CONF_MAX_SOLAR_POWER,
     CONF_SCAN_INTERVAL,
+    CONF_CALC_SOLAR_POWER,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_BATTERY_COUNT,
@@ -102,18 +104,22 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="parameters",
             data_schema=vol.Schema(
                 {
-                    vol.Optional(
+                    vol.Required(
                         CONF_BATTERY_COUNT, default=DEFAULT_BATTERY_COUNT
                     ): vol.All(int, vol.Range(min=0, max=6)),
-                    vol.Optional(
+                    vol.Required(
                         CONF_MAX_SOLAR_POWER, default=DEFAULT_MAX_SOLAR_POWER
                     ): vol.All(int, vol.Range(min=1000, max=60000)),
-                    vol.Optional(
+                    vol.Required(
                         CONF_MAX_GRID_POWER, default=DEFAULT_MAX_GRID_POWER
                     ): vol.All(int, vol.Range(min=1000, max=60000)),
-                    vol.Optional(
+                    vol.Required(
                         CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
                     ): vol.All(int, vol.Range(min=2, max=30)),
+                    vol.Required(
+                        CONF_CALC_SOLAR_POWER,
+                        default=False,
+                    ): BooleanSelector({}),
                 }
             ),
             errors=errors,
@@ -154,7 +160,7 @@ class EcoflowOptionsFlow(OptionsFlow):
                     vol.Required(
                         CONF_HOST, default=self._config_entry.data.get(CONF_HOST, "")
                     ): str,
-                    vol.Optional(
+                    vol.Required(
                         CONF_PORT,
                         default=self._config_entry.data.get(CONF_PORT, DEFAULT_PORT),
                     ): int,
@@ -181,31 +187,38 @@ class EcoflowOptionsFlow(OptionsFlow):
             step_id="parameters",
             data_schema=vol.Schema(
                 {
-                    vol.Optional(
+                    vol.Required(
                         CONF_BATTERY_COUNT,
                         default=self._config_entry.data.get(
                             CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT
                         ),
                     ): vol.All(int, vol.Range(min=0, max=6)),
-                    vol.Optional(
+                    vol.Required(
                         CONF_MAX_SOLAR_POWER,
                         default=self._config_entry.data.get(
                             CONF_MAX_SOLAR_POWER, DEFAULT_MAX_SOLAR_POWER
                         ),
                     ): vol.All(int, vol.Range(min=1000, max=60000)),
-                    vol.Optional(
+                    vol.Required(
                         CONF_MAX_GRID_POWER,
                         default=self._config_entry.data.get(
                             CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER
                         ),
                     ): vol.All(int, vol.Range(min=1000, max=60000)),
-                    vol.Optional(
+                    vol.Required(
                         CONF_SCAN_INTERVAL,
                         default=self._config_entry.data.get(
                             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                         ),
                     ): vol.All(int, vol.Range(min=2, max=30)),
+                    vol.Required(
+                        CONF_CALC_SOLAR_POWER,
+                        default=self._config_entry.data.get(
+                            CONF_CALC_SOLAR_POWER, False
+                        ),
+                    ): BooleanSelector({}),
                 }
             ),
             errors=errors,
         )
+

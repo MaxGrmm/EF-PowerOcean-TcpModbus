@@ -20,13 +20,15 @@
           "battery_count": "Battery module count",
           "solar_power_max": "Maximum solar power [W]",
           "grid_power_max": "Maximum grid power [W]",
-          "scan_interval": "Poll Interval [s]"
+          "scan_interval": "Poll Interval [s]",
+		  "calc_solar_power": "Calculation of solar power"
         },
         "data_description": {
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",
-          "scan_interval": "How often values are polled (2-30 seconds)"
+          "scan_interval": "How often values are polled (2-30 seconds)",
+		  "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
         }
       }
     },
@@ -58,13 +60,15 @@
           "battery_count": "Battery module count",
           "solar_power_max": "Maximum solar power [W]",
           "grid_power_max": "Maximum grid power [W]",
-          "scan_interval": "Poll Interval [s]"
+          "scan_interval": "Poll Interval [s]",
+		  "calc_solar_power": "Calculation of solar power"
         },
         "data_description": {
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",
-          "scan_interval": "How often values are polled (2–30 seconds)"
+          "scan_interval": "How often values are polled (2–30 seconds)",
+		  "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
         }
       }
     },

@@ -30,6 +30,7 @@ from .const import (
     CONF_MAX_GRID_POWER,
     CONF_MAX_SOLAR_POWER,
     CONF_SCAN_INTERVAL,
+    CONF_CALC_SOLAR_POWER,
     PV_VOLTAGE_THRESHOLD,
     DEFAULT_SLAVE,
     ENERGY_SENSOR_MAP,
@@ -46,23 +47,8 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-BUFFER_SIZE = 10
-TIMEOUT_CLEAR_BUFFER = 120
 SLEEP_TIME_AFTER_RECONNECT = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED = 15
-
-GRADIENT_KEYS = (
-    "grid_import_total",
-    "grid_import_today",
-    "grid_export_total",
-    "grid_export_today",
-    "bat_charged_total",
-    "bat_charged_today",
-    "bat_discharged_total",
-    "bat_discharged_today",
-    "solar_total",
-    "solar_today",
-)
 
 
 def getBit(value: int, bitpos: int) -> bool:
@@ -101,6 +87,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             )
             * config_entry.data.get(CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT),
         }
+        self._ena_calc_solar_power = config_entry.data.get(CONF_CALC_SOLAR_POWER, False)
         super().__init__(
             hass,
             _LOGGER,
@@ -122,9 +109,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             if sensor.reset_at_midnight:
                 self._count_reset_energy_sensor += 1
         self._count_reset_energy_finished: int = self._count_reset_energy_sensor
-
-        self._last_valid_value: dict[str, Any] = {}
-        self._last_valid_time: dict[str, Any] = {}
 
     @staticmethod
     def _decode_register(
@@ -440,13 +424,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             )
         )
 
-        if data.get("solar_power", None) is None:
-            _LOGGER.warning(
-                f"Register of solar_power is None! Calculation is based on the individual powers!"
-            )
-            pv1_power = data.get("pv1_power", None)
-            pv2_power = data.get("pv2_power", None)
-            pv3_power = data.get("pv3_power", None)
+        if self._ena_calc_solar_power:
+            pv1_power = calc_data.get("pv1_power", None)
+            pv2_power = calc_data.get("pv2_power", None)
+            pv3_power = calc_data.get("pv3_power", None)
 
             calc_data["solar_power"] = (
                 None
@@ -474,38 +455,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         return data
 
-    def _get_calculate_gradient(self, name, new_raw_value) -> float | None:
-        now = dt.now()
-        if new_raw_value is None:
-            return None
-
-        last_valid_value = self._last_valid_value.get(name, None)
-        last_valid_time = self._last_valid_time.get(name, None)
-        if last_valid_value is None or last_valid_time is None:
-            self._last_valid_value[name] = new_raw_value
-            self._last_valid_time[name] = now
-            return None
-
-        time_delta = (now - last_valid_time).total_seconds()
-        if time_delta <= 1:
-            return None
-
-        current_gradient = (new_raw_value - last_valid_value) / time_delta
-
-        self._last_valid_value[name] = new_raw_value
-        self._last_valid_time[name] = now
-
-        return current_gradient
-
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             if (raw_data := await self.async_get_raw_data()) is None:
                 return None
-
-            gradient_dict = {}
-            for name in GRADIENT_KEYS:
-                gradient = self._get_calculate_gradient(name, raw_data.get(name, None))
-                gradient_dict[f"gradient_{name}"] = gradient
 
             result = self._sanitize_energy_values(raw_data)
             calculated_results = self._get_calculated_values(result)
@@ -516,11 +469,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
-
-            if result["frequency"] == 0 or not result.get("frequency", None):
-                _LOGGER.warning(f"frequency: {result.get('frequency', 'no data')}")
-
-            result.update(gradient_dict)
 
             return dict(result)
         except UpdateFailed:  # noqa: BLE001
