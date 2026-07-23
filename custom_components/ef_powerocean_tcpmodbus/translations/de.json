@@ -20,13 +20,15 @@
           "battery_count": "Anzahl installierter Batterie-Module",
           "solar_power_max": "Maximale Solar-Leistung [W]",
           "grid_power_max": "Maximale Netz-Leistung [W]",
-          "scan_interval": "Abfrageintervall [s]"
+          "scan_interval": "Abfrageintervall [s]",
+		  "calc_solar_power": "Berechnung der Solarleistung"
         },
         "data_description": {
           "battery_count": "Die Anzahl wird zur Berechnung der max. Lade- und Entladeleistung verwendet.",
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "grid_power_max": "Die max. Netz-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
-          "scan_interval": "Wie oft Werte abgefragt werden (2–30 Sekunden)"
+          "scan_interval": "Wie oft Werte abgefragt werden (2–30 Sekunden)",
+		  "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
         }
       }
     },
@@ -58,13 +60,15 @@
           "battery_count": "Anzahl installierter Batterie-Module",
           "solar_power_max": "Maximale Solar-Leistung [W]",
           "grid_power_max": "Maximale Netz-Leistung [W]",
-          "scan_interval": "Abfrageintervall [s]"
+          "scan_interval": "Abfrageintervall [s]",
+		  "calc_solar_power": "Berechnung der Solarleistung"
         },
         "data_description": {
           "battery_count": "Die Anzahl wird zur Berechnung der max. Lade- und Entladeleistung verwendet.",
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "grid_power_max": "Die max. Netz-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
-          "scan_interval": "Wie oft Werte abgefragt werden (2–30 Sekunden)"
+          "scan_interval": "Wie oft Werte abgefragt werden (2–30 Sekunden)",
+		  "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
         }
       }
     },
@@ -166,7 +170,7 @@
 		  },
 		  "current_l1":{
 			  "name": "Netz Phase L1 Strom"
-		  },
+      },
 		  "current_l2":{
 			  "name": "Netz Phase L2 Strom"
 		  },
@@ -223,6 +227,9 @@
 		  },
 		  "bat_net_energy":{
 			  "name": "Batterieverlustenergie Gesamt"
+		  },
+		  "feed_in_power_max":{
+			  "name": "Max. Einspeiseleistung"
 		  }
 	  },
     "binary_sensor": {

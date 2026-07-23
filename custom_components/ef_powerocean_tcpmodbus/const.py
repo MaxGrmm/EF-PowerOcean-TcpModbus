@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
 from dataclasses import dataclass
-from collections.abc import Callable
 
 DOMAIN = "ef_powerocean_tcpmodbus"
 DEFAULT_PORT = 502
@@ -23,8 +21,9 @@ CONF_MAX_GRID_POWER = "grid_power_max"
 CONF_MAX_BATTERY_CHARGED_POWER = "battery_charged_power_max"
 CONF_MAX_BATTERY_DISCHARGED_POWER = "battery_discharged_power_max"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_CALC_SOLAR_POWER = "calc_solar_power"
 
-PV_VOLTAGE_THRESHOLD = 190
+PV_VOLTAGE_THRESHOLD = 250
 MAX_BATTERY_CHARGED_POWER = 2500
 MAX_BATTERY_DISCHARGED_POWER = 3300
 
@@ -109,6 +108,7 @@ MOD_REGISTER_MAP = {
                 RegisterDef(key="pv1_current", block_index=83),
                 RegisterDef(key="pv2_current", block_index=85),
                 RegisterDef(key="pv3_current", block_index=87),
+                RegisterDef(key="feed_in_power_max", block_index=90, size=1),
             ],
         ),
         BlockDef(
@@ -334,6 +334,13 @@ SENSOR_MAP: list[SensorDef] = [
         key="pv3_current",
         unit="A",
         device_class="current",
+        state_class="measurement",
+        entity_category="diagnostic",
+    ),
+    SensorDef(
+        key="feed_in_power_max",
+        unit="W",
+        device_class="power",
         state_class="measurement",
         entity_category="diagnostic",
     ),

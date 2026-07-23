@@ -29,6 +29,7 @@ from .const import (
     CONF_MAX_GRID_POWER,
     CONF_MAX_SOLAR_POWER,
     CONF_SCAN_INTERVAL,
+    CONF_CALC_SOLAR_POWER,
     PV_VOLTAGE_THRESHOLD,
     DEFAULT_SLAVE,
     ENERGY_SENSOR_MAP,
@@ -85,6 +86,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             )
             * config_entry.data.get(CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT),
         }
+        self._ena_calc_solar_power = config_entry.data.get(CONF_CALC_SOLAR_POWER, False)
         super().__init__(
             hass,
             _LOGGER,
@@ -98,7 +100,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         )
         self._client_slave_id = DEFAULT_SLAVE
         self._lock = asyncio.Lock()
-
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime = None
         self._check_monotonic: bool = True
@@ -421,6 +422,17 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 else round(pv3_current * pv3_voltage, 1)
             )
         )
+
+        if self._ena_calc_solar_power:
+            pv1_power = calc_data.get("pv1_power", None)
+            pv2_power = calc_data.get("pv2_power", None)
+            pv3_power = calc_data.get("pv3_power", None)
+
+            calc_data["solar_power"] = (
+                None
+                if pv1_power is None or pv2_power is None or pv3_power is None
+                else pv1_power + pv2_power + pv3_power
+            )
 
         system_mode = data.get("system_modes", None)
         if system_mode is not None:
