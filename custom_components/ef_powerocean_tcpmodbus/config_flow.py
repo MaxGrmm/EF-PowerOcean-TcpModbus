@@ -1,4 +1,5 @@
 """Config flow for EF-PowerOcean-TcpModbus integration."""
+
 from __future__ import annotations
 
 import logging
@@ -7,56 +8,56 @@ from typing import Any
 import voluptuous as vol
 from pymodbus.client import AsyncModbusTcpClient
 
-from homeassistant import config_entries
+from homeassistant.core import callback
+from homeassistant.config_entries import ConfigFlow, ConfigEntry, OptionsFlow
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
-    CONF_BATTERY_CAPACITY,
-    CONF_PV_STRINGS,
-    CONF_SCAN_INTERVAL,
-    DEFAULT_BATTERY_CAPACITY,
-    DEFAULT_PORT,
-    DEFAULT_PV_STRINGS,
-    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    REG_STATUS,
-    DEFAULT_SLAVE
+    CONF_HOST,
+    CONF_PORT,
+    CONF_BATTERY_COUNT,
+    CONF_MAX_GRID_POWER,
+    CONF_MAX_SOLAR_POWER,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_BATTERY_COUNT,
+    DEFAULT_MAX_GRID_POWER,
+    DEFAULT_MAX_SOLAR_POWER,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("host"): str,
-        vol.Optional("port", default=DEFAULT_PORT): int,
-        vol.Optional(CONF_BATTERY_CAPACITY, default=DEFAULT_BATTERY_CAPACITY): vol.Coerce(float),
-        vol.Optional(CONF_PV_STRINGS, default=DEFAULT_PV_STRINGS): vol.All(int, vol.Range(min=1, max=3)),
-        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(int, vol.Range(min=2, max=60)),
-    }
-)
 
-
-async def async_test_connection(host: str, port: int) -> bool:
+async def async_validate_connection(host: str, port: int) -> bool:
     """Try to connect and read status register."""
     try:
         client = AsyncModbusTcpClient(host, port=port, timeout=5)
-        client.unit_id = DEFAULT_SLAVE
         await client.connect()
         if not client.connected:
             return False
-        
-        result = await client.read_holding_registers(REG_STATUS, count=1)
-        client.close()
-        return not result.isError()
+        else:
+            client.close()
+            return True
     except Exception as e:
         _LOGGER.warning("EF-PowerOcean connection test failed: %s", e)
         return False
 
 
-class EcoflowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the config flow for EF-PowerOcean-TcpModbus."""
 
     VERSION = 1
+
+    def __init__(self) -> None:
+        """Initialize the config flow."""
+        self._user_input: dict = {}
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return EcoflowOptionsFlow(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -64,37 +65,67 @@ class EcoflowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            host = user_input["host"]
-            port = user_input.get("port", DEFAULT_PORT)
-
-            ok = await async_test_connection(host, port)
-
-            if ok:
-                await self.async_set_unique_id(f"{host}:{port}")
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(
-                    title=f"EcoFlow PowerOcean ({host})",
-                    data=user_input,
+            if await async_validate_connection(
+                user_input[CONF_HOST], user_input[CONF_PORT]
+            ):
+                self._user_input = user_input
+                await self.async_set_unique_id(
+                    f"{self._user_input[CONF_HOST]}:{self._user_input[CONF_PORT]}"
                 )
+                self._abort_if_unique_id_configured()
+                return await self.async_step_parameters()
             else:
                 errors["base"] = "cannot_connect"
 
         return self.async_show_form(
             step_id="user",
-            data_schema=STEP_USER_DATA_SCHEMA,
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_HOST): str,
+                    vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
+                }
+            ),
             errors=errors,
         )
 
-    @staticmethod
-    def async_get_options_flow(config_entry):
-        return EcoflowOptionsFlow(config_entry)
+    async def async_step_parameters(self, user_input=None) -> FlowResult:
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            self._user_input.update(user_input)
+            return self.async_create_entry(
+                title=f"EcoFlow PowerOcean ({self._user_input[CONF_HOST]})",
+                data=self._user_input,
+            )
+
+        return self.async_show_form(
+            step_id="parameters",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_BATTERY_COUNT, default=DEFAULT_BATTERY_COUNT
+                    ): vol.All(int, vol.Range(min=0, max=6)),
+                    vol.Optional(
+                        CONF_MAX_SOLAR_POWER, default=DEFAULT_MAX_SOLAR_POWER
+                    ): vol.All(int, vol.Range(min=1000, max=60000)),
+                    vol.Optional(
+                        CONF_MAX_GRID_POWER, default=DEFAULT_MAX_GRID_POWER
+                    ): vol.All(int, vol.Range(min=1000, max=60000)),
+                    vol.Optional(
+                        CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
+                    ): vol.All(int, vol.Range(min=2, max=30)),
+                }
+            ),
+            errors=errors,
+        )
 
 
-class EcoflowOptionsFlow(config_entries.OptionsFlow):
+class EcoflowOptionsFlow(OptionsFlow):
     """Handle options (reconfiguration after setup)."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self, config_entry: ConfigEntry) -> None:
         self._config_entry = config_entry
+        self._user_input: dict = {}
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -102,52 +133,79 @@ class EcoflowOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            host = user_input["host"]
-            port = user_input["port"]
+            host = user_input[CONF_HOST]
+            port = user_input[CONF_PORT]
 
             # Only re-test connection if host or port changed
-            current_host = self._config_entry.data.get("host")
-            current_port = self._config_entry.data.get("port", DEFAULT_PORT)
+            current_host = self._config_entry.data.get(CONF_HOST)
+            current_port = self._config_entry.data.get(CONF_PORT, DEFAULT_PORT)
             if host != current_host or port != current_port:
-                ok = await async_test_connection(host, port)
-                if not ok:
+                if not await async_validate_connection(host, port):
                     errors["base"] = "cannot_connect"
 
             if not errors:
-                # Update entry data for host/port, store rest in options
-                self.hass.config_entries.async_update_entry(
-                    self._config_entry,
-                    data={**self._config_entry.data, "host": host, "port": port},
-                )
-                return self.async_create_entry(title="", data={
-                    CONF_BATTERY_CAPACITY: user_input[CONF_BATTERY_CAPACITY],
-                    CONF_SCAN_INTERVAL: user_input[CONF_SCAN_INTERVAL],
-                })
+                self._user_input = user_input
+                return await self.async_step_parameters()
 
-        # Pre-fill current values – check options first, fall back to data
-        def _current(key, default):
-            return self._config_entry.options.get(
-                key, self._config_entry.data.get(key, default)
-            )
-
-        schema = vol.Schema(
-            {
-                vol.Required("host", default=self._config_entry.data.get("host", "")): str,
-                vol.Optional("port", default=self._config_entry.data.get("port", DEFAULT_PORT)): int,
-                vol.Optional(
-                    CONF_BATTERY_CAPACITY,
-                    default=_current(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY),
-                ): vol.Coerce(float),
-                vol.Optional(
-                    CONF_PV_STRINGS,
-                    default=_current(CONF_PV_STRINGS, DEFAULT_PV_STRINGS),
-                ): vol.All(int, vol.Range(min=1, max=3)),
-                vol.Optional(
-                    CONF_SCAN_INTERVAL,
-                    default=_current(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-                ): vol.All(int, vol.Range(min=2, max=60)),
-            }
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_HOST, default=self._config_entry.data.get(CONF_HOST, "")
+                    ): str,
+                    vol.Optional(
+                        CONF_PORT,
+                        default=self._config_entry.data.get(CONF_PORT, DEFAULT_PORT),
+                    ): int,
+                }
+            ),
+            errors=errors,
         )
 
-        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
+    async def async_step_parameters(self, user_input=None) -> FlowResult:
+        errors: dict[str, str] = {}
 
+        if user_input is not None:
+            self._user_input.update(user_input)
+            self.hass.config_entries.async_update_entry(
+                self._config_entry,
+                data={
+                    **self._config_entry.data,
+                    **self._user_input,
+                },
+            )
+            return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(
+            step_id="parameters",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_BATTERY_COUNT,
+                        default=self._config_entry.data.get(
+                            CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT
+                        ),
+                    ): vol.All(int, vol.Range(min=0, max=6)),
+                    vol.Optional(
+                        CONF_MAX_SOLAR_POWER,
+                        default=self._config_entry.data.get(
+                            CONF_MAX_SOLAR_POWER, DEFAULT_MAX_SOLAR_POWER
+                        ),
+                    ): vol.All(int, vol.Range(min=1000, max=60000)),
+                    vol.Optional(
+                        CONF_MAX_GRID_POWER,
+                        default=self._config_entry.data.get(
+                            CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER
+                        ),
+                    ): vol.All(int, vol.Range(min=1000, max=60000)),
+                    vol.Optional(
+                        CONF_SCAN_INTERVAL,
+                        default=self._config_entry.data.get(
+                            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                        ),
+                    ): vol.All(int, vol.Range(min=2, max=30)),
+                }
+            ),
+            errors=errors,
+        )

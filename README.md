@@ -15,8 +15,8 @@
 - **Configurable poll interval** (5–60 seconds, default 10 s)
 - Real-time power flow: house consumption, grid import/export, solar generation, battery
 - Full battery monitoring: SOC, voltage, current, power, temperature, remaining energy
-- Per-string PV power and current (configurable 1–3 strings, phantom current filtering)
-- Per-phase AC measurements: voltage, current, frequency, apparent power
+- Per-string PV power, current and voltage (configurable 1–3 strings, phantom current filtering)
+- Per-phase AC measurements: voltage, current, frequency
 - Energy counters: daily and lifetime for grid, solar, battery charge/discharge, house consumption
 - Configurable battery capacity (workaround for unreliable register value)
 - Reconfigurable after setup via **Settings → Configure** (no re-install needed)
@@ -103,9 +103,9 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 
 | Sensor | Unit | Description |
 |---|---|---|
-| PV String 1/2/3 Power | W | Per-string power (current × PV voltage) |
+| PV String 1/2/3 Power | W | Per-string power (current × own string voltage) |
 | PV String 1/2/3 Current | A | MPPT string current |
-| PV Voltage Global | V | Common PV bus voltage |
+| PV String 1/2/3 Voltage | V | Per-string DC voltage |
 
 ### AC Grid
 
@@ -114,7 +114,6 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 | Grid Voltage L1/L2/L3 | V | Per-phase voltage |
 | Grid Current L1/L2/L3 | A | Per-phase current |
 | Grid Frequency | Hz | Grid frequency |
-| Grid Apparent Power | VA | Total apparent power |
 | Inverter Temperature | °C | Inverter temperature |
 
 ### Limits (Diagnostic)
