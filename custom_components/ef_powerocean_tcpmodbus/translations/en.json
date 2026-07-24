@@ -201,10 +201,10 @@
 		  "grid_export_today":{
 			  "name": "Grid Export Today"
 		  },
-		  "bat_charge_today":{
+		  "bat_charged_today":{
 			  "name": "Battery Charged Today"
 		  },
-		  "bat_discharge_today":{
+		  "bat_discharged_today":{
 			  "name": "Battery Discharged Today"
 		  },
 		  "house_energy_total":{
