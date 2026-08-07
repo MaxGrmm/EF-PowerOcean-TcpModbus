@@ -62,7 +62,10 @@ def calculate_pv_power(
     if current is None or voltage is None:
         return None
 
-    return 0 if voltage < startup_voltage else round(current * voltage, 1)
+    if voltage < startup_voltage:
+        return 0.0
+
+    return round(current * voltage, 1)
 
 
 class EcoflowCoordinator(DataUpdateCoordinator):
