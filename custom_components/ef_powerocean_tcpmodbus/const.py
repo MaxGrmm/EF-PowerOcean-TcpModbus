@@ -34,6 +34,7 @@ class InverterModel(StrEnum):
     POWEROCEAN_SINGLE_PHASE = "powerocean_single_phase"
     POWEROCEAN_THREE_PHASE = "powerocean_three_phase"
     POWEROCEAN_PLUS = "powerocean_plus"
+    POWEROCEAN_DC_FIT = "powerocean_dc_fit"
     OCEAN_2 = "ocean_2"
 
     @property
@@ -42,10 +43,16 @@ class InverterModel(StrEnum):
             # The startup voltage is used to filter out phantom string power when the PV input is not actually producing power.
             # The values are based on the datasheets of each model. However, the single phase does not have a dedicated startup voltage specification
             # so this value is deducted from the MPPT operating range.
+            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/content/2024-03-27-1485da5d-eae4-4a38-830a-4e340517d968.pdf
             self.POWEROCEAN_SINGLE_PHASE: 90,
+            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1772090325968/EcoFlow%20PowerOcean%20(Three-phase)_Datasheet_EN.pdf
             self.POWEROCEAN_THREE_PHASE: 160,
+            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1754035729875/PowerOcean%20Plus%20(three-phase)_Brochure_20241223_EN.pdf
             self.POWEROCEAN_PLUS: 160,
-            self.OCEAN_2: 120,
+            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1735192805714/EcoFlow%20PowerOcean%20DC%20Fit_Datasheet_EN_20241225.pdf
+            self.POWEROCEAN_DC_FIT: 90,
+            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1779447439219/OCEAN%202%20Three-Phase_Datasheet_EN_260522.pdf
+            self.OCEAN_2: 120
         }[self]
 
     @property
@@ -54,6 +61,7 @@ class InverterModel(StrEnum):
             self.POWEROCEAN_SINGLE_PHASE: "PowerOcean Single Phase",
             self.POWEROCEAN_THREE_PHASE: "PowerOcean Three Phase",
             self.POWEROCEAN_PLUS: "PowerOcean Plus",
+            self.POWEROCEAN_DC_FIT: "PowerOcean DC Fit",
             self.OCEAN_2: "Ocean 2",
         }[self]
 
