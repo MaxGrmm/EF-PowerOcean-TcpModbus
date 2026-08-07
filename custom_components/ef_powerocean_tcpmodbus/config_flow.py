@@ -15,6 +15,7 @@ from homeassistant.helpers.selector import (
     BooleanSelector,
     SelectSelector,
     SelectSelectorConfig,
+    SelectSelectorMode,
 )
 
 from .const import (
@@ -117,6 +118,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
                         SelectSelectorConfig(
                             options=[model.value for model in InverterModel],
                             translation_key=CONF_INVERTER_MODEL,
+                            mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
                     vol.Required(
@@ -211,6 +213,7 @@ class EcoflowOptionsFlow(OptionsFlow):
                         SelectSelectorConfig(
                             options=[model.value for model in InverterModel],
                             translation_key=CONF_INVERTER_MODEL,
+                            mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
                     vol.Required(
