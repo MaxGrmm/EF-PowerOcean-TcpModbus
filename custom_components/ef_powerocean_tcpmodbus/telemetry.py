@@ -35,7 +35,7 @@ class TelemetryData:
     @classmethod
     def from_mapping(
         cls, data: Mapping[str, float | None]
-    ) -> "TelemetryData":
+    ) -> TelemetryData:
         """Create calculation input from the coordinator's raw telemetry."""
         return cls(
             battery_soc=data.get("battery_soc"),
@@ -184,8 +184,8 @@ def calculate_derived_values(
     )
 
     for pv_number in range(1, 4):
-        current = data.get(f"pv{pv_number}_current")
-        voltage = data.get(f"pv{pv_number}_voltage")
+        current = getattr(data, f"pv{pv_number}_current")
+        voltage = getattr(data, f"pv{pv_number}_voltage")
         calculated[f"pv{pv_number}_power"] = _calculate_pv_power(
             current,
             voltage,

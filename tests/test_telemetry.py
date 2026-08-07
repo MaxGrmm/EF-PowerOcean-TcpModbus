@@ -100,7 +100,7 @@ class CalculateValuesTest(unittest.TestCase):
             TelemetryData.from_mapping(self.data),
             calculate_solar_power=calculate_solar_power,
             daily_reset_complete=daily_reset_complete,
-            pv_voltage_threshold=250,
+            startup_voltage=250,
             max_battery_charge_power=2500,
             max_battery_discharge_power=3300,
         )
