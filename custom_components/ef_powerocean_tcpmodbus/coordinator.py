@@ -6,7 +6,7 @@ import asyncio
 import logging
 import struct
 
-from typing import Any
+from typing import Any, Final
 from datetime import timedelta
 
 from datetime import datetime
@@ -48,8 +48,8 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-SLEEP_TIME_AFTER_RECONNECT = 1
-SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED = 15
+SLEEP_TIME_AFTER_RECONNECT: Final = 1
+SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED: Final = 15
 
 
 def getBit(value: int, bitpos: int) -> bool:
