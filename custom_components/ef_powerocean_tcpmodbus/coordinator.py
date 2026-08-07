@@ -262,11 +262,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._count_reset_energy_finished += 1
             else:
                 dt_hours = (now - self._last_checked_time).total_seconds() / 3600
+                energy_delta = current_energy - last_energy
+                calculated_power = energy_delta / dt_hours
                 # Nur innerhalb einer 1h Stunde prüfen, danach ist das Gap zu groß
                 if 0 < dt_hours <= 1:
-                    # Anstieg berechnen
-                    energy_delta = current_energy - last_energy
-                    calculated_power = energy_delta / dt_hours
                     limit = self.limits.get(energy_sensor.max_power, DEFAULT_MAX_POWER)
                     if calculated_power > limit:
                         # positiver Anstieg und Leistung über Max-Leistung

@@ -5,7 +5,11 @@ from __future__ import annotations
 import unittest
 
 import pytest
-from telemetry import TelemetryData, calculate_derived_values, decode_register
+from ef_powerocean_tcpmodbus.telemetry import (
+    TelemetryData,
+    calculate_derived_values,
+    decode_register,
+)
 
 
 @pytest.mark.parametrize(
