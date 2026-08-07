@@ -107,6 +107,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._count_reset_energy_sensor += 1
         self._count_reset_energy_finished: int = self._count_reset_energy_sensor
 
+    @property
+    def connected(self) -> bool:
+        return self._client.connected
 
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
@@ -225,7 +228,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         now = dt.now()
         if self._last_checked_time is None or self._last_checked_data is None:
-            _LOGGER.debug("Last checked time or last checked data is None. Return current data.")
+            _LOGGER.debug(
+                "Last checked time or last checked data is None. Return current data."
+            )
             return result
 
         elapsed_seconds = (now - self._last_checked_time).total_seconds()
@@ -313,7 +318,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 daily_reset_complete=(
                     self._count_reset_energy_finished == self._count_reset_energy_sensor
                 ),
-                startup_voltage = self.inverter_model.startup_voltage,
+                startup_voltage=self.inverter_model.startup_voltage,
                 max_battery_charge_power=MAX_BATTERY_CHARGED_POWER,
                 max_battery_discharge_power=MAX_BATTERY_DISCHARGED_POWER,
             )

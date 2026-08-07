@@ -29,6 +29,7 @@ from .const import (
     SENSOR_MAP,
     ENERGY_SENSOR_MAP,
 )
+from .entity import EcoFlowBaseEntity
 from .coordinator import EcoflowCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,29 +63,29 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
+class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
     def __init__(
         self,
         coordinator: EcoflowCoordinator,
         entry: ConfigEntry,
         definition: SensorDef | EnergySensorDef,
     ) -> None:
-        super().__init__(coordinator)
-        self._definition = definition
-        self._attr_unique_id = f"{entry.entry_id}_{self._definition.key}"
+        super().__init__(coordinator, entry, definition)
+        # self._definition = definition
+        # self._attr_unique_id = f"{entry.entry_id}_{self._definition.key}"
         self._attr_native_unit_of_measurement = self._definition.unit
         self._attr_device_class = self._definition.device_class
         self._attr_state_class = self._definition.state_class
-        self._attr_translation_key = self._definition.key
-        self._attr_has_entity_name = True
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name="EcoFlow PowerOcean",
-            manufacturer="EcoFlow",
-            model=coordinator.inverter_model.display_name,
-            serial_number=coordinator.serial_number,
-            entry_type=DeviceEntryType.SERVICE,
-        )
+        # self._attr_translation_key = self._definition.key
+        # self._attr_has_entity_name = True
+        # self._attr_device_info = DeviceInfo(
+        #     identifiers={(DOMAIN, entry.entry_id)},
+        #     name="EcoFlow PowerOcean",
+        #     manufacturer="EcoFlow",
+        #     model=coordinator.inverter_model.display_name,
+        #     serial_number=coordinator.serial_number,
+        #     entry_type=DeviceEntryType.SERVICE,
+        # )
         self._restored_value: float | int | str | None = None
         self._last_written_value: float | int | str | None = None
 
