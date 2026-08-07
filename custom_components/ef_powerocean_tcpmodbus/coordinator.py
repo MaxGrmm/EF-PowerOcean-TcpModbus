@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import struct
 
 from typing import Any, Final
 from datetime import timedelta
@@ -45,27 +44,12 @@ from .const import (
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
 )
+from .telemetry import calculate_derived_values, decode_register
 
 _LOGGER = logging.getLogger(__name__)
 
 SLEEP_TIME_AFTER_RECONNECT: Final = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED: Final = 15
-
-
-def getBit(value: int, bitpos: int) -> bool:
-    return (value & (2**bitpos)) == 2**bitpos
-
-
-def calculate_pv_power(
-    current: float | None, voltage: float | None, startup_voltage: int
-) -> float | None:
-    if current is None or voltage is None:
-        return None
-
-    if voltage < startup_voltage:
-        return 0.0
-
-    return round(current * voltage, 1)
 
 
 class EcoflowCoordinator(DataUpdateCoordinator):
@@ -126,27 +110,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._count_reset_energy_sensor += 1
         self._count_reset_energy_finished: int = self._count_reset_energy_sensor
 
-    @staticmethod
-    def _decode_register(
-        regs: list[int], register_index: int, register_size: int
-    ) -> float:
-        """Decode a word-swapped 32-bit IEEE 754 float from two 16-bit registers."""
-        if not regs:
-            return None
-        elif register_size == 1:
-            return round(float(regs[register_index]), 2)
-        elif len(regs) < register_index + 2:
-            return None
-
-        try:
-            raw = struct.pack("<HH", regs[register_index], regs[register_index + 1])
-            value = struct.unpack("<f", raw)[0]
-        except struct.error, TypeError:  # ab Python 3.14 ist ohne Klammern der Standard
-            return None
-
-        if abs(value) > 1e9 or value != value:  # guard against NaN / inf
-            return None
-        return round(value, 2)
 
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
@@ -237,14 +200,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     register_block.start_register, register_block.num_read_regs
                 )
                 for register in register_block.content:
-                    decode_value = self._decode_register(
+                    decode_value = decode_register(
                         raw, register.block_index, register.size
                     )
                     data[register.key] = decode_value
 
             if data["battery_count"] != self.limits[CONF_BATTERY_COUNT]:
                 _LOGGER.debug(
-                    f"Readed battery count {data['battery_count']} is unequal -> Skip data! Wait {SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED}s."
+                    f"Read battery count {data['battery_count']} is unequal -> Skip data! Wait {SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED}s."
                 )
                 await asyncio.sleep(SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED)
                 return None
@@ -264,13 +227,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         now = dt.now()
         if self._last_checked_time is None or self._last_checked_data is None:
-            _LOGGER.debug(
-                f"Last checked time or last checked data is None. Return current data."
-            )
+            _LOGGER.debug("Last checked time or last checked data is None. Return current data.")
             return result
         elif (now - self._last_checked_time).total_seconds() < 1:
             _LOGGER.debug(
-                f"dt is less then one secend. Return last data. Delta-t: {(now - self._last_checked_time).total_seconds()}"
+                f"dt is less than one second. Return last data. Delta-t: {(now - self._last_checked_time).total_seconds()}"
             )
             return dict(self._last_checked_data)
 
@@ -321,11 +282,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                             )
                             return dict(self._last_checked_data)
                         # Rückgabe des aktuellen Wertes nur wenn der neue Wert > letzter Wert ist
-                        result[energy_sensor.key] = (
-                            current_energy
-                            if current_energy >= last_energy
-                            else last_energy
-                        )
+                        result[energy_sensor.key] = max(current_energy, last_energy)
                 else:
                     _LOGGER.debug(
                         f"Time window is too large of entity {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 4)} dt: {dt_hours} power: {int(calculated_power)} limit: {energy_sensor.max_power} last check: {self._last_checked_time.time()})"
@@ -334,116 +291,16 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         return result
 
     def _get_calculated_values(self, data: dict[str, Any]) -> dict[str, Any]:
-        calc_data: dict[str, Any] = {}
-
-        battery_soc = data.get("battery_soc", None)
-        battery_count = data.get("battery_count", None)
-        calc_data["bat_remaining"] = (
-            round(battery_count * 5 * battery_soc / 100, 2)
-            if battery_soc is not None and battery_count is not None
-            else None
+        return calculate_derived_values(
+            data,
+            calculate_solar_power=self._ena_calc_solar_power,
+            daily_reset_complete=(
+                self._count_reset_energy_finished == self._count_reset_energy_sensor
+            ),
+            startup_voltage = self.inverter_model.startup_voltage,
+            max_battery_charge_power=MAX_BATTERY_CHARGED_POWER,
+            max_battery_discharge_power=MAX_BATTERY_DISCHARGED_POWER,
         )
-        calc_data["limit_discharge"] = (
-            round(battery_count * MAX_BATTERY_DISCHARGED_POWER)
-            if battery_count is not None
-            else None
-        )
-        calc_data["limit_charge"] = (
-            round(battery_count * MAX_BATTERY_CHARGED_POWER)
-            if battery_count is not None
-            else None
-        )
-        bat_charged_total = data.get("bat_charged_total", None)
-        bat_discharged_total = data.get("bat_discharged_total", None)
-        calc_data["bat_net_energy"] = (
-            round(bat_charged_total - bat_discharged_total, 2)
-            if bat_charged_total is not None and bat_discharged_total is not None
-            else None
-        )
-
-        # house energy calculation
-        if self._count_reset_energy_finished == self._count_reset_energy_sensor:
-            # Berechnung erst wenn alle Werte zurückgesetzt wurden
-            solar_today = data.get("solar_today", None)
-            grid_import_today = data.get("grid_import_today", None)
-            grid_export_today = data.get("grid_export_today", None)
-            bat_charged_today = data.get("bat_charged_today", None)
-            bat_discharged_today = data.get("bat_discharged_today", None)
-            calc_data["house_energy_today"] = (
-                round(
-                    solar_today
-                    + grid_import_today
-                    + bat_discharged_today
-                    - grid_export_today
-                    - bat_charged_today,
-                    2,
-                )
-                if solar_today is not None
-                and grid_import_today is not None
-                and bat_discharged_today is not None
-                and grid_export_today is not None
-                and bat_charged_today is not None
-                else None
-            )
-
-        solar_total = data.get("solar_total", None)
-        grid_import_total = data.get("grid_import_total", None)
-        grid_export_total = data.get("grid_export_total", None)
-        calc_data["house_energy_total"] = (
-            round(
-                solar_total
-                + grid_import_total
-                + bat_discharged_total
-                - grid_export_total
-                - bat_charged_total,
-                0,
-            )
-            if solar_total is not None
-            and grid_import_total is not None
-            and bat_discharged_total is not None
-            and grid_export_total is not None
-            and bat_charged_total is not None
-            else None
-        )
-
-        pv1_current = data.get("pv1_current", None)
-        pv1_voltage = data.get("pv1_voltage", None)
-        pv2_current = data.get("pv2_current", None)
-        pv2_voltage = data.get("pv2_voltage", None)
-        pv3_current = data.get("pv3_current", None)
-        pv3_voltage = data.get("pv3_voltage", None)
-        startup_voltage = self.inverter_model.startup_voltage
-        calc_data["pv1_power"] = calculate_pv_power(
-            pv1_current, pv1_voltage, startup_voltage
-        )
-        calc_data["pv2_power"] = calculate_pv_power(
-            pv2_current, pv2_voltage, startup_voltage
-        )
-        calc_data["pv3_power"] = calculate_pv_power(
-            pv3_current, pv3_voltage, startup_voltage
-        )
-
-        if self._ena_calc_solar_power:
-            pv1_power = calc_data.get("pv1_power", None)
-            pv2_power = calc_data.get("pv2_power", None)
-            pv3_power = calc_data.get("pv3_power", None)
-
-            calc_data["solar_power"] = (
-                None
-                if pv1_power is None or pv2_power is None or pv3_power is None
-                else pv1_power + pv2_power + pv3_power
-            )
-
-        system_mode = data.get("system_modes", None)
-        if system_mode is not None:
-            # Bit 3: Batteriesparmodus
-            # Bit 4: Eigenstromversorgung
-            # Bit 5: Intelligenter Modus
-            calc_data["battery_saver_mode_ena"] = getBit(int(system_mode), 3)
-            calc_data["self_use_mode_ena"] = getBit(int(system_mode), 4)
-            calc_data["intelligent_mode_ena"] = getBit(int(system_mode), 5)
-
-        return calc_data
 
     def _enforced_monotonic(self, data: dict[str, Any]) -> dict[str, Any]:
         for energy_senser in ENERGY_SENSOR_MAP:
