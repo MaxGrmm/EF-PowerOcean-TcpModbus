@@ -17,25 +17,25 @@
         "title": "EcoFlow PowerOcean",
         "description": "Settings",
         "data": {
-					"inverter_model": "Inverter model",
+          "inverter_model": "Inverter model",
           "battery_count": "Battery module count",
           "solar_power_max": "Maximum solar power [W]",
           "grid_power_max": "Maximum grid power [W]",
           "scan_interval": "Poll Interval [s]",
-		  "calc_solar_power": "Calculation of solar power"
+          "calc_solar_power": "Calculation of solar power"
         },
         "data_description": {
-					"inverter_model": "Select the inverter model to use the correct PV startup voltage when filtering phantom string power.",
+          "inverter_model": "Select the inverter model.",
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",
           "scan_interval": "How often values are polled (2-30 seconds)",
-		  "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
+          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
         }
       }
     },
     "error": {
-      "cannot_connect": "Connection failed – please check IP address and port"
+      "cannot_connect": "Connection failed - please check IP address and port"
     },
     "abort": {
       "already_configured": "This device is already configured"
@@ -44,7 +44,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "EcoFlow PowerOcean – Settings",
+        "title": "EcoFlow PowerOcean - Settings",
         "description": "Adjust the connection details for your inverter.",
         "data": {
           "host": "IP Address",
@@ -56,196 +56,196 @@
         }
       },
       "parameters": {
-        "title": "EcoFlow PowerOcean – Settings",
+        "title": "EcoFlow PowerOcean - Settings",
         "description": "Settings",
         "data": {
-					"inverter_model": "Inverter model",
+          "inverter_model": "Inverter model",
           "battery_count": "Battery module count",
           "solar_power_max": "Maximum solar power [W]",
           "grid_power_max": "Maximum grid power [W]",
           "scan_interval": "Poll Interval [s]",
-		  "calc_solar_power": "Calculation of solar power"
+          "calc_solar_power": "Calculation of solar power"
         },
         "data_description": {
-					"inverter_model": "Select the inverter model to use the correct PV startup voltage when filtering phantom string power.",
+          "inverter_model": "Select the inverter model.",
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",
-          "scan_interval": "How often values are polled (2–30 seconds)",
-		  "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
+          "scan_interval": "How often values are polled (2-30 seconds)",
+          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
         }
       }
     },
     "error": {
-      "cannot_connect": "Connection failed – please check IP address and port"
+      "cannot_connect": "Connection failed - please check IP address and port"
     }
   },
-	"selector": {
-		"inverter_model": {
-			"options": {
-				"powerocean_single_phase": "PowerOcean Single Phase",
-				"powerocean_three_phase": "PowerOcean Three Phase",
-				"powerocean_plus": "PowerOcean Plus",
-				"ocean_2": "Ocean 2"
-			}
-		}
-	},
-  "entity":{
-	  "sensor": {
-		  "system_modes":{
-			  "name": "System Modes"
-		  },
-		"battery_count":{
-			  "name": "Battery Module Count"
-		  },
-		  "battery_soc":{
-			  "name": "Battery SOC"
-		  },
-      "soc_battery_1":{
-			  "name": "Battery 1 SOC"
-		  },
-      "soc_battery_2":{
-			  "name": "Battery 2 SOC"
-		  },
-      "soc_battery_3":{
-			  "name": "Battery 3 SOC"
-		  },
-		  "battery_power":{
-			  "name": "Battery Power"
-		  },
-		  "bat_remaining":{
-			  "name": "Battery Remaining Energy"
-		  },
-		  "battery_voltage":{
-			  "name": "Battery Voltage"
-		  },
-		  "battery_current":{
-			  "name": "Battery Current"
-		  },
-		  "battery_temperature":{
-			  "name": "Battery Temperature"
-		  },
-		  "battery_capacity":{
-			  "name": "Battery Nominal Capacity"
-		  },
-		  "min_soc_limit":{
-			  "name": "Min SOC Limit"
-		  },
-		  "bat_temp_warn_max":{
-			  "name": "Battery Temp Warning Max"
-		  },
-		  "device_led_brightness":{
-			  "name": "Device LED brightness"
-		  },
-		  "solar_power":{
-			  "name": "Solar Power"
-		  },
-		  "pv1_power":{
-			  "name": "PV String 1 Power"
-		  },
-		  "pv2_power":{
-			  "name": "PV String 2 Power"
-		  },
-		  "pv3_power":{
-			  "name": "PV String 3 Power"
-		  },
-		  "pv1_current":{
-			  "name": "PV String 1 Current"
-		  },
-		  "pv2_current":{
-			  "name": "PV String 2 Current"
-		  },
-		  "pv3_current":{
-			  "name": "PV String 3 Current"
-		  },
-		  "pv1_voltage":{
-			  "name": "PV String 1 Voltage"
-		  },
-		  "pv2_voltage":{
-			  "name": "PV String 2 Voltage"
-		  },
-		  "pv3_voltage":{
-			  "name": "PV String 3 Voltage"
-		  },
-		  "house_power":{
-			  "name": "House Power"
-		  },
-		  "grid_power":{
-			  "name": "Grid Power"
-		  },
-		  "voltage_l1":{
-			  "name": "Grid Voltage L1"
-		  },
-		  "voltage_l2":{
-			  "name": "Grid Voltage L2"
-		  },
-		  "voltage_l3":{
-			  "name": "Grid Voltage L3"
-		  },
-		  "current_l1":{
-			  "name": "Grid Current L1"
-		  },
-		  "current_l2":{
-			  "name": "Grid Current L2"
-		  },
-		  "current_l3":{
-			  "name": "Grid Current L3"
-		  },
-		  "frequency":{
-			  "name": "Grid Frequency"
-		  },
-		  "inverter_temperature":{
-			  "name": "Inverter Temperature"
-		  },
-		  "limit_inv_max":{
-			  "name": "Inverter Nominal Power Limit"
-		  },
-		  "limit_inv_power":{
-			  "name": "Inverter Current Max Power"
-		  },
-		  "house_energy_today":{
-			  "name": "House Consumption Today"
-		  },
-		  "solar_today":{
-			  "name": "Solar Yield Today"
-		  },
-		  "grid_import_today":{
-			  "name": "Grid Import Today"
-		  },
-		  "grid_export_today":{
-			  "name": "Grid Export Today"
-		  },
-		  "bat_charged_today":{
-			  "name": "Battery Charged Today"
-		  },
-		  "bat_discharged_today":{
-			  "name": "Battery Discharged Today"
-		  },
-		  "house_energy_total":{
-			  "name": "House Consumption Total"
-		  },
-		  "solar_total":{
-			  "name": "Solar Yield Total"
-		  },
-		  "grid_import_total":{
-			  "name": "Grid Import Total"
-		  },
-		  "grid_export_total":{
-			  "name": "Grid Export Total"
-		  },
-		  "bat_charged_total":{
-			  "name": "Battery Charged Total"
-		  },
-		  "bat_discharged_total":{
-			  "name": "Battery Discharged Total"
-		  },
-		  "bat_net_energy":{
-			  "name": "Battery Energy Loss"
-		  },
-		  "feed_in_power_max":{
-			  "name": "Maximum feed-in Power"
-		  }
-	  },
+  "selector": {
+    "inverter_model": {
+      "options": {
+        "powerocean_single_phase": "PowerOcean Single Phase",
+        "powerocean_three_phase": "PowerOcean Three Phase",
+        "powerocean_plus": "PowerOcean Plus",
+        "ocean_2": "Ocean 2"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "system_modes": {
+        "name": "System Modes"
+      },
+      "battery_count": {
+        "name": "Battery Module Count"
+      },
+      "battery_soc": {
+        "name": "Battery SOC"
+      },
+      "soc_battery_1": {
+        "name": "Battery 1 SOC"
+      },
+      "soc_battery_2": {
+        "name": "Battery 2 SOC"
+      },
+      "soc_battery_3": {
+        "name": "Battery 3 SOC"
+      },
+      "battery_power": {
+        "name": "Battery Power"
+      },
+      "bat_remaining": {
+        "name": "Battery Remaining Energy"
+      },
+      "battery_voltage": {
+        "name": "Battery Voltage"
+      },
+      "battery_current": {
+        "name": "Battery Current"
+      },
+      "battery_temperature": {
+        "name": "Battery Temperature"
+      },
+      "battery_capacity": {
+        "name": "Battery Nominal Capacity"
+      },
+      "min_soc_limit": {
+        "name": "Min SOC Limit"
+      },
+      "bat_temp_warn_max": {
+        "name": "Battery Temp Warning Max"
+      },
+      "device_led_brightness": {
+        "name": "Device LED brightness"
+      },
+      "solar_power": {
+        "name": "Solar Power"
+      },
+      "pv1_power": {
+        "name": "PV String 1 Power"
+      },
+      "pv2_power": {
+        "name": "PV String 2 Power"
+      },
+      "pv3_power": {
+        "name": "PV String 3 Power"
+      },
+      "pv1_current": {
+        "name": "PV String 1 Current"
+      },
+      "pv2_current": {
+        "name": "PV String 2 Current"
+      },
+      "pv3_current": {
+        "name": "PV String 3 Current"
+      },
+      "pv1_voltage": {
+        "name": "PV String 1 Voltage"
+      },
+      "pv2_voltage": {
+        "name": "PV String 2 Voltage"
+      },
+      "pv3_voltage": {
+        "name": "PV String 3 Voltage"
+      },
+      "house_power": {
+        "name": "House Power"
+      },
+      "grid_power": {
+        "name": "Grid Power"
+      },
+      "voltage_l1": {
+        "name": "Grid Voltage L1"
+      },
+      "voltage_l2": {
+        "name": "Grid Voltage L2"
+      },
+      "voltage_l3": {
+        "name": "Grid Voltage L3"
+      },
+      "current_l1": {
+        "name": "Grid Current L1"
+      },
+      "current_l2": {
+        "name": "Grid Current L2"
+      },
+      "current_l3": {
+        "name": "Grid Current L3"
+      },
+      "frequency": {
+        "name": "Grid Frequency"
+      },
+      "inverter_temperature": {
+        "name": "Inverter Temperature"
+      },
+      "limit_inv_max": {
+        "name": "Inverter Nominal Power Limit"
+      },
+      "limit_inv_power": {
+        "name": "Inverter Current Max Power"
+      },
+      "house_energy_today": {
+        "name": "House Consumption Today"
+      },
+      "solar_today": {
+        "name": "Solar Yield Today"
+      },
+      "grid_import_today": {
+        "name": "Grid Import Today"
+      },
+      "grid_export_today": {
+        "name": "Grid Export Today"
+      },
+      "bat_charged_today": {
+        "name": "Battery Charged Today"
+      },
+      "bat_discharged_today": {
+        "name": "Battery Discharged Today"
+      },
+      "house_energy_total": {
+        "name": "House Consumption Total"
+      },
+      "solar_total": {
+        "name": "Solar Yield Total"
+      },
+      "grid_import_total": {
+        "name": "Grid Import Total"
+      },
+      "grid_export_total": {
+        "name": "Grid Export Total"
+      },
+      "bat_charged_total": {
+        "name": "Battery Charged Total"
+      },
+      "bat_discharged_total": {
+        "name": "Battery Discharged Total"
+      },
+      "bat_net_energy": {
+        "name": "Battery Energy Loss"
+      },
+      "feed_in_power_max": {
+        "name": "Maximum feed-in Power"
+      }
+    },
     "binary_sensor": {
       "self_use_mode_ena": {
         "name": "Self-powered Mode"
