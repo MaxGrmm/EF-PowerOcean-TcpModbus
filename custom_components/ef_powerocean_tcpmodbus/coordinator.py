@@ -126,11 +126,12 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         if not self._client.connected:
             _LOGGER.error(f"Modbus TCP not connected to {self.host}:{self.port}")
-        else:
-            self.serial_number = await self.async_get_serial_number()
-            _LOGGER.info(
-                f"Modbus TCP is connected to {self.host}:{self.port} (SN: {self.serial_number})"
-            )
+            return
+
+        self.serial_number = await self.async_get_serial_number()
+        _LOGGER.info(
+            f"Modbus TCP is connected to {self.host}:{self.port} (SN: {self.serial_number})"
+        )
 
     async def async_get_serial_number(self) -> str:
         """Read serial number"""
@@ -229,15 +230,19 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         if self._last_checked_time is None or self._last_checked_data is None:
             _LOGGER.debug("Last checked time or last checked data is None. Return current data.")
             return result
-        elif (now - self._last_checked_time).total_seconds() < 1:
+
+        elapsed_seconds = (now - self._last_checked_time).total_seconds()
+        if elapsed_seconds < 1:
             _LOGGER.debug(
-                f"dt is less than one second. Return last data. Delta-t: {(now - self._last_checked_time).total_seconds()}"
+                f"dt is less than one second. Return last data. Delta-t: {elapsed_seconds}"
             )
             return dict(self._last_checked_data)
 
+        dt_hours = elapsed_seconds / 3600
         for energy_sensor in ENERGY_SENSOR_MAP:
             if energy_sensor.is_calculated:
                 continue
+
             current_energy = result.get(energy_sensor.key, None)
             last_energy = self._last_checked_data.get(energy_sensor.key, None)
             if current_energy is None or last_energy is None:
@@ -245,13 +250,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     f"Current energy or last energy is None of entity {energy_sensor.key}"
                 )
                 continue
-            elif (
+
+            is_midnight_reset = (
                 energy_sensor.reset_at_midnight
                 and current_energy == 0
                 and last_energy > 0
                 and now.hour == 0
                 and now.minute < 1
-            ):
+            )
+            if is_midnight_reset:
                 # Reset nur zwischen 00:00 und 00:01 erlauben
                 _LOGGER.debug(f"Reset of entity {energy_sensor.key}")
                 if self._count_reset_energy_finished == self._count_reset_energy_sensor:
@@ -260,32 +267,31 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 result[energy_sensor.key] = 0
                 self._check_monotonic = False
                 self._count_reset_energy_finished += 1
-            else:
-                dt_hours = (now - self._last_checked_time).total_seconds() / 3600
-                energy_delta = current_energy - last_energy
-                calculated_power = energy_delta / dt_hours
-                # Nur innerhalb einer 1h Stunde prüfen, danach ist das Gap zu groß
-                if 0 < dt_hours <= 1:
-                    limit = self.limits.get(energy_sensor.max_power, DEFAULT_MAX_POWER)
-                    if calculated_power > limit:
-                        # positiver Anstieg und Leistung über Max-Leistung
-                        _LOGGER.warning(
-                            f"Skip entire data. Reason: {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
-                        )
-                        return dict(self._last_checked_data)
-                    else:
-                        # negativer Anstieg oder unterhalb der Max-Leistung
-                        if current_energy == 0 and last_energy > 0:
-                            _LOGGER.warning(
-                                f"Skip entire data. Reason: 0 kWh of {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
-                            )
-                            return dict(self._last_checked_data)
-                        # Rückgabe des aktuellen Wertes nur wenn der neue Wert > letzter Wert ist
-                        result[energy_sensor.key] = max(current_energy, last_energy)
-                else:
-                    _LOGGER.debug(
-                        f"Time window is too large of entity {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 4)} dt: {dt_hours} power: {int(calculated_power)} limit: {energy_sensor.max_power} last check: {self._last_checked_time.time()})"
-                    )
+                continue
+
+            energy_delta = current_energy - last_energy
+            calculated_power = energy_delta / dt_hours
+            if dt_hours > 1:
+                _LOGGER.debug(
+                    f"Time window is too large of entity {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 4)} dt: {dt_hours} power: {int(calculated_power)} limit: {energy_sensor.max_power} last check: {self._last_checked_time.time()})"
+                )
+                continue
+
+            limit = self.limits.get(energy_sensor.max_power, DEFAULT_MAX_POWER)
+            if calculated_power > limit:
+                _LOGGER.warning(
+                    f"Skip entire data. Reason: {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
+                )
+                return dict(self._last_checked_data)
+
+            if current_energy == 0 and last_energy > 0:
+                _LOGGER.warning(
+                    f"Skip entire data. Reason: 0 kWh of {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
+                )
+                return dict(self._last_checked_data)
+
+            # Rückgabe des aktuellen Wertes nur wenn der neue Wert > letzter Wert ist
+            result[energy_sensor.key] = max(current_energy, last_energy)
 
         return result
 
