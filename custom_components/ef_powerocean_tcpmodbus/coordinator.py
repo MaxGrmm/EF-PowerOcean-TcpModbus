@@ -44,7 +44,7 @@ from .const import (
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
 )
-from .telemetry import calculate_derived_values, decode_register
+from .telemetry import TelemetryData, calculate_derived_values, decode_register
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -292,7 +292,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     def _get_calculated_values(self, data: dict[str, Any]) -> dict[str, Any]:
         return calculate_derived_values(
-            data,
+            TelemetryData.from_mapping(data),
             calculate_solar_power=self._ena_calc_solar_power,
             daily_reset_complete=(
                 self._count_reset_energy_finished == self._count_reset_energy_sensor

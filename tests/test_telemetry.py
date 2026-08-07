@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 import pytest
-from telemetry import calculate_derived_values, decode_register
+from telemetry import TelemetryData, calculate_derived_values, decode_register
 
 
 @pytest.mark.parametrize(
@@ -93,7 +93,7 @@ class CalculateValuesTest(unittest.TestCase):
         daily_reset_complete: bool = True,
     ) -> dict:
         return calculate_derived_values(
-            self.data,
+            TelemetryData.from_mapping(self.data),
             calculate_solar_power=calculate_solar_power,
             daily_reset_complete=daily_reset_complete,
             pv_voltage_threshold=250,
