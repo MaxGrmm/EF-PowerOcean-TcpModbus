@@ -13,27 +13,29 @@
           "port": "Standard ist 502"
         }
       },
-      "parameters":{
+      "parameters": {
         "title": "EcoFlow PowerOcean",
         "description": "Einstellungen",
         "data": {
+          "inverter_model": "Wechselrichtermodell",
           "battery_count": "Anzahl installierter Batterie-Module",
           "solar_power_max": "Maximale Solar-Leistung [W]",
           "grid_power_max": "Maximale Netz-Leistung [W]",
           "scan_interval": "Abfrageintervall [s]",
-		  "calc_solar_power": "Berechnung der Solarleistung"
+          "calc_solar_power": "Berechnung der Solarleistung"
         },
         "data_description": {
+          "inverter_model": "Wählen Sie das Wechselrichtermodell.",
           "battery_count": "Die Anzahl wird zur Berechnung der max. Lade- und Entladeleistung verwendet.",
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "grid_power_max": "Die max. Netz-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
-          "scan_interval": "Wie oft Werte abgefragt werden (2–30 Sekunden)",
-		  "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
+          "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
+          "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
         }
       }
     },
     "error": {
-      "cannot_connect": "Verbindung fehlgeschlagen – IP-Adresse und Port prüfen"
+      "cannot_connect": "Verbindung fehlgeschlagen - IP-Adresse und Port prüfen"
     },
     "abort": {
       "already_configured": "Dieses Gerät ist bereits eingerichtet"
@@ -42,7 +44,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "EcoFlow PowerOcean – Einstellungen",
+        "title": "EcoFlow PowerOcean - Einstellungen",
         "description": "Verbindungsdaten",
         "data": {
           "host": "IP-Adresse",
@@ -54,184 +56,196 @@
         }
       },
       "parameters": {
-        "title": "EcoFlow PowerOcean – Einstellungen",
+        "title": "EcoFlow PowerOcean - Einstellungen",
         "description": "Einstellungen",
         "data": {
+          "inverter_model": "Wechselrichtermodell",
           "battery_count": "Anzahl installierter Batterie-Module",
           "solar_power_max": "Maximale Solar-Leistung [W]",
           "grid_power_max": "Maximale Netz-Leistung [W]",
           "scan_interval": "Abfrageintervall [s]",
-		  "calc_solar_power": "Berechnung der Solarleistung"
+          "calc_solar_power": "Berechnung der Solarleistung"
         },
         "data_description": {
+          "inverter_model": "Wählen Sie das Wechselrichtermodell.",
           "battery_count": "Die Anzahl wird zur Berechnung der max. Lade- und Entladeleistung verwendet.",
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "grid_power_max": "Die max. Netz-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
-          "scan_interval": "Wie oft Werte abgefragt werden (2–30 Sekunden)",
-		  "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
+          "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
+          "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
         }
       }
     },
     "error": {
-      "cannot_connect": "Verbindung fehlgeschlagen – IP-Adresse und Port prüfen"
+      "cannot_connect": "Verbindung fehlgeschlagen - IP-Adresse und Port prüfen"
     }
   },
-  "entity":{
-	  "sensor": {
-		  "system_modes":{
-			  "name": "Betriebsmodi"
-		  },
-      "battery_count":{
-			  "name": "Batterieanzahl"
-		  },
-		  "battery_soc":{
-			  "name": "Batterieladezustand"
-		  },
-      "soc_battery_1":{
-			  "name": "Batterie 1 Ladezustand"
-		  },
-      "soc_battery_2":{
-			  "name": "Batterie 2 Ladezustand"
-		  },
-      "soc_battery_3":{
-			  "name": "Batterie 3 Ladezustand"
-		  },
-		  "battery_power":{
-			  "name": "Batterieleistung"
-		  },
-		  "bat_remaining":{
-			  "name": "Verbleibene Batterieladung"
-		  },
-		  "battery_voltage":{
-			  "name": "Batteriespannung"
-		  },
-		  "battery_current":{
-			  "name": "Batteriestrom"
-		  },
-		  "battery_temperature":{
-			  "name": "Batterietemperatur"
-		  },
-		  "battery_capacity":{
-			  "name": "Gesamt Batteriekapazität"
-		  },
-		  "min_soc_limit":{
-			  "name": "Batterie Backup-Reserve"
-		  },
-		  "bat_temp_warn_max":{
-			  "name": "Batterie Temp Warnung Max"
-		  },
-		  "device_led_brightness":{
-			  "name": "Helligkeit LED-Geräteanzeige"
-		  },
-		  "solar_power":{
-			  "name": "Solarleistung"
-		  },
-		  "pv1_power":{
-			  "name": "PV-Leistung String 1"
-		  },
-		  "pv2_power":{
-			  "name": "PV-Leistung String 2"
-		  },
-		  "pv3_power":{
-			  "name": "PV-Leistung String 3"
-		  },
-		  "pv1_current":{
-			  "name": "PV-Strom String 1"
-		  },
-		  "pv2_current":{
-			  "name": "PV-Strom String 2"
-		  },
-		  "pv3_current":{
-			  "name": "PV-Strom String 3"
-		  },
-		  "pv1_voltage":{
-			  "name": "PV-Spannung String 1"
-		  },
-		  "pv2_voltage":{
-			  "name": "PV-Spannung String 2"
-		  },
-		  "pv3_voltage":{
-			  "name": "PV-Spannung String 3"
-		  },
-		  "house_power":{
-			  "name": "Hausverbrauch"
-		  },
-		  "grid_power":{
-			  "name": "Netzleistung"
-		  },
-		  "voltage_l1":{
-			  "name": "Netz Phase L1 Spannung"
-		  },
-		  "voltage_l2":{
-			  "name": "Netz Phase L2 Spannung"
-		  },
-		  "voltage_l3":{
-			  "name": "Netz Phase L3 Spannung"
-		  },
-		  "current_l1":{
-			  "name": "Netz Phase L1 Strom"
+  "selector": {
+    "inverter_model": {
+      "options": {
+        "powerocean_single_phase": "PowerOcean 1-phasig",
+        "powerocean_three_phase": "PowerOcean 3-phasig",
+        "powerocean_plus": "PowerOcean Plus",
+        "ocean_2": "Ocean 2"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "system_modes": {
+        "name": "Betriebsmodi"
       },
-		  "current_l2":{
-			  "name": "Netz Phase L2 Strom"
-		  },
-		  "current_l3":{
-			  "name": "Netz Phase L3 Strom"
-		  },
-		  "frequency":{
-			  "name": "Netzfrequenz"
-		  },
-		  "inverter_temperature":{
-			  "name": "Wechselrichter-Temperatur"
-		  },
-		  "limit_inv_max":{
-			  "name": "WR-Nennleistungsgrenze"
-		  },
-		  "limit_inv_power":{
-			  "name": "WR-Maximalleistung"
-		  },
-		  "house_energy_today":{
-			  "name": "Hausenergie Heute"
-		  },
-		  "solar_today":{
-			  "name": "Solarenergie Heute"
-		  },
-		  "grid_import_today":{
-			  "name": "Netzbezugsenergie Heute"
-		  },
-		  "grid_export_today":{
-			  "name": "Netzeinspeiseenergie Heute"
-		  },
-		  "bat_charged_today":{
-			  "name": "Batterieladeenergie Heute"
-		  },
-		  "bat_discharged_today":{
-			  "name": "Batterieentladeenergie Heute"
-		  },
-		  "house_energy_total":{
-			  "name": "Hausenergie Gesamt"
-		  },
-		  "solar_total":{
-			  "name": "Solarenergie Gesamt"
-		  },
-		  "grid_import_total":{
-			  "name": "Netzbezugsenergie Gesamt"
-		  },
-		  "grid_export_total":{
-			  "name": "Netzeinspeiseenergie Gesamt"
-		  },
-		  "bat_charged_total":{
-			  "name": "Batterieladeenergie Gesamt"
-		  },
-		  "bat_discharged_total":{
-			  "name": "Batterieentladeenergie Gesamt"
-		  },
-		  "bat_net_energy":{
-			  "name": "Batterieverlustenergie Gesamt"
-		  },
-		  "feed_in_power_max":{
-			  "name": "Max. Einspeiseleistung"
-		  }
-	  },
+      "battery_count": {
+        "name": "Batterieanzahl"
+      },
+      "battery_soc": {
+        "name": "Batterieladezustand"
+      },
+      "soc_battery_1": {
+        "name": "Batterie 1 Ladezustand"
+      },
+      "soc_battery_2": {
+        "name": "Batterie 2 Ladezustand"
+      },
+      "soc_battery_3": {
+        "name": "Batterie 3 Ladezustand"
+      },
+      "battery_power": {
+        "name": "Batterieleistung"
+      },
+      "bat_remaining": {
+        "name": "Verbleibene Batterieladung"
+      },
+      "battery_voltage": {
+        "name": "Batteriespannung"
+      },
+      "battery_current": {
+        "name": "Batteriestrom"
+      },
+      "battery_temperature": {
+        "name": "Batterietemperatur"
+      },
+      "battery_capacity": {
+        "name": "Gesamt Batteriekapazität"
+      },
+      "min_soc_limit": {
+        "name": "Batterie Backup-Reserve"
+      },
+      "bat_temp_warn_max": {
+        "name": "Batterie Temp Warnung Max"
+      },
+      "device_led_brightness": {
+        "name": "Helligkeit LED-Geräteanzeige"
+      },
+      "solar_power": {
+        "name": "Solarleistung"
+      },
+      "pv1_power": {
+        "name": "PV-Leistung String 1"
+      },
+      "pv2_power": {
+        "name": "PV-Leistung String 2"
+      },
+      "pv3_power": {
+        "name": "PV-Leistung String 3"
+      },
+      "pv1_current": {
+        "name": "PV-Strom String 1"
+      },
+      "pv2_current": {
+        "name": "PV-Strom String 2"
+      },
+      "pv3_current": {
+        "name": "PV-Strom String 3"
+      },
+      "pv1_voltage": {
+        "name": "PV-Spannung String 1"
+      },
+      "pv2_voltage": {
+        "name": "PV-Spannung String 2"
+      },
+      "pv3_voltage": {
+        "name": "PV-Spannung String 3"
+      },
+      "house_power": {
+        "name": "Hausverbrauch"
+      },
+      "grid_power": {
+        "name": "Netzleistung"
+      },
+      "voltage_l1": {
+        "name": "Netz Phase L1 Spannung"
+      },
+      "voltage_l2": {
+        "name": "Netz Phase L2 Spannung"
+      },
+      "voltage_l3": {
+        "name": "Netz Phase L3 Spannung"
+      },
+      "current_l1": {
+        "name": "Netz Phase L1 Strom"
+      },
+      "current_l2": {
+        "name": "Netz Phase L2 Strom"
+      },
+      "current_l3": {
+        "name": "Netz Phase L3 Strom"
+      },
+      "frequency": {
+        "name": "Netzfrequenz"
+      },
+      "inverter_temperature": {
+        "name": "Wechselrichter-Temperatur"
+      },
+      "limit_inv_max": {
+        "name": "WR-Nennleistungsgrenze"
+      },
+      "limit_inv_power": {
+        "name": "WR-Maximalleistung"
+      },
+      "house_energy_today": {
+        "name": "Hausenergie Heute"
+      },
+      "solar_today": {
+        "name": "Solarenergie Heute"
+      },
+      "grid_import_today": {
+        "name": "Netzbezugsenergie Heute"
+      },
+      "grid_export_today": {
+        "name": "Netzeinspeiseenergie Heute"
+      },
+      "bat_charged_today": {
+        "name": "Batterieladeenergie Heute"
+      },
+      "bat_discharged_today": {
+        "name": "Batterieentladeenergie Heute"
+      },
+      "house_energy_total": {
+        "name": "Hausenergie Gesamt"
+      },
+      "solar_total": {
+        "name": "Solarenergie Gesamt"
+      },
+      "grid_import_total": {
+        "name": "Netzbezugsenergie Gesamt"
+      },
+      "grid_export_total": {
+        "name": "Netzeinspeiseenergie Gesamt"
+      },
+      "bat_charged_total": {
+        "name": "Batterieladeenergie Gesamt"
+      },
+      "bat_discharged_total": {
+        "name": "Batterieentladeenergie Gesamt"
+      },
+      "bat_net_energy": {
+        "name": "Batterieverlustenergie Gesamt"
+      },
+      "feed_in_power_max": {
+        "name": "Max. Einspeiseleistung"
+      }
+    },
     "binary_sensor": {
       "self_use_mode_ena": {
         "name": "Eigenstromversorgung"

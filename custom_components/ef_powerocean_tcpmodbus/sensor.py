@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Final
 import logging
 
 from homeassistant.components.sensor import RestoreSensor
@@ -33,7 +34,7 @@ from .coordinator import EcoflowCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
-VALUE_PRECISION = {
+VALUE_PRECISION: Final = {
     PERCENTAGE: 0,
     UnitOfPower.WATT: 0,
     UnitOfEnergy.KILO_WATT_HOUR: 2,
@@ -80,7 +81,7 @@ class EcoflowSensor(CoordinatorEntity[EcoflowCoordinator], RestoreSensor):
             identifiers={(DOMAIN, entry.entry_id)},
             name="EcoFlow PowerOcean",
             manufacturer="EcoFlow",
-            model="PowerOcean",
+            model=coordinator.inverter_model.display_name,
             serial_number=coordinator.serial_number,
             entry_type=DeviceEntryType.SERVICE,
         )

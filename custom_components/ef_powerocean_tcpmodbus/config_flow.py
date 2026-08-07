@@ -11,7 +11,11 @@ from pymodbus.client import AsyncModbusTcpClient
 from homeassistant.core import callback
 from homeassistant.config_entries import ConfigFlow, ConfigEntry, OptionsFlow
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers.selector import BooleanSelector
+from homeassistant.helpers.selector import (
+    BooleanSelector,
+    SelectSelector,
+    SelectSelectorConfig,
+)
 
 from .const import (
     DOMAIN,
@@ -22,11 +26,14 @@ from .const import (
     CONF_MAX_SOLAR_POWER,
     CONF_SCAN_INTERVAL,
     CONF_CALC_SOLAR_POWER,
+    CONF_INVERTER_MODEL,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_BATTERY_COUNT,
     DEFAULT_MAX_GRID_POWER,
     DEFAULT_MAX_SOLAR_POWER,
+    DEFAULT_INVERTER_MODEL,
+    InverterModel,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -104,6 +111,14 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="parameters",
             data_schema=vol.Schema(
                 {
+                    vol.Required(
+                        CONF_INVERTER_MODEL, default=DEFAULT_INVERTER_MODEL
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[model.value for model in InverterModel],
+                            translation_key=CONF_INVERTER_MODEL,
+                        )
+                    ),
                     vol.Required(
                         CONF_BATTERY_COUNT, default=DEFAULT_BATTERY_COUNT
                     ): vol.All(int, vol.Range(min=0, max=6)),
@@ -187,6 +202,17 @@ class EcoflowOptionsFlow(OptionsFlow):
             step_id="parameters",
             data_schema=vol.Schema(
                 {
+                    vol.Required(
+                        CONF_INVERTER_MODEL,
+                        default=self._config_entry.data.get(
+                            CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL
+                        ),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[model.value for model in InverterModel],
+                            translation_key=CONF_INVERTER_MODEL,
+                        )
+                    ),
                     vol.Required(
                         CONF_BATTERY_COUNT,
                         default=self._config_entry.data.get(
