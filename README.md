@@ -12,13 +12,12 @@
 ## Features
 
 - **Local polling** – no EcoFlow cloud account needed
-- **Configurable poll interval** (5–60 seconds, default 10 s)
+- **Configurable poll interval** (2–30 seconds, default 5 s)
 - Real-time power flow: house consumption, grid import/export, solar generation, battery
 - Full battery monitoring: SOC, voltage, current, power, temperature, remaining energy
-- Per-string PV power, current and voltage (configurable 1–3 strings, phantom current filtering)
+- Per-string PV power, current and voltage (1–3 strings)
 - Per-phase AC measurements: voltage, current, frequency
 - Energy counters: daily and lifetime for grid, solar, battery charge/discharge, house consumption
-- Configurable battery capacity (workaround for unreliable register value)
 - Reconfigurable after setup via **Settings → Configure** (no re-install needed)
 - Debug logging toggle directly in the HA UI
 - German and English translations
@@ -27,16 +26,17 @@
 
 ## Supported Devices
 
-| Device | Status |
-|---|---|
-| EcoFlow PowerOcean Plus | ✅ Confirmed |
-| EcoFlow PowerOcean |  ✅ Confirmed |
+| Device                     | Status                         |
+| -------------------------- | ------------------------------ |
+| EcoFlow PowerOcean Plus    | ✅ Confirmed                   |
+| EcoFlow PowerOcean         | ✅ Confirmed                   |
 | EcoFlow PowerOcean Connect | ❓ Untested – feedback welcome |
 
 ---
-## Prequesites 
 
-The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled by default! 
+## Prequesites
+
+The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled by default!
 
 ---
 
@@ -64,13 +64,16 @@ The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled b
 2. Search for **EF-PowerOcean-TcpModbus**
 3. Fill in the setup form:
 
-| Field | Default | Description |
-|---|---|---|
-| IP Address | – | Local IP of your PowerOcean Plus |
-| Port | 502 | Modbus TCP port |
-| Battery Capacity (kWh) | 5.0 | Usable capacity of your battery module |
-| Number of PV Strings | 2 | Active strings connected to the inverter (1–3) |
-| Poll Interval (seconds) | 10 | How often values are fetched |
+| Field                      | Default                | Description                                                                                                                                                      |
+| -------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| IP Address                 | –                      | Local IP of your PowerOcean Plus                                                                                                                                 |
+| Port                       | 502                    | Modbus TCP port                                                                                                                                                  |
+| Inverter model             | PowerOcean Three Phase |                                                                                                                                                                  |
+| Number of Batteries        | 0                      | Number of installed battery modules                                                                                                                              |
+| Maximum solar power        | 12kW                   | Installed solar power                                                                                                                                            |
+| Maximum grid power         | 15kW                   | Expected maximum grid power to detect unauthorized values                                                                                                        |
+| Calculation of solar power | true/false             | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
+| Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
 
 To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**
 
@@ -80,74 +83,76 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 
 ### Power (real-time)
 
-| Sensor | Unit | Description |
-|---|---|---|
-| House Power | W | Current house consumption |
-| Grid Power | W | Grid exchange (negative = export) |
-| Solar Power | W | Total PV generation (sum of active strings) |
-| Battery Power | W | Battery charge/discharge power |
-| Inverter AC Power | W | Total AC output of inverter |
+| Sensor        | Unit | Description                                 |
+| ------------- | ---- | ------------------------------------------- |
+| House Power   | W    | Current house consumption                   |
+| Grid Power    | W    | Grid exchange (negative = export)           |
+| Solar Power   | W    | Total PV generation (sum of active strings) |
+| Battery Power | W    | Battery charge/discharge power              |
 
 ### Battery
 
-| Sensor | Unit | Description |
-|---|---|---|
-| Battery SOC | % | State of charge |
-| Battery Remaining Energy | kWh | Calculated from SOC × configured capacity |
-| Battery Voltage | V | DC bus voltage |
-| Battery Current | A | Positive = charging, negative = discharging |
-| Battery Temperature | °C | Battery temperature |
-| Battery Nominal Capacity | kWh | User-configured capacity |
+| Sensor                   | Unit | Description                                 |
+| ------------------------ | ---- | ------------------------------------------- |
+| Battery SOC              | %    | State of charge                             |
+| Battery 1 SOC            | %    | State of charge                             |
+| Battery 2 SOC            | %    | State of charge                             |
+| Battery 3 SOC            | %    | State of charge                             |
+| Battery Remaining Energy | kWh  | Calculated from SOC × configured capacity   |
+| Battery Voltage          | V    | DC bus voltage                              |
+| Battery Current          | A    | Positive = charging, negative = discharging |
+| Battery Temperature      | °C   | Battery temperature                         |
+| Battery Nominal Capacity | kWh  | User-configured capacity                    |
 
 ### Solar
 
-| Sensor | Unit | Description |
-|---|---|---|
-| PV String 1/2/3 Power | W | Per-string power (current × own string voltage) |
-| PV String 1/2/3 Current | A | MPPT string current |
-| PV String 1/2/3 Voltage | V | Per-string DC voltage |
+| Sensor                  | Unit | Description                                     |
+| ----------------------- | ---- | ----------------------------------------------- |
+| PV String 1/2/3 Power   | W    | Per-string power (current × own string voltage) |
+| PV String 1/2/3 Current | A    | MPPT string current                             |
+| PV String 1/2/3 Voltage | V    | Per-string DC voltage                           |
 
 ### AC Grid
 
-| Sensor | Unit | Description |
-|---|---|---|
-| Grid Voltage L1/L2/L3 | V | Per-phase voltage |
-| Grid Current L1/L2/L3 | A | Per-phase current |
-| Grid Frequency | Hz | Grid frequency |
-| Inverter Temperature | °C | Inverter temperature |
+| Sensor                | Unit | Description          |
+| --------------------- | ---- | -------------------- |
+| Grid Voltage L1/L2/L3 | V    | Per-phase voltage    |
+| Grid Current L1/L2/L3 | A    | Per-phase current    |
+| Grid Frequency        | Hz   | Grid frequency       |
+| Inverter Temperature  | °C   | Inverter temperature |
 
 ### Limits (Diagnostic)
 
-| Sensor | Unit | Description |
-|---|---|---|
-| Inverter Nominal Power Limit | W | Maximum inverter output |
-| Inverter Current Max Power | W | Current active power limit |
-| Max Battery Discharge Power | W | Calculated: 3300 W × number of modules |
-| Max Charge Power | W | Calculated: 2500 W × number of modules |
-| Min SOC Limit | % | Configured minimum state of charge |
+| Sensor                       | Unit | Description                            |
+| ---------------------------- | ---- | -------------------------------------- |
+| Inverter Nominal Power Limit | W    | Maximum inverter output                |
+| Inverter Current Max Power   | W    | Current active power limit             |
+| Max Battery Discharge Power  | W    | Calculated: 3300 W × number of modules |
+| Max Charge Power             | W    | Calculated: 2500 W × number of modules |
+| Min SOC Limit                | %    | Configured minimum state of charge     |
 
 ### Energy – Today
 
-| Sensor | Unit | Description |
-|---|---|---|
-| House Consumption Today | kWh | Calculated from energy balance |
-| Solar Yield Today | kWh | Total solar energy generated today |
-| Grid Import Today | kWh | Energy imported from grid today |
-| Grid Export Today | kWh | Energy exported to grid today |
-| Battery Charged Today | kWh | Energy charged today |
-| Battery Discharged Today | kWh | Energy discharged today |
+| Sensor                   | Unit | Description                        |
+| ------------------------ | ---- | ---------------------------------- |
+| House Consumption Today  | kWh  | Calculated from energy balance     |
+| Solar Yield Today        | kWh  | Total solar energy generated today |
+| Grid Import Today        | kWh  | Energy imported from grid today    |
+| Grid Export Today        | kWh  | Energy exported to grid today      |
+| Battery Charged Today    | kWh  | Energy charged today               |
+| Battery Discharged Today | kWh  | Energy discharged today            |
 
 ### Energy – Lifetime
 
-| Sensor | Unit | Description |
-|---|---|---|
-| House Consumption Total | kWh | Calculated from energy balance |
-| Solar Yield Total | kWh | Lifetime solar generation |
-| Grid Import Total | kWh | Lifetime grid import |
-| Grid Export Total | kWh | Lifetime grid export |
-| Battery Charged Total | kWh | Lifetime energy charged |
-| Battery Discharged Total | kWh | Lifetime energy discharged |
-| Battery Net Energy | kWh | Charged minus discharged |
+| Sensor                   | Unit | Description                    |
+| ------------------------ | ---- | ------------------------------ |
+| House Consumption Total  | kWh  | Calculated from energy balance |
+| Solar Yield Total        | kWh  | Lifetime solar generation      |
+| Grid Import Total        | kWh  | Lifetime grid import           |
+| Grid Export Total        | kWh  | Lifetime grid export           |
+| Battery Charged Total    | kWh  | Lifetime energy charged        |
+| Battery Discharged Total | kWh  | Lifetime energy discharged     |
+| Battery Net Energy       | kWh  | Charged minus discharged       |
 
 ---
 
@@ -156,14 +161,13 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 To enable debug logging without editing `configuration.yaml`:
 
 - Settings → Devices & Services → EF-PowerOcean-TcpModbus → Enable debug logging
+
 ---
 
 ## Screenshots
+
 <img width="334" height="1202" alt="Screenshot 2026-04-02 132824" src="https://github.com/user-attachments/assets/dc73b934-ad8b-4610-8050-45d445dc318f" />
 <img width="326" height="1276" alt="Screenshot 2026-04-02 132833" src="https://github.com/user-attachments/assets/f5908343-ff6f-450b-9b55-8c7a0ad59859" />
-
-
-
 
 ---
 
@@ -174,7 +178,7 @@ To enable debug logging without editing `configuration.yaml`:
 - **Float encoding:** 32-bit IEEE 754, little-endian word order (word-swapped)
 - **Read strategy:** Block reads (5 requests per poll cycle)
 - **Tested firmware:** 3.0.15.10
-- **Tested pymodbus version:** 3.6.9 and 3.11.x
+- **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 
 Full register map: [EcoFlow_PowerOcean_Modbus.md](EcoFlow_PowerOcean_Modbus.md)
 
