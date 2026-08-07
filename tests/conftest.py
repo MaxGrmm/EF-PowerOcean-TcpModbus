@@ -11,7 +11,6 @@ import sys
 import types
 from datetime import datetime
 
-
 homeassistant = types.ModuleType("homeassistant")
 homeassistant_util = types.ModuleType("homeassistant.util")
 homeassistant_dt = types.ModuleType("homeassistant.util.dt")
@@ -33,9 +32,15 @@ homeassistant_update_coordinator = types.ModuleType(
 homeassistant_update_coordinator.DataUpdateCoordinator = type(
     "DataUpdateCoordinator", (), {}
 )
-homeassistant_update_coordinator.UpdateFailed = type(
-    "UpdateFailed", (Exception,), {}
-)
+
+
+class UpdateFailed(Exception):
+    def __init__(self, message: str, *, retry_after: int | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+homeassistant_update_coordinator.UpdateFailed = UpdateFailed
 
 pymodbus = types.ModuleType("pymodbus")
 pymodbus.__version__ = "test"

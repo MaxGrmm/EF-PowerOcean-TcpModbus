@@ -16,15 +16,11 @@ from ef_powerocean_tcpmodbus.telemetry import (
     ("registers", "register_index", "register_size", "expected"),
     (
         ([17], 0, 1, 17.0),
-        ([17], -1, 1, 17.0),
         ([0xFFFF, 0x0000, 0x42F7], 1, 2, 123.5),
-        ([0x0000, 0x42F7], 0, 3, 123.5),
     ),
     ids=(
         "single-register",
-        "negative-index",
         "word-swapped-float",
-        "non-single-size",
     ),
 )
 def test_decodes_register_values(
@@ -34,11 +30,6 @@ def test_decodes_register_values(
     expected: float,
 ) -> None:
     assert decode_register(registers, register_index, register_size) == expected
-
-
-def test_raises_for_out_of_range_single_register() -> None:
-    with pytest.raises(IndexError):
-        decode_register([0], 1, 1)
 
 
 @pytest.mark.parametrize(

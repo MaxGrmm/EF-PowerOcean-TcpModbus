@@ -4,45 +4,42 @@ from __future__ import annotations
 
 import asyncio
 import logging
-
+from datetime import datetime, timedelta
 from typing import Any, Final
-from datetime import timedelta
 
-from datetime import datetime
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt
 from pymodbus import __version__ as pyModbusVersion
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
-from homeassistant.util import dt
-from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-
 from .const import (
-    DOMAIN,
-    CONF_HOST,
-    CONF_PORT,
     CONF_BATTERY_COUNT,
+    CONF_CALC_SOLAR_POWER,
+    CONF_HOST,
+    CONF_INVERTER_MODEL,
     CONF_MAX_BATTERY_CHARGED_POWER,
     CONF_MAX_BATTERY_DISCHARGED_POWER,
     CONF_MAX_GRID_POWER,
     CONF_MAX_SOLAR_POWER,
+    CONF_PORT,
     CONF_SCAN_INTERVAL,
-    CONF_CALC_SOLAR_POWER,
-    CONF_INVERTER_MODEL,
-    DEFAULT_SLAVE,
-    ENERGY_SENSOR_MAP,
-    MOD_REGISTER_MAP,
-    DEFAULT_PORT,
-    DEFAULT_MAX_POWER,
     DEFAULT_BATTERY_COUNT,
-    DEFAULT_MAX_GRID_POWER,
-    DEFAULT_MAX_SOLAR_POWER,
-    DEFAULT_SCAN_INTERVAL,
     DEFAULT_INVERTER_MODEL,
-    InverterModel,
+    DEFAULT_MAX_GRID_POWER,
+    DEFAULT_MAX_POWER,
+    DEFAULT_MAX_SOLAR_POWER,
+    DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SLAVE,
+    DOMAIN,
+    ENERGY_SENSOR_MAP,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
+    MOD_REGISTER_MAP,
+    InverterModel,
 )
 from .telemetry import TelemetryData, calculate_derived_values, decode_register
 
@@ -295,18 +292,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         return result
 
-    def _get_calculated_values(self, data: dict[str, Any]) -> dict[str, Any]:
-        return calculate_derived_values(
-            TelemetryData.from_mapping(data),
-            calculate_solar_power=self._ena_calc_solar_power,
-            daily_reset_complete=(
-                self._count_reset_energy_finished == self._count_reset_energy_sensor
-            ),
-            startup_voltage = self.inverter_model.startup_voltage,
-            max_battery_charge_power=MAX_BATTERY_CHARGED_POWER,
-            max_battery_discharge_power=MAX_BATTERY_DISCHARGED_POWER,
-        )
-
     def _enforced_monotonic(self, data: dict[str, Any]) -> dict[str, Any]:
         for energy_senser in ENERGY_SENSOR_MAP:
             last = self._last_checked_data.get(energy_senser.key, None)
@@ -322,7 +307,16 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 return None
 
             result = self._sanitize_energy_values(raw_data)
-            calculated_results = self._get_calculated_values(result)
+            calculated_results = calculate_derived_values(
+                TelemetryData.from_mapping(result),
+                calculate_solar_power=self._ena_calc_solar_power,
+                daily_reset_complete=(
+                    self._count_reset_energy_finished == self._count_reset_energy_sensor
+                ),
+                startup_voltage = self.inverter_model.startup_voltage,
+                max_battery_charge_power=MAX_BATTERY_CHARGED_POWER,
+                max_battery_discharge_power=MAX_BATTERY_DISCHARGED_POWER,
+            )
             result.update(calculated_results)
 
             if self._check_monotonic:

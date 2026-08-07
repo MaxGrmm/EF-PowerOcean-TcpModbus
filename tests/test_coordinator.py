@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from ef_powerocean_tcpmodbus import const
@@ -106,13 +109,13 @@ def test_validates_energy_changes_within_one_hour(
     coordinator._last_checked_time = now - timedelta(minutes=30)
     coordinator._last_checked_data = {
         "grid_import_total": 10.0,
-        "unrelated": 1.0,
+        "previous_snapshot_marker": 1.0,
     }
 
     result = sanitize(coordinator, {"grid_import_total": current}, now, monkeypatch)
 
     assert result["grid_import_total"] == expected
-    assert (result == coordinator._last_checked_data) is rejects_snapshot
+    assert ("previous_snapshot_marker" in result) is rejects_snapshot
 
 
 @pytest.mark.parametrize(
@@ -220,3 +223,81 @@ def test_daily_reset_window_boundaries(
 
     assert result[sensor_key] == (0.0 if expected_reset else 10.0)
     assert (coordinator._check_monotonic is False) is expected_reset
+
+
+def test_enforces_monotonic_energy_values(coordinator) -> None:
+    coordinator._last_checked_data = {
+        "grid_import_total": 10.0,
+        "grid_export_total": 5.0,
+    }
+    data = {
+        "grid_import_total": 9.0,
+        "grid_export_total": 6.0,
+    }
+
+    result = coordinator._enforced_monotonic(data)
+
+    assert result is data
+    assert result["grid_import_total"] == 10.0
+    assert result["grid_export_total"] == 6.0
+
+
+@pytest.mark.parametrize("is_error", (False, True), ids=("success", "modbus-error"))
+def test_reads_register_block(coordinator, is_error: bool) -> None:
+    response = SimpleNamespace(
+        isError=Mock(return_value=is_error),
+        exception_code=2,
+        registers=[11, 22],
+    )
+    coordinator._client = SimpleNamespace(
+        read_holding_registers=AsyncMock(return_value=response)
+    )
+    coordinator._client_slave_id = const.DEFAULT_SLAVE
+
+    async def read_block():
+        coordinator._lock = asyncio.Lock()
+        return await coordinator.async_read_block(100, 2)
+
+    if is_error:
+        with pytest.raises(coordinator_module.ModbusException):
+            asyncio.run(read_block())
+    else:
+        assert asyncio.run(read_block()) == [11, 22]
+
+    coordinator._client.read_holding_registers.assert_awaited_once_with(
+        address=100,
+        count=2,
+        device_id=const.DEFAULT_SLAVE,
+    )
+
+
+def test_gets_and_decodes_raw_data(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    block = SimpleNamespace(
+        start_register=100,
+        num_read_regs=2,
+        content=(
+            SimpleNamespace(key="battery_count", block_index=0, size=1),
+            SimpleNamespace(key="grid_power", block_index=1, size=1),
+        ),
+    )
+    monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
+    decode_register = Mock(side_effect=(2.0, 42.0))
+    monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
+    coordinator._client = SimpleNamespace(connected=True)
+    coordinator.async_read_block = AsyncMock(return_value=[2, 42])
+    coordinator.limits[const.CONF_BATTERY_COUNT] = 2
+
+    result = asyncio.run(coordinator.async_get_raw_data())
+
+    assert result == {"battery_count": 2.0, "grid_power": 42.0}
+    coordinator.async_read_block.assert_awaited_once_with(100, 2)
+
+
+def test_raw_data_raises_when_reconnect_fails(coordinator) -> None:
+    coordinator._client = SimpleNamespace(connected=False)
+    coordinator.async_reconnect = AsyncMock(return_value=False)
+
+    with pytest.raises(coordinator_module.UpdateFailed, match="Reconnect failed"):
+        asyncio.run(coordinator.async_get_raw_data())
