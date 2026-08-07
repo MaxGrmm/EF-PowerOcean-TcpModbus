@@ -3,29 +3,62 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
+from typing import Final
 
-DOMAIN = "ef_powerocean_tcpmodbus"
-DEFAULT_PORT = 502
-DEFAULT_SLAVE = 1
-DEFAULT_SCAN_INTERVAL = 5  # seconds
-DEFAULT_BATTERY_COUNT = 0
-DEFAULT_MAX_SOLAR_POWER = 12000
-DEFAULT_MAX_GRID_POWER = 15000
-DEFAULT_MAX_POWER = 30000
+DOMAIN: Final = "ef_powerocean_tcpmodbus"
+DEFAULT_PORT: Final = 502
+DEFAULT_SLAVE: Final = 1
+DEFAULT_SCAN_INTERVAL: Final = 5  # seconds
+DEFAULT_BATTERY_COUNT: Final = 0
+DEFAULT_MAX_SOLAR_POWER: Final = 12000
+DEFAULT_MAX_GRID_POWER: Final = 15000
+DEFAULT_MAX_POWER: Final = 30000
 
-CONF_HOST = "host"
-CONF_PORT = "port"
-CONF_BATTERY_COUNT = "battery_count"
-CONF_MAX_SOLAR_POWER = "solar_power_max"
-CONF_MAX_GRID_POWER = "grid_power_max"
-CONF_MAX_BATTERY_CHARGED_POWER = "battery_charged_power_max"
-CONF_MAX_BATTERY_DISCHARGED_POWER = "battery_discharged_power_max"
-CONF_SCAN_INTERVAL = "scan_interval"
-CONF_CALC_SOLAR_POWER = "calc_solar_power"
+CONF_HOST: Final = "host"
+CONF_PORT: Final = "port"
+CONF_BATTERY_COUNT: Final = "battery_count"
+CONF_MAX_SOLAR_POWER: Final = "solar_power_max"
+CONF_MAX_GRID_POWER: Final = "grid_power_max"
+CONF_MAX_BATTERY_CHARGED_POWER: Final = "battery_charged_power_max"
+CONF_MAX_BATTERY_DISCHARGED_POWER: Final = "battery_discharged_power_max"
+CONF_SCAN_INTERVAL: Final = "scan_interval"
+CONF_CALC_SOLAR_POWER: Final = "calc_solar_power"
+CONF_INVERTER_MODEL: Final = "inverter_model"
 
-PV_VOLTAGE_THRESHOLD = 250
-MAX_BATTERY_CHARGED_POWER = 2500
-MAX_BATTERY_DISCHARGED_POWER = 3300
+MAX_BATTERY_CHARGED_POWER: Final = 2500
+MAX_BATTERY_DISCHARGED_POWER: Final = 3300
+
+
+class InverterModel(StrEnum):
+    POWEROCEAN_SINGLE_PHASE = "powerocean_single_phase"
+    POWEROCEAN_THREE_PHASE = "powerocean_three_phase"
+    POWEROCEAN_PLUS = "powerocean_plus"
+    OCEAN_2 = "ocean_2"
+
+    @property
+    def startup_voltage(self) -> int:
+        return {
+            # The startup voltage is used to filter out phantom string power when the PV input is not actually producing power.
+            # The values are based on the datasheets of each model. However, the single phase does not have a dedicated startup voltage specification
+            # so this value is deducted from the MPPT operating range.
+            self.POWEROCEAN_SINGLE_PHASE: 90,
+            self.POWEROCEAN_THREE_PHASE: 160,
+            self.POWEROCEAN_PLUS: 160,
+            self.OCEAN_2: 120,
+        }[self]
+
+    @property
+    def display_name(self) -> str:
+        return {
+            self.POWEROCEAN_SINGLE_PHASE: "PowerOcean Single Phase",
+            self.POWEROCEAN_THREE_PHASE: "PowerOcean Three Phase",
+            self.POWEROCEAN_PLUS: "PowerOcean Plus",
+            self.OCEAN_2: "Ocean 2",
+        }[self]
+
+
+DEFAULT_INVERTER_MODEL: Final = InverterModel.POWEROCEAN_THREE_PHASE
 
 
 @dataclass(frozen=True)

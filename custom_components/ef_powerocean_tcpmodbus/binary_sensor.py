@@ -44,7 +44,7 @@ class EcoFlowBinarySensor(CoordinatorEntity[EcoflowCoordinator], BinarySensorEnt
             identifiers={(DOMAIN, entry.entry_id)},
             name="EcoFlow PowerOcean",
             manufacturer="EcoFlow",
-            model="PowerOcean",
+            model=coordinator.inverter_model.display_name,
             serial_number=coordinator.serial_number,
             entry_type=DeviceEntryType.SERVICE,
         )

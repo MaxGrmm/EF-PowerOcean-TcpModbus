@@ -30,7 +30,7 @@ from .const import (
     CONF_MAX_SOLAR_POWER,
     CONF_SCAN_INTERVAL,
     CONF_CALC_SOLAR_POWER,
-    PV_VOLTAGE_THRESHOLD,
+    CONF_INVERTER_MODEL,
     DEFAULT_SLAVE,
     ENERGY_SENSOR_MAP,
     MOD_REGISTER_MAP,
@@ -40,6 +40,8 @@ from .const import (
     DEFAULT_MAX_GRID_POWER,
     DEFAULT_MAX_SOLAR_POWER,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_INVERTER_MODEL,
+    InverterModel,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
 )
@@ -52,6 +54,15 @@ SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED = 15
 
 def getBit(value: int, bitpos: int) -> bool:
     return (value & (2**bitpos)) == 2**bitpos
+
+
+def calculate_pv_power(
+    current: float | None, voltage: float | None, startup_voltage: int
+) -> float | None:
+    if current is None or voltage is None:
+        return None
+
+    return 0 if voltage < startup_voltage else round(current * voltage, 1)
 
 
 class EcoflowCoordinator(DataUpdateCoordinator):
@@ -87,6 +98,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             * config_entry.data.get(CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT),
         }
         self._ena_calc_solar_power = config_entry.data.get(CONF_CALC_SOLAR_POWER, False)
+        self.inverter_model = InverterModel(
+            config_entry.data.get(CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL)
+        )
         super().__init__(
             hass,
             _LOGGER,
@@ -395,32 +409,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         pv2_voltage = data.get("pv2_voltage", None)
         pv3_current = data.get("pv3_current", None)
         pv3_voltage = data.get("pv3_voltage", None)
-        calc_data["pv1_power"] = (
-            None
-            if pv1_current is None or pv1_voltage is None
-            else (
-                0
-                if pv1_voltage < PV_VOLTAGE_THRESHOLD
-                else round(pv1_current * pv1_voltage, 1)
-            )
+        startup_voltage = self.inverter_model.startup_voltage
+        calc_data["pv1_power"] = calculate_pv_power(
+            pv1_current, pv1_voltage, startup_voltage
         )
-        calc_data["pv2_power"] = (
-            None
-            if pv2_current is None or pv2_voltage is None
-            else (
-                0
-                if pv2_voltage < PV_VOLTAGE_THRESHOLD
-                else round(pv2_current * pv2_voltage, 1)
-            )
+        calc_data["pv2_power"] = calculate_pv_power(
+            pv2_current, pv2_voltage, startup_voltage
         )
-        calc_data["pv3_power"] = (
-            None
-            if pv3_current is None or pv3_voltage is None
-            else (
-                0
-                if pv3_voltage < PV_VOLTAGE_THRESHOLD
-                else round(pv3_current * pv3_voltage, 1)
-            )
+        calc_data["pv3_power"] = calculate_pv_power(
+            pv3_current, pv3_voltage, startup_voltage
         )
 
         if self._ena_calc_solar_power:

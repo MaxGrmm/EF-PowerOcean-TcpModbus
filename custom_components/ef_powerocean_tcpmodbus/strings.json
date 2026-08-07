@@ -17,6 +17,7 @@
         "title": "EcoFlow PowerOcean",
         "description": "Settings",
         "data": {
+          "inverter_model": "Inverter model",
           "battery_count": "Battery module count",
           "solar_power_max": "Maximum solar power [W]",
           "grid_power_max": "Maximum grid power [W]",
@@ -24,6 +25,7 @@
 		  "calc_solar_power": "Calculation of solar power"
         },
         "data_description": {
+          "inverter_model": "Select the Ecoflow inverter model.",
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",
@@ -57,6 +59,7 @@
         "title": "EcoFlow PowerOcean – Settings",
         "description": "Settings",
         "data": {
+          "inverter_model": "Inverter model",
           "battery_count": "Battery module count",
           "solar_power_max": "Maximum solar power [W]",
           "grid_power_max": "Maximum grid power [W]",
@@ -64,6 +67,7 @@
 		  "calc_solar_power": "Calculation of solar power"
         },
         "data_description": {
+          "inverter_model": "Select the Ecoflow inverter model.",
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",
@@ -76,6 +80,16 @@
       "cannot_connect": "Connection failed – please check IP address and port"
     }
   },
+	"selector": {
+		"inverter_model": {
+			"options": {
+				"powerocean_single_phase": "PowerOcean Single Phase",
+				"powerocean_three_phase": "PowerOcean Three Phase",
+				"powerocean_plus": "PowerOcean Plus",
+				"ocean_2": "Ocean 2"
+			}
+		}
+	},
   "entity":{
 	  "sensor": {
 		  "system_modes":{
