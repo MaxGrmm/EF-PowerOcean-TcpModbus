@@ -17,7 +17,7 @@
         "title": "EcoFlow PowerOcean",
         "description": "Einstellungen",
         "data": {
-					"inverter_model": "Wechselrichtermodell",
+          "inverter_model": "Wechselrichtermodell",
           "battery_count": "Anzahl installierter Batterie-Module",
           "solar_power_max": "Maximale Solar-Leistung [W]",
           "grid_power_max": "Maximale Netz-Leistung [W]",
@@ -25,7 +25,7 @@
 		  "calc_solar_power": "Berechnung der Solarleistung"
         },
         "data_description": {
-					"inverter_model": "Wählen Sie das Wechselrichtermodell, damit die passende PV-Einschaltspannung zum Filtern von Phantomleistung verwendet wird.",
+          "inverter_model": "Wählen Sie das Wechselrichtermodell.",
           "battery_count": "Die Anzahl wird zur Berechnung der max. Lade- und Entladeleistung verwendet.",
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "grid_power_max": "Die max. Netz-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
@@ -67,7 +67,7 @@
 		  "calc_solar_power": "Berechnung der Solarleistung"
         },
         "data_description": {
-					"inverter_model": "Wählen Sie das Wechselrichtermodell, damit die passende PV-Einschaltspannung zum Filtern von Phantomleistung verwendet wird.",
+					"inverter_model": "Wählen Sie das Wechselrichtermodell.",
           "battery_count": "Die Anzahl wird zur Berechnung der max. Lade- und Entladeleistung verwendet.",
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "grid_power_max": "Die max. Netz-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
@@ -83,8 +83,8 @@
 	"selector": {
 		"inverter_model": {
 			"options": {
-				"powerocean_single_phase": "PowerOcean einphasig",
-				"powerocean_three_phase": "PowerOcean dreiphasig",
+				"powerocean_single_phase": "PowerOcean 1-phasig",
+				"powerocean_three_phase": "PowerOcean 3-phasig",
 				"powerocean_plus": "PowerOcean Plus",
 				"ocean_2": "Ocean 2"
 			}
