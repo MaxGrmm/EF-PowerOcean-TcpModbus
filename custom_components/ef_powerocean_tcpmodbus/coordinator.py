@@ -94,7 +94,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         self.serial_number: str | None = None
         self._client: AsyncModbusTcpClient = AsyncModbusTcpClient(
-            host=self.host, port=self.port, timeout=5, reconnect_delay=0, retries=0
+            host=self.host, port=self.port, timeout=20, reconnect_delay=0, retries=0
         )
         self._client_slave_id = DEFAULT_SLAVE
         self._lock = asyncio.Lock()

@@ -11,6 +11,7 @@
 
 - Fix the phantom voltage filter for all inverter models
 - Fix CI running twice on PR pushes
+- Increase timeout to reduce connection errors
 
 ## [2.1.0] – 2026-08-06
 
