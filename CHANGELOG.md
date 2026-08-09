@@ -1,8 +1,46 @@
 # Changelog
 
+## [2.2.0] – 2026-08-08
+
+### Added
+
+- Improve code quality and add tests
+- Download diagnostic data
+
+### Fixed
+
+- Fix the phantom voltage filter for all inverter models
+- Fix CI running twice on PR pushes
+- Increase timeout to reduce connection errors
+
+## [2.1.0] – 2026-08-06
+
+### Added
+
+- **Maximum feed-in Power** sensor (register 40609)
+- **Battery Module Count** sensor (register 42081)
+- **Battery 1 SOC** sensor (register 42082)
+- **Battery 2 SOC** sensor (register 42083)
+- **Battery 3 SOC** sensor (register 42084)
+- **Self-powered Mode** binary sensor (Bit 3 register 40530)
+- **Intelligent Mode** binary sensor (Bit 4 register 40530)
+- **Battery Saver Mode** binary sensor (Bit 5 register 40530)
+- **Device LED brightness** sensor (register 40541)
+- Added new reconnect behavior
+
+### Changed
+
+- Switch the pymodbus client to AsyncModbusTcpClient to reduce the configurable polling interval to 2 seconds
+- Detection of unauthorized spikes in the energy sensors
+
+### Fixed
+
+- Reconnect Bugfix
+
 ## [2.0.0] – 2026-03-31
 
 ### Added
+
 - **House Power** sensor (register 40519) – previously incorrectly listed as cloud-only
 - **Grid Power** sensor (register 40521) – previously incorrectly listed as cloud-only
 - **Solar Power** sensor – calculated from active PV strings (more reliable than register 40523)
@@ -26,22 +64,25 @@
 - **Automatic reconnect** after inverter restart or network interruption – stale TCP connections are detected and cleanly closed, with reconnect on the next poll
 
 ### Changed
+
 - Switched from individual register reads to **block reads** (5 requests per poll cycle instead of ~25)
 - Inverter Temperature register corrected to 40592 (was incorrectly mapped to 40600)
 - `inverter_ac_power` (40530) now read as direct INT16 Watts (division by 100 removed)
 - Power limit register offsets corrected (40546/40548/40550/40552)
 - Registers 40550/40552 replaced by calculated values (were unreliable)
-- `const.py` cleaned up – individual REG_* constants removed, block addressing used in coordinator
+- `const.py` cleaned up – individual REG\_\* constants removed, block addressing used in coordinator
 - `sensor.py` uses `UnitOfApparentPower.VOLT_AMPERE` instead of hardcoded `"VA"`
 
 ### Fixed
+
 - Grid power and solar power returning 0 due to incorrect register mapping
 - Battery remaining energy returning double the correct value (wrong scale factor)
 - Phantom voltage on unconfigured PV string 3
 
 ### Removed
+
 - Unused `ConfigEntryNotReady` import from `__init__.py`
-- Unused REG_* constants from `const.py`
+- Unused REG\_\* constants from `const.py`
 - `pv1_today` / `pv2_today` individual string energy sensors (not available via Modbus)
 
 ---

@@ -5,11 +5,10 @@ from __future__ import annotations
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo, DeviceEntryType
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, BinarySensorDef, BINARY_SENSOR_MAP
+from .entity import EcoFlowBaseEntity
 from .coordinator import EcoflowCoordinator
 
 
@@ -28,27 +27,14 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class EcoFlowBinarySensor(CoordinatorEntity[EcoflowCoordinator], BinarySensorEntity):
+class EcoFlowBinarySensor(EcoFlowBaseEntity, BinarySensorEntity):
     def __init__(
         self,
         coordinator: EcoflowCoordinator,
         entry: ConfigEntry,
         definition: BinarySensorDef,
     ) -> None:
-        super().__init__(coordinator)
-        self._definition = definition
-        self._attr_unique_id = f"{entry.entry_id}_{definition.key}"
-        self._attr_translation_key = definition.key
-        self._attr_has_entity_name = True
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name="EcoFlow PowerOcean",
-            manufacturer="EcoFlow",
-            model=coordinator.inverter_model.display_name,
-            serial_number=coordinator.serial_number,
-            entry_type=DeviceEntryType.SERVICE,
-        )
-
+        super().__init__(coordinator, entry, definition)
         self._last_written_value: bool | None = None
 
     @callback
