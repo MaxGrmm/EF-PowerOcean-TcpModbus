@@ -244,6 +244,12 @@
       },
       "feed_in_power_max": {
         "name": "Max. Einspeiseleistung"
+      },
+      "inverter_rated_power": {
+        "name": "Wechselrichter-Nennleistung"
+      },
+      "bat_charge_power_limit": {
+        "name": "Batterieladeleistungsgrenze"
       }
     },
     "binary_sensor": {
