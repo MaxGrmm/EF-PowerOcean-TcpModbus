@@ -242,9 +242,6 @@
       "bat_net_energy": {
         "name": "Batterieverlustenergie Gesamt"
       },
-      "feed_in_power_max_ai": {
-        "name": "Max. Einspeiseleistung (KI-Zeitplan)"
-      },
       "feed_in_power_max": {
         "name": "Max. Einspeiseleistung"
       },
