@@ -249,6 +249,12 @@ SENSOR_MAP: list[SensorDef] = [
         state_class="measurement",
     ),
     SensorDef(
+        key="battery_charge_power_limit",
+        unit="W",
+        device_class="power",
+        state_class="measurement",
+    ),
+    SensorDef(
         key="bat_temp_warn_max",
         unit="°C",
         device_class="temperature",
@@ -411,13 +417,6 @@ SENSOR_MAP: list[SensorDef] = [
     ),
     SensorDef(
         key="inverter_rated_power",
-        unit="W",
-        device_class="power",
-        state_class="measurement",
-        entity_category="diagnostic",
-    ),
-    SensorDef(
-        key="battery_charge_power_limit",
         unit="W",
         device_class="power",
         state_class="measurement",
