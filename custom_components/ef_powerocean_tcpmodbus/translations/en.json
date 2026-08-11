@@ -243,6 +243,9 @@
       "bat_net_energy": {
         "name": "Battery Energy Loss"
       },
+      "feed_in_power_max_ai": {
+        "name": "Maximum feed-in Power (AI Schedule)"
+      },
       "feed_in_power_max": {
         "name": "Maximum feed-in Power"
       },
