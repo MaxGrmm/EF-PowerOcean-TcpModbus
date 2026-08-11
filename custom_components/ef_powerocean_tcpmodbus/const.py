@@ -148,7 +148,7 @@ MOD_REGISTER_MAP = {
                 RegisterDef(key="limit_inv_power", block_index=27, size=1),
                 RegisterDef(key="limit_inv_max", block_index=29, size=1),
                 RegisterDef(key="battery_capacity", block_index=33, size=1),
-                RegisterDef(key="bat_charge_power_limit", block_index=37, size=1),
+                RegisterDef(key="battery_charge_power_limit", block_index=37, size=1),
                 RegisterDef(key="battery_voltage", block_index=55),
                 RegisterDef(key="battery_current", block_index=57),
                 RegisterDef(key="battery_temperature", block_index=59),
@@ -417,7 +417,7 @@ SENSOR_MAP: list[SensorDef] = [
         entity_category="diagnostic",
     ),
     SensorDef(
-        key="bat_charge_power_limit",
+        key="battery_charge_power_limit",
         unit="W",
         device_class="power",
         state_class="measurement",

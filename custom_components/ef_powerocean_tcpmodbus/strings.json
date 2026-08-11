@@ -249,8 +249,8 @@
       "inverter_rated_power": {
         "name": "Inverter Rated Power"
       },
-      "bat_charge_power_limit": {
-        "name": "Battery Charge Power Limit"
+      "battery_charge_power_limit": {
+        "name": "Max. Battery Charge Power"
       }
     },
     "binary_sensor": {

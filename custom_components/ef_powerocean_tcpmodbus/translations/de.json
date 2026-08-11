@@ -248,8 +248,8 @@
       "inverter_rated_power": {
         "name": "Wechselrichter-Nennleistung"
       },
-      "bat_charge_power_limit": {
-        "name": "Batterieladeleistungsgrenze"
+      "battery_charge_power_limit": {
+        "name": "Max. Batterieladeleistung"
       }
     },
     "binary_sensor": {
