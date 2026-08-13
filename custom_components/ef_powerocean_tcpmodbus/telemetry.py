@@ -103,7 +103,7 @@ def decode_register(
             "<HH", registers[register_index], registers[register_index + 1]
         )
         value = struct.unpack("<f", raw)[0]
-    except struct.error, TypeError:
+    except (struct.error, TypeError):
         return None
 
     if not math.isfinite(value) or abs(value) > 1e9:
