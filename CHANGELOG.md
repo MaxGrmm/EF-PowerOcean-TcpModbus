@@ -6,6 +6,7 @@
 
 - **Inverter Rated Power** sensor (register 40528)
 - **Maximum Battery Charge Power** sensor (register 40556)
+- **Grid Mode** sensor (Bit 0 register 40530)
 
 ### Changed
 
