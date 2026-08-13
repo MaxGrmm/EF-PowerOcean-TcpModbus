@@ -95,9 +95,7 @@ pre-commit run --all-files
 ```
 
 CI also runs these checks. Formatting fixes are committed automatically to
-branches in this repository. Pull requests from forks receive a failing check
-with the required diff because GitHub does not grant CI permission to update the
-fork.
+branches in this repository.
 
 ---
 
