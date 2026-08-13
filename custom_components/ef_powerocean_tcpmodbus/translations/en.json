@@ -245,6 +245,12 @@
       },
       "feed_in_power_max": {
         "name": "Maximum feed-in Power"
+      },
+      "inverter_rated_power": {
+        "name": "Inverter Rated Power"
+      },
+      "battery_charge_power_limit": {
+        "name": "Maximum Battery Charge Power"
       }
     },
     "binary_sensor": {

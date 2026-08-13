@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.3.0] - 2026-08-13
+
+### Added
+
+- **Inverter Rated Power** sensor (register 40528)
+- **Maximum Battery Charge Power** sensor (register 40556)
+
+### Changed
+
+- Updated Maximum feed-in Power with separate register (40529) for PowerOcean Plus
+
 ## [2.2.0] – 2026-08-08
 
 ### Added

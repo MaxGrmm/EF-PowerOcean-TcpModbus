@@ -22,6 +22,7 @@ def coordinator():
     instance._check_monotonic = True
     instance._count_reset_energy_sensor = 5
     instance._count_reset_energy_finished = 5
+    instance.inverter_model = const.DEFAULT_INVERTER_MODEL
     instance.limits = {
         const.CONF_MAX_GRID_POWER: 15_000,
         const.CONF_MAX_SOLAR_POWER: 12_000,
@@ -278,8 +279,8 @@ def test_gets_and_decodes_raw_data(
         start_register=100,
         num_read_regs=2,
         content=(
-            SimpleNamespace(key="battery_count", block_index=0, size=1),
-            SimpleNamespace(key="grid_power", block_index=1, size=1),
+            const.RegisterDef(key="battery_count", block_index=0, size=1),
+            const.RegisterDef(key="grid_power", block_index=1, size=1),
         ),
     )
     monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
@@ -293,6 +294,28 @@ def test_gets_and_decodes_raw_data(
 
     assert result == {"battery_count": 2.0, "grid_power": 42.0}
     coordinator.async_read_block.assert_awaited_once_with(100, 2)
+
+
+@pytest.mark.parametrize(
+    ("inverter_model", "expected_index"),
+    (
+        (const.InverterModel.POWEROCEAN_THREE_PHASE, 90),
+        (const.InverterModel.POWEROCEAN_PLUS, 19),
+    ),
+    ids=("three-phase-default", "powerocean-plus-override"),
+)
+def test_resolves_model_specific_feed_in_register_index(
+    inverter_model: const.InverterModel, expected_index: int
+) -> None:
+    registers = {
+        register.key: register for register in const.MOD_REGISTER_MAP["blocks"][0].content
+    }
+
+    assert "feed_in_power_max_ai" not in registers
+    assert (
+        registers["feed_in_power_max"].block_index_for(inverter_model)
+        == expected_index
+    )
 
 
 def test_raw_data_raises_when_reconnect_fails(coordinator) -> None:

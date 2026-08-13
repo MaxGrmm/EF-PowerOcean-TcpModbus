@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
@@ -70,10 +71,24 @@ DEFAULT_INVERTER_MODEL: Final = InverterModel.POWEROCEAN_THREE_PHASE
 
 
 @dataclass(frozen=True)
+class ModelBlockIndex:
+    default: int
+    overrides: Mapping[InverterModel, int]
+
+    def for_model(self, inverter_model: InverterModel) -> int:
+        return self.overrides.get(inverter_model, self.default)
+
+
+@dataclass(frozen=True)
 class RegisterDef:
     key: str
-    block_index: int
+    block_index: int | ModelBlockIndex
     size: int = 2
+
+    def block_index_for(self, inverter_model: InverterModel) -> int:
+        if isinstance(self.block_index, int):
+            return self.block_index
+        return self.block_index.for_model(inverter_model)
 
 
 @dataclass(frozen=True)
@@ -125,6 +140,7 @@ MOD_REGISTER_MAP = {
                 RegisterDef(key="solar_power", block_index=4),
                 RegisterDef(key="battery_power", block_index=6),
                 RegisterDef(key="battery_soc", block_index=8, size=1),
+                RegisterDef(key="inverter_rated_power", block_index=9, size=1),
                 RegisterDef(key="system_modes", block_index=11, size=1),
                 RegisterDef(key="min_soc_limit", block_index=17, size=1),
                 RegisterDef(key="bat_temp_warn_max", block_index=21, size=1),
@@ -132,6 +148,7 @@ MOD_REGISTER_MAP = {
                 RegisterDef(key="limit_inv_power", block_index=27, size=1),
                 RegisterDef(key="limit_inv_max", block_index=29, size=1),
                 RegisterDef(key="battery_capacity", block_index=33, size=1),
+                RegisterDef(key="battery_charge_power_limit", block_index=37, size=1),
                 RegisterDef(key="battery_voltage", block_index=55),
                 RegisterDef(key="battery_current", block_index=57),
                 RegisterDef(key="battery_temperature", block_index=59),
@@ -149,7 +166,14 @@ MOD_REGISTER_MAP = {
                 RegisterDef(key="pv1_current", block_index=83),
                 RegisterDef(key="pv2_current", block_index=85),
                 RegisterDef(key="pv3_current", block_index=87),
-                RegisterDef(key="feed_in_power_max", block_index=90, size=1),
+                RegisterDef(
+                    key="feed_in_power_max",
+                    block_index=ModelBlockIndex(
+                        default=90,
+                        overrides={InverterModel.POWEROCEAN_PLUS: 19},
+                    ),
+                    size=1,
+                ),
             ],
         ),
         BlockDef(
@@ -222,6 +246,12 @@ SENSOR_MAP: list[SensorDef] = [
         key="min_soc_limit",
         unit="%",
         device_class="battery",
+        state_class="measurement",
+    ),
+    SensorDef(
+        key="battery_charge_power_limit",
+        unit="W",
+        device_class="power",
         state_class="measurement",
     ),
     SensorDef(
@@ -380,6 +410,13 @@ SENSOR_MAP: list[SensorDef] = [
     ),
     SensorDef(
         key="feed_in_power_max",
+        unit="W",
+        device_class="power",
+        state_class="measurement",
+        entity_category="diagnostic",
+    ),
+    SensorDef(
+        key="inverter_rated_power",
         unit="W",
         device_class="power",
         state_class="measurement",

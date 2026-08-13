@@ -202,7 +202,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 )
                 for register in register_block.content:
                     decode_value = decode_register(
-                        raw, register.block_index, register.size
+                        raw,
+                        register.block_index_for(self.inverter_model),
+                        register.size,
                     )
                     data[register.key] = decode_value
 
