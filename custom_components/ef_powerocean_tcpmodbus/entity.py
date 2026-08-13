@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.device_registry import DeviceInfo, DeviceEntryType
 
-from .const import DOMAIN, BinarySensorDef, SensorDef, EnergySensorDef
+from .const import DOMAIN, BinarySensorDef, EnergySensorDef, SensorDef
 from .coordinator import EcoflowCoordinator
 
 

@@ -308,13 +308,13 @@ def test_resolves_model_specific_feed_in_register_index(
     inverter_model: const.InverterModel, expected_index: int
 ) -> None:
     registers = {
-        register.key: register for register in const.MOD_REGISTER_MAP["blocks"][0].content
+        register.key: register
+        for register in const.MOD_REGISTER_MAP["blocks"][0].content
     }
 
     assert "feed_in_power_max_ai" not in registers
     assert (
-        registers["feed_in_power_max"].block_index_for(inverter_model)
-        == expected_index
+        registers["feed_in_power_max"].block_index_for(inverter_model) == expected_index
     )
 
 

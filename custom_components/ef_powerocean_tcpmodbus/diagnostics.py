@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, CONF_HOST
+from .const import CONF_HOST, DOMAIN
 from .coordinator import EcoflowCoordinator
 
 TO_REDACT = (CONF_HOST, "title", "unique_id")

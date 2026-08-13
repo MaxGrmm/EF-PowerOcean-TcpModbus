@@ -7,9 +7,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, BinarySensorDef, BINARY_SENSOR_MAP
-from .entity import EcoFlowBaseEntity
+from .const import BINARY_SENSOR_MAP, DOMAIN, BinarySensorDef
 from .coordinator import EcoflowCoordinator
+from .entity import EcoFlowBaseEntity
 
 
 async def async_setup_entry(

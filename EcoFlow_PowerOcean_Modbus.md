@@ -54,13 +54,13 @@ pip install pymodbus==3.6.9
 
 ## Connection
 
-| Parameter | Value |
-|-----------|-------|
-| Protocol  | Modbus TCP |
-| Default Port | 502 |
-| Default Slave ID | 1 (device responds to all IDs 1–250) |
-| Data Encoding | Big-endian IEEE 754 float, **word-swapped** |
-| Register Numbering | 1-based (Modbus standard) |
+| Parameter          | Value                                       |
+| ------------------ | ------------------------------------------- |
+| Protocol           | Modbus TCP                                  |
+| Default Port       | 502                                         |
+| Default Slave ID   | 1 (device responds to all IDs 1–250)        |
+| Data Encoding      | Big-endian IEEE 754 float, **word-swapped** |
+| Register Numbering | 1-based (Modbus standard)                   |
 
 ```python
 from pymodbus.client import ModbusTcpClient
@@ -75,11 +75,11 @@ client.connect()
 
 ### Device Info
 
-| Register | Type | Value | Description |
-|----------|------|-------|-------------|
-| 40001 | UINT16 | 1 | Device type identifier |
-| 40002 | UINT16 | 1 | Unknown |
-| 40003 | UINT16 | 3 | Unknown |
+| Register    | Type             | Value                   | Description                                           |
+| ----------- | ---------------- | ----------------------- | ----------------------------------------------------- |
+| 40001       | UINT16           | 1                       | Device type identifier                                |
+| 40002       | UINT16           | 1                       | Unknown                                               |
+| 40003       | UINT16           | 3                       | Unknown                                               |
 | 40004–40011 | ASCII (8×UINT16) | e.g. `R371ZDH4ZGAW0028` | Serial number (2 chars per register, high byte first) |
 
 **Reading the serial number:**
@@ -98,10 +98,10 @@ serial = ''.join(c for c in chars if 32 <= ord(c) <= 126)
 
 ### Status & Battery SOC
 
-| Register | Type | Unit | Scale | Description |
-|----------|------|------|-------|-------------|
-| 42081 | UINT16 | — | — | System status: `1` = Online, `0` = Offline |
-| 42082 | UINT16 | % | ×1 | Battery State of Charge (SOC) |
+| Register | Type   | Unit | Scale | Description                                |
+| -------- | ------ | ---- | ----- | ------------------------------------------ |
+| 42081    | UINT16 | —    | —     | System status: `1` = Online, `0` = Offline |
+| 42082    | UINT16 | %    | ×1    | Battery State of Charge (SOC)              |
 
 ---
 
@@ -125,40 +125,40 @@ def read_float(client, addr, scale=1):
 
 #### Solar
 
-| Register | Unit | Scale | Description |
-|----------|------|-------|-------------|
-| 40574/40575 | W | ×100 | Total PV power |
-| 40602/40603 | A | ×1 | PV string 1 current |
-| 40604/40605 | A | ×1 | PV string 2 current |
-| 40606/40607 | A | ×1 | PV string 3 current |
+| Register    | Unit | Scale | Description         |
+| ----------- | ---- | ----- | ------------------- |
+| 40574/40575 | W    | ×100  | Total PV power      |
+| 40602/40603 | A    | ×1    | PV string 1 current |
+| 40604/40605 | A    | ×1    | PV string 2 current |
+| 40606/40607 | A    | ×1    | PV string 3 current |
 
 #### Battery
 
-| Register | Unit | Scale | Description |
-|----------|------|-------|-------------|
-| 40576/40577 | W | ×1000 | Battery power (positive = charging, negative = discharging) |
-| 40578/40579 | °C | ×1 | Battery ambient temperature |
+| Register    | Unit | Scale | Description                                                 |
+| ----------- | ---- | ----- | ----------------------------------------------------------- |
+| 40576/40577 | W    | ×1000 | Battery power (positive = charging, negative = discharging) |
+| 40578/40579 | °C   | ×1    | Battery ambient temperature                                 |
 
 #### AC Grid
 
-| Register | Unit | Scale | Description |
-|----------|------|-------|-------------|
-| 40580/40581 | V | ×1 | Grid voltage phase L1 |
-| 40582/40583 | V | ×1 | Grid voltage phase L2 |
-| 40584/40585 | V | ×1 | Grid voltage phase L3 |
-| 40586/40587 | A | ×1 | Grid current phase L1 |
-| 40588/40589 | A | ×1 | Grid current phase L2 |
-| 40590/40591 | A | ×1 | Grid current phase L3 |
-| 40592/40593 | Hz | ×1 | Grid frequency (measurement 1) |
-| 40594/40595 | Hz | ×1 | Grid frequency (measurement 2) |
-| 40596/40597 | W | ×10 | Active power / grid feed-in power (positive = feed-in, negative = consumption) |
-| 40598/40599 | VA | ×10 | Apparent power |
+| Register    | Unit | Scale | Description                                                                    |
+| ----------- | ---- | ----- | ------------------------------------------------------------------------------ |
+| 40580/40581 | V    | ×1    | Grid voltage phase L1                                                          |
+| 40582/40583 | V    | ×1    | Grid voltage phase L2                                                          |
+| 40584/40585 | V    | ×1    | Grid voltage phase L3                                                          |
+| 40586/40587 | A    | ×1    | Grid current phase L1                                                          |
+| 40588/40589 | A    | ×1    | Grid current phase L2                                                          |
+| 40590/40591 | A    | ×1    | Grid current phase L3                                                          |
+| 40592/40593 | Hz   | ×1    | Grid frequency (measurement 1)                                                 |
+| 40594/40595 | Hz   | ×1    | Grid frequency (measurement 2)                                                 |
+| 40596/40597 | W    | ×10   | Active power / grid feed-in power (positive = feed-in, negative = consumption) |
+| 40598/40599 | VA   | ×10   | Apparent power                                                                 |
 
 #### Inverter
 
-| Register | Unit | Scale | Description |
-|----------|------|-------|-------------|
-| 40600/40601 | °C | ×1 | Inverter temperature |
+| Register    | Unit | Scale | Description          |
+| ----------- | ---- | ----- | -------------------- |
+| 40600/40601 | °C   | ×1    | Inverter temperature |
 
 ---
 
@@ -166,30 +166,30 @@ def read_float(client, addr, scale=1):
 
 Values reset at midnight.
 
-| Register | Unit | Scale | Description |
-|----------|------|-------|-------------|
-| 42163/42164 | kWh | ×1 | Grid import today |
-| 42179/42180 | kWh | ×1 | Grid export today |
-| 42195/42196 | kWh | ×1 | PV string 1 yield today |
-| 42211/42212 | kWh | ×1 | PV string 2 yield today |
-| 42243/42244 | kWh | ×1 | Battery charged today |
-| 42145/42146 | kWh | ×1 | Battery discharged today |
+| Register    | Unit | Scale | Description              |
+| ----------- | ---- | ----- | ------------------------ |
+| 42163/42164 | kWh  | ×1    | Grid import today        |
+| 42179/42180 | kWh  | ×1    | Grid export today        |
+| 42195/42196 | kWh  | ×1    | PV string 1 yield today  |
+| 42211/42212 | kWh  | ×1    | PV string 2 yield today  |
+| 42243/42244 | kWh  | ×1    | Battery charged today    |
+| 42145/42146 | kWh  | ×1    | Battery discharged today |
 
 ---
 
 ### Energy Counters – Lifetime
 
-| Register | Unit | Scale | Description |
-|----------|------|-------|-------------|
-| 42113/42114 | kWh | ×1 | Battery net energy (charged minus discharged) |
-| 42161/42162 | Wh | ×1 | Grid import lifetime |
-| 42177/42178 | Wh | ×1 | Grid export lifetime |
-| 42193/42194 | kWh | ×1 | PV string 1 total yield |
-| 42209/42210 | kWh | ×1 | PV string 2 total yield |
-| 42225/42226 | kWh | ×1 | Battery total charged (lifetime) |
-| 42227/42228 | kWh | ×1 | Battery remaining energy (current) |
-| 42241/42242 | kWh | ×1 | Battery total discharged (lifetime) |
-| 42257/42258 | kWh | ×1 | Total system energy |
+| Register    | Unit | Scale | Description                                   |
+| ----------- | ---- | ----- | --------------------------------------------- |
+| 42113/42114 | kWh  | ×1    | Battery net energy (charged minus discharged) |
+| 42161/42162 | Wh   | ×1    | Grid import lifetime                          |
+| 42177/42178 | Wh   | ×1    | Grid export lifetime                          |
+| 42193/42194 | kWh  | ×1    | PV string 1 total yield                       |
+| 42209/42210 | kWh  | ×1    | PV string 2 total yield                       |
+| 42225/42226 | kWh  | ×1    | Battery total charged (lifetime)              |
+| 42227/42228 | kWh  | ×1    | Battery remaining energy (current)            |
+| 42241/42242 | kWh  | ×1    | Battery total discharged (lifetime)           |
+| 42257/42258 | kWh  | ×1    | Total system energy                           |
 
 ---
 
@@ -198,26 +198,26 @@ Values reset at midnight.
 These registers appear to hold device configuration. Their exact meaning is not fully confirmed.  
 **Do not write to these registers unless you know what you are doing.**
 
-| Register | Value (observed) | Notes |
-|----------|-----------------|-------|
-| 40527 | 100 | Unknown – possibly max SOC limit (%) |
-| 40528 | 15000 | Unknown – possibly power limit (W×10 = 1500 W?) |
-| 40536 | 11 | Unknown |
-| 40537 | 1 | Unknown |
-| 40538 | 15000 | Unknown |
-| 40540 | 32 | Unknown |
-| 40541 | 20 | Unknown – possibly min cell temperature |
-| 40546 | 15000 | Unknown |
-| 40548 | 15000 | Unknown |
-| 40552 | 5000 | Unknown |
-| 40615 | 10000 | Unknown |
-| 40616 | 10000 | Unknown |
-| 40617 | 6000 | Unknown |
-| 40618 | 6000 | Unknown |
-| 40625 | 800 | Unknown |
-| 40626 | 800 | Unknown |
-| 40627 | 10000 | Unknown |
-| 40628 | 10000 | Unknown |
+| Register | Value (observed) | Notes                                           |
+| -------- | ---------------- | ----------------------------------------------- |
+| 40527    | 100              | Unknown – possibly max SOC limit (%)            |
+| 40528    | 15000            | Unknown – possibly power limit (W×10 = 1500 W?) |
+| 40536    | 11               | Unknown                                         |
+| 40537    | 1                | Unknown                                         |
+| 40538    | 15000            | Unknown                                         |
+| 40540    | 32               | Unknown                                         |
+| 40541    | 20               | Unknown – possibly min cell temperature         |
+| 40546    | 15000            | Unknown                                         |
+| 40548    | 15000            | Unknown                                         |
+| 40552    | 5000             | Unknown                                         |
+| 40615    | 10000            | Unknown                                         |
+| 40616    | 10000            | Unknown                                         |
+| 40617    | 6000             | Unknown                                         |
+| 40618    | 6000             | Unknown                                         |
+| 40625    | 800              | Unknown                                         |
+| 40626    | 800              | Unknown                                         |
+| 40627    | 10000            | Unknown                                         |
+| 40628    | 10000            | Unknown                                         |
 
 ---
 
@@ -398,18 +398,18 @@ while True:
 
 The following values are **not available via Modbus TCP** and can only be retrieved through the EcoFlow Cloud API:
 
-| Parameter | Cloud API Sensor | Notes |
-|-----------|-----------------|-------|
-| State of Health | `bpSoh` | e.g. 98% |
-| Battery voltage | `bpVol` | e.g. 54 V |
-| Max cell temperature | `bpMaxCellTemp` | e.g. 22°C |
-| Min cell temperature | `bpMinCellTemp` | e.g. 20°C |
-| Battery current (A) | `bpAmp` | e.g. -0.05 A |
-| Accumulated charge | `bpAccuChgEnergy` | lifetime Wh |
-| Accumulated discharge | `bpAccuDsgEnergy` | lifetime Wh |
-| Individual MPPT voltages | `mpptPv1_vol` | e.g. 423 V |
-| Individual MPPT power | `mpptPv1_pwr` | e.g. 690 W |
-| Per-phase reactive power | `pcsAPhase_reactPwr` | VAr |
+| Parameter                | Cloud API Sensor     | Notes        |
+| ------------------------ | -------------------- | ------------ |
+| State of Health          | `bpSoh`              | e.g. 98%     |
+| Battery voltage          | `bpVol`              | e.g. 54 V    |
+| Max cell temperature     | `bpMaxCellTemp`      | e.g. 22°C    |
+| Min cell temperature     | `bpMinCellTemp`      | e.g. 20°C    |
+| Battery current (A)      | `bpAmp`              | e.g. -0.05 A |
+| Accumulated charge       | `bpAccuChgEnergy`    | lifetime Wh  |
+| Accumulated discharge    | `bpAccuDsgEnergy`    | lifetime Wh  |
+| Individual MPPT voltages | `mpptPv1_vol`        | e.g. 423 V   |
+| Individual MPPT power    | `mpptPv1_pwr`        | e.g. 690 W   |
+| Per-phase reactive power | `pcsAPhase_reactPwr` | VAr          |
 
 > Scanned address range: 40001–44096 and 42081–43500. No additional registers were found beyond those documented above.
 
@@ -417,9 +417,9 @@ The following values are **not available via Modbus TCP** and can only be retrie
 
 ## Tested Hardware
 
-| Device | Firmware | Result |
-|--------|----------|--------|
-| EcoFlow PowerOcean Plus | Unknown | Full register map confirmed |
+| Device                  | Firmware | Result                      |
+| ----------------------- | -------- | --------------------------- |
+| EcoFlow PowerOcean Plus | Unknown  | Full register map confirmed |
 
 If you have tested on other EcoFlow devices (Power Ocean DC, Power Ocean Connect 5kWh etc.), please open an issue or PR with your findings.
 
@@ -457,4 +457,4 @@ MIT License – free to use, modify, and distribute with attribution.
 
 ---
 
-*Discovered and documented by community reverse engineering. Not affiliated with EcoFlow Technology Co., Ltd.*
+_Discovered and documented by community reverse engineering. Not affiliated with EcoFlow Technology Co., Ltd._

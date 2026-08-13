@@ -53,7 +53,7 @@ class InverterModel(StrEnum):
             # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1735192805714/EcoFlow%20PowerOcean%20DC%20Fit_Datasheet_EN_20241225.pdf
             self.POWEROCEAN_DC_FIT: 90,
             # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1779447439219/OCEAN%202%20Three-Phase_Datasheet_EN_260522.pdf
-            self.OCEAN_2: 120
+            self.OCEAN_2: 120,
         }[self]
 
     @property
