@@ -92,17 +92,18 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 
 ### Battery
 
-| Sensor                   | Unit | Description                                 |
-| ------------------------ | ---- | ------------------------------------------- |
-| Battery SOC              | %    | State of charge                             |
-| Battery 1 SOC            | %    | State of charge                             |
-| Battery 2 SOC            | %    | State of charge                             |
-| Battery 3 SOC            | %    | State of charge                             |
-| Battery Remaining Energy | kWh  | Calculated from SOC × configured capacity   |
-| Battery Voltage          | V    | DC bus voltage                              |
-| Battery Current          | A    | Positive = charging, negative = discharging |
-| Battery Temperature      | °C   | Battery temperature                         |
-| Battery Nominal Capacity | kWh  | User-configured capacity                    |
+| Sensor                        | Unit | Description                                 |
+| ----------------------------- | ---- | ------------------------------------------- |
+| Battery SOC                   | %    | State of charge                             |
+| Battery 1 SOC                 | %    | State of charge                             |
+| Battery 2 SOC                 | %    | State of charge                             |
+| Battery 3 SOC                 | %    | State of charge                             |
+| Battery Remaining Energy      | kWh  | Calculated from SOC × configured capacity   |
+| Battery Voltage               | V    | DC bus voltage                              |
+| Battery Current               | A    | Positive = charging, negative = discharging |
+| Battery Temperature           | °C   | Battery temperature                         |
+| Battery Nominal Capacity      | kWh  | User-configured capacity                    |
+| Maximum Battery Charge Power  | W    | Configured max charging in the EcoFlow app  |
 
 ### Solar
 
@@ -126,6 +127,7 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 | Sensor                       | Unit | Description                            |
 | ---------------------------- | ---- | -------------------------------------- |
 | Inverter Nominal Power Limit | W    | Maximum inverter output                |
+| Inverter Rated Power Limit   | W    | Maximum inverter rated power           |
 | Inverter Current Max Power   | W    | Current active power limit             |
 | Max Battery Discharge Power  | W    | Calculated: 3300 W × number of modules |
 | Max Charge Power             | W    | Calculated: 2500 W × number of modules |
