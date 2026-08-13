@@ -250,6 +250,13 @@
       },
       "battery_charge_power_limit": {
         "name": "Max. Batterieladeleistung"
+      },
+      "grid_mode":{
+        "name": "Netzmodus",
+        "state": {
+          "0": "Netzbetrieb",
+          "1": "Inselbetrieb"
+        }
       }
     },
     "binary_sensor": {

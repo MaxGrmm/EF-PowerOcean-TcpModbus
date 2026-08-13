@@ -251,6 +251,13 @@
       },
       "battery_charge_power_limit": {
         "name": "Maximum Battery Charge Power"
+      },
+      "grid_mode":{
+        "name": "Grid Mode",
+        "state": {
+          "0": "Grid-connected",
+          "1": "Islanded"
+        }
       }
     },
     "binary_sensor": {
