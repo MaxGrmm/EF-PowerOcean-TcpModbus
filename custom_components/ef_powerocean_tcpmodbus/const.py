@@ -53,7 +53,7 @@ class InverterModel(StrEnum):
             # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1735192805714/EcoFlow%20PowerOcean%20DC%20Fit_Datasheet_EN_20241225.pdf
             self.POWEROCEAN_DC_FIT: 90,
             # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1779447439219/OCEAN%202%20Three-Phase_Datasheet_EN_260522.pdf
-            self.OCEAN_2: 120
+            self.OCEAN_2: 120,
         }[self]
 
     @property
@@ -106,6 +106,7 @@ class SensorDef:
     device_class: str | None = None
     state_class: str | None = None
     entity_category: str | None = None
+    icon: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,7 @@ class EnergySensorDef:
     device_class: str = "energy"
     state_class: str = "total_increasing"
     entity_category: str | None = None
+    icon: str | None = None
 
 
 @dataclass(frozen=True)
@@ -479,6 +481,13 @@ SENSOR_MAP: list[SensorDef] = [
         unit="kWh",
         device_class="energy",
         state_class="total",
+    ),
+    SensorDef(
+        key="grid_mode",
+        unit=None,
+        device_class="enum",
+        state_class=None,
+        icon="mdi:transmission-tower",
     ),
 ]
 

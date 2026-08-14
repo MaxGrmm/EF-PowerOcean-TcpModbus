@@ -33,9 +33,7 @@ class TelemetryData:
     system_modes: float | None = None
 
     @classmethod
-    def from_mapping(
-        cls, data: Mapping[str, float | None]
-    ) -> TelemetryData:
+    def from_mapping(cls, data: Mapping[str, float | None]) -> TelemetryData:
         """Create calculation input from the coordinator's raw telemetry."""
         return cls(
             battery_soc=data.get("battery_soc"),
@@ -159,8 +157,7 @@ def calculate_derived_values(
     battery_discharged_total = data.bat_discharged_total
     calculated["bat_net_energy"] = (
         round(battery_charged_total - battery_discharged_total, 2)
-        if battery_charged_total is not None
-        and battery_discharged_total is not None
+        if battery_charged_total is not None and battery_discharged_total is not None
         else None
     )
 
@@ -203,9 +200,9 @@ def calculate_derived_values(
         )
 
     if data.system_modes is not None:
+        calculated["grid_mode"] = _is_bit_set(int(data.system_modes), 0)
         calculated["battery_saver_mode_ena"] = _is_bit_set(int(data.system_modes), 3)
         calculated["self_use_mode_ena"] = _is_bit_set(int(data.system_modes), 4)
         calculated["intelligent_mode_ena"] = _is_bit_set(int(data.system_modes), 5)
 
     return calculated
-

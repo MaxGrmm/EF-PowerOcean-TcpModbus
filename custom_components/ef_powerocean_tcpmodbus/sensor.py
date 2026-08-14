@@ -83,6 +83,9 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
         if self._definition.entity_category == "diagnostic":
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
+        if self._definition.icon:
+            self._attr_icon = self._definition.icon
+
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
