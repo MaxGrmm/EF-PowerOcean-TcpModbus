@@ -6,10 +6,8 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from pymodbus.client import AsyncModbusTcpClient
-
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
-from homeassistant.config_entries import ConfigFlow, ConfigEntry, OptionsFlow
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
     BooleanSelector,
@@ -17,23 +15,24 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
 )
+from pymodbus.client import AsyncModbusTcpClient
 
 from .const import (
-    DOMAIN,
-    CONF_HOST,
-    CONF_PORT,
     CONF_BATTERY_COUNT,
+    CONF_CALC_SOLAR_POWER,
+    CONF_HOST,
+    CONF_INVERTER_MODEL,
     CONF_MAX_GRID_POWER,
     CONF_MAX_SOLAR_POWER,
+    CONF_PORT,
     CONF_SCAN_INTERVAL,
-    CONF_CALC_SOLAR_POWER,
-    CONF_INVERTER_MODEL,
-    DEFAULT_PORT,
-    DEFAULT_SCAN_INTERVAL,
     DEFAULT_BATTERY_COUNT,
+    DEFAULT_INVERTER_MODEL,
     DEFAULT_MAX_GRID_POWER,
     DEFAULT_MAX_SOLAR_POWER,
-    DEFAULT_INVERTER_MODEL,
+    DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
     InverterModel,
 )
 
@@ -250,4 +249,3 @@ class EcoflowOptionsFlow(OptionsFlow):
             ),
             errors=errors,
         )
-

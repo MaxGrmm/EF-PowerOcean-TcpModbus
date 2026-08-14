@@ -13,7 +13,7 @@ body:
       placeholder: "e.g. 2025.3.0"
     validations:
       required: true
-  
+
   - type: dropdown
     id: device_type
     attributes:

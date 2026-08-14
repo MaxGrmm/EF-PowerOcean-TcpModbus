@@ -79,6 +79,26 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 
 ---
 
+## Development
+
+Install the development dependencies and enable the formatting hooks:
+
+```shell
+python -m pip install -r requirements-development.txt
+pre-commit install
+```
+
+Run all linting and formatting checks manually with:
+
+```shell
+pre-commit run --all-files
+```
+
+CI also runs these checks. Formatting fixes are committed automatically to
+branches in this repository.
+
+---
+
 ## Available Sensors
 
 ### Power (real-time)
@@ -92,18 +112,18 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 
 ### Battery
 
-| Sensor                        | Unit | Description                                 |
-| ----------------------------- | ---- | ------------------------------------------- |
-| Battery SOC                   | %    | State of charge                             |
-| Battery 1 SOC                 | %    | State of charge                             |
-| Battery 2 SOC                 | %    | State of charge                             |
-| Battery 3 SOC                 | %    | State of charge                             |
-| Battery Remaining Energy      | kWh  | Calculated from SOC × configured capacity   |
-| Battery Voltage               | V    | DC bus voltage                              |
-| Battery Current               | A    | Positive = charging, negative = discharging |
-| Battery Temperature           | °C   | Battery temperature                         |
-| Battery Nominal Capacity      | kWh  | User-configured capacity                    |
-| Maximum Battery Charge Power  | W    | Configured max charging in the EcoFlow app  |
+| Sensor                       | Unit | Description                                 |
+| ---------------------------- | ---- | ------------------------------------------- |
+| Battery SOC                  | %    | State of charge                             |
+| Battery 1 SOC                | %    | State of charge                             |
+| Battery 2 SOC                | %    | State of charge                             |
+| Battery 3 SOC                | %    | State of charge                             |
+| Battery Remaining Energy     | kWh  | Calculated from SOC × configured capacity   |
+| Battery Voltage              | V    | DC bus voltage                              |
+| Battery Current              | A    | Positive = charging, negative = discharging |
+| Battery Temperature          | °C   | Battery temperature                         |
+| Battery Nominal Capacity     | kWh  | User-configured capacity                    |
+| Maximum Battery Charge Power | W    | Configured max charging in the EcoFlow app  |
 
 ### Solar
 

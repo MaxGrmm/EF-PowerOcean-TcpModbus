@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Final
 import logging
+from typing import Final
 
 from homeassistant.components.sensor import RestoreSensor
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    EntityCategory,
     PERCENTAGE,
+    EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -22,13 +22,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     DOMAIN,
-    SensorDef,
-    EnergySensorDef,
-    SENSOR_MAP,
     ENERGY_SENSOR_MAP,
+    SENSOR_MAP,
+    EnergySensorDef,
+    SensorDef,
 )
-from .entity import EcoFlowBaseEntity
 from .coordinator import EcoflowCoordinator
+from .entity import EcoFlowBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
 
