@@ -72,7 +72,7 @@ The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled b
 | Number of Batteries        | 0                      | Number of installed battery modules                                                                                                                              |
 | Maximum solar power        | 12kW                   | Installed solar power                                                                                                                                            |
 | Maximum grid power         | 15kW                   | Expected maximum grid power to detect unauthorized values                                                                                                        |
-| Calculation of solar power | false             | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
+| Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
 | Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
 
 To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**
