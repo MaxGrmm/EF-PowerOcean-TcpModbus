@@ -341,3 +341,67 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
             return None
+
+    async def async_write_modbus_register(
+        self, register_address: int, key: str, value: int
+    ) -> None:
+        """Universal method to write a 16-bit unsigned integer to any Modbus register."""
+        if not self._client:
+            _LOGGER.error("Modbus client is not initialized")
+            return
+
+        async with self._lock:
+            try:
+                from homeassistant.exceptions import HomeAssistantError
+
+                target_value = int(value)
+
+                _LOGGER.debug(
+                    "Sending Modbus write command [FC6]: value %s to address %s (Key: %s, Device ID: %s)",
+                    target_value,
+                    register_address,
+                    key,
+                    self._client_slave_id,
+                )
+
+                # Execute write single register operation
+                response = await self._client.write_register(
+                    address=register_address,
+                    value=target_value,
+                    device_id=self._client_slave_id,
+                )
+
+                if response.isError():
+                    _LOGGER.error(
+                        "Modbus error response when writing to register %s: %s",
+                        register_address,
+                        response,
+                    )
+                    raise HomeAssistantError(
+                        f"Modbus rejected write operation for register {register_address}: {response}"
+                    )
+
+                _LOGGER.info(
+                    "Register %s [%s] successfully updated to value: %s",
+                    register_address,
+                    key,
+                    target_value,
+                )
+
+                # Update the coordinator cache data locally to update the user interface immediately
+                if self.data is None:
+                    self.data = {}
+
+                if isinstance(self.data, dict):
+                    self.data[key] = target_value
+
+                # Notify entity platforms to refresh states across Home Assistant
+                self.async_update_listeners()
+
+            except Exception as err:
+                _LOGGER.error(
+                    "Failed to write to register %s via Modbus TCP: %s",
+                    register_address,
+                    err,
+                )
+                raise HomeAssistantError(f"Error writing data to inverter: {err}")

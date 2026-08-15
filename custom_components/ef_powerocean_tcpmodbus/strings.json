@@ -252,7 +252,7 @@
       "battery_charge_power_limit": {
         "name": "Maximum Battery Charge Power"
       },
-      "grid_mode":{
+      "grid_mode": {
         "name": "Grid Mode",
         "state": {
           "0": "Grid-connected",
@@ -269,6 +269,14 @@
       },
       "battery_saver_mode_ena": {
         "name": "Battery Saver Mode"
+      }
+    },
+    "number": {
+      "min_soc_limit_control": {
+        "name": "Minimum SOC Limit Control"
+      },
+      "device_led_brightness_control": {
+        "name": "LED Brightness Control"
       }
     }
   }
