@@ -19,6 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: Final = [
     Platform.BINARY_SENSOR,
     Platform.SENSOR,
+    Platform.NUMBER,
 ]
 WARNING_TRANSLATION_PREFIX: Final = f"component.{DOMAIN}.config.step.warning"
 
