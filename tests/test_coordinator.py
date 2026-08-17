@@ -43,25 +43,26 @@ def sanitize(
 
 
 @pytest.mark.parametrize(
-    ("serial_number", "battery_temperature", "expected"),
+    ("serial_number", "display_brightness", "expected"),
     (
         ("R123456789", 0, True),
-        ("R123456789", 0.0, True),
-        ("R123456789", 21.5, False),
-        ("unknown", 0, False),
-        ("", 0, False),
-        (None, 0, False),
+        ("R123456789", 19, True),
+        ("R123456789", 20, False),
+        ("R123456789", 100, False),
+        ("unknown", 19, False),
+        ("", 19, False),
+        (None, 19, False),
         ("R123456789", None, False),
     ),
 )
 def test_reports_modbus_disabled_from_current_telemetry(
     coordinator,
     serial_number: str | None,
-    battery_temperature: float | None,
+    display_brightness: float | None,
     expected: bool,
 ) -> None:
     coordinator.serial_number = serial_number
-    coordinator.data = {"battery_temperature": battery_temperature}
+    coordinator.data = {"device_led_brightness": display_brightness}
 
     assert coordinator.is_modbus_disabled is expected
 

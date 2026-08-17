@@ -8,8 +8,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from .const import (
-    BATTERY_TEMPERATURE_REGISTER,
-    BATTERY_TEMPERATURE_REGISTER_SIZE,
+    DEVICE_LED_BRIGHTNESS_REGISTER,
+    DEVICE_LED_BRIGHTNESS_REGISTER_SIZE,
     SERIAL_NUMBER_REGISTER,
     SERIAL_NUMBER_REGISTER_COUNT,
 )
@@ -31,11 +31,14 @@ def decode_serial_number(registers: list[int] | None) -> str | None:
 
 
 def is_modbus_disabled(
-    serial_number: str | None, battery_temperature: float | None
+    serial_number: str | None, display_brightness: float | None
 ) -> bool:
     """Return whether Modbus responds but telemetry appears disabled."""
     return bool(
-        serial_number and serial_number != "unknown" and battery_temperature == 0
+        serial_number
+        and serial_number != "unknown"
+        and display_brightness is not None
+        and display_brightness < 20
     )
 
 
@@ -46,17 +49,17 @@ async def async_is_modbus_disabled(
     serial_raw = await read_registers(
         SERIAL_NUMBER_REGISTER, SERIAL_NUMBER_REGISTER_COUNT
     )
-    battery_temperature_raw = await read_registers(
-        BATTERY_TEMPERATURE_REGISTER,
-        BATTERY_TEMPERATURE_REGISTER_SIZE,
+    display_brightness_raw = await read_registers(
+        DEVICE_LED_BRIGHTNESS_REGISTER,
+        DEVICE_LED_BRIGHTNESS_REGISTER_SIZE,
     )
 
     return is_modbus_disabled(
         decode_serial_number(serial_raw),
         decode_register(
-            battery_temperature_raw,
+            display_brightness_raw,
             0,
-            BATTERY_TEMPERATURE_REGISTER_SIZE,
+            DEVICE_LED_BRIGHTNESS_REGISTER_SIZE,
         ),
     )
 

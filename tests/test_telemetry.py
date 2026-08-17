@@ -17,15 +17,15 @@ from ef_powerocean_tcpmodbus.telemetry import (
 
 def test_reads_modbus_setup_check_registers() -> None:
     serial_registers = [0x5231, 0x3233, 0x3435]
-    temperature_registers = [0, 0]
-    read_registers = AsyncMock(side_effect=(serial_registers, temperature_registers))
+    brightness_registers = [19]
+    read_registers = AsyncMock(side_effect=(serial_registers, brightness_registers))
 
     result = asyncio.run(async_is_modbus_disabled(read_registers))
 
     assert result is True
     assert read_registers.await_args_list == [
         unittest.mock.call(40004, 8),
-        unittest.mock.call(40578, 2),
+        unittest.mock.call(40541, 1),
     ]
 
 
