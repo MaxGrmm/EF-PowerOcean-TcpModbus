@@ -25,7 +25,17 @@ homeassistant_core = types.ModuleType("homeassistant.core")
 homeassistant_core.HomeAssistant = type("HomeAssistant", (), {})
 homeassistant_config_entries = types.ModuleType("homeassistant.config_entries")
 homeassistant_config_entries.ConfigEntry = type("ConfigEntry", (), {})
+homeassistant_components = types.ModuleType("homeassistant.components")
+homeassistant_diagnostics = types.ModuleType("homeassistant.components.diagnostics")
+homeassistant_diagnostics.async_redact_data = lambda data, _to_redact: data
+homeassistant_persistent_notification = types.ModuleType(
+    "homeassistant.components.persistent_notification"
+)
+homeassistant_persistent_notification.async_create = lambda *args, **kwargs: None
+homeassistant_components.persistent_notification = homeassistant_persistent_notification
 homeassistant_helpers = types.ModuleType("homeassistant.helpers")
+homeassistant_translation = types.ModuleType("homeassistant.helpers.translation")
+homeassistant_translation.async_get_translations = None
 homeassistant_update_coordinator = types.ModuleType(
     "homeassistant.helpers.update_coordinator"
 )
@@ -56,7 +66,11 @@ DEPENDENCY_STUBS = {
     "homeassistant.const": homeassistant_const,
     "homeassistant.core": homeassistant_core,
     "homeassistant.config_entries": homeassistant_config_entries,
+    "homeassistant.components": homeassistant_components,
+    "homeassistant.components.diagnostics": homeassistant_diagnostics,
+    "homeassistant.components.persistent_notification": homeassistant_persistent_notification,
     "homeassistant.helpers": homeassistant_helpers,
+    "homeassistant.helpers.translation": homeassistant_translation,
     "homeassistant.helpers.update_coordinator": homeassistant_update_coordinator,
     "pymodbus": pymodbus,
     "pymodbus.client": pymodbus_client,

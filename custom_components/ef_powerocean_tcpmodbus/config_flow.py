@@ -32,26 +32,46 @@ from .const import (
     DEFAULT_MAX_SOLAR_POWER,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SLAVE,
     DOMAIN,
     InverterModel,
 )
+from .telemetry import async_is_modbus_disabled
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_validate_connection(host: str, port: int) -> bool:
-    """Try to connect and read status register."""
+async def async_validate_connection(host: str, port: int) -> tuple[bool, bool]:
+    """Try to connect and return any diagnostic warning."""
+    client = AsyncModbusTcpClient(host, port=port, timeout=5)
     try:
-        client = AsyncModbusTcpClient(host, port=port, timeout=5)
         await client.connect()
         if not client.connected:
-            return False
-        else:
-            client.close()
-            return True
+            return False, False
+
+        try:
+
+            async def async_read_registers(
+                address: int, count: int
+            ) -> list[int] | None:
+                response = await client.read_holding_registers(
+                    address=address,
+                    count=count,
+                    device_id=DEFAULT_SLAVE,
+                )
+                return None if response.isError() else response.registers
+
+            modbus_disabled = await async_is_modbus_disabled(async_read_registers)
+        except Exception as err:
+            _LOGGER.debug("Could not run Modbus warning check: %s", err)
+            return True, False
+
+        return True, modbus_disabled
     except Exception as e:
         _LOGGER.warning("EF-PowerOcean connection test failed: %s", e)
-        return False
+        return False, False
+    finally:
+        client.close()
 
 
 class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -62,6 +82,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._user_input: dict = {}
+        self._is_modbus_disabled = False
 
     @staticmethod
     @callback
@@ -74,9 +95,10 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            if await async_validate_connection(
+            connected, self._is_modbus_disabled = await async_validate_connection(
                 user_input[CONF_HOST], user_input[CONF_PORT]
-            ):
+            )
+            if connected:
                 self._user_input = user_input
                 await self.async_set_unique_id(
                     f"{self._user_input[CONF_HOST]}:{self._user_input[CONF_PORT]}"
@@ -102,10 +124,9 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self._user_input.update(user_input)
-            return self.async_create_entry(
-                title=f"EcoFlow PowerOcean ({self._user_input[CONF_HOST]})",
-                data=self._user_input,
-            )
+            if self._is_modbus_disabled:
+                return await self.async_step_warning()
+            return self._async_create_config_entry()
 
         return self.async_show_form(
             step_id="parameters",
@@ -141,6 +162,23 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_warning(self, user_input=None) -> FlowResult:
+        """Show a non-blocking warning before creating the entry."""
+        if user_input is not None:
+            return self._async_create_config_entry()
+
+        return self.async_show_form(
+            step_id="warning",
+            data_schema=vol.Schema({}),
+        )
+
+    def _async_create_config_entry(self) -> FlowResult:
+        """Create the config entry after all setup steps."""
+        return self.async_create_entry(
+            title=f"EcoFlow PowerOcean ({self._user_input[CONF_HOST]})",
+            data=self._user_input,
+        )
+
 
 class EcoflowOptionsFlow(OptionsFlow):
     """Handle options (reconfiguration after setup)."""
@@ -162,7 +200,8 @@ class EcoflowOptionsFlow(OptionsFlow):
             current_host = self._config_entry.data.get(CONF_HOST)
             current_port = self._config_entry.data.get(CONF_PORT, DEFAULT_PORT)
             if host != current_host or port != current_port:
-                if not await async_validate_connection(host, port):
+                connected, _ = await async_validate_connection(host, port)
+                if not connected:
                     errors["base"] = "cannot_connect"
 
             if not errors:

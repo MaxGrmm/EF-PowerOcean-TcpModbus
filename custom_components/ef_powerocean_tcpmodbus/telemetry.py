@@ -4,8 +4,61 @@ from __future__ import annotations
 
 import math
 import struct
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+
+from .const import (
+    BATTERY_TEMPERATURE_REGISTER,
+    BATTERY_TEMPERATURE_REGISTER_SIZE,
+    SERIAL_NUMBER_REGISTER,
+    SERIAL_NUMBER_REGISTER_COUNT,
+)
+
+
+def decode_serial_number(registers: list[int] | None) -> str | None:
+    """Decode a serial number from Modbus registers."""
+    if not registers:
+        return None
+
+    serial_number = (
+        "".join(
+            chr((register >> 8) & 0xFF) + chr(register & 0xFF) for register in registers
+        )
+        .strip()
+        .replace("\x00", "")
+    )
+    return serial_number or None
+
+
+def is_modbus_disabled(
+    serial_number: str | None, battery_temperature: float | None
+) -> bool:
+    """Return whether Modbus responds but telemetry appears disabled."""
+    return bool(
+        serial_number and serial_number != "unknown" and battery_temperature == 0
+    )
+
+
+async def async_is_modbus_disabled(
+    read_registers: Callable[[int, int], Awaitable[list[int] | None]],
+) -> bool:
+    """Read and decode all registers that define Modbus setup validity."""
+    serial_raw = await read_registers(
+        SERIAL_NUMBER_REGISTER, SERIAL_NUMBER_REGISTER_COUNT
+    )
+    battery_temperature_raw = await read_registers(
+        BATTERY_TEMPERATURE_REGISTER,
+        BATTERY_TEMPERATURE_REGISTER_SIZE,
+    )
+
+    return is_modbus_disabled(
+        decode_serial_number(serial_raw),
+        decode_register(
+            battery_temperature_raw,
+            0,
+            BATTERY_TEMPERATURE_REGISTER_SIZE,
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)

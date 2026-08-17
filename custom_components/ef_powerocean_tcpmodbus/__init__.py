@@ -3,21 +3,47 @@
 from __future__ import annotations
 
 import logging
+from typing import Final
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.translation import async_get_translations
 
 from .const import DOMAIN
 from .coordinator import EcoflowCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [
+PLATFORMS: Final = [
     Platform.BINARY_SENSOR,
     Platform.SENSOR,
 ]
 # CONFIG_VERSION = 2
+WARNING_TRANSLATION_PREFIX: Final = f"component.{DOMAIN}.config.step.warning"
+
+
+async def _async_show_modbus_warning(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: EcoflowCoordinator
+) -> None:
+    """Create a persistent notification when telemetry appears disabled."""
+    if not coordinator.is_modbus_disabled:
+        return
+
+    translations = await async_get_translations(
+        hass,
+        hass.config.language,
+        "config",
+        integrations={DOMAIN},
+        config_flow=True,
+    )
+    persistent_notification.async_create(
+        hass,
+        translations[f"{WARNING_TRANSLATION_PREFIX}.description"],
+        title=translations[f"{WARNING_TRANSLATION_PREFIX}.title"],
+        notification_id=f"{DOMAIN}_{entry.entry_id}_modbus_warning",
+    )
 
 
 # async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -49,6 +75,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await coordinator.async_connect_client()
     await coordinator.async_config_entry_first_refresh()
+
+    await _async_show_modbus_warning(hass, entry, coordinator)
+    entry.async_on_unload(
+        coordinator.async_add_listener(
+            lambda: hass.async_create_task(
+                _async_show_modbus_warning(hass, entry, coordinator)
+            )
+        )
+    )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

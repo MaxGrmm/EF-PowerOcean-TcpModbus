@@ -32,6 +32,10 @@
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
         }
+      },
+      "warning": {
+        "title": "Modbus TCP is disabled",
+        "description": "The integration requires Modbus TCP to be enabled in the EcoFlow Pro app. Ask your installer to enable it and the integration will automatically start working."
       }
     },
     "error": {
