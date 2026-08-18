@@ -20,8 +20,7 @@ PLATFORMS: Final = [
     Platform.BINARY_SENSOR,
     Platform.SENSOR,
 ]
-# CONFIG_VERSION = 2
-WARNING_TRANSLATION_PREFIX: Final = f"component.{DOMAIN}.issues.modbus_disabled"
+WARNING_TRANSLATION_PREFIX: Final = f"component.{DOMAIN}.config.step.warning"
 
 
 def _modbus_warning_notification_id(entry: ConfigEntry) -> str:
@@ -43,8 +42,9 @@ async def _async_show_modbus_warning(
     translations = await async_get_translations(
         hass,
         hass.config.language,
-        "issues",
+        "config",
         integrations={DOMAIN},
+        config_flow=True,
     )
     persistent_notification.async_create(
         hass,
@@ -52,26 +52,6 @@ async def _async_show_modbus_warning(
         title=translations[f"{WARNING_TRANSLATION_PREFIX}.title"],
         notification_id=_modbus_warning_notification_id(entry),
     )
-
-
-# async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-#     """Migrate old config entries to current schema."""
-
-#     if config_entry.version < CONFIG_VERSION:
-#         _LOGGER.info(
-#             f"Migrating config entry {config_entry.entry_id} from version {CONFIG_VERSION} to {config_entry.version}."
-#         )
-#         new_data = {**config_entry.data}
-#         hass.config_entries.async_update_entry(
-#             config_entry,
-#             data=new_data,
-#             version=CONFIG_VERSION,
-#         )
-#         _LOGGER.info(
-#             f"Migration of config entry {config_entry.entry_id} to version {CONFIG_VERSION} successful!"
-#         )
-
-#     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
