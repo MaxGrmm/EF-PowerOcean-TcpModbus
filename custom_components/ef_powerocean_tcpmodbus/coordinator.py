@@ -41,7 +41,13 @@ from .const import (
     MOD_REGISTER_MAP,
     InverterModel,
 )
-from .telemetry import TelemetryData, calculate_derived_values, decode_register
+from .telemetry import (
+    TelemetryData,
+    calculate_derived_values,
+    decode_register,
+    decode_serial_number,
+    is_modbus_disabled,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -111,6 +117,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def connected(self) -> bool:
         return self._client.connected
 
+    @property
+    def is_modbus_disabled(self) -> bool:
+        """Return whether the current telemetry indicates Modbus is disabled."""
+        return is_modbus_disabled(
+            self.serial_number,
+            self.data.get("inverter_temperature"),
+        )
+
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
 
@@ -142,8 +156,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             self._client.close()
             return "unknown"
 
-        sn = "".join(chr((r >> 8) & 0xFF) + chr(r & 0xFF) for r in raw)
-        return sn.strip().replace("\x00", "")
+        return decode_serial_number(raw) or "unknown"
 
     async def async_reconnect(self) -> bool:
         """Client-Reconnect"""

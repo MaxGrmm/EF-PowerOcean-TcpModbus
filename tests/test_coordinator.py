@@ -42,6 +42,30 @@ def sanitize(
     return coordinator._sanitize_energy_values(data)
 
 
+@pytest.mark.parametrize(
+    ("serial_number", "inverter_temperature", "expected"),
+    (
+        ("R123456789", 0, True),
+        ("R123456789", 0.0, True),
+        ("R123456789", 21.5, False),
+        ("unknown", 0, False),
+        ("", 0, False),
+        (None, 0, False),
+        ("R123456789", None, False),
+    ),
+)
+def test_reports_modbus_disabled_from_current_telemetry(
+    coordinator,
+    serial_number: str | None,
+    inverter_temperature: float | None,
+    expected: bool,
+) -> None:
+    coordinator.serial_number = serial_number
+    coordinator.data = {"inverter_temperature": inverter_temperature}
+
+    assert coordinator.is_modbus_disabled is expected
+
+
 def test_returns_current_data_for_first_observation(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:

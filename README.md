@@ -34,7 +34,7 @@
 
 ---
 
-## Prequesites
+## Prerequisites
 
 The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled by default!
 

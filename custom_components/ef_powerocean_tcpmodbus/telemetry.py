@@ -8,6 +8,30 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 
+def decode_serial_number(registers: list[int] | None) -> str | None:
+    """Decode a serial number from Modbus registers."""
+    if not registers:
+        return None
+
+    serial_number = (
+        "".join(
+            chr((register >> 8) & 0xFF) + chr(register & 0xFF) for register in registers
+        )
+        .strip()
+        .replace("\x00", "")
+    )
+    return serial_number or None
+
+
+def is_modbus_disabled(
+    serial_number: str | None, inverter_temperature: float | None
+) -> bool:
+    """Return whether Modbus responds but telemetry appears disabled."""
+    return bool(
+        serial_number and serial_number != "unknown" and inverter_temperature == 0
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class TelemetryData:
     """Raw telemetry values used to calculate derived values."""

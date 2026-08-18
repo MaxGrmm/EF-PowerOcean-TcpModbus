@@ -131,11 +131,18 @@ class BinarySensorDef:
     entity_category: str | None = None
 
 
+SERIAL_NUMBER_REGISTER: Final = 40004
+MAIN_BLOCK_START_REGISTER: Final = 40519
+MAIN_BLOCK_REGISTER_COUNT: Final = 100
+BATTERY_TEMPERATURE_BLOCK_INDEX: Final = 59
+BATTERY_TEMPERATURE_REGISTER_SIZE: Final = 2
+
 MOD_REGISTER_MAP = {
-    "serial_number": 40004,
+    "serial_number": SERIAL_NUMBER_REGISTER,
     "blocks": [
         BlockDef(
-            start_register=40519,
+            start_register=MAIN_BLOCK_START_REGISTER,
+            num_read_regs=MAIN_BLOCK_REGISTER_COUNT,
             content=[
                 RegisterDef(key="house_power", block_index=0),
                 RegisterDef(key="grid_power", block_index=2),
@@ -153,7 +160,11 @@ MOD_REGISTER_MAP = {
                 RegisterDef(key="battery_charge_power_limit", block_index=37, size=1),
                 RegisterDef(key="battery_voltage", block_index=55),
                 RegisterDef(key="battery_current", block_index=57),
-                RegisterDef(key="battery_temperature", block_index=59),
+                RegisterDef(
+                    key="battery_temperature",
+                    block_index=BATTERY_TEMPERATURE_BLOCK_INDEX,
+                    size=BATTERY_TEMPERATURE_REGISTER_SIZE,
+                ),
                 RegisterDef(key="voltage_l1", block_index=61),
                 RegisterDef(key="voltage_l2", block_index=63),
                 RegisterDef(key="voltage_l3", block_index=65),
