@@ -124,6 +124,11 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self._user_input.update(user_input)
+            connected, modbus_disabled = await async_validate_connection(
+                self._user_input[CONF_HOST], self._user_input[CONF_PORT]
+            )
+            if connected:
+                self._is_modbus_disabled = modbus_disabled
             if self._is_modbus_disabled:
                 return await self.async_step_warning()
             return self._async_create_config_entry()
@@ -170,6 +175,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="warning",
             data_schema=vol.Schema({}),
+            last_step=True,
         )
 
     def _async_create_config_entry(self) -> FlowResult:
@@ -186,6 +192,7 @@ class EcoflowOptionsFlow(OptionsFlow):
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._config_entry = config_entry
         self._user_input: dict = {}
+        self._is_modbus_disabled = False
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -196,13 +203,15 @@ class EcoflowOptionsFlow(OptionsFlow):
             host = user_input[CONF_HOST]
             port = user_input[CONF_PORT]
 
-            # Only re-test connection if host or port changed
+            # A failed connection only blocks changes to the endpoint.
             current_host = self._config_entry.data.get(CONF_HOST)
             current_port = self._config_entry.data.get(CONF_PORT, DEFAULT_PORT)
-            if host != current_host or port != current_port:
-                connected, _ = await async_validate_connection(host, port)
-                if not connected:
-                    errors["base"] = "cannot_connect"
+            endpoint_changed = host != current_host or port != current_port
+            connected, self._is_modbus_disabled = await async_validate_connection(
+                host, port
+            )
+            if endpoint_changed and not connected:
+                errors["base"] = "cannot_connect"
 
             if not errors:
                 self._user_input = user_input
@@ -229,14 +238,14 @@ class EcoflowOptionsFlow(OptionsFlow):
 
         if user_input is not None:
             self._user_input.update(user_input)
-            self.hass.config_entries.async_update_entry(
-                self._config_entry,
-                data={
-                    **self._config_entry.data,
-                    **self._user_input,
-                },
+            connected, modbus_disabled = await async_validate_connection(
+                self._user_input[CONF_HOST], self._user_input[CONF_PORT]
             )
-            return self.async_create_entry(title="", data={})
+            if connected:
+                self._is_modbus_disabled = modbus_disabled
+            if self._is_modbus_disabled:
+                return await self.async_step_warning()
+            return self._async_update_config_entry()
 
         return self.async_show_form(
             step_id="parameters",
@@ -288,3 +297,25 @@ class EcoflowOptionsFlow(OptionsFlow):
             ),
             errors=errors,
         )
+
+    async def async_step_warning(self, user_input=None) -> FlowResult:
+        """Show a non-blocking warning before updating the entry."""
+        if user_input is not None:
+            return self._async_update_config_entry()
+
+        return self.async_show_form(
+            step_id="warning",
+            data_schema=vol.Schema({}),
+            last_step=True,
+        )
+
+    def _async_update_config_entry(self) -> FlowResult:
+        """Update the config entry after all options steps."""
+        self.hass.config_entries.async_update_entry(
+            self._config_entry,
+            data={
+                **self._config_entry.data,
+                **self._user_input,
+            },
+        )
+        return self.async_create_entry(title="", data={})

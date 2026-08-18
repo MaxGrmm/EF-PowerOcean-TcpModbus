@@ -78,6 +78,10 @@
           "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
           "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
         }
+      },
+      "warning": {
+        "title": "Modbus TCP ist deaktiviert",
+        "description": "Für die Integration muss Modbus TCP in der EcoFlow Pro App aktiviert sein. Bitten Sie Ihren Installateur, es zu aktivieren. Die Integration wird anschließend automatisch funktionieren."
       }
     },
     "error": {
