@@ -21,7 +21,7 @@ PLATFORMS: Final = [
     Platform.SENSOR,
 ]
 # CONFIG_VERSION = 2
-WARNING_TRANSLATION_PREFIX: Final = f"component.{DOMAIN}.config.step.warning"
+WARNING_TRANSLATION_PREFIX: Final = f"component.{DOMAIN}.issues.modbus_disabled"
 
 
 def _modbus_warning_notification_id(entry: ConfigEntry) -> str:
@@ -43,9 +43,8 @@ async def _async_show_modbus_warning(
     translations = await async_get_translations(
         hass,
         hass.config.language,
-        "config",
+        "issues",
         integrations={DOMAIN},
-        config_flow=True,
     )
     persistent_notification.async_create(
         hass,

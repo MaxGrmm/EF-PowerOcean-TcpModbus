@@ -2,32 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import unittest
-from unittest.mock import AsyncMock
 
 import pytest
 from ef_powerocean_tcpmodbus.telemetry import (
     TelemetryData,
-    async_is_modbus_disabled,
     calculate_derived_values,
     decode_register,
 )
-
-
-def test_reads_modbus_setup_check_registers() -> None:
-    serial_registers = [0x5231, 0x3233, 0x3435]
-    main_block = [0] * 100
-    main_block[22] = 19
-    read_registers = AsyncMock(side_effect=(serial_registers, main_block))
-
-    result = asyncio.run(async_is_modbus_disabled(read_registers))
-
-    assert result is True
-    assert read_registers.await_args_list == [
-        unittest.mock.call(40004, 8),
-        unittest.mock.call(40519, 100),
-    ]
 
 
 @pytest.mark.parametrize(

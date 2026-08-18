@@ -15,8 +15,8 @@ def test_creates_translated_modbus_warning(monkeypatch) -> None:
     entry = SimpleNamespace(entry_id="test-entry")
     coordinator = SimpleNamespace(is_modbus_disabled=True)
     translations = {
-        f"component.{DOMAIN}.config.step.warning.title": "Warning title",
-        f"component.{DOMAIN}.config.step.warning.description": "Warning body",
+        f"component.{DOMAIN}.issues.modbus_disabled.title": "Warning title",
+        f"component.{DOMAIN}.issues.modbus_disabled.description": "Warning body",
     }
     get_translations = AsyncMock(return_value=translations)
     create = Mock()

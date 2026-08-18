@@ -4,17 +4,8 @@ from __future__ import annotations
 
 import math
 import struct
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
-
-from .const import (
-    DEVICE_LED_BRIGHTNESS_BLOCK_INDEX,
-    DEVICE_LED_BRIGHTNESS_REGISTER_SIZE,
-    MAIN_BLOCK_REGISTER_COUNT,
-    MAIN_BLOCK_START_REGISTER,
-    SERIAL_NUMBER_REGISTER,
-    SERIAL_NUMBER_REGISTER_COUNT,
-)
 
 
 def decode_serial_number(registers: list[int] | None) -> str | None:
@@ -41,28 +32,6 @@ def is_modbus_disabled(
         and serial_number != "unknown"
         and display_brightness is not None
         and display_brightness < 20
-    )
-
-
-async def async_is_modbus_disabled(
-    read_registers: Callable[[int, int], Awaitable[list[int] | None]],
-) -> bool:
-    """Read and decode all registers that define Modbus setup validity."""
-    serial_raw = await read_registers(
-        SERIAL_NUMBER_REGISTER, SERIAL_NUMBER_REGISTER_COUNT
-    )
-    main_block = await read_registers(
-        MAIN_BLOCK_START_REGISTER,
-        MAIN_BLOCK_REGISTER_COUNT,
-    )
-
-    return is_modbus_disabled(
-        decode_serial_number(serial_raw),
-        decode_register(
-            main_block,
-            DEVICE_LED_BRIGHTNESS_BLOCK_INDEX,
-            DEVICE_LED_BRIGHTNESS_REGISTER_SIZE,
-        ),
     )
 
 
