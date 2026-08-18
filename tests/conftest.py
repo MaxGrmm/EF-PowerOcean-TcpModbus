@@ -32,6 +32,7 @@ homeassistant_persistent_notification = types.ModuleType(
     "homeassistant.components.persistent_notification"
 )
 homeassistant_persistent_notification.async_create = lambda *args, **kwargs: None
+homeassistant_persistent_notification.async_dismiss = lambda *args, **kwargs: None
 homeassistant_components.persistent_notification = homeassistant_persistent_notification
 homeassistant_helpers = types.ModuleType("homeassistant.helpers")
 homeassistant_translation = types.ModuleType("homeassistant.helpers.translation")

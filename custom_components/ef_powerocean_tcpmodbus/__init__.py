@@ -24,11 +24,20 @@ PLATFORMS: Final = [
 WARNING_TRANSLATION_PREFIX: Final = f"component.{DOMAIN}.config.step.warning"
 
 
+def _modbus_warning_notification_id(entry: ConfigEntry) -> str:
+    """Return the stable Modbus warning notification ID."""
+    return f"{DOMAIN}_{entry.entry_id}_modbus_warning"
+
+
 async def _async_show_modbus_warning(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: EcoflowCoordinator
 ) -> None:
     """Create a persistent notification when telemetry appears disabled."""
     if not coordinator.is_modbus_disabled:
+        persistent_notification.async_dismiss(
+            hass,
+            _modbus_warning_notification_id(entry),
+        )
         return
 
     translations = await async_get_translations(
@@ -42,7 +51,7 @@ async def _async_show_modbus_warning(
         hass,
         translations[f"{WARNING_TRANSLATION_PREFIX}.description"],
         title=translations[f"{WARNING_TRANSLATION_PREFIX}.title"],
-        notification_id=f"{DOMAIN}_{entry.entry_id}_modbus_warning",
+        notification_id=_modbus_warning_notification_id(entry),
     )
 
 

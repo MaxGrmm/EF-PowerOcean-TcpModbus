@@ -8,8 +8,10 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from .const import (
-    DEVICE_LED_BRIGHTNESS_REGISTER,
+    DEVICE_LED_BRIGHTNESS_BLOCK_INDEX,
     DEVICE_LED_BRIGHTNESS_REGISTER_SIZE,
+    MAIN_BLOCK_REGISTER_COUNT,
+    MAIN_BLOCK_START_REGISTER,
     SERIAL_NUMBER_REGISTER,
     SERIAL_NUMBER_REGISTER_COUNT,
 )
@@ -49,16 +51,16 @@ async def async_is_modbus_disabled(
     serial_raw = await read_registers(
         SERIAL_NUMBER_REGISTER, SERIAL_NUMBER_REGISTER_COUNT
     )
-    display_brightness_raw = await read_registers(
-        DEVICE_LED_BRIGHTNESS_REGISTER,
-        DEVICE_LED_BRIGHTNESS_REGISTER_SIZE,
+    main_block = await read_registers(
+        MAIN_BLOCK_START_REGISTER,
+        MAIN_BLOCK_REGISTER_COUNT,
     )
 
     return is_modbus_disabled(
         decode_serial_number(serial_raw),
         decode_register(
-            display_brightness_raw,
-            0,
+            main_block,
+            DEVICE_LED_BRIGHTNESS_BLOCK_INDEX,
             DEVICE_LED_BRIGHTNESS_REGISTER_SIZE,
         ),
     )
