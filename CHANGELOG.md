@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.4.0] - 2026-08-18
+
+### Added
+
+- Add notification if Modbus TCP is not enabled in the EcoFlow Pro app.
+
 ## [2.3.0] - 2026-08-13
 
 ### Added
