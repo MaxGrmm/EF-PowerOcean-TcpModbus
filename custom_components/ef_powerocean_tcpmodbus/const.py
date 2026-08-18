@@ -134,8 +134,6 @@ class BinarySensorDef:
 SERIAL_NUMBER_REGISTER: Final = 40004
 MAIN_BLOCK_START_REGISTER: Final = 40519
 MAIN_BLOCK_REGISTER_COUNT: Final = 100
-DEVICE_LED_BRIGHTNESS_BLOCK_INDEX: Final = 22
-DEVICE_LED_BRIGHTNESS_REGISTER_SIZE: Final = 1
 BATTERY_TEMPERATURE_BLOCK_INDEX: Final = 59
 BATTERY_TEMPERATURE_REGISTER_SIZE: Final = 2
 
@@ -155,11 +153,7 @@ MOD_REGISTER_MAP = {
                 RegisterDef(key="system_modes", block_index=11, size=1),
                 RegisterDef(key="min_soc_limit", block_index=17, size=1),
                 RegisterDef(key="bat_temp_warn_max", block_index=21, size=1),
-                RegisterDef(
-                    key="device_led_brightness",
-                    block_index=DEVICE_LED_BRIGHTNESS_BLOCK_INDEX,
-                    size=DEVICE_LED_BRIGHTNESS_REGISTER_SIZE,
-                ),
+                RegisterDef(key="device_led_brightness", block_index=22, size=1),
                 RegisterDef(key="limit_inv_power", block_index=27, size=1),
                 RegisterDef(key="limit_inv_max", block_index=29, size=1),
                 RegisterDef(key="battery_capacity", block_index=33, size=1),
