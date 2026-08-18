@@ -40,16 +40,18 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_validate_connection(host: str, port: int) -> bool:
-    """Try to connect to the configured Modbus endpoint."""
-    client = AsyncModbusTcpClient(host, port=port, timeout=5)
+    """Try to connect and read status register."""
     try:
+        client = AsyncModbusTcpClient(host, port=port, timeout=5)
         await client.connect()
-        return client.connected
+        if not client.connected:
+            return False
+        else:
+            client.close()
+            return True
     except Exception as e:
         _LOGGER.warning("EF-PowerOcean connection test failed: %s", e)
         return False
-    finally:
-        client.close()
 
 
 class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -72,10 +74,9 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            connected = await async_validate_connection(
+            if await async_validate_connection(
                 user_input[CONF_HOST], user_input[CONF_PORT]
-            )
-            if connected:
+            ):
                 self._user_input = user_input
                 await self.async_set_unique_id(
                     f"{self._user_input[CONF_HOST]}:{self._user_input[CONF_PORT]}"
@@ -101,7 +102,10 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self._user_input.update(user_input)
-            return self._async_create_config_entry()
+            return self.async_create_entry(
+                title=f"EcoFlow PowerOcean ({self._user_input[CONF_HOST]})",
+                data=self._user_input,
+            )
 
         return self.async_show_form(
             step_id="parameters",
@@ -137,13 +141,6 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    def _async_create_config_entry(self) -> FlowResult:
-        """Create the config entry after all setup steps."""
-        return self.async_create_entry(
-            title=f"EcoFlow PowerOcean ({self._user_input[CONF_HOST]})",
-            data=self._user_input,
-        )
-
 
 class EcoflowOptionsFlow(OptionsFlow):
     """Handle options (reconfiguration after setup)."""
@@ -161,13 +158,12 @@ class EcoflowOptionsFlow(OptionsFlow):
             host = user_input[CONF_HOST]
             port = user_input[CONF_PORT]
 
-            # A failed connection only blocks changes to the endpoint.
+            # Only re-test connection if host or port changed
             current_host = self._config_entry.data.get(CONF_HOST)
             current_port = self._config_entry.data.get(CONF_PORT, DEFAULT_PORT)
-            endpoint_changed = host != current_host or port != current_port
-            connected = await async_validate_connection(host, port)
-            if endpoint_changed and not connected:
-                errors["base"] = "cannot_connect"
+            if host != current_host or port != current_port:
+                if not await async_validate_connection(host, port):
+                    errors["base"] = "cannot_connect"
 
             if not errors:
                 self._user_input = user_input
@@ -194,7 +190,14 @@ class EcoflowOptionsFlow(OptionsFlow):
 
         if user_input is not None:
             self._user_input.update(user_input)
-            return self._async_update_config_entry()
+            self.hass.config_entries.async_update_entry(
+                self._config_entry,
+                data={
+                    **self._config_entry.data,
+                    **self._user_input,
+                },
+            )
+            return self.async_create_entry(title="", data={})
 
         return self.async_show_form(
             step_id="parameters",
@@ -246,14 +249,3 @@ class EcoflowOptionsFlow(OptionsFlow):
             ),
             errors=errors,
         )
-
-    def _async_update_config_entry(self) -> FlowResult:
-        """Update the config entry after all options steps."""
-        self.hass.config_entries.async_update_entry(
-            self._config_entry,
-            data={
-                **self._config_entry.data,
-                **self._user_input,
-            },
-        )
-        return self.async_create_entry(title="", data={})
