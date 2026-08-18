@@ -34,7 +34,7 @@
         }
       },
       "warning": {
-        "title": "Modbus TCP is disabled",
+        "title": "EF-PowerOcean-TcpModbus",
         "description": "The integration requires Modbus TCP to be enabled in the EcoFlow Pro app. Ask your installer to enable it and the integration will automatically start working."
       }
     },
