@@ -120,9 +120,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     @property
     def is_modbus_disabled(self) -> bool:
         """Return whether the current telemetry indicates Modbus is disabled."""
+        data = self.data or {}
         return is_modbus_disabled(
             self.serial_number,
-            self.data.get("inverter_temperature"),
+            data.get("inverter_temperature"),
         )
 
     def get_pymodbus_version(self) -> str:
