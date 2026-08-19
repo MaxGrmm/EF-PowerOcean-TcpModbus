@@ -99,6 +99,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         )
 
         self.serial_number: str | None = None
+        self._last_inverter_temperature: float | None = None
         self._client: AsyncModbusTcpClient = AsyncModbusTcpClient(
             host=self.host, port=self.port, timeout=20, reconnect_delay=0, retries=0
         )
@@ -119,11 +120,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     @property
     def is_modbus_disabled(self) -> bool:
-        """Return whether the current telemetry indicates Modbus is disabled."""
-        data = self.data or {}
+        """Return whether the last telemetry read indicates Modbus is disabled."""
         return is_modbus_disabled(
             self.serial_number,
-            data.get("inverter_temperature"),
+            self._last_inverter_temperature,
         )
 
     def get_pymodbus_version(self) -> str:
@@ -221,6 +221,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                         register.size,
                     )
                     data[register.key] = decode_value
+
+            # Store the inverter temperature used for the modbus tcp disabled check, before we do any data validations.
+            self._last_inverter_temperature = data.get("inverter_temperature")
 
             if data["battery_count"] != self.limits[CONF_BATTERY_COUNT]:
                 _LOGGER.debug(

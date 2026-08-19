@@ -61,7 +61,7 @@ def test_reports_modbus_disabled_from_current_telemetry(
     expected: bool,
 ) -> None:
     coordinator.serial_number = serial_number
-    coordinator.data = {"inverter_temperature": inverter_temperature}
+    coordinator._last_inverter_temperature = inverter_temperature
 
     assert coordinator.is_modbus_disabled is expected
 
@@ -318,6 +318,33 @@ def test_gets_and_decodes_raw_data(
 
     assert result == {"battery_count": 2.0, "grid_power": 42.0}
     coordinator.async_read_block.assert_awaited_once_with(100, 2)
+
+
+def test_captures_disabled_state_when_battery_count_guard_drops_frame(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    block = SimpleNamespace(
+        start_register=100,
+        num_read_regs=2,
+        content=(
+            const.RegisterDef(key="battery_count", block_index=0, size=1),
+            const.RegisterDef(key="inverter_temperature", block_index=1, size=1),
+        ),
+    )
+    monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
+    decode_register = Mock(side_effect=(0.0, 0.0))
+    monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
+    monkeypatch.setattr(coordinator_module.asyncio, "sleep", AsyncMock())
+    coordinator._client = SimpleNamespace(connected=True)
+    coordinator.async_read_block = AsyncMock(return_value=[0, 0])
+    coordinator.limits[const.CONF_BATTERY_COUNT] = 2
+    coordinator.serial_number = "R123456789"
+
+    result = asyncio.run(coordinator.async_get_raw_data())
+
+    assert result is None
+    assert coordinator._last_inverter_temperature == 0.0
+    assert coordinator.is_modbus_disabled is True
 
 
 @pytest.mark.parametrize(
