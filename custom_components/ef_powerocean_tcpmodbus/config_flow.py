@@ -122,7 +122,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
                     ),
                     vol.Required(
                         CONF_BATTERY_COUNT, default=DEFAULT_BATTERY_COUNT
-                    ): vol.All(int, vol.Range(min=0, max=6)),
+                    ): vol.All(int, vol.Range(min=0, max=9)),
                     vol.Required(
                         CONF_MAX_SOLAR_POWER, default=DEFAULT_MAX_SOLAR_POWER
                     ): vol.All(int, vol.Range(min=1000, max=60000)),
