@@ -347,6 +347,39 @@ def test_captures_disabled_state_when_battery_count_guard_drops_frame(
     assert coordinator.is_modbus_disabled is True
 
 
+def test_modbus_disabled_recovers_when_telemetry_returns(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    block = SimpleNamespace(
+        start_register=100,
+        num_read_regs=2,
+        content=(
+            const.RegisterDef(key="battery_count", block_index=0, size=1),
+            const.RegisterDef(key="inverter_temperature", block_index=1, size=1),
+        ),
+    )
+    monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
+    # Provide values for two polls, first with all zeroes and second with values
+    decode_register = Mock(side_effect=(0.0, 0.0, 2.0, 21.5))
+    monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
+    monkeypatch.setattr(coordinator_module.asyncio, "sleep", AsyncMock())
+    coordinator._client = SimpleNamespace(connected=True)
+    coordinator.async_read_block = AsyncMock(return_value=[0, 0])
+    coordinator.limits[const.CONF_BATTERY_COUNT] = 2
+    coordinator.serial_number = "R123456789"
+
+    # Run first poll, returning zeros to simulate a Modbus-disabled state.
+    assert asyncio.run(coordinator.async_get_raw_data()) is None
+    assert coordinator.is_modbus_disabled is True
+
+    # Run second poll, returning valid telemetry to simulate recovery.
+    assert asyncio.run(coordinator.async_get_raw_data()) == {
+        "battery_count": 2.0,
+        "inverter_temperature": 21.5,
+    }
+    assert coordinator.is_modbus_disabled is False
+
+
 @pytest.mark.parametrize(
     ("inverter_model", "expected_index"),
     (
