@@ -9,6 +9,7 @@ from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt
 from pymodbus import __version__ as pyModbusVersion
@@ -54,6 +55,8 @@ _LOGGER = logging.getLogger(__name__)
 SLEEP_TIME_AFTER_RECONNECT: Final = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED: Final = 15
 UNREALISTIC_ENERGY_READ_THRESHOLD: Final = 3
+STORAGE_VERSION: Final = 1
+STATE_SAVE_DELAY: Final = 30  # seconds
 
 
 class EcoflowCoordinator(DataUpdateCoordinator):
@@ -109,10 +112,18 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
         self._unrealistic_energy_read_counts: dict[str, int] = {}
+        self._store: Store[dict[str, Any]] | None = Store(
+            hass, STORAGE_VERSION, f"{DOMAIN}.{config_entry.entry_id}.state"
+        )
 
     @property
     def connected(self) -> bool:
         return self._client.connected
+
+    @property
+    def last_read_time(self) -> datetime | None:
+        """Return the timestamp of the last accepted telemetry read."""
+        return self._last_checked_time
 
     @property
     def is_modbus_disabled(self) -> bool:
@@ -125,9 +136,34 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
 
+    def _persisted_state(self) -> dict[str, Any]:
+        """Return the validation baseline in a JSON-serializable form."""
+        return {
+            "last_checked_data": self._last_checked_data,
+            "last_checked_time": self._last_checked_time.isoformat()
+            if self._last_checked_time is not None
+            else None,
+        }
+
+    async def async_load_persisted_state(self) -> None:
+        """Seed the validation baseline from disk so the first poll is validated."""
+        if self._store is None or (stored := await self._store.async_load()) is None:
+            return
+
+        self._last_checked_data = stored.get("last_checked_data") or {}
+        raw_time = stored.get("last_checked_time")
+        try:
+            self._last_checked_time = (
+                datetime.fromisoformat(raw_time) if raw_time else None
+            )
+        except ValueError:
+            self._last_checked_time = None
+
     async def async_client_shutdown(self) -> None:
         """Integration-Shutdown, closing connection"""
         _LOGGER.info("PowerOcean Shutdown. Closing Connection!")
+        if self._store is not None:
+            await self._store.async_save(self._persisted_state())
         self._client.close()
         await super().async_shutdown()
 
@@ -327,6 +363,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
+            if self._store is not None:
+                self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY)
 
             return dict(result)
         except UpdateFailed:  # noqa: BLE001

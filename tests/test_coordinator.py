@@ -20,6 +20,7 @@ def coordinator():
     instance._last_checked_data = {}
     instance._last_checked_time = None
     instance._unrealistic_energy_read_counts = {}
+    instance._store = None
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
     instance.limits = {
         const.CONF_MAX_GRID_POWER: 15_000,
@@ -192,6 +193,38 @@ def test_total_energy_decrease_is_never_accepted(
 
     assert [result["grid_import_total"] for result in results] == [10.0] * 5
     assert coordinator._unrealistic_energy_read_counts == {}
+
+
+def test_seeds_baseline_from_persisted_state(coordinator) -> None:
+    stored = {
+        "last_checked_data": {"grid_import_total": 12.5},
+        "last_checked_time": "2026-08-07T12:00:00+00:00",
+    }
+    coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
+
+    asyncio.run(coordinator.async_load_persisted_state())
+
+    assert coordinator._last_checked_data == {"grid_import_total": 12.5}
+    assert coordinator._last_checked_time == datetime(
+        2026, 8, 7, 12, 0, tzinfo=timezone.utc
+    )
+    assert coordinator.last_read_time == coordinator._last_checked_time
+
+
+def test_persisted_state_after_reload_clamps_total_reset(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored = {
+        "last_checked_data": {"grid_import_total": 10.0},
+        "last_checked_time": "2026-08-07T11:59:30+00:00",
+    }
+    coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
+    asyncio.run(coordinator.async_load_persisted_state())
+
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    result = sanitize(coordinator, {"grid_import_total": 0.0}, now, monkeypatch)
+
+    assert result["grid_import_total"] == 10.0
 
 
 def test_valid_energy_read_clears_unrealistic_read_count(

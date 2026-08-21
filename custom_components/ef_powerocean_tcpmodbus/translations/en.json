@@ -202,6 +202,9 @@
       "inverter_temperature": {
         "name": "Inverter Temperature"
       },
+      "last_read_time": {
+        "name": "Last Successful Read"
+      },
       "limit_inv_max": {
         "name": "Inverter Nominal Power Limit"
       },

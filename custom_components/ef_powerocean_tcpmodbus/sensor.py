@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Final
 
-from homeassistant.components.sensor import RestoreSensor
+from homeassistant.components.sensor import (
+    RestoreSensor,
+    SensorDeviceClass,
+    SensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
@@ -23,6 +28,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import (
     DOMAIN,
     ENERGY_SENSOR_MAP,
+    LAST_READ_TIME_SENSOR,
     SENSOR_MAP,
     EnergySensorDef,
     SensorDef,
@@ -57,6 +63,8 @@ async def async_setup_entry(
 
     for sensor in ENERGY_SENSOR_MAP:
         entities.append(EcoflowSensor(coordinator, entry, sensor))
+
+    entities.append(EcoflowLastReadSensor(coordinator, entry, LAST_READ_TIME_SENSOR))
 
     async_add_entities(entities)
 
@@ -121,3 +129,26 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
                 else:
                     return int(value)
         return self._last_written_value
+
+
+class EcoflowLastReadSensor(EcoFlowBaseEntity, SensorEntity):
+    """Diagnostic sensor exposing the timestamp of the last accepted read."""
+
+    def __init__(
+        self,
+        coordinator: EcoflowCoordinator,
+        entry: ConfigEntry,
+        definition: SensorDef,
+    ) -> None:
+        super().__init__(coordinator, entry, definition)
+        self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def available(self) -> bool:
+        # Stays available while disconnected so the last read time remains visible.
+        return True
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self.coordinator.last_read_time

@@ -201,6 +201,9 @@
       "inverter_temperature": {
         "name": "Wechselrichter-Temperatur"
       },
+      "last_read_time": {
+        "name": "Letzte erfolgreiche Abfrage"
+      },
       "limit_inv_max": {
         "name": "WR-Nennleistungsgrenze"
       },

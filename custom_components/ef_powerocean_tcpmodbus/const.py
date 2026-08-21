@@ -541,6 +541,13 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
 ]
 
 
+LAST_READ_TIME_SENSOR: Final = SensorDef(
+    key="last_read_time",
+    device_class="timestamp",
+    entity_category="diagnostic",
+)
+
+
 BINARY_SENSOR_MAP: list[BinarySensorDef] = [
     BinarySensorDef("self_use_mode_ena", "battery"),
     BinarySensorDef("intelligent_mode_ena", "battery"),
