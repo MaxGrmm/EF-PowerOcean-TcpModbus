@@ -208,7 +208,31 @@ def test_seeds_baseline_from_persisted_state(coordinator) -> None:
     assert coordinator._last_checked_time == datetime(
         2026, 8, 7, 12, 0, tzinfo=timezone.utc
     )
-    assert coordinator.last_read_time == coordinator._last_checked_time
+
+
+def test_accepted_update_publishes_last_read_time_without_persisting_it(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    coordinator.async_get_raw_data = AsyncMock(return_value={"grid_import_total": 10.0})
+    coordinator._sanitize_energy_values = Mock(return_value={"grid_import_total": 10.0})
+    coordinator._clamp_calculated_energy_values = Mock(side_effect=lambda data: data)
+    coordinator._ena_calc_solar_power = False
+    coordinator._store = None
+    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+    monkeypatch.setattr(
+        coordinator_module.TelemetryData,
+        "from_mapping",
+        Mock(return_value=object()),
+    )
+    monkeypatch.setattr(
+        coordinator_module, "calculate_derived_values", Mock(return_value={})
+    )
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result["last_read_time"] == now
+    assert "last_read_time" not in coordinator._last_checked_data
 
 
 def test_persisted_state_after_reload_clamps_total_reset(

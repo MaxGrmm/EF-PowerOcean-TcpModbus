@@ -121,11 +121,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         return self._client.connected
 
     @property
-    def last_read_time(self) -> datetime | None:
-        """Return the timestamp of the last accepted telemetry read."""
-        return self._last_checked_time
-
-    @property
     def is_modbus_disabled(self) -> bool:
         """Return whether the last telemetry read indicates Modbus is disabled."""
         return is_modbus_disabled(
@@ -392,6 +387,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
+            result["last_read_time"] = self._last_checked_time
             if self._store is not None:
                 self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
 

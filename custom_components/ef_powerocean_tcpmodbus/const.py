@@ -507,6 +507,11 @@ SENSOR_MAP: list[SensorDef] = [
         state_class=None,
         icon="mdi:transmission-tower",
     ),
+    SensorDef(
+        key="last_read_time",
+        device_class="timestamp",
+        entity_category="diagnostic",
+    ),
 ]
 
 
@@ -547,13 +552,6 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
         max_power=CONF_MAX_GRID_POWER,
     ),
 ]
-
-
-LAST_READ_TIME_SENSOR: Final = SensorDef(
-    key="last_read_time",
-    device_class="timestamp",
-    entity_category="diagnostic",
-)
 
 
 BINARY_SENSOR_MAP: list[BinarySensorDef] = [

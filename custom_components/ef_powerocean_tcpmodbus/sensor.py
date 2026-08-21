@@ -6,11 +6,7 @@ import logging
 from datetime import datetime
 from typing import Final
 
-from homeassistant.components.sensor import (
-    RestoreSensor,
-    SensorDeviceClass,
-    SensorEntity,
-)
+from homeassistant.components.sensor import RestoreSensor
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
@@ -28,7 +24,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import (
     DOMAIN,
     ENERGY_SENSOR_MAP,
-    LAST_READ_TIME_SENSOR,
     SENSOR_MAP,
     EnergySensorDef,
     SensorDef,
@@ -56,15 +51,13 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: EcoflowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities: list[SensorDef | EnergySensorDef] = []
+    entities: list[EcoflowSensor] = []
 
     for sensor in SENSOR_MAP:
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 
     for sensor in ENERGY_SENSOR_MAP:
         entities.append(EcoflowSensor(coordinator, entry, sensor))
-
-    entities.append(EcoflowLastReadSensor(coordinator, entry, LAST_READ_TIME_SENSOR))
 
     async_add_entities(entities)
 
@@ -80,8 +73,8 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
         self._attr_native_unit_of_measurement = self._definition.unit
         self._attr_device_class = self._definition.device_class
         self._attr_state_class = self._definition.state_class
-        self._restored_value: float | int | str | None = None
-        self._last_written_value: float | int | str | None = None
+        self._restored_value: datetime | float | int | str | None = None
+        self._last_written_value: datetime | float | int | str | None = None
 
         if self._definition.unit in VALUE_PRECISION:
             self._attr_suggested_display_precision = VALUE_PRECISION.get(
@@ -115,11 +108,13 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
             self._last_written_value = self._restored_value
 
     @property
-    def native_value(self) -> float | int | str | None:
+    def native_value(self) -> datetime | float | int | str | None:
         """Return the sensor value from coordinator, falling back to last value"""
         if self.coordinator.data is not None:
             value = self.coordinator.data.get(self._definition.key, None)
             if value is not None:
+                if isinstance(value, datetime):
+                    return value
                 if precision := VALUE_PRECISION.get(self._definition.unit, None):
                     return (
                         round(value, precision)
@@ -129,26 +124,3 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
                 else:
                     return int(value)
         return self._last_written_value
-
-
-class EcoflowLastReadSensor(EcoFlowBaseEntity, SensorEntity):
-    """Diagnostic sensor exposing the timestamp of the last accepted read."""
-
-    def __init__(
-        self,
-        coordinator: EcoflowCoordinator,
-        entry: ConfigEntry,
-        definition: SensorDef,
-    ) -> None:
-        super().__init__(coordinator, entry, definition)
-        self._attr_device_class = SensorDeviceClass.TIMESTAMP
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def available(self) -> bool:
-        # Stays available while disconnected so the last read time remains visible.
-        return True
-
-    @property
-    def native_value(self) -> datetime | None:
-        return self.coordinator.last_read_time
