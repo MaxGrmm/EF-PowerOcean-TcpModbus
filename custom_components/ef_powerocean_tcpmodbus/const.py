@@ -33,6 +33,7 @@ MAX_BATTERY_DISCHARGED_POWER: Final = 3300
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S: Final = 15
 UNREALISTIC_ENERGY_READ_THRESHOLD: Final = 3
+CALCULATED_ENERGY_RESET_FRACTION: Final = 0.5
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
 
@@ -537,6 +538,7 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
     EnergySensorDef(
         "house_energy_today",
         is_calculated=True,
+        resets_daily=True,
         max_power=CONF_MAX_GRID_POWER,
     ),
     EnergySensorDef(

@@ -242,7 +242,7 @@ def test_valid_energy_read_clears_unrealistic_read_count(
     assert coordinator._unrealistic_energy_read_counts == {"grid_import_total": 1}
 
 
-def test_accepted_daily_reset_updates_derived_house_energy(
+def test_accepted_nonzero_daily_reset_updates_derived_house_energy(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     now = datetime(2026, 8, 8, 0, 1, tzinfo=timezone.utc)
@@ -261,13 +261,65 @@ def test_accepted_daily_reset_updates_derived_house_energy(
     coordinator._unrealistic_energy_read_counts = dict.fromkeys(daily_energy, 2)
     coordinator._ena_calc_solar_power = False
     coordinator.async_get_raw_data = AsyncMock(
-        return_value=dict.fromkeys(daily_energy, 0.0)
+        return_value=dict.fromkeys(daily_energy, 0.1)
     )
     monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
 
     result = asyncio.run(coordinator._async_update_data())
 
-    assert result["house_energy_today"] == 0.0
+    assert result["house_energy_today"] == 0.1
+
+
+def test_clamps_derived_house_energy_rounding_jitter(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 8, 21, 8, 24, 19, tzinfo=timezone.utc)
+    previous = {
+        "solar_today": 4.0,
+        "grid_import_today": 2.0,
+        "bat_discharged_today": 1.0,
+        "grid_export_today": 0.5,
+        "bat_charged_today": 1.35,
+        "house_energy_today": 5.15,
+    }
+    coordinator._last_checked_time = now - timedelta(seconds=5)
+    coordinator._last_checked_data = previous
+    coordinator._ena_calc_solar_power = False
+    coordinator.async_get_raw_data = AsyncMock(
+        return_value={**previous, "bat_charged_today": 1.36}
+    )
+    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result["house_energy_today"] == 5.15
+
+
+def test_clamps_derived_house_energy_jitter_during_raw_counter_reset(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 8, 21, 9, 10, 54, tzinfo=timezone.utc)
+    previous = {
+        "solar_today": 5.63,
+        "grid_import_today": 0.0,
+        "bat_discharged_today": 0.0,
+        "grid_export_today": 0.0,
+        "bat_charged_today": 0.0,
+        "house_energy_today": 5.63,
+    }
+    coordinator._last_checked_time = now - timedelta(seconds=5)
+    coordinator._last_checked_data = previous
+    # A raw daily counter completes an accepted downward wobble this poll.
+    coordinator._unrealistic_energy_read_counts = {"solar_today": 2}
+    coordinator._ena_calc_solar_power = False
+    coordinator.async_get_raw_data = AsyncMock(
+        return_value={**previous, "solar_today": 5.62}
+    )
+    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result["house_energy_today"] == 5.63
 
 
 @pytest.mark.parametrize(

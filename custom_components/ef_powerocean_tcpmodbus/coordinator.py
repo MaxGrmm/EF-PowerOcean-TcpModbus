@@ -17,6 +17,7 @@ from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from .const import (
+    CALCULATED_ENERGY_RESET_FRACTION,
     CONF_BATTERY_COUNT,
     CONF_CALC_SOLAR_POWER,
     CONF_HOST,
@@ -345,6 +346,34 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         return result
 
+    def _clamp_calculated_energy_values(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Keep calculated total-increasing sensors monotonic between resets.
+
+        Derived values sum independently rounded counters, so they can dip by a
+        small kWh without a real decrease. Hold the last value to prevent this,
+        but let a large drop (a daily reset toward zero) pass through.
+        """
+        result = dict(data)
+
+        for energy_sensor in ENERGY_SENSOR_MAP:
+            if not energy_sensor.is_calculated:
+                continue
+
+            current_energy = result.get(energy_sensor.key)
+            last_energy = self._last_checked_data.get(energy_sensor.key)
+            if current_energy is None or last_energy is None:
+                continue
+
+            # Only consider a daily reset if the energy drops by CALCULATED_ENERGY_RESET_FRACTION
+            is_daily_reset = (
+                energy_sensor.resets_daily
+                and current_energy < last_energy * CALCULATED_ENERGY_RESET_FRACTION
+            )
+            if current_energy < last_energy and not is_daily_reset:
+                result[energy_sensor.key] = last_energy
+
+        return result
+
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             if (raw_data := await self.async_get_raw_data()) is None:
@@ -359,6 +388,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 max_battery_discharge_power=MAX_BATTERY_DISCHARGED_POWER,
             )
             result.update(calculated_results)
+            result = self._clamp_calculated_energy_values(result)
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
