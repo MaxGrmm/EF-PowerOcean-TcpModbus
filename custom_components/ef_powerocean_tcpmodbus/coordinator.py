@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Final
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -40,6 +40,11 @@ from .const import (
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MOD_REGISTER_MAP,
+    SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S,
+    SLEEP_TIME_AFTER_RECONNECT_S,
+    STATE_SAVE_DELAY_S,
+    STORAGE_VERSION,
+    UNREALISTIC_ENERGY_READ_THRESHOLD,
     InverterModel,
 )
 from .telemetry import (
@@ -51,12 +56,6 @@ from .telemetry import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-SLEEP_TIME_AFTER_RECONNECT: Final = 1
-SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED: Final = 15
-UNREALISTIC_ENERGY_READ_THRESHOLD: Final = 3
-STORAGE_VERSION: Final = 1
-STATE_SAVE_DELAY: Final = 30  # seconds
 
 
 class EcoflowCoordinator(DataUpdateCoordinator):
@@ -211,7 +210,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug(
                         f"Reconnect successful! (SN: {self.serial_number}) Atempts: {i + 1}/4"
                     )
-                    await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT)
+                    await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
                     return True
                 self._client.close()
 
@@ -259,9 +258,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
             if data["battery_count"] != self.limits[CONF_BATTERY_COUNT]:
                 _LOGGER.debug(
-                    f"Read battery count {data['battery_count']} is unequal -> Skip data! Wait {SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED}s."
+                    f"Read battery count {data['battery_count']} is unequal -> Skip data! Wait {SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S}s."
                 )
-                await asyncio.sleep(SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED)
+                await asyncio.sleep(SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S)
                 return None
 
             return data
@@ -364,7 +363,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
             if self._store is not None:
-                self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY)
+                self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
 
             return dict(result)
         except UpdateFailed:  # noqa: BLE001
