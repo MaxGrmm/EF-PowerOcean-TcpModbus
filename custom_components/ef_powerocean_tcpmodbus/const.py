@@ -10,7 +10,7 @@ from typing import Final
 DOMAIN: Final = "ef_powerocean_tcpmodbus"
 DEFAULT_PORT: Final = 502
 DEFAULT_SLAVE: Final = 1
-DEFAULT_SCAN_INTERVAL: Final = 5  # seconds
+DEFAULT_SCAN_INTERVAL_S: Final = 5
 DEFAULT_BATTERY_COUNT: Final = 0
 DEFAULT_MAX_SOLAR_POWER: Final = 12000
 DEFAULT_MAX_GRID_POWER: Final = 15000

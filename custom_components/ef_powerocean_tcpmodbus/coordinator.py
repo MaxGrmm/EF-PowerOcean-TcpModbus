@@ -33,7 +33,7 @@ from .const import (
     DEFAULT_MAX_POWER,
     DEFAULT_MAX_SOLAR_POWER,
     DEFAULT_PORT,
-    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL_S,
     DEFAULT_SLAVE,
     DOMAIN,
     ENERGY_SENSOR_MAP,
@@ -69,7 +69,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self.host = config_entry.data.get(CONF_HOST)
         self.port = config_entry.data.get(CONF_PORT, DEFAULT_PORT)
         self.scan_interval = config_entry.data.get(
-            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_S
         )
         self.limits = {
             CONF_BATTERY_COUNT: config_entry.data.get(
