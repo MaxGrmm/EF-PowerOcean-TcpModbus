@@ -53,6 +53,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SLEEP_TIME_AFTER_RECONNECT: Final = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED: Final = 15
+UNREALISTIC_ENERGY_READ_THRESHOLD: Final = 3
 
 
 class EcoflowCoordinator(DataUpdateCoordinator):
@@ -106,13 +107,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._client_slave_id = DEFAULT_SLAVE
         self._lock = asyncio.Lock()
         self._last_checked_data: dict[str, Any] = {}
-        self._last_checked_time: datetime = None
-        self._check_monotonic: bool = True
-        self._count_reset_energy_sensor: int = 0
-        for sensor in ENERGY_SENSOR_MAP:
-            if sensor.reset_at_midnight:
-                self._count_reset_energy_sensor += 1
-        self._count_reset_energy_finished: int = self._count_reset_energy_sensor
+        self._last_checked_time: datetime | None = None
+        self._unrealistic_energy_read_counts: dict[str, int] = {}
 
     @property
     def connected(self) -> bool:
@@ -243,7 +239,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     def _sanitize_energy_values(self, data: dict[str, Any]) -> dict[str, Any]:
         result: dict[str, Any] = dict(data)
-        self._check_monotonic = True
 
         now = dt.now()
         if self._last_checked_time is None or self._last_checked_data is None:
@@ -270,24 +265,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug(
                     f"Current energy or last energy is None of entity {energy_sensor.key}"
                 )
-                continue
-
-            is_midnight_reset = (
-                energy_sensor.reset_at_midnight
-                and current_energy == 0
-                and last_energy > 0
-                and now.hour == 0
-                and now.minute < 1
-            )
-            if is_midnight_reset:
-                # Reset nur zwischen 00:00 und 00:01 erlauben
-                _LOGGER.debug(f"Reset of entity {energy_sensor.key}")
-                if self._count_reset_energy_finished == self._count_reset_energy_sensor:
-                    # first counter reset after midnight
-                    self._count_reset_energy_finished = 0
-                result[energy_sensor.key] = 0
-                self._check_monotonic = False
-                self._count_reset_energy_finished += 1
+                self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
                 continue
 
             energy_delta = current_energy - last_energy
@@ -296,34 +274,41 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug(
                     f"Time window is too large of entity {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 4)} dt: {dt_hours} power: {int(calculated_power)} limit: {energy_sensor.max_power} last check: {self._last_checked_time.time()})"
                 )
+                self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
                 continue
 
             limit = self.limits.get(energy_sensor.max_power, DEFAULT_MAX_POWER)
-            if calculated_power > limit:
-                _LOGGER.warning(
-                    f"Skip entire data. Reason: {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
-                )
-                return dict(self._last_checked_data)
 
-            if current_energy == 0 and last_energy > 0:
+            # A total counter must never decrease; hold the last value indefinitely.
+            if energy_delta < 0 and not energy_sensor.resets_daily:
+                result[energy_sensor.key] = last_energy
                 _LOGGER.warning(
-                    f"Skip entire data. Reason: 0 kWh of {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
+                    f"Clamp decreasing total {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
                 )
-                return dict(self._last_checked_data)
+                continue
 
-            # Rückgabe des aktuellen Wertes nur wenn der neue Wert > letzter Wert ist
-            result[energy_sensor.key] = max(current_energy, last_energy)
+            is_unrealistic = energy_delta < 0 or calculated_power > limit
+            if is_unrealistic:
+                read_count = (
+                    self._unrealistic_energy_read_counts.get(energy_sensor.key, 0) + 1
+                )
+                self._unrealistic_energy_read_counts[energy_sensor.key] = read_count
+                if read_count < UNREALISTIC_ENERGY_READ_THRESHOLD:
+                    result[energy_sensor.key] = last_energy
+                    _LOGGER.warning(
+                        f"Ignore unrealistic value of {energy_sensor.key} ({read_count}/{UNREALISTIC_ENERGY_READ_THRESHOLD})! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
+                    )
+                    continue
+
+                self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
+                _LOGGER.warning(
+                    f"Accept unrealistic value of {energy_sensor.key} after {UNREALISTIC_ENERGY_READ_THRESHOLD} consecutive readings. (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
+                )
+                continue
+
+            self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
 
         return result
-
-    def _enforced_monotonic(self, data: dict[str, Any]) -> dict[str, Any]:
-        for energy_senser in ENERGY_SENSOR_MAP:
-            last = self._last_checked_data.get(energy_senser.key, None)
-            current = data.get(energy_senser.key, None)
-            if last is not None and current is not None and current < last:
-                data[energy_senser.key] = last
-
-        return data
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
@@ -334,17 +319,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             calculated_results = calculate_derived_values(
                 TelemetryData.from_mapping(result),
                 calculate_solar_power=self._ena_calc_solar_power,
-                daily_reset_complete=(
-                    self._count_reset_energy_finished == self._count_reset_energy_sensor
-                ),
                 startup_voltage=self.inverter_model.startup_voltage,
                 max_battery_charge_power=MAX_BATTERY_CHARGED_POWER,
                 max_battery_discharge_power=MAX_BATTERY_DISCHARGED_POWER,
             )
             result.update(calculated_results)
-
-            if self._check_monotonic:
-                result = self._enforced_monotonic(result)
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()

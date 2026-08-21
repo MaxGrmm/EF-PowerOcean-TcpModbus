@@ -19,9 +19,7 @@ def coordinator():
     )
     instance._last_checked_data = {}
     instance._last_checked_time = None
-    instance._check_monotonic = True
-    instance._count_reset_energy_sensor = 5
-    instance._count_reset_energy_finished = 5
+    instance._unrealistic_energy_read_counts = {}
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
     instance.limits = {
         const.CONF_MAX_GRID_POWER: 15_000,
@@ -107,13 +105,13 @@ def test_handles_minimum_update_interval_boundary(
 
 
 @pytest.mark.parametrize(
-    ("current", "expected", "rejects_snapshot"),
+    ("current", "expected"),
     (
-        (9.0, 10.0, False),
-        (10.0, 10.0, False),
-        (7_510.0, 7_510.0, False),
-        (7_510.01, 10.0, True),
-        (0.0, 10.0, True),
+        (9.0, 10.0),
+        (10.0, 10.0),
+        (7_510.0, 7_510.0),
+        (7_510.01, 10.0),
+        (0.0, 10.0),
     ),
     ids=(
         "decrease-is-clamped",
@@ -128,7 +126,6 @@ def test_validates_energy_changes_within_one_hour(
     monkeypatch: pytest.MonkeyPatch,
     current: float,
     expected: float,
-    rejects_snapshot: bool,
 ) -> None:
     now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
     coordinator._last_checked_time = now - timedelta(minutes=30)
@@ -140,7 +137,104 @@ def test_validates_energy_changes_within_one_hour(
     result = sanitize(coordinator, {"grid_import_total": current}, now, monkeypatch)
 
     assert result["grid_import_total"] == expected
-    assert ("previous_snapshot_marker" in result) is rejects_snapshot
+    assert "previous_snapshot_marker" not in result
+
+
+def test_debounces_unrealistic_energy_read_without_discarding_frame(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    coordinator._last_checked_time = now - timedelta(seconds=30)
+    coordinator._last_checked_data = {
+        "bat_discharged_today": 1.77,
+        "battery_soc": 50.0,
+    }
+
+    for read_number in (1, 2, 3):
+        result = sanitize(
+            coordinator,
+            {"bat_discharged_today": 0.0, "battery_soc": 45.0},
+            now,
+            monkeypatch,
+        )
+
+        expected_bat_discharged_today = 0.0 if read_number == 3 else 1.77
+        assert result["bat_discharged_today"] == expected_bat_discharged_today
+        assert result["battery_soc"] == 45.0
+
+
+def test_debounces_nonzero_energy_decrease(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    coordinator._last_checked_time = now - timedelta(seconds=30)
+    coordinator._last_checked_data = {"grid_import_today": 10.0}
+
+    results = [
+        sanitize(coordinator, {"grid_import_today": 1.0}, now, monkeypatch)
+        for _ in range(3)
+    ]
+
+    assert [result["grid_import_today"] for result in results] == [10.0, 10.0, 1.0]
+
+
+def test_total_energy_decrease_is_never_accepted(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    coordinator._last_checked_time = now - timedelta(seconds=30)
+    coordinator._last_checked_data = {"grid_import_total": 10.0}
+
+    results = [
+        sanitize(coordinator, {"grid_import_total": 0.0}, now, monkeypatch)
+        for _ in range(5)
+    ]
+
+    assert [result["grid_import_total"] for result in results] == [10.0] * 5
+    assert coordinator._unrealistic_energy_read_counts == {}
+
+
+def test_valid_energy_read_clears_unrealistic_read_count(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    coordinator._last_checked_time = now - timedelta(seconds=30)
+    coordinator._last_checked_data = {"grid_import_total": 10.0}
+
+    sanitize(coordinator, {"grid_import_total": 1_000.0}, now, monkeypatch)
+    sanitize(coordinator, {"grid_import_total": 11.0}, now, monkeypatch)
+    result = sanitize(coordinator, {"grid_import_total": 1_000.0}, now, monkeypatch)
+
+    assert result["grid_import_total"] == 10.0
+    assert coordinator._unrealistic_energy_read_counts == {"grid_import_total": 1}
+
+
+def test_accepted_daily_reset_updates_derived_house_energy(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 8, 8, 0, 1, tzinfo=timezone.utc)
+    daily_energy = {
+        "solar_today": 20.0,
+        "grid_import_today": 5.0,
+        "bat_discharged_today": 2.0,
+        "grid_export_today": 3.0,
+        "bat_charged_today": 4.0,
+    }
+    coordinator._last_checked_time = now - timedelta(seconds=30)
+    coordinator._last_checked_data = {
+        **daily_energy,
+        "house_energy_today": 20.0,
+    }
+    coordinator._unrealistic_energy_read_counts = dict.fromkeys(daily_energy, 2)
+    coordinator._ena_calc_solar_power = False
+    coordinator.async_get_raw_data = AsyncMock(
+        return_value=dict.fromkeys(daily_energy, 0.0)
+    )
+    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result["house_energy_today"] == 0.0
 
 
 @pytest.mark.parametrize(
@@ -168,20 +262,6 @@ def test_leaves_values_unchanged_when_a_reading_is_missing(
     assert result == current_data
 
 
-def test_accepts_daily_reset_during_midnight_window(
-    coordinator, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    now = datetime(2026, 8, 8, 0, 0, 30, tzinfo=timezone.utc)
-    coordinator._last_checked_time = now - timedelta(minutes=1)
-    coordinator._last_checked_data = {"grid_import_today": 10.0}
-
-    result = sanitize(coordinator, {"grid_import_today": 0.0}, now, monkeypatch)
-
-    assert result["grid_import_today"] == 0.0
-    assert coordinator._check_monotonic is False
-    assert coordinator._count_reset_energy_finished == 1
-
-
 @pytest.mark.parametrize(
     ("elapsed", "expected"),
     (
@@ -205,66 +285,6 @@ def test_handles_maximum_validation_window_boundary(
     result = sanitize(coordinator, {"grid_import_total": current}, now, monkeypatch)
 
     assert result["grid_import_total"] == expected
-
-
-@pytest.mark.parametrize(
-    ("now", "sensor_key", "expected_reset"),
-    (
-        (datetime(2026, 8, 8, 0, 0, tzinfo=timezone.utc), "grid_import_today", True),
-        (
-            datetime(2026, 8, 8, 0, 0, 59, tzinfo=timezone.utc),
-            "grid_import_today",
-            True,
-        ),
-        (
-            datetime(2026, 8, 8, 0, 1, tzinfo=timezone.utc),
-            "grid_import_today",
-            False,
-        ),
-        (
-            datetime(2026, 8, 8, 0, 0, tzinfo=timezone.utc),
-            "grid_import_total",
-            False,
-        ),
-    ),
-    ids=(
-        "start-of-midnight-window",
-        "end-of-midnight-window",
-        "after-midnight-window",
-        "non-resetting-sensor",
-    ),
-)
-def test_daily_reset_window_boundaries(
-    coordinator,
-    monkeypatch: pytest.MonkeyPatch,
-    now: datetime,
-    sensor_key: str,
-    expected_reset: bool,
-) -> None:
-    coordinator._last_checked_time = now - timedelta(minutes=1)
-    coordinator._last_checked_data = {sensor_key: 10.0}
-
-    result = sanitize(coordinator, {sensor_key: 0.0}, now, monkeypatch)
-
-    assert result[sensor_key] == (0.0 if expected_reset else 10.0)
-    assert (coordinator._check_monotonic is False) is expected_reset
-
-
-def test_enforces_monotonic_energy_values(coordinator) -> None:
-    coordinator._last_checked_data = {
-        "grid_import_total": 10.0,
-        "grid_export_total": 5.0,
-    }
-    data = {
-        "grid_import_total": 9.0,
-        "grid_export_total": 6.0,
-    }
-
-    result = coordinator._enforced_monotonic(data)
-
-    assert result is data
-    assert result["grid_import_total"] == 10.0
-    assert result["grid_export_total"] == 6.0
 
 
 @pytest.mark.parametrize("is_error", (False, True), ids=("success", "modbus-error"))

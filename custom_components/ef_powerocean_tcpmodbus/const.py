@@ -114,8 +114,8 @@ class EnergySensorDef:
     key: str
     name: str | None = None
     unit: str = "kWh"
-    reset_at_midnight: bool = False  # nur bei Sensor die aus einem Register gelesen werden, keine berechneten Sensoren
     is_calculated: bool = False
+    resets_daily: bool = False
     max_power: int | None = None
     device_class: str = "energy"
     state_class: str = "total_increasing"
@@ -506,16 +506,16 @@ SENSOR_MAP: list[SensorDef] = [
 ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
     EnergySensorDef("grid_import_total", max_power=CONF_MAX_GRID_POWER),
     EnergySensorDef(
-        "grid_import_today", reset_at_midnight=True, max_power=CONF_MAX_GRID_POWER
+        "grid_import_today", resets_daily=True, max_power=CONF_MAX_GRID_POWER
     ),
     EnergySensorDef("grid_export_total", max_power=CONF_MAX_SOLAR_POWER),
     EnergySensorDef(
-        "grid_export_today", reset_at_midnight=True, max_power=CONF_MAX_SOLAR_POWER
+        "grid_export_today", resets_daily=True, max_power=CONF_MAX_SOLAR_POWER
     ),
     EnergySensorDef("bat_charged_total", max_power=CONF_MAX_BATTERY_CHARGED_POWER),
     EnergySensorDef(
         "bat_charged_today",
-        reset_at_midnight=True,
+        resets_daily=True,
         max_power=CONF_MAX_BATTERY_CHARGED_POWER,
     ),
     EnergySensorDef(
@@ -523,13 +523,11 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
     ),
     EnergySensorDef(
         "bat_discharged_today",
-        reset_at_midnight=True,
+        resets_daily=True,
         max_power=CONF_MAX_BATTERY_DISCHARGED_POWER,
     ),
     EnergySensorDef("solar_total", max_power=CONF_MAX_SOLAR_POWER),
-    EnergySensorDef(
-        "solar_today", reset_at_midnight=True, max_power=CONF_MAX_SOLAR_POWER
-    ),
+    EnergySensorDef("solar_today", resets_daily=True, max_power=CONF_MAX_SOLAR_POWER),
     EnergySensorDef(
         "house_energy_today",
         is_calculated=True,
