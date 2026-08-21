@@ -73,6 +73,8 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
         self._attr_native_unit_of_measurement = self._definition.unit
         self._attr_device_class = self._definition.device_class
         self._attr_state_class = self._definition.state_class
+        if options := getattr(self._definition, "options", None):
+            self._attr_options = list(options)
         self._restored_value: datetime | float | int | str | None = None
         self._last_written_value: datetime | float | int | str | None = None
 
@@ -108,13 +110,24 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
             self._last_written_value = self._restored_value
 
     @property
+    def available(self) -> bool:
+        """Keep coordinator diagnostics available when normal entities are not."""
+        if self._definition.key == "coordinator_status":
+            return self.coordinator.status is not None
+        return super().available
+
+    @property
     def native_value(self) -> datetime | float | int | str | None:
         """Return the sensor value from coordinator, falling back to last value"""
+        if self._definition.key == "coordinator_status":
+            return self.coordinator.status
         if self.coordinator.data is not None:
             value = self.coordinator.data.get(self._definition.key, None)
             if value is not None:
                 if isinstance(value, datetime):
                     return value
+                if self._definition.device_class == "enum":
+                    return str(value)
                 if precision := VALUE_PRECISION.get(self._definition.unit, None):
                     return (
                         round(value, precision)

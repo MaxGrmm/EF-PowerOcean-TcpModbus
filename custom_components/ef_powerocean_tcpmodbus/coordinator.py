@@ -46,6 +46,7 @@ from .const import (
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
     UNREALISTIC_ENERGY_READ_THRESHOLD,
+    CoordinatorStatus,
     InverterModel,
 )
 from .telemetry import (
@@ -112,6 +113,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
         self._unrealistic_energy_read_counts: dict[str, int] = {}
+        self._status: CoordinatorStatus | None = None
         self._store: Store[dict[str, Any]] | None = Store(
             hass, STORAGE_VERSION, f"{DOMAIN}.{config_entry.entry_id}.state"
         )
@@ -119,6 +121,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     @property
     def connected(self) -> bool:
         return self._client.connected
+
+    @property
+    def status(self) -> CoordinatorStatus | None:
+        return self._status
 
     @property
     def is_modbus_disabled(self) -> bool:
@@ -372,7 +378,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             if (raw_data := await self.async_get_raw_data()) is None:
-                return None
+                self._status = CoordinatorStatus.READ_FAILED
+                return dict(self._last_checked_data)
 
             result = self._sanitize_energy_values(raw_data)
             calculated_results = calculate_derived_values(
@@ -387,16 +394,18 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
-            result["last_read_time"] = self._last_checked_time
+            self._status = CoordinatorStatus.SUCCESS
             if self._store is not None:
                 self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
 
             return dict(result)
         except UpdateFailed:  # noqa: BLE001
+            self._status = CoordinatorStatus.RECONNECT_FAILED
             raise UpdateFailed(
                 "Reconnect attempts failed! Integration stopped. Retry after 120s.",
                 retry_after=120,
             )
         except Exception as err:
+            self._status = CoordinatorStatus.PROCESSING_FAILED
             _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
             return None

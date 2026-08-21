@@ -77,6 +77,13 @@ class InverterModel(StrEnum):
 DEFAULT_INVERTER_MODEL: Final = InverterModel.POWEROCEAN_THREE_PHASE
 
 
+class CoordinatorStatus(StrEnum):
+    SUCCESS = "success"
+    READ_FAILED = "read_failed"
+    RECONNECT_FAILED = "reconnect_failed"
+    PROCESSING_FAILED = "processing_failed"
+
+
 @dataclass(frozen=True)
 class ModelBlockIndex:
     default: int
@@ -114,6 +121,7 @@ class SensorDef:
     state_class: str | None = None
     entity_category: str | None = None
     icon: str | None = None
+    options: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -508,9 +516,10 @@ SENSOR_MAP: list[SensorDef] = [
         icon="mdi:transmission-tower",
     ),
     SensorDef(
-        key="last_read_time",
-        device_class="timestamp",
+        key="coordinator_status",
+        device_class="enum",
         entity_category="diagnostic",
+        options=tuple(CoordinatorStatus),
     ),
 ]
 

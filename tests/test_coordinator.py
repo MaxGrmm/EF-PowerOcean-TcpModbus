@@ -20,6 +20,7 @@ def coordinator():
     instance._last_checked_data = {}
     instance._last_checked_time = None
     instance._unrealistic_energy_read_counts = {}
+    instance._status = None
     instance._store = None
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
     instance.limits = {
@@ -210,7 +211,7 @@ def test_seeds_baseline_from_persisted_state(coordinator) -> None:
     )
 
 
-def test_accepted_update_publishes_last_read_time_without_persisting_it(
+def test_accepted_update_publishes_successful_coordinator_status(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
@@ -229,10 +230,44 @@ def test_accepted_update_publishes_last_read_time_without_persisting_it(
         coordinator_module, "calculate_derived_values", Mock(return_value={})
     )
 
+    asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.status == const.CoordinatorStatus.SUCCESS
+    assert "coordinator_status" not in coordinator._last_checked_data
+
+
+def test_unsuccessful_update_publishes_failed_coordinator_status(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    coordinator._last_checked_data = {"grid_import_total": 10.0}
+    coordinator.async_get_raw_data = AsyncMock(return_value=None)
+
     result = asyncio.run(coordinator._async_update_data())
 
-    assert result["last_read_time"] == now
-    assert "last_read_time" not in coordinator._last_checked_data
+    assert result == {"grid_import_total": 10.0}
+    assert coordinator.status == const.CoordinatorStatus.READ_FAILED
+    assert "coordinator_status" not in coordinator._last_checked_data
+
+
+def test_reconnect_failure_updates_coordinator_status(coordinator) -> None:
+    coordinator.async_get_raw_data = AsyncMock(
+        side_effect=coordinator_module.UpdateFailed("Reconnect failed")
+    )
+
+    with pytest.raises(coordinator_module.UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.status == const.CoordinatorStatus.RECONNECT_FAILED
+
+
+def test_processing_failure_updates_coordinator_status(coordinator) -> None:
+    coordinator.async_get_raw_data = AsyncMock(return_value={})
+    coordinator._sanitize_energy_values = Mock(side_effect=ValueError("Invalid data"))
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result is None
+    assert coordinator.status == const.CoordinatorStatus.PROCESSING_FAILED
 
 
 def test_persisted_state_after_reload_clamps_total_reset(
