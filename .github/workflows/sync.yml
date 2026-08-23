@@ -17,7 +17,7 @@ jobs:
       - name: Checkout Fork
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ef-3phase-write-to-register-battery_soc
           fetch-depth: 0
 
       # 2. Connect the original MaxGrmm repository to fetch upstream tags
@@ -45,9 +45,14 @@ jobs:
           
           # Switch to your feature branch
           git checkout ef-3phase-write-to-register-battery_soc
+
+          # 3. Принудительно возвращаем manifest.json к оригиналу из main в рабочей директории.
+          # Это предотвратит конфликт версий при rebase, так как файлы станут идентичными.
+          git checkout origin/main -- custom_components/ef_powerocean_tcpmodbus/manifest.json
           
-          # Perform rebase operation
-          git rebase -Xtheirs origin/main
+          # 4. Perform rebase operation
+          # сделает идеальный rebase ваших коммитов и вернет файл обратно без лишних конфликтов и коммитов.
+          git rebase --autostash origin/main          
 
       # 5. Detect the latest upstream tag, patch manifest.json, and create a custom tag
       - name: Create Expanded Tag
