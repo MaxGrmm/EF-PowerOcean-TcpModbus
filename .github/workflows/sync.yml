@@ -49,7 +49,7 @@ jobs:
           # Выполняем перебазирование поверх актуального main
           git rebase origin/main
 
-      # 5. Находим последний тег оригинала и создаем ваш тег с суффиксом -expanded
+      # 5. Находим последний тег оригинала, обновляем manifest.json и создаем ваш тег
       - name: Create Expanded Tag
         id: tag_step
         run: |
@@ -69,14 +69,28 @@ jobs:
           if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
             echo "Тег $NEW_TAG уже существует. Обновляем ветку без создания нового тега."
             echo "create_release=false" >> $GITHUB_OUTPUT
-            # Отправляем перебазированную ветку (требуется force-push)
             git push origin ef-3phase-write-to-register-battery_soc --force-with-lease
           else
             echo "create_release=true" >> $GITHUB_OUTPUT
             echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
             echo "upstream_tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
-            # Ставим тег на самый свежий (перебазированный) коммит рабочей ветки
+            
+            # --- НОВЫЙ БЛОК: Модификация manifest.json под ваш тег ---
+            MANIFEST_PATH="custom_components/ef_powerocean_tcpmodbus/manifest.json"
+            if [ -f "$MANIFEST_PATH" ]; then
+              echo "Обновляем версию в manifest.json на $NEW_TAG"
+              # Изменяем поле version в JSON-файле
+              jq --arg ver "$NEW_TAG" '.version = $ver' "$MANIFEST_PATH" > tmp.json && mv tmp.json "$MANIFEST_PATH"
+              
+              # Коммитим измененный манифест в вашу рабочую ветку перед созданием тега
+              git add "$MANIFEST_PATH"
+              git commit -m "bump: update manifest.json version to $NEW_TAG [skip ci]"
+            fi
+            # ---------------------------------------------------------
+            
+            # Ставим тег на коммит с обновленным манифестом
             git tag "$NEW_TAG"
+            
             # Отправляем обновленную ветку и новый тег в ваш GitHub
             git push origin ef-3phase-write-to-register-battery_soc --force-with-lease
             git push origin "$NEW_TAG"
