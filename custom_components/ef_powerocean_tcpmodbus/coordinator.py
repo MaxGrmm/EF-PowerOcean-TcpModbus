@@ -319,7 +319,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             # A total counter must never decrease; hold the last value indefinitely.
             if energy_delta < 0 and not energy_sensor.resets_daily:
                 result[energy_sensor.key] = last_energy
-                _LOGGER.warning(
+                _LOGGER.debug(
                     f"Clamp decreasing total {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
                 )
                 continue
@@ -332,13 +332,13 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._unrealistic_energy_read_counts[energy_sensor.key] = read_count
                 if read_count < UNREALISTIC_ENERGY_READ_THRESHOLD:
                     result[energy_sensor.key] = last_energy
-                    _LOGGER.warning(
+                    _LOGGER.debug(
                         f"Ignore unrealistic value of {energy_sensor.key} ({read_count}/{UNREALISTIC_ENERGY_READ_THRESHOLD})! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
                     )
                     continue
 
                 self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
-                _LOGGER.warning(
+                _LOGGER.debug(
                     f"Accept unrealistic value of {energy_sensor.key} after {UNREALISTIC_ENERGY_READ_THRESHOLD} consecutive readings. (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
                 )
                 continue
