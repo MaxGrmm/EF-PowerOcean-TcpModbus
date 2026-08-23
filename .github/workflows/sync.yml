@@ -1,0 +1,74 @@
+name: Auto Sync and Tag Fork (Rebase Mode)
+
+on:
+  schedule:
+    - cron: '30 0 * * *' # Автоматический запуск каждый день в 00:00
+  workflow_dispatch: # Кнопка для ручного запуска
+
+jobs:
+  sync_and_tag:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Скачиваем ваш форк (глубина fetch-depth: 0 обязательна для rebase)
+      - name: Checkout Fork
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # 2. Подключаем оригинальный репозиторий MaxGrmm для получения тегов
+      - name: Fetch Upstream Tags
+        run: |
+          git remote add upstream https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus
+          git fetch upstream --tags
+
+      # 3. Синхронизируем ветку main вашего форка с оригиналом MaxGrmm
+      - name: Sync Main with Upstream
+        uses: tgymnich/fork-sync@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
+          head: main
+
+      # 4. Переключаемся на рабочую ветку и делаем REBASE на обновленный main
+      - name: Rebase Feature Branch onto Main
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Получаем свежее состояние main, которое обновил предыдущий шаг
+          git fetch origin main
+          
+          # Переходим в вашу ветку
+          git checkout ef-3phase-write-to-register-battery_soc
+          
+          # Выполняем перебазирование поверх актуального main
+          git rebase origin/main
+          
+      # 5. Находим последний тег оригинала и создаем ваш тег с суффиксом -expanded
+      - name: Create Expanded Tag
+        run: |
+          UPSTREAM_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "")
+          
+          if [ -z "$UPSTREAM_TAG" ]; then
+            echo "Теги в оригинальном репозитории не найдены. Создаем базовый тег."
+            NEW_TAG="v1.0.0-expanded"
+          else
+            NEW_TAG="${UPSTREAM_TAG}-expanded"
+            echo "Найден тег оригинала: $UPSTREAM_TAG"
+          fi
+          
+          echo "Целевой тег: $NEW_TAG"
+          
+          # Проверяем, существует ли уже такой тег в вашем форке harduser-gnk
+          if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+            echo "Тег $NEW_TAG уже существует. Обновляем ветку без создания нового тега."
+            # Отправляем перебазированную ветку (требуется force-push)
+            git push origin ef-3phase-write-to-register-battery_soc --force-with-lease
+          else
+            # Ставим тег на самый свежий (перебазированный) коммит рабочей ветки
+            git tag "$NEW_TAG"
+            # Отправляем обновленную ветку и новый тег в ваш GitHub
+            git push origin ef-3phase-write-to-register-battery_soc --force-with-lease
+            git push origin "$NEW_TAG"
+          fi
