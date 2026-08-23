@@ -47,7 +47,7 @@ jobs:
           git checkout ef-3phase-write-to-register-battery_soc
           
           # Perform rebase operation
-          git rebase origin/main
+          git rebase -Xtheirs origin/main
 
       # 5. Detect the latest upstream tag, patch manifest.json, and create a custom tag
       - name: Create Expanded Tag
