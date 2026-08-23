@@ -2,31 +2,31 @@ name: Auto Sync and Tag Fork (Rebase Mode)
 
 on:
   schedule:
-    - cron: '30 0 * * *' # Автоматический запуск каждый день в 00:30
-  workflow_dispatch: # Кнопка для ручного запуска
+    - cron: '30 0 * * *' # Runs automatically every day at 00:30 UTC
+  workflow_dispatch: # Button for manual trigger
 
 jobs:
   sync_and_tag:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write # Нужно для работы fork-sync
+      pull-requests: write # Required for fork-sync action
     
     steps:
-      # 1. Скачиваем ваш форк (глубина fetch-depth: 0 обязательна для rebase)
+      # 1. Checkout the fork repository with full history depth (required for rebase and tags)
       - name: Checkout Fork
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      # 2. Подключаем оригинальный репозиторий MaxGrmm для получения тегов
+      # 2. Connect the original MaxGrmm repository to fetch upstream tags
       - name: Fetch Upstream Tags
         run: |
           git remote add upstream https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus
           git fetch upstream --tags
 
-      # 3. Синхронизируем ветку main вашего форка с оригиналом MaxGrmm
+      # 3. Synchronize the main branch of your fork with MaxGrmm/main
       - name: Sync Main with Upstream
         uses: tgymnich/fork-sync@v2
         with:
@@ -34,40 +34,40 @@ jobs:
           base: main
           head: main
 
-      # 4. Переключаемся на рабочую ветку и делаем REBASE на обновленный main
+      # 4. Switch to your feature branch and rebase it on top of the updated main
       - name: Rebase Feature Branch onto Main
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Получаем свежее состояние main, которое обновил предыдущий шаг
+          # Fetch the freshly updated main branch from origin
           git fetch origin main
           
-          # Переходим в вашу ветку
+          # Switch to your feature branch
           git checkout ef-3phase-write-to-register-battery_soc
           
-          # Выполняем перебазирование поверх актуального main
+          # Perform rebase operation
           git rebase origin/main
 
-      # 5. Находим последний тег оригинала, обновляем manifest.json и создаем ваш тег
+      # 5. Detect the latest upstream tag, patch manifest.json, and create a custom tag
       - name: Create Expanded Tag
         id: tag_step
         run: |
           UPSTREAM_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "")
           
           if [ -z "$UPSTREAM_TAG" ]; then
-            echo "Теги в оригинальном репозитории не найдены. Создаем базовый тег."
+            echo "No tags found in upstream repository. Creating a fallback tag."
             NEW_TAG="v1.0.0-expanded"
           else
             NEW_TAG="${UPSTREAM_TAG}-expanded"
-            echo "Найден тег оригинала: $UPSTREAM_TAG"
+            echo "Found upstream tag: $UPSTREAM_TAG"
           fi
           
-          echo "Целевой тег: $NEW_TAG"
+          echo "Target tag: $NEW_TAG"
           
-          # Проверяем, существует ли уже такой тег в вашем форке harduser-gnk
+          # Check if this custom tag already exists in your fork
           if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
-            echo "Тег $NEW_TAG уже существует. Обновляем ветку без создания нового тега."
+            echo "Tag $NEW_TAG already exists. Updating the branch without recreating the tag."
             echo "create_release=false" >> $GITHUB_OUTPUT
             git push origin ef-3phase-write-to-register-battery_soc --force-with-lease
           else
@@ -75,69 +75,69 @@ jobs:
             echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
             echo "upstream_tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
             
-            # --- НОВЫЙ БЛОК: Модификация manifest.json под ваш тег ---
+            # --- Injecting new version string into manifest.json ---
             MANIFEST_PATH="custom_components/ef_powerocean_tcpmodbus/manifest.json"
             if [ -f "$MANIFEST_PATH" ]; then
-              echo "Обновляем версию в manifest.json на $NEW_TAG"
-              # Изменяем поле version в JSON-файле
+              echo "Updating manifest.json version field to $NEW_TAG"
+
               jq --arg ver "$NEW_TAG" '.version = $ver' "$MANIFEST_PATH" > tmp.json && mv tmp.json "$MANIFEST_PATH"
               
-              # Коммитим измененный манифест в вашу рабочую ветку перед созданием тега
+              # Commit patched manifest directly to your feature branch before tagging
               git add "$MANIFEST_PATH"
               git commit -m "bump: update manifest.json version to $NEW_TAG [skip ci]"
             fi
-            # ---------------------------------------------------------
+            # --------------------------------------------------------
             
-            # Ставим тег на коммит с обновленным манифестом
+            # Apply tag to the latest commit with the updated manifest
             git tag "$NEW_TAG"
             
-            # Отправляем обновленную ветку и новый тег в ваш GitHub
+            # Push both the rebased branch and the new release tag
             git push origin ef-3phase-write-to-register-battery_soc --force-with-lease
             git push origin "$NEW_TAG"
           fi
 
-      # 6. Получаем описание релиза из апстрима и локальные коммиты вашей ветки
+      # 6. Fetch original release notes from upstream and compile fork changes
       - name: Fetch Release Notes and Fork Logs
         if: steps.tag_step.outputs.create_release == 'true' && steps.tag_step.outputs.upstream_tag != ''
         id: release_info
         run: |
-          # Переносим значение тега в переменную Bash
+
           UTAG="${{ steps.tag_step.outputs.upstream_tag }}"
           
-          # Собираем домен частями, чтобы обойти текстовый фильтр
+          # Safe step-by-step URL construction to prevent Markdown parser breakdown
           API_HOST="api.github.com"
           API_PATH="repos/MaxGrmm/EF-PowerOcean-TcpModbus/releases/tags"
           FULL_API_URL="https://${API_HOST}/${API_PATH}/${UTAG}"
           
-          echo "Запрашиваем данные оригинального релиза..."
+          echo "Fetching upstream release notes..."
           
-          # Выполняем защищенный запрос
+          # Execute safe cURL request to the GitHub API
           RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$FULL_API_URL")
-          ORIGINAL_BODY=$(echo "$RESPONSE" | jq -r '.body // "Описание оригинального релиза недоступно."')
+          ORIGINAL_BODY=$(echo "$RESPONSE" | jq -r '.body // "Upstream release notes description is unavailable."')
           
-          # Генерируем лог коммитов вашей рабочей ветки
+          # Generate git log containing your unique custom commits
           FORK_COMMITS=$(git log origin/main..ef-3phase-write-to-register-battery_soc --oneline)
           if [ -z "$FORK_COMMITS" ]; then
-            FORK_COMMITS="Нет уникальных коммитов (ветки идентичны)."
+            FORK_COMMITS="No unique custom commits found (branches are identical)."
           fi
 
-          # Формируем итоговый файл markdown для релиза
-          echo "### Изменения в оригинальном релизе ($UTAG)" > release_notes.md
-          echo "[Оригинальный релиз MaxGrmm](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases/tag/$UTAG)" >> release_notes.md
+          # Compile the markdown release notes file in English
+          echo "### Upstream Release Changes ($UTAG)" > release_notes.md
+          echo "[Original Release Notes by MaxGrmm](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases/tag/$UTAG)" >> release_notes.md
           echo "" >> release_notes.md
           echo "$ORIGINAL_BODY" >> release_notes.md
           echo "" >> release_notes.md
           echo "---" >> release_notes.md
-          echo "### Статус автоматизации форка" >> release_notes.md
-          echo "- Ветка \`ef-3phase-write-to-register-battery_soc\` успешно синхронизирована." >> release_notes.md
-          echo "- Выполнен \`git rebase\` поверх актуального \`main\`." >> release_notes.md
+          echo "### Fork Automation Status" >> release_notes.md
+          echo "- Branch \`ef-3phase-write-to-register-battery_soc\` has been successfully synced with upstream." >> release_notes.md
+          echo "- Performed automatic \`git rebase\` on top of the latest \`main\` branch." >> release_notes.md
           echo "" >> release_notes.md
-          echo "**Коммиты вашей рабочей ветки in этом релизе:**" >> release_notes.md
+          echo "**Your custom feature commits included in this release:**" >> release_notes.md
           echo "\`\`\`text" >> release_notes.md
           echo "$FORK_COMMITS" >> release_notes.md
           echo "\`\`\`" >> release_notes.md
 
-      # 7. Фиксируем коммит как релиз с расширенным текстом (используем современный экшен)
+      # 7. Publish the complete GitHub Release with compiled English changelog
       - name: Create GitHub Release
         if: steps.tag_step.outputs.create_release == 'true'
         uses: softprops/action-gh-release@v2
