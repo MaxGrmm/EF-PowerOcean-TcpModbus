@@ -88,8 +88,14 @@ jobs:
               jq --arg ver "$NEW_TAG" '.version = $ver' "$MANIFEST_PATH" > tmp.json && mv tmp.json "$MANIFEST_PATH"
               
               # Commit patched manifest directly to your feature branch before tagging
+              # БЕЗОПАСНЫЙ КОММИТ: проверяем, изменился ли файл физически
               git add "$MANIFEST_PATH"
-              git commit -m "bump: update manifest.json version to $NEW_TAG [skip ci]"
+              if [ -n "$(git status --porcelain "$MANIFEST_PATH")" ]; then
+                echo "Changes detected in manifest.json. Committing..."
+                git commit -m "bump: update manifest.json version to $NEW_TAG [skip ci]"
+              else
+                echo "manifest.json already has version $NEW_TAG. Skipping commit step."
+              fi
             fi
             # --------------------------------------------------------
             
