@@ -85,12 +85,10 @@ class CalculateValuesTest(unittest.TestCase):
         self,
         *,
         calculate_solar_power: bool = True,
-        daily_reset_complete: bool = True,
     ) -> dict:
         return calculate_derived_values(
             TelemetryData.from_mapping(self.data),
             calculate_solar_power=calculate_solar_power,
-            daily_reset_complete=daily_reset_complete,
             startup_voltage=250,
             max_battery_charge_power=2500,
             max_battery_discharge_power=3300,
@@ -121,11 +119,6 @@ class CalculateValuesTest(unittest.TestCase):
         self.assertTrue(result["battery_saver_mode_ena"])
         self.assertFalse(result["self_use_mode_ena"])
         self.assertTrue(result["intelligent_mode_ena"])
-
-    def test_skips_daily_energy_until_reset_is_complete(self) -> None:
-        self.assertNotIn(
-            "house_energy_today", self.calculate(daily_reset_complete=False)
-        )
 
     def test_omits_optional_values_when_their_inputs_are_disabled_or_absent(
         self,

@@ -201,6 +201,15 @@
       "inverter_temperature": {
         "name": "Wechselrichter-Temperatur"
       },
+      "coordinator_status": {
+        "name": "Koordinatorstatus",
+        "state": {
+          "success": "Erfolgreich",
+          "read_failed": "Abfrage fehlgeschlagen",
+          "reconnect_failed": "Wiederverbindung fehlgeschlagen",
+          "processing_failed": "Verarbeitung fehlgeschlagen"
+        }
+      },
       "limit_inv_max": {
         "name": "WR-Nennleistungsgrenze"
       },
