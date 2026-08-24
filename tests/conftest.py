@@ -19,7 +19,7 @@ homeassistant_util.dt = homeassistant_dt
 
 homeassistant_const = types.ModuleType("homeassistant.const")
 homeassistant_const.Platform = type(
-    "Platform", (), {"BINARY_SENSOR": "binary_sensor", "SENSOR": "sensor"}
+    "Platform", (), {"BINARY_SENSOR": "binary_sensor", "SENSOR": "sensor", "NUMBER": "number"}
 )
 homeassistant_core = types.ModuleType("homeassistant.core")
 homeassistant_core.HomeAssistant = type("HomeAssistant", (), {})
