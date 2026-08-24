@@ -45,15 +45,7 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):
     ) -> None:
         """Initialize the generic number slider entity."""
         # Initialize basic CoordinatorEntity directly to prevent type conflicts in EcoFlowBaseEntity.__init__
-        CoordinatorEntity.__init__(self, coordinator)
-        self._entry_id = entry.entry_id
-        self._attr_has_entity_name = True
-        self._definition = definition
-
-        # Explicitly set identification attributes
-        self._attr_unique_id = f"{self._entry_id}_{definition.key}"
-        self._attr_name = definition.name
-        self._attr_translation_key = None
+        super().__init__(coordinator, entry, definition)
 
         # Track the last written value to prevent redundant state updates
         self._last_written_value: float | None = None

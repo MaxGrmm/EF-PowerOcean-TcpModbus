@@ -166,7 +166,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         if self._store is not None:
             await self._store.async_save(self._persisted_state())
         self._client.close()
-        await super().async_shutdown()
+async def async_client_shutdown(self) -> None:
+    if self._store is not None:
+        await self._store.async_save(self._persisted_state())
+
+    async with self._lock:
+        self._client.close()
+
+    await super().async_shutdown()
 
     async def async_connect_client(self) -> None:
         """First Client-Connect"""
@@ -414,7 +421,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self, register_address: int, key: str, value: int
     ) -> None:
         """Universal method to write a 16-bit unsigned integer to any Modbus register."""
-        if not self._client:
+        if not self._client or not self.connected:
             _LOGGER.error("Modbus client is not initialized")
             return
 
@@ -448,6 +455,22 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     raise HomeAssistantError(
                         f"Modbus rejected write operation for register {register_address}: {response}"
                     )
+                readback_response = await self._client.read_holding_registers(
+                    address=register_address,
+                    count=1,
+                    device_id=self._client_slave_id,
+                )
+                if readback_response.isError():
+                    raise HomeAssistantError(
+                        f"Could not verify write to register {register_address}: {readback_response}"
+                    )
+
+                readback_value = readback_response.registers[0]
+                if readback_value != target_value:
+                    raise HomeAssistantError(
+                        f"Register {register_address} acknowledged value {target_value}, "
+                        f"but read back {readback_value}"
+                    )
 
                 _LOGGER.info(
                     "Register %s [%s] successfully updated to value: %s",
@@ -456,16 +479,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     target_value,
                 )
 
-                # Update the coordinator cache data locally to update the user interface immediately
-                if self.data is None:
-                    self.data = {}
-
-                if isinstance(self.data, dict):
-                    self.data[key] = target_value
-
-                # Notify entity platforms to refresh states across Home Assistant
-                self.async_update_listeners()
-
+                updated_data = {**(self.data or {}), key: target_value}
+                self.async_set_updated_data(updated_data)
             except Exception as err:
                 _LOGGER.error(
                     "Failed to write to register %s via Modbus TCP: %s",
