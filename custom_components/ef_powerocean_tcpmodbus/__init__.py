@@ -63,6 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         config_entry=entry,
     )
     await coordinator.async_connect_client()
+    await coordinator.async_load_persisted_state()
     await coordinator.async_config_entry_first_refresh()
 
     await _async_show_modbus_warning(hass, entry, coordinator)

@@ -151,7 +151,6 @@ def calculate_derived_values(
     data: TelemetryData,
     *,
     calculate_solar_power: bool,
-    daily_reset_complete: bool,
     startup_voltage: int,
     max_battery_charge_power: float,
     max_battery_discharge_power: float,
@@ -185,15 +184,14 @@ def calculate_derived_values(
         else None
     )
 
-    if daily_reset_complete:
-        calculated["house_energy_today"] = _calculate_house_energy(
-            solar=data.solar_today,
-            grid_import=data.grid_import_today,
-            battery_discharged=data.bat_discharged_today,
-            grid_export=data.grid_export_today,
-            battery_charged=data.bat_charged_today,
-            precision=2,
-        )
+    calculated["house_energy_today"] = _calculate_house_energy(
+        solar=data.solar_today,
+        grid_import=data.grid_import_today,
+        battery_discharged=data.bat_discharged_today,
+        grid_export=data.grid_export_today,
+        battery_charged=data.bat_charged_today,
+        precision=2,
+    )
 
     calculated["house_energy_total"] = _calculate_house_energy(
         solar=data.solar_total,

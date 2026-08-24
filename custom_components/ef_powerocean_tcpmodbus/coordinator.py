@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Final
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt
 from pymodbus import __version__ as pyModbusVersion
@@ -16,6 +17,7 @@ from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from .const import (
+    CALCULATED_ENERGY_RESET_FRACTION,
     CONF_BATTERY_COUNT,
     CONF_CALC_SOLAR_POWER,
     CONF_HOST,
@@ -32,13 +34,19 @@ from .const import (
     DEFAULT_MAX_POWER,
     DEFAULT_MAX_SOLAR_POWER,
     DEFAULT_PORT,
-    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL_S,
     DEFAULT_SLAVE,
     DOMAIN,
     ENERGY_SENSOR_MAP,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MOD_REGISTER_MAP,
+    SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S,
+    SLEEP_TIME_AFTER_RECONNECT_S,
+    STATE_SAVE_DELAY_S,
+    STORAGE_VERSION,
+    UNREALISTIC_ENERGY_READ_THRESHOLD,
+    CoordinatorStatus,
     InverterModel,
 )
 from .telemetry import (
@@ -50,9 +58,6 @@ from .telemetry import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-SLEEP_TIME_AFTER_RECONNECT: Final = 1
-SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED: Final = 15
 
 
 class EcoflowCoordinator(DataUpdateCoordinator):
@@ -66,7 +71,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self.host = config_entry.data.get(CONF_HOST)
         self.port = config_entry.data.get(CONF_PORT, DEFAULT_PORT)
         self.scan_interval = config_entry.data.get(
-            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_S
         )
         self.limits = {
             CONF_BATTERY_COUNT: config_entry.data.get(
@@ -106,17 +111,20 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._client_slave_id = DEFAULT_SLAVE
         self._lock = asyncio.Lock()
         self._last_checked_data: dict[str, Any] = {}
-        self._last_checked_time: datetime = None
-        self._check_monotonic: bool = True
-        self._count_reset_energy_sensor: int = 0
-        for sensor in ENERGY_SENSOR_MAP:
-            if sensor.reset_at_midnight:
-                self._count_reset_energy_sensor += 1
-        self._count_reset_energy_finished: int = self._count_reset_energy_sensor
+        self._last_checked_time: datetime | None = None
+        self._unrealistic_energy_read_counts: dict[str, int] = {}
+        self._status: CoordinatorStatus | None = None
+        self._store: Store[dict[str, Any]] | None = Store(
+            hass, STORAGE_VERSION, f"{DOMAIN}.{config_entry.entry_id}.state"
+        )
 
     @property
     def connected(self) -> bool:
         return self._client.connected
+
+    @property
+    def status(self) -> CoordinatorStatus | None:
+        return self._status
 
     @property
     def is_modbus_disabled(self) -> bool:
@@ -129,9 +137,34 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
 
+    def _persisted_state(self) -> dict[str, Any]:
+        """Return the validation baseline in a JSON-serializable form."""
+        return {
+            "last_checked_data": self._last_checked_data,
+            "last_checked_time": self._last_checked_time.isoformat()
+            if self._last_checked_time is not None
+            else None,
+        }
+
+    async def async_load_persisted_state(self) -> None:
+        """Seed the validation baseline from disk so the first poll is validated."""
+        if self._store is None or (stored := await self._store.async_load()) is None:
+            return
+
+        self._last_checked_data = stored.get("last_checked_data") or {}
+        raw_time = stored.get("last_checked_time")
+        try:
+            self._last_checked_time = (
+                datetime.fromisoformat(raw_time) if raw_time else None
+            )
+        except ValueError:
+            self._last_checked_time = None
+
     async def async_client_shutdown(self) -> None:
         """Integration-Shutdown, closing connection"""
         _LOGGER.info("PowerOcean Shutdown. Closing Connection!")
+        if self._store is not None:
+            await self._store.async_save(self._persisted_state())
         self._client.close()
         await super().async_shutdown()
 
@@ -179,7 +212,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug(
                         f"Reconnect successful! (SN: {self.serial_number}) Atempts: {i + 1}/4"
                     )
-                    await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT)
+                    await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
                     return True
                 self._client.close()
 
@@ -227,9 +260,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
             if data["battery_count"] != self.limits[CONF_BATTERY_COUNT]:
                 _LOGGER.debug(
-                    f"Read battery count {data['battery_count']} is unequal -> Skip data! Wait {SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED}s."
+                    f"Read battery count {data['battery_count']} is unequal -> Skip data! Wait {SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S}s."
                 )
-                await asyncio.sleep(SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED)
+                await asyncio.sleep(SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S)
                 return None
 
             return data
@@ -243,7 +276,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     def _sanitize_energy_values(self, data: dict[str, Any]) -> dict[str, Any]:
         result: dict[str, Any] = dict(data)
-        self._check_monotonic = True
 
         now = dt.now()
         if self._last_checked_time is None or self._last_checked_data is None:
@@ -270,24 +302,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug(
                     f"Current energy or last energy is None of entity {energy_sensor.key}"
                 )
-                continue
-
-            is_midnight_reset = (
-                energy_sensor.reset_at_midnight
-                and current_energy == 0
-                and last_energy > 0
-                and now.hour == 0
-                and now.minute < 1
-            )
-            if is_midnight_reset:
-                # Reset nur zwischen 00:00 und 00:01 erlauben
-                _LOGGER.debug(f"Reset of entity {energy_sensor.key}")
-                if self._count_reset_energy_finished == self._count_reset_energy_sensor:
-                    # first counter reset after midnight
-                    self._count_reset_energy_finished = 0
-                result[energy_sensor.key] = 0
-                self._check_monotonic = False
-                self._count_reset_energy_finished += 1
+                self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
                 continue
 
             energy_delta = current_energy - last_energy
@@ -296,66 +311,102 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug(
                     f"Time window is too large of entity {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 4)} dt: {dt_hours} power: {int(calculated_power)} limit: {energy_sensor.max_power} last check: {self._last_checked_time.time()})"
                 )
+                self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
                 continue
 
             limit = self.limits.get(energy_sensor.max_power, DEFAULT_MAX_POWER)
-            if calculated_power > limit:
-                _LOGGER.warning(
-                    f"Skip entire data. Reason: {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
-                )
-                return dict(self._last_checked_data)
 
-            if current_energy == 0 and last_energy > 0:
-                _LOGGER.warning(
-                    f"Skip entire data. Reason: 0 kWh of {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
+            # A total counter must never decrease; hold the last value indefinitely.
+            if energy_delta < 0 and not energy_sensor.resets_daily:
+                result[energy_sensor.key] = last_energy
+                _LOGGER.debug(
+                    f"Clamp decreasing total {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
                 )
-                return dict(self._last_checked_data)
+                continue
 
-            # Rückgabe des aktuellen Wertes nur wenn der neue Wert > letzter Wert ist
-            result[energy_sensor.key] = max(current_energy, last_energy)
+            is_unrealistic = energy_delta < 0 or calculated_power > limit
+            if is_unrealistic:
+                read_count = (
+                    self._unrealistic_energy_read_counts.get(energy_sensor.key, 0) + 1
+                )
+                self._unrealistic_energy_read_counts[energy_sensor.key] = read_count
+                if read_count < UNREALISTIC_ENERGY_READ_THRESHOLD:
+                    result[energy_sensor.key] = last_energy
+                    _LOGGER.debug(
+                        f"Ignore unrealistic value of {energy_sensor.key} ({read_count}/{UNREALISTIC_ENERGY_READ_THRESHOLD})! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
+                    )
+                    continue
+
+                self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
+                _LOGGER.debug(
+                    f"Accept unrealistic value of {energy_sensor.key} after {UNREALISTIC_ENERGY_READ_THRESHOLD} consecutive readings. (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
+                )
+                continue
+
+            self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
 
         return result
 
-    def _enforced_monotonic(self, data: dict[str, Any]) -> dict[str, Any]:
-        for energy_senser in ENERGY_SENSOR_MAP:
-            last = self._last_checked_data.get(energy_senser.key, None)
-            current = data.get(energy_senser.key, None)
-            if last is not None and current is not None and current < last:
-                data[energy_senser.key] = last
+    def _clamp_calculated_energy_values(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Keep calculated total-increasing sensors monotonic between resets.
 
-        return data
+        Derived values sum independently rounded counters, so they can dip by a
+        small kWh without a real decrease. Hold the last value to prevent this,
+        but let a large drop (a daily reset toward zero) pass through.
+        """
+        result = dict(data)
+
+        for energy_sensor in ENERGY_SENSOR_MAP:
+            if not energy_sensor.is_calculated:
+                continue
+
+            current_energy = result.get(energy_sensor.key)
+            last_energy = self._last_checked_data.get(energy_sensor.key)
+            if current_energy is None or last_energy is None:
+                continue
+
+            # Only consider a daily reset if the energy drops by CALCULATED_ENERGY_RESET_FRACTION
+            is_daily_reset = (
+                energy_sensor.resets_daily
+                and current_energy < last_energy * CALCULATED_ENERGY_RESET_FRACTION
+            )
+            if current_energy < last_energy and not is_daily_reset:
+                result[energy_sensor.key] = last_energy
+
+        return result
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             if (raw_data := await self.async_get_raw_data()) is None:
-                return None
+                self._status = CoordinatorStatus.READ_FAILED
+                return dict(self._last_checked_data)
 
             result = self._sanitize_energy_values(raw_data)
             calculated_results = calculate_derived_values(
                 TelemetryData.from_mapping(result),
                 calculate_solar_power=self._ena_calc_solar_power,
-                daily_reset_complete=(
-                    self._count_reset_energy_finished == self._count_reset_energy_sensor
-                ),
                 startup_voltage=self.inverter_model.startup_voltage,
                 max_battery_charge_power=MAX_BATTERY_CHARGED_POWER,
                 max_battery_discharge_power=MAX_BATTERY_DISCHARGED_POWER,
             )
             result.update(calculated_results)
-
-            if self._check_monotonic:
-                result = self._enforced_monotonic(result)
+            result = self._clamp_calculated_energy_values(result)
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
+            self._status = CoordinatorStatus.SUCCESS
+            if self._store is not None:
+                self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
 
             return dict(result)
         except UpdateFailed:  # noqa: BLE001
+            self._status = CoordinatorStatus.RECONNECT_FAILED
             raise UpdateFailed(
                 "Reconnect attempts failed! Integration stopped. Retry after 120s.",
                 retry_after=120,
             )
         except Exception as err:
+            self._status = CoordinatorStatus.PROCESSING_FAILED
             _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
             return None
 

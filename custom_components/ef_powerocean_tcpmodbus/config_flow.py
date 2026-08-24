@@ -31,7 +31,7 @@ from .const import (
     DEFAULT_MAX_GRID_POWER,
     DEFAULT_MAX_SOLAR_POWER,
     DEFAULT_PORT,
-    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL_S,
     DOMAIN,
     InverterModel,
 )
@@ -130,7 +130,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_MAX_GRID_POWER, default=DEFAULT_MAX_GRID_POWER
                     ): vol.All(int, vol.Range(min=1000, max=60000)),
                     vol.Required(
-                        CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
+                        CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_S
                     ): vol.All(int, vol.Range(min=2, max=30)),
                     vol.Required(
                         CONF_CALC_SOLAR_POWER,
@@ -236,7 +236,7 @@ class EcoflowOptionsFlow(OptionsFlow):
                     vol.Required(
                         CONF_SCAN_INTERVAL,
                         default=self._config_entry.data.get(
-                            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_S
                         ),
                     ): vol.All(int, vol.Range(min=2, max=30)),
                     vol.Required(

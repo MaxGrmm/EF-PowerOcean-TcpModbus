@@ -53,6 +53,25 @@ class UpdateFailed(Exception):
 
 homeassistant_update_coordinator.UpdateFailed = UpdateFailed
 
+homeassistant_storage = types.ModuleType("homeassistant.helpers.storage")
+
+
+class _Store:
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    async def async_load(self):
+        return None
+
+    async def async_save(self, *args, **kwargs) -> None:
+        pass
+
+    def async_delay_save(self, *args, **kwargs) -> None:
+        pass
+
+
+homeassistant_storage.Store = _Store
+
 pymodbus = types.ModuleType("pymodbus")
 pymodbus.__version__ = "test"
 pymodbus_client = types.ModuleType("pymodbus.client")
@@ -73,6 +92,7 @@ DEPENDENCY_STUBS = {
     "homeassistant.helpers": homeassistant_helpers,
     "homeassistant.helpers.translation": homeassistant_translation,
     "homeassistant.helpers.update_coordinator": homeassistant_update_coordinator,
+    "homeassistant.helpers.storage": homeassistant_storage,
     "pymodbus": pymodbus,
     "pymodbus.client": pymodbus_client,
     "pymodbus.exceptions": pymodbus_exceptions,

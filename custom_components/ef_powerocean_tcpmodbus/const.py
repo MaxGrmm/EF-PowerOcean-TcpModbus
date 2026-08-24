@@ -10,7 +10,7 @@ from typing import Final
 DOMAIN: Final = "ef_powerocean_tcpmodbus"
 DEFAULT_PORT: Final = 502
 DEFAULT_SLAVE: Final = 1
-DEFAULT_SCAN_INTERVAL: Final = 5  # seconds
+DEFAULT_SCAN_INTERVAL_S: Final = 5
 DEFAULT_BATTERY_COUNT: Final = 0
 DEFAULT_MAX_SOLAR_POWER: Final = 12000
 DEFAULT_MAX_GRID_POWER: Final = 15000
@@ -29,6 +29,13 @@ CONF_INVERTER_MODEL: Final = "inverter_model"
 
 MAX_BATTERY_CHARGED_POWER: Final = 2500
 MAX_BATTERY_DISCHARGED_POWER: Final = 3300
+
+SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
+SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S: Final = 15
+UNREALISTIC_ENERGY_READ_THRESHOLD: Final = 3
+CALCULATED_ENERGY_RESET_FRACTION: Final = 0.5
+STORAGE_VERSION: Final = 1
+STATE_SAVE_DELAY_S: Final = 30
 
 
 class InverterModel(StrEnum):
@@ -70,6 +77,13 @@ class InverterModel(StrEnum):
 DEFAULT_INVERTER_MODEL: Final = InverterModel.POWEROCEAN_THREE_PHASE
 
 
+class CoordinatorStatus(StrEnum):
+    SUCCESS = "success"
+    READ_FAILED = "read_failed"
+    RECONNECT_FAILED = "reconnect_failed"
+    PROCESSING_FAILED = "processing_failed"
+
+
 @dataclass(frozen=True)
 class ModelBlockIndex:
     default: int
@@ -107,6 +121,7 @@ class SensorDef:
     state_class: str | None = None
     entity_category: str | None = None
     icon: str | None = None
+    options: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -114,8 +129,8 @@ class EnergySensorDef:
     key: str
     name: str | None = None
     unit: str = "kWh"
-    reset_at_midnight: bool = False  # nur bei Sensor die aus einem Register gelesen werden, keine berechneten Sensoren
     is_calculated: bool = False
+    resets_daily: bool = False
     max_power: int | None = None
     device_class: str = "energy"
     state_class: str = "total_increasing"
@@ -500,22 +515,28 @@ SENSOR_MAP: list[SensorDef] = [
         state_class=None,
         icon="mdi:transmission-tower",
     ),
+    SensorDef(
+        key="coordinator_status",
+        device_class="enum",
+        entity_category="diagnostic",
+        options=tuple(CoordinatorStatus),
+    ),
 ]
 
 
 ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
     EnergySensorDef("grid_import_total", max_power=CONF_MAX_GRID_POWER),
     EnergySensorDef(
-        "grid_import_today", reset_at_midnight=True, max_power=CONF_MAX_GRID_POWER
+        "grid_import_today", resets_daily=True, max_power=CONF_MAX_GRID_POWER
     ),
     EnergySensorDef("grid_export_total", max_power=CONF_MAX_SOLAR_POWER),
     EnergySensorDef(
-        "grid_export_today", reset_at_midnight=True, max_power=CONF_MAX_SOLAR_POWER
+        "grid_export_today", resets_daily=True, max_power=CONF_MAX_SOLAR_POWER
     ),
     EnergySensorDef("bat_charged_total", max_power=CONF_MAX_BATTERY_CHARGED_POWER),
     EnergySensorDef(
         "bat_charged_today",
-        reset_at_midnight=True,
+        resets_daily=True,
         max_power=CONF_MAX_BATTERY_CHARGED_POWER,
     ),
     EnergySensorDef(
@@ -523,16 +544,15 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
     ),
     EnergySensorDef(
         "bat_discharged_today",
-        reset_at_midnight=True,
+        resets_daily=True,
         max_power=CONF_MAX_BATTERY_DISCHARGED_POWER,
     ),
     EnergySensorDef("solar_total", max_power=CONF_MAX_SOLAR_POWER),
-    EnergySensorDef(
-        "solar_today", reset_at_midnight=True, max_power=CONF_MAX_SOLAR_POWER
-    ),
+    EnergySensorDef("solar_today", resets_daily=True, max_power=CONF_MAX_SOLAR_POWER),
     EnergySensorDef(
         "house_energy_today",
         is_calculated=True,
+        resets_daily=True,
         max_power=CONF_MAX_GRID_POWER,
     ),
     EnergySensorDef(

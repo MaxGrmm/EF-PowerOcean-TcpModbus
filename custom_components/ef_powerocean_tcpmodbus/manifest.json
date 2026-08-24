@@ -12,5 +12,5 @@
     "custom_components.ef_powerocean_tcpmodbus"
   ],
   "requirements": [],
-  "version": "v2.4.0-expanded"
+  "version": "2.4.1"
 }
