@@ -166,14 +166,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         if self._store is not None:
             await self._store.async_save(self._persisted_state())
         self._client.close()
-async def async_client_shutdown(self) -> None:
-    if self._store is not None:
-        await self._store.async_save(self._persisted_state())
-
-    async with self._lock:
-        self._client.close()
-
-    await super().async_shutdown()
+        await super().async_shutdown()
 
     async def async_connect_client(self) -> None:
         """First Client-Connect"""
