@@ -220,7 +220,7 @@ class EcoflowOptionsFlow(OptionsFlow):
                         default=self._config_entry.data.get(
                             CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT
                         ),
-                    ): vol.All(int, vol.Range(min=0, max=6)),
+                    ): vol.All(int, vol.Range(min=0, max=9)),
                     vol.Required(
                         CONF_MAX_SOLAR_POWER,
                         default=self._config_entry.data.get(
