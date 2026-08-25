@@ -9,6 +9,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt
@@ -48,6 +49,7 @@ from .const import (
     UNREALISTIC_ENERGY_READ_THRESHOLD,
     CoordinatorStatus,
     InverterModel,
+    NumberWritableDef,
 )
 from .telemetry import (
     TelemetryData,
@@ -165,7 +167,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         _LOGGER.info("PowerOcean Shutdown. Closing Connection!")
         if self._store is not None:
             await self._store.async_save(self._persisted_state())
-        self._client.close()
+        async with self._lock:
+            self._client.close()
         await super().async_shutdown()
 
     async def async_connect_client(self) -> None:
@@ -411,7 +414,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             return None
 
     async def async_write_modbus_register(
-        self, register_address: int, key: str, value: int
+        self, entity_def: NumberWritableDef, value: int
     ) -> None:
         """Universal method to write a 16-bit unsigned integer to any Modbus register."""
         if not self._client or not self.connected:
@@ -420,9 +423,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         async with self._lock:
             try:
-                from homeassistant.exceptions import HomeAssistantError
-
                 target_value = int(value)
+
+                register_address = entity_def.register
+                key = entity_def.read_key
 
                 _LOGGER.debug(
                     "Sending Modbus write command [FC6]: value %s to address %s (Key: %s, Device ID: %s)",
@@ -477,7 +481,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             except Exception as err:
                 _LOGGER.error(
                     "Failed to write to register %s via Modbus TCP: %s",
-                    register_address,
+                    entity_def.register,
                     err,
                 )
                 raise HomeAssistantError(f"Error writing data to inverter: {err}")

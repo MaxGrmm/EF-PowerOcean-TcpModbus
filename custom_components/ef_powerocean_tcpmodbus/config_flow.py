@@ -33,6 +33,7 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL_S,
     DOMAIN,
+    MAX_BATTERY_COUNT,
     InverterModel,
 )
 
@@ -122,7 +123,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
                     ),
                     vol.Required(
                         CONF_BATTERY_COUNT, default=DEFAULT_BATTERY_COUNT
-                    ): vol.All(int, vol.Range(min=0, max=9)),
+                    ): vol.All(int, vol.Range(min=0, max=MAX_BATTERY_COUNT)),
                     vol.Required(
                         CONF_MAX_SOLAR_POWER, default=DEFAULT_MAX_SOLAR_POWER
                     ): vol.All(int, vol.Range(min=1000, max=60000)),
@@ -220,7 +221,7 @@ class EcoflowOptionsFlow(OptionsFlow):
                         default=self._config_entry.data.get(
                             CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT
                         ),
-                    ): vol.All(int, vol.Range(min=0, max=9)),
+                    ): vol.All(int, vol.Range(min=0, max=MAX_BATTERY_COUNT)),
                     vol.Required(
                         CONF_MAX_SOLAR_POWER,
                         default=self._config_entry.data.get(

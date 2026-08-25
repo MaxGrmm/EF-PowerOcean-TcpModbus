@@ -104,8 +104,7 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Set new value asynchronously (overrides NumberEntity abstract method)."""
         await self.coordinator.async_write_modbus_register(
-            register_address=self._definition.register,
-            key=self._definition.read_key,  # Update the main sensor cache key on write
+            entity_def=self._definition,
             value=int(value),
         )
 
