@@ -421,21 +421,21 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Modbus client is not initialized")
             return
 
-        async with self._lock:
-            try:
-                target_value = int(value)
+        target_value = int(value)
 
-                register_address = entity_def.register
-                key = entity_def.read_key
+        register_address = entity_def.register
+        key = entity_def.read_key
 
-                _LOGGER.debug(
-                    "Sending Modbus write command [FC6]: value %s to address %s (Key: %s, Device ID: %s)",
-                    target_value,
-                    register_address,
-                    key,
-                    self._client_slave_id,
-                )
+        _LOGGER.debug(
+            "Sending Modbus write command [FC6]: value %s to address %s (Key: %s, Device ID: %s)",
+            target_value,
+            register_address,
+            key,
+            self._client_slave_id,
+        )
 
+        try:
+            async with self._lock:
                 # Execute write single register operation
                 response = await self._client.write_register(
                     address=register_address,
@@ -452,6 +452,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     raise HomeAssistantError(
                         f"Modbus rejected write operation for register {register_address}: {response}"
                     )
+
                 readback_response = await self._client.read_holding_registers(
                     address=register_address,
                     count=1,
@@ -463,25 +464,26 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     )
 
                 readback_value = readback_response.registers[0]
-                if readback_value != target_value:
-                    raise HomeAssistantError(
-                        f"Register {register_address} acknowledged value {target_value}, "
-                        f"but read back {readback_value}"
-                    )
 
-                _LOGGER.info(
-                    "Register %s [%s] successfully updated to value: %s",
-                    register_address,
-                    key,
-                    target_value,
+            if readback_value != target_value:
+                raise HomeAssistantError(
+                    f"Register {register_address} acknowledged value {target_value}, "
+                    f"but read back {readback_value}"
                 )
 
-                updated_data = {**(self.data or {}), key: target_value}
-                self.async_set_updated_data(updated_data)
-            except Exception as err:
-                _LOGGER.error(
-                    "Failed to write to register %s via Modbus TCP: %s",
-                    entity_def.register,
-                    err,
-                )
-                raise HomeAssistantError(f"Error writing data to inverter: {err}")
+            _LOGGER.info(
+                "Register %s [%s] successfully updated to value: %s",
+                register_address,
+                key,
+                target_value,
+            )
+
+            updated_data = {**(self.data or {}), key: target_value}
+            self.async_set_updated_data(updated_data)
+        except Exception as err:
+            _LOGGER.error(
+                "Failed to write to register %s via Modbus TCP: %s",
+                entity_def.register,
+                err,
+            )
+            raise HomeAssistantError(f"Error writing data to inverter: {err}")
