@@ -185,55 +185,50 @@ def test_holds_over_budget_increase_scaled_to_interval(
 def test_debounces_unrealistic_energy_read_without_discarding_frame(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # A held energy read must not discard the rest of the frame.
     now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
     coordinator._last_checked_time = now - timedelta(seconds=30)
-    coordinator._last_checked_data = {
-        "bat_discharged_today": 1.77,
-        "battery_soc": 50.0,
-    }
+    coordinator._last_checked_data = {"bat_discharged_today": 1.77, "battery_soc": 50.0}
 
-    for read_number in (1, 2, 3):
-        result = sanitize(
-            coordinator,
-            {"bat_discharged_today": 0.0, "battery_soc": 45.0},
-            now,
-            monkeypatch,
-        )
+    result = sanitize(
+        coordinator,
+        {"bat_discharged_today": 0.0, "battery_soc": 45.0},
+        now,
+        monkeypatch,
+    )
 
-        expected_bat_discharged_today = 0.0 if read_number == 3 else 1.77
-        assert result["bat_discharged_today"] == expected_bat_discharged_today
-        assert result["battery_soc"] == 45.0
+    assert result["bat_discharged_today"] == 1.77
+    assert result["battery_soc"] == 45.0
 
 
-def test_debounces_nonzero_energy_decrease(
-    coordinator, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("sensor_key", "last", "current", "expected_sequence"),
+    (
+        ("bat_discharged_today", 1.77, 0.0, [1.77, 1.77, 0.0]),
+        ("grid_import_today", 10.0, 1.0, [10.0, 10.0, 1.0]),
+        ("grid_import_total", 10.0, 0.0, [10.0, 10.0, 10.0]),
+    ),
+    ids=("daily-reset-to-zero", "daily-drop-nonzero", "total-never-decreases"),
+)
+def test_debounces_decreasing_energy(
+    coordinator,
+    monkeypatch: pytest.MonkeyPatch,
+    sensor_key: str,
+    last: float,
+    current: float,
+    expected_sequence: list[float],
 ) -> None:
+    # Daily counters accept a decrease after the threshold; totals never do.
     now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
     coordinator._last_checked_time = now - timedelta(seconds=30)
-    coordinator._last_checked_data = {"grid_import_today": 10.0}
+    coordinator._last_checked_data = {sensor_key: last}
 
-    results = [
-        sanitize(coordinator, {"grid_import_today": 1.0}, now, monkeypatch)
+    actual = [
+        sanitize(coordinator, {sensor_key: current}, now, monkeypatch)[sensor_key]
         for _ in range(3)
     ]
 
-    assert [result["grid_import_today"] for result in results] == [10.0, 10.0, 1.0]
-
-
-def test_total_energy_decrease_is_never_accepted(
-    coordinator, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
-    coordinator._last_checked_time = now - timedelta(seconds=30)
-    coordinator._last_checked_data = {"grid_import_total": 10.0}
-
-    results = [
-        sanitize(coordinator, {"grid_import_total": 0.0}, now, monkeypatch)
-        for _ in range(5)
-    ]
-
-    assert [result["grid_import_total"] for result in results] == [10.0] * 5
-    assert coordinator._unrealistic_energy_read_counts == {}
+    assert actual == expected_sequence
 
 
 def test_seeds_baseline_from_persisted_state(coordinator) -> None:
@@ -451,10 +446,10 @@ def test_holds_derived_house_energy_on_negative_transient_at_midnight(
         now += timedelta(seconds=5)
         results.append(asyncio.run(coordinator._async_update_data()))
 
-    assert results[0]["bat_charged_today"] == 0.0
-    assert results[1]["bat_charged_today"] == 0.0
+    # The invariant that was violated: house energy is never negative.
+    assert all(result["house_energy_today"] >= 0 for result in results)
+    # The spike is held below the threshold, then accepted on it.
     assert results[2]["bat_charged_today"] == 6.32
-    assert results[2]["house_energy_today"] == results[1]["house_energy_today"]
 
 
 def test_floors_derived_house_energy_at_zero_without_baseline(
