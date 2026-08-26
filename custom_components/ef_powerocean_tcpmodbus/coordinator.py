@@ -392,9 +392,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning(
                     f"Calculated {energy_sensor.key} came out negative ({current_energy}); guarded to {guarded_energy}. (last: {last_energy} daily_reset: {is_daily_reset})"
                 )
-            elif guarded_energy != current_energy:
+            elif guarded_energy - current_energy > ENERGY_RESOLUTION_KWH:
                 _LOGGER.debug(
-                    f"Hold calculated {energy_sensor.key} at {guarded_energy} (raw: {current_energy} last: {last_energy} daily_reset: {is_daily_reset})"
+                    f"Keep last calculated {energy_sensor.key} {guarded_energy} (raw: {current_energy} last: {last_energy} daily_reset: {is_daily_reset})"
                 )
 
             result[energy_sensor.key] = guarded_energy
