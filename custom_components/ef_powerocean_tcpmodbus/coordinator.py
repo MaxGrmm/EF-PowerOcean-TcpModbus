@@ -307,10 +307,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 continue
 
             energy_delta = current_energy - last_energy
-            calculated_power = energy_delta / dt_hours * 1000  # Convert kWh to W
             if dt_hours > 1:
                 _LOGGER.debug(
-                    f"Time window is too large of entity {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 4)} dt: {dt_hours} power: {int(calculated_power)} limit: {energy_sensor.max_power} last check: {self._last_checked_time.time()})"
+                    f"Time window is too large of entity {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 4)} dt: {dt_hours} last check: {self._last_checked_time.time()})"
                 )
                 self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
                 continue
@@ -321,13 +320,13 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             if energy_delta < 0 and not energy_sensor.resets_daily:
                 result[energy_sensor.key] = last_energy
                 _LOGGER.debug(
-                    f"Clamp decreasing total {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
+                    f"Clamp decreasing total {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} limit: {limit} last check: {self._last_checked_time.time()})"
                 )
                 continue
 
-            # Largest believable rise this interval: max power over the actual
-            # elapsed time, plus one register step so a short poll is not flagged
-            # for a single 0.01 kWh tick.
+            # Largest believable rise this interval (kWh): max power over the
+            # actual elapsed time, plus one register step so a short poll is not
+            # flagged for a single 0.01 kWh tick.
             max_believable_delta = limit * dt_hours / 1000 + ENERGY_RESOLUTION_KWH
             is_unrealistic = energy_delta < 0 or energy_delta > max_believable_delta
             if is_unrealistic:
@@ -338,13 +337,13 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 if read_count < UNREALISTIC_ENERGY_READ_THRESHOLD:
                     result[energy_sensor.key] = last_energy
                     _LOGGER.debug(
-                        f"Ignore unrealistic value of {energy_sensor.key} ({read_count}/{UNREALISTIC_ENERGY_READ_THRESHOLD})! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
+                        f"Ignore unrealistic value of {energy_sensor.key} ({read_count}/{UNREALISTIC_ENERGY_READ_THRESHOLD})! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} max delta: {round(max_believable_delta, 4)} dt: {dt_hours} last check: {self._last_checked_time.time()})"
                     )
                     continue
 
                 self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
                 _LOGGER.warning(
-                    f"Accept unrealistic value of {energy_sensor.key} after {UNREALISTIC_ENERGY_READ_THRESHOLD} consecutive readings. (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} power: {int(calculated_power)} limit: {limit} last check: {self._last_checked_time.time()})"
+                    f"Accept unrealistic value of {energy_sensor.key} after {UNREALISTIC_ENERGY_READ_THRESHOLD} consecutive readings. (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} max delta: {round(max_believable_delta, 4)} dt: {dt_hours} last check: {self._last_checked_time.time()})"
                 )
                 continue
 
@@ -378,9 +377,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 and last_energy is not None
                 and 0 <= current_energy < last_energy * CALCULATED_ENERGY_RESET_FRACTION
             )
-            # guarded_energy is the value we publish after enforcing the invariants.
+            # guarded_energy is the value we publish after enforcing the invariants
             guarded_energy = current_energy
-            # Hold the last value on a decrease that is not a real daily reset.
             if (
                 last_energy is not None
                 and guarded_energy < last_energy
@@ -388,7 +386,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             ):
                 guarded_energy = last_energy
 
-            # Never publish a negative total_increasing value.
+            # Never publish a negative total_increasing value
             guarded_energy = max(guarded_energy, 0)
             if current_energy < 0:
                 _LOGGER.warning(
