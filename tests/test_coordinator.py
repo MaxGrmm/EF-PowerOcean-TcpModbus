@@ -87,7 +87,7 @@ def test_returns_current_data_for_first_observation(
     (
         (timedelta(0), 10.0),
         (timedelta(milliseconds=999), 10.0),
-        (timedelta(seconds=1), 11.0),
+        (timedelta(seconds=1), 10.004),
     ),
     ids=("same-time", "just-under-one-second", "exactly-one-second"),
 )
@@ -101,7 +101,7 @@ def test_handles_minimum_update_interval_boundary(
     coordinator._last_checked_time = now - elapsed
     coordinator._last_checked_data = {"grid_import_total": 10.0}
 
-    result = sanitize(coordinator, {"grid_import_total": 11.0}, now, monkeypatch)
+    result = sanitize(coordinator, {"grid_import_total": 10.004}, now, monkeypatch)
 
     assert result["grid_import_total"] == expected
 
@@ -111,15 +111,15 @@ def test_handles_minimum_update_interval_boundary(
     (
         (9.0, 10.0),
         (10.0, 10.0),
-        (7_510.0, 7_510.0),
-        (7_510.01, 10.0),
+        (17.5, 17.5),
+        (18.0, 10.0),
         (0.0, 10.0),
     ),
     ids=(
         "decrease-is-clamped",
         "unchanged",
-        "increase-at-power-limit",
-        "increase-above-power-limit",
+        "increase-within-budget",
+        "increase-above-budget",
         "unexpected-zero",
     ),
 )
@@ -140,6 +140,46 @@ def test_validates_energy_changes_within_one_hour(
 
     assert result["grid_import_total"] == expected
     assert "previous_snapshot_marker" not in result
+
+
+@pytest.mark.parametrize("scan_interval", (2, 5, 30), ids=("2s", "5s", "30s"))
+def test_accepts_single_register_step_regardless_of_scan_interval(
+    coordinator, monkeypatch: pytest.MonkeyPatch, scan_interval: int
+) -> None:
+    # A single 0.01 kWh tick must never be flagged as unrealistic, even at a 2 s
+    # interval where it implies a high instantaneous power.
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    coordinator._last_checked_time = now - timedelta(seconds=scan_interval)
+    coordinator._last_checked_data = {"grid_import_total": 10.0}
+
+    result = sanitize(coordinator, {"grid_import_total": 10.01}, now, monkeypatch)
+
+    assert result["grid_import_total"] == 10.01
+
+
+@pytest.mark.parametrize(
+    ("scan_interval", "current", "expected"),
+    (
+        (2, 10.1, 10.0),
+        (30, 10.2, 10.0),
+    ),
+    ids=("2s-spike-held", "30s-spike-held"),
+)
+def test_holds_over_budget_increase_scaled_to_interval(
+    coordinator,
+    monkeypatch: pytest.MonkeyPatch,
+    scan_interval: int,
+    current: float,
+    expected: float,
+) -> None:
+    # grid budget at 15 kW: ~0.008 kWh over 2 s, ~0.125 kWh over 30 s.
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    coordinator._last_checked_time = now - timedelta(seconds=scan_interval)
+    coordinator._last_checked_data = {"grid_import_total": 10.0}
+
+    result = sanitize(coordinator, {"grid_import_total": current}, now, monkeypatch)
+
+    assert result["grid_import_total"] == expected
 
 
 def test_debounces_unrealistic_energy_read_without_discarding_frame(
@@ -294,7 +334,7 @@ def test_valid_energy_read_clears_unrealistic_read_count(
     coordinator._last_checked_data = {"grid_import_total": 10.0}
 
     sanitize(coordinator, {"grid_import_total": 1_000.0}, now, monkeypatch)
-    sanitize(coordinator, {"grid_import_total": 11.0}, now, monkeypatch)
+    sanitize(coordinator, {"grid_import_total": 10.1}, now, monkeypatch)
     result = sanitize(coordinator, {"grid_import_total": 1_000.0}, now, monkeypatch)
 
     assert result["grid_import_total"] == 10.0
@@ -381,6 +421,64 @@ def test_clamps_derived_house_energy_jitter_during_raw_counter_reset(
     assert result["house_energy_today"] == 5.63
 
 
+def test_holds_derived_house_energy_on_negative_transient_at_midnight(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    previous = {
+        "solar_today": 0.0,
+        "grid_import_today": 0.0,
+        "bat_discharged_today": 0.76,
+        "grid_export_today": 0.01,
+        "bat_charged_today": 0.0,
+        "house_energy_today": 0.75,
+    }
+    spike = {
+        "solar_today": 0.04,
+        "grid_import_today": 0.0,
+        "bat_discharged_today": 9.02,
+        "grid_export_today": 9.73,
+        "bat_charged_today": 6.32,
+    }
+    now = datetime(2026, 8, 25, 23, 59, 49, tzinfo=timezone.utc)
+    coordinator._last_checked_time = now
+    coordinator._last_checked_data = previous
+    coordinator._ena_calc_solar_power = False
+    coordinator.async_get_raw_data = AsyncMock(return_value=dict(spike))
+    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+
+    results = []
+    for _ in range(const.UNREALISTIC_ENERGY_READ_THRESHOLD):
+        now += timedelta(seconds=5)
+        results.append(asyncio.run(coordinator._async_update_data()))
+
+    assert results[0]["bat_charged_today"] == 0.0
+    assert results[1]["bat_charged_today"] == 0.0
+    assert results[2]["bat_charged_today"] == 6.32
+    assert results[2]["house_energy_today"] == results[1]["house_energy_today"]
+
+
+def test_floors_derived_house_energy_at_zero_without_baseline(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 8, 26, 0, 0, 4, tzinfo=timezone.utc)
+    raw = {
+        "solar_today": 0.0,
+        "grid_import_today": 0.04,
+        "bat_discharged_today": 0.76,
+        "grid_export_today": 0.01,
+        "bat_charged_today": 7.75,
+    }
+    coordinator._last_checked_time = None
+    coordinator._last_checked_data = {}
+    coordinator._ena_calc_solar_power = False
+    coordinator.async_get_raw_data = AsyncMock(return_value=dict(raw))
+    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result["house_energy_today"] == 0
+
+
 @pytest.mark.parametrize(
     ("current_data", "previous_data"),
     (
@@ -409,7 +507,7 @@ def test_leaves_values_unchanged_when_a_reading_is_missing(
 @pytest.mark.parametrize(
     ("elapsed", "expected"),
     (
-        (timedelta(hours=1), 15_010.0),
+        (timedelta(hours=1), 25.0),
         (timedelta(hours=1, microseconds=1), 20_000.0),
         (timedelta(hours=2), 20_000.0),
     ),
@@ -425,7 +523,7 @@ def test_handles_maximum_validation_window_boundary(
     coordinator._last_checked_time = now - elapsed
     coordinator._last_checked_data = {"grid_import_total": 10.0}
 
-    current = 15_010.0 if elapsed == timedelta(hours=1) else 20_000.0
+    current = 25.0 if elapsed == timedelta(hours=1) else 20_000.0
     result = sanitize(coordinator, {"grid_import_total": current}, now, monkeypatch)
 
     assert result["grid_import_total"] == expected
