@@ -115,7 +115,7 @@ class CalculateValuesTest(unittest.TestCase):
     def test_decodes_system_mode_bits(self) -> None:
         result = self.calculate()
 
-        self.assertFalse(result["grid_mode"])
+        self.assertEqual(result["grid_mode"], "grid")
         self.assertTrue(result["battery_saver_mode_ena"])
         self.assertFalse(result["self_use_mode_ena"])
         self.assertTrue(result["intelligent_mode_ena"])
@@ -159,7 +159,7 @@ class CalculateValuesTest(unittest.TestCase):
         self.assertEqual(result["house_energy_today"], 0)
         self.assertEqual(result["house_energy_total"], 0)
         self.assertEqual(result["solar_power"], 0)
-        self.assertFalse(result["grid_mode"])
+        self.assertEqual(result["grid_mode"], "grid")
         self.assertFalse(result["battery_saver_mode_ena"])
         self.assertFalse(result["self_use_mode_ena"])
         self.assertFalse(result["intelligent_mode_ena"])
