@@ -9,7 +9,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, WRITABLE_NUMBERS_MAP, NumberWritableDef
 from .coordinator import EcoflowCoordinator
@@ -44,7 +43,6 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):
         definition: NumberWritableDef,
     ) -> None:
         """Initialize the generic number slider entity."""
-        # Initialize basic CoordinatorEntity directly to prevent type conflicts in EcoFlowBaseEntity.__init__
         super().__init__(coordinator, entry, definition)
 
         # Track the last written value to prevent redundant state updates
@@ -70,16 +68,6 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):
         initial_value = self.native_value
         if initial_value is not None:
             self._last_written_value = initial_value
-
-    @property
-    def device_info(self):
-        """Return Home Assistant device info using base entity properties."""
-        return EcoFlowBaseEntity.device_info.fget(self)
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        return EcoFlowBaseEntity.available.fget(self)
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -107,7 +95,3 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):
             entity_def=self._definition,
             value=int(value),
         )
-
-    def set_native_value(self, value: float) -> None:
-        """Fallback synchronous method implementation for strict abstract compliance if required by legacy wrappers."""
-        raise NotImplementedError()
