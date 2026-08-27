@@ -29,6 +29,7 @@ CONF_INVERTER_MODEL: Final = "inverter_model"
 
 MAX_BATTERY_CHARGED_POWER: Final = 2500
 MAX_BATTERY_DISCHARGED_POWER: Final = 3300
+MAX_BATTERY_COUNT: Final = 9
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S: Final = 15
@@ -568,4 +569,45 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
     BinarySensorDef("self_use_mode_ena", "battery"),
     BinarySensorDef("intelligent_mode_ena", "battery"),
     BinarySensorDef("battery_saver_mode_ena", "battery"),
+]
+
+
+@dataclass(frozen=True)
+class NumberWritableDef:
+    key: str  # Unique key for the number entity (e.g., "min_soc_limit_control")
+    read_key: str  # The original key from MOD_REGISTER_MAP used for reading (e.g., "min_soc_limit")
+    name: str  # Display name for Home Assistant UI
+    register: int  # Physical Modbus register address for writing
+    min_value: float  # Slider minimum value
+    max_value: float  # Slider maximum value
+    step: float  # Step size (1.0 for integers, 0.1 for floats)
+    unit: str | None = None  # Unit of measurement ("%", "W", or None)
+    device_class: str | None = None  # Device class type
+    icon: str | None = None  # Custom icon for the slider
+
+
+# Map of all modbus registers available for writing operations.
+WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
+    NumberWritableDef(
+        key="min_soc_limit_control",
+        read_key="min_soc_limit",  # Points to the existing read sensor data
+        name="Minimum SOC Limit Control",
+        register=40536,  # 40519 + 17
+        min_value=0.0,
+        max_value=100.0,
+        step=1.0,
+        unit="%",
+        device_class="battery",
+    ),
+    NumberWritableDef(
+        key="device_led_brightness_control",
+        read_key="device_led_brightness",  # Points to the existing read sensor data
+        name="LED Brightness Control",
+        register=40541,  # 40519 + 22
+        min_value=0.0,
+        max_value=100.0,
+        step=10.0,
+        unit="%",
+        icon="mdi:led-on",
+    ),
 ]

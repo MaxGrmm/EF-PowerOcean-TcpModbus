@@ -264,7 +264,7 @@
       "battery_charge_power_limit": {
         "name": "Max. Batterieladeleistung"
       },
-      "grid_mode":{
+      "grid_mode": {
         "name": "Netzmodus",
         "state": {
           "grid": "Netzbetrieb",
@@ -281,6 +281,14 @@
       },
       "battery_saver_mode_ena": {
         "name": "Batteriesparmodus"
+      }
+    },
+    "number": {
+      "min_soc_limit_control": {
+        "name": "Batterie Backup-Reserve Steuerung"
+      },
+      "device_led_brightness_control": {
+        "name": "Helligkeit LED-Geräteanzeige Steuerung"
       }
     }
   }

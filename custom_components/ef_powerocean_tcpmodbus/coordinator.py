@@ -9,6 +9,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt
@@ -49,6 +50,7 @@ from .const import (
     UNREALISTIC_ENERGY_READ_THRESHOLD,
     CoordinatorStatus,
     InverterModel,
+    NumberWritableDef,
 )
 from .telemetry import (
     TelemetryData,
@@ -166,7 +168,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         _LOGGER.info("PowerOcean Shutdown. Closing Connection!")
         if self._store is not None:
             await self._store.async_save(self._persisted_state())
-        self._client.close()
+        async with self._lock:
+            self._client.close()
         await super().async_shutdown()
 
     async def async_connect_client(self) -> None:
@@ -435,3 +438,78 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             self._status = CoordinatorStatus.PROCESSING_FAILED
             _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
             return None
+
+    async def async_write_modbus_register(
+        self, entity_def: NumberWritableDef, value: int
+    ) -> None:
+        """Universal method to write a 16-bit unsigned integer to any Modbus register."""
+        if not self._client or not self.connected:
+            _LOGGER.error("Modbus client is not initialized")
+            return
+
+        target_value = int(value)
+
+        register_address = entity_def.register
+        key = entity_def.read_key
+
+        _LOGGER.debug(
+            "Sending Modbus write command [FC6]: value %s to address %s (Key: %s, Device ID: %s)",
+            target_value,
+            register_address,
+            key,
+            self._client_slave_id,
+        )
+
+        try:
+            async with self._lock:
+                # Execute write single register operation
+                response = await self._client.write_register(
+                    address=register_address,
+                    value=target_value,
+                    device_id=self._client_slave_id,
+                )
+
+                if response.isError():
+                    _LOGGER.error(
+                        "Modbus error response when writing to register %s: %s",
+                        register_address,
+                        response,
+                    )
+                    raise HomeAssistantError(
+                        f"Modbus rejected write operation for register {register_address}: {response}"
+                    )
+
+                readback_response = await self._client.read_holding_registers(
+                    address=register_address,
+                    count=1,
+                    device_id=self._client_slave_id,
+                )
+                if readback_response.isError():
+                    raise HomeAssistantError(
+                        f"Could not verify write to register {register_address}: {readback_response}"
+                    )
+
+                readback_value = readback_response.registers[0]
+
+            if readback_value != target_value:
+                raise HomeAssistantError(
+                    f"Register {register_address} acknowledged value {target_value}, "
+                    f"but read back {readback_value}"
+                )
+
+            _LOGGER.info(
+                "Register %s [%s] successfully updated to value: %s",
+                register_address,
+                key,
+                target_value,
+            )
+
+            updated_data = {**(self.data or {}), key: target_value}
+            self.async_set_updated_data(updated_data)
+        except Exception as err:
+            _LOGGER.error(
+                "Failed to write to register %s via Modbus TCP: %s",
+                entity_def.register,
+                err,
+            )
+            raise HomeAssistantError(f"Error writing data to inverter: {err}")

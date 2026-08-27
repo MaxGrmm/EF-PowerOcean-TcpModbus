@@ -19,7 +19,9 @@ homeassistant_util.dt = homeassistant_dt
 
 homeassistant_const = types.ModuleType("homeassistant.const")
 homeassistant_const.Platform = type(
-    "Platform", (), {"BINARY_SENSOR": "binary_sensor", "SENSOR": "sensor"}
+    "Platform",
+    (),
+    {"BINARY_SENSOR": "binary_sensor", "SENSOR": "sensor", "NUMBER": "number"},
 )
 homeassistant_core = types.ModuleType("homeassistant.core")
 homeassistant_core.HomeAssistant = type("HomeAssistant", (), {})
@@ -28,6 +30,10 @@ homeassistant_config_entries.ConfigEntry = type("ConfigEntry", (), {})
 homeassistant_components = types.ModuleType("homeassistant.components")
 homeassistant_diagnostics = types.ModuleType("homeassistant.components.diagnostics")
 homeassistant_diagnostics.async_redact_data = lambda data, _to_redact: data
+homeassistant_exceptions = types.ModuleType("homeassistant.exceptions")
+homeassistant_exceptions.HomeAssistantError = type(
+    "HomeAssistantError", (Exception,), {}
+)
 homeassistant_persistent_notification = types.ModuleType(
     "homeassistant.components.persistent_notification"
 )
@@ -72,6 +78,7 @@ class _Store:
 
 homeassistant_storage.Store = _Store
 
+
 pymodbus = types.ModuleType("pymodbus")
 pymodbus.__version__ = "test"
 pymodbus_client = types.ModuleType("pymodbus.client")
@@ -93,6 +100,7 @@ DEPENDENCY_STUBS = {
     "homeassistant.helpers.translation": homeassistant_translation,
     "homeassistant.helpers.update_coordinator": homeassistant_update_coordinator,
     "homeassistant.helpers.storage": homeassistant_storage,
+    "homeassistant.exceptions": homeassistant_exceptions,
     "pymodbus": pymodbus,
     "pymodbus.client": pymodbus_client,
     "pymodbus.exceptions": pymodbus_exceptions,
