@@ -222,7 +222,9 @@ def calculate_derived_values(
         )
 
     if data.system_modes is not None:
-        calculated["grid_mode"] = _is_bit_set(int(data.system_modes), 0)
+        calculated["grid_mode"] = (
+            "islanded" if _is_bit_set(int(data.system_modes), 0) else "grid"
+        )
         calculated["battery_saver_mode_ena"] = _is_bit_set(int(data.system_modes), 3)
         calculated["self_use_mode_ena"] = _is_bit_set(int(data.system_modes), 4)
         calculated["intelligent_mode_ena"] = _is_bit_set(int(data.system_modes), 5)

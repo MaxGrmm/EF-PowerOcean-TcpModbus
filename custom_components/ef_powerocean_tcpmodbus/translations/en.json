@@ -268,8 +268,8 @@
       "grid_mode":{
         "name": "Grid Mode",
         "state": {
-          "0": "Grid-connected",
-          "1": "Islanded"
+          "grid": "Grid-connected",
+          "islanded": "Islanded"
         }
       }
     },
