@@ -267,8 +267,8 @@
       "grid_mode":{
         "name": "Netzmodus",
         "state": {
-          "0": "Netzbetrieb",
-          "1": "Inselbetrieb"
+          "grid": "Netzbetrieb",
+          "islanded": "Inselbetrieb"
         }
       }
     },
