@@ -142,7 +142,7 @@ def test_accepted_update_publishes_successful_coordinator_status(
         return_value={"grid_import_total": 10.0}
     )
     coordinator._energy_processor.derive_daily = Mock(
-        side_effect=lambda data: (data, False)
+        side_effect=lambda data, _prev: (data, False)
     )
     coordinator._energy_processor.clamp_calculated = Mock(
         side_effect=lambda data, _prev, **_: data

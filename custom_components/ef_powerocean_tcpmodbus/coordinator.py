@@ -290,7 +290,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             result = self._energy_processor.validate_totals(
                 raw_data, self._last_checked_data, self._last_checked_time
             )
-            result, is_daily_reset = self._energy_processor.derive_daily(result)
+            result, is_daily_reset = self._energy_processor.derive_daily(
+                result, self._last_checked_time
+            )
             result.update(self._energy_processor.raw_daily_values(raw_data))
             calculated_results = calculate_derived_values(
                 TelemetryData.from_mapping(result),

@@ -31,14 +31,13 @@ def parse_datetime(raw: Any) -> datetime | None:
 class EnergyProcessor:
     """Turns raw PowerOcean energy registers into trustworthy sensor values.
 
-    - Lifetime *_total counters are the source of truth. They are validated
-      against a physical-power budget that accrues from the last accepted
-      reading, so a counter is never stuck and never spikes.
-    - Daily *_today values are derived as total - snapshot, where the
-      snapshot is taken at the device's own daily reset. The device's own daily
-      registers are never published, because a ghost of the previous day flaps
-      onto them around 00:00 UTC; they are only read to detect the reset.
-    - The reset is detected from a daily register dropping below its previous
+    - Lifetime _total counters are the source of truth. They are validated
+      against a max belieable power since the last accepted read.
+    - Daily _today values are derived as total - snapshot, where the snapshot is
+      taken at the device's own daily reset. The device's own daily registers
+      are never published, because we experienced illogical spikes indicating
+      at timezone bugs in the inverter itself.
+    - The daily reset is detected from a daily register dropping below its previous
       reading and then rolled on a 24 h timer. Observing the device directly
       keeps the rollover aligned across DST without assuming Home Assistant and
       the inverter share a timezone.
@@ -143,10 +142,13 @@ class EnergyProcessor:
         elapsed_hours = max((now - accepted_at).total_seconds(), 0) / 3600
         return limit * elapsed_hours / 1000 + ENERGY_RESOLUTION_KWH
 
-    def derive_daily(self, data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    def derive_daily(
+        self, data: dict[str, Any], previous_time: datetime | None
+    ) -> tuple[dict[str, Any], bool]:
         """Set each daily counter to its lifetime counter's growth since the
         last reset snapshot; also return whether a reset rolled this poll."""
         result = dict(data)
+        now = dt.now()
         is_daily_reset = self._should_roll_daily_snapshots(result)
 
         for energy_sensor in ENERGY_SENSOR_MAP:
@@ -160,7 +162,14 @@ class EnergyProcessor:
             device_daily = result.get(energy_sensor.key)
             snapshot = self.daily_snapshots.get(energy_sensor.key)
             if is_daily_reset or snapshot is None:
-                snapshot = self._snapshot_from_device_daily(device_daily, total_energy)
+                max_believable_daily = total_energy
+                if is_daily_reset and previous_time is not None:
+                    max_believable_daily = self._max_believable_energy_delta(
+                        energy_sensor, previous_time, now
+                    )
+                snapshot = self._snapshot_from_device_daily(
+                    device_daily, total_energy, max_believable_daily
+                )
                 _LOGGER.debug(
                     f"Snapshot {energy_sensor.key} at {snapshot} (total: {total_energy} reset: {is_daily_reset})"
                 )
@@ -246,15 +255,16 @@ class EnergyProcessor:
 
     @staticmethod
     def _snapshot_from_device_daily(
-        device_daily: float | None, total_energy: float
+        device_daily: float | None, total_energy: float, max_believable_daily: float
     ) -> float:
         """Return the lifetime total that today's zero maps to.
 
         Chosen so the derived daily (total - snapshot) equals the device's
         own daily register. Falls back to the current total (day starts at 0)
-        when that register is missing or implausible.
+        when that register is missing or exceeds the believable bound, which
+        rejects the reset-boundary ghost spikes.
         """
-        if device_daily is not None and 0 <= device_daily <= total_energy:
+        if device_daily is not None and 0 <= device_daily <= max_believable_daily:
             return round(total_energy - device_daily, 2)
         return total_energy
 

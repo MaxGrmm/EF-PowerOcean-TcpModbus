@@ -316,3 +316,77 @@ def test_scales_rise_budget_with_time_since_last_acceptance(
     )
 
     assert result["grid_import_total"] == expected
+
+
+def derive_daily(
+    processor: EnergyProcessor,
+    data: dict[str, float | None],
+    previous_time: datetime | None,
+    now: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, float]:
+    monkeypatch.setattr(energy_processor_module.dt, "now", lambda: now)
+    result, _ = processor.derive_daily(data, previous_time)
+    return result
+
+
+def test_reset_snapshot_rejects_ghost_daily_register(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A large device daily at the reset poll is a ghost spike: it exceeds the
+    # 30 s rise budget, so the day must start at 0 rather than inherit it.
+    now = datetime(2026, 8, 7, 0, 0, 30, tzinfo=timezone.utc)
+    previous_time = now - timedelta(seconds=30)
+    processor.last_rollover = now - timedelta(hours=24)
+    processor.reset_learned = True
+    processor.prev_device_dailies = {"grid_import_today": 18.4}
+
+    result = derive_daily(
+        processor,
+        {"grid_import_total": 1000.03, "grid_import_today": 5.0},
+        previous_time,
+        now,
+        monkeypatch,
+    )
+
+    assert result["grid_import_today"] == 0.0
+
+
+def test_reset_snapshot_keeps_plausible_daily_accrual(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A tiny device daily within the rise budget is the genuine accrual since
+    # the device midnight and must be preserved across the reset.
+    now = datetime(2026, 8, 7, 0, 0, 30, tzinfo=timezone.utc)
+    previous_time = now - timedelta(seconds=30)
+    processor.last_rollover = now - timedelta(hours=24)
+    processor.reset_learned = True
+    processor.prev_device_dailies = {"grid_import_today": 18.4}
+
+    result = derive_daily(
+        processor,
+        {"grid_import_total": 1000.03, "grid_import_today": 0.03},
+        previous_time,
+        now,
+        monkeypatch,
+    )
+
+    assert result["grid_import_today"] == 0.03
+
+
+def test_first_seed_trusts_large_midday_daily(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # On the first observation there is no reset; a legitimate mid-day daily
+    # register must seed today even though it is far above a poll's budget.
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+
+    result = derive_daily(
+        processor,
+        {"grid_import_total": 1000.0, "grid_import_today": 8.0},
+        now - timedelta(seconds=30),
+        now,
+        monkeypatch,
+    )
+
+    assert result["grid_import_today"] == 8.0
