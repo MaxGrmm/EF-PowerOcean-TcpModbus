@@ -47,7 +47,7 @@ from .const import (
     InverterModel,
     NumberWritableDef,
 )
-from .energy import EnergyProcessor, parse_datetime
+from .energy_processor import EnergyProcessor, parse_datetime
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
@@ -111,7 +111,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._lock = asyncio.Lock()
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
-        self._energy = EnergyProcessor(self.limits)
+        self._energy_processor = EnergyProcessor(self.limits)
         self._status: CoordinatorStatus | None = None
         self._store: Store[dict[str, Any]] | None = Store(
             hass, STORAGE_VERSION, f"{DOMAIN}.{config_entry.entry_id}.state"
@@ -143,7 +143,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             "last_checked_time": self._last_checked_time.isoformat()
             if self._last_checked_time is not None
             else None,
-            **self._energy.dump_state(),
+            **self._energy_processor.dump_state(),
         }
 
     async def async_load_persisted_state(self) -> None:
@@ -153,7 +153,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         self._last_checked_data = stored.get("last_checked_data") or {}
         self._last_checked_time = parse_datetime(stored.get("last_checked_time"))
-        self._energy.load_state(stored)
+        self._energy_processor.load_state(stored)
 
     async def async_client_shutdown(self) -> None:
         """Integration-Shutdown, closing connection"""
@@ -287,11 +287,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             )
 
         try:
-            result = self._energy.validate_totals(
+            result = self._energy_processor.validate_totals(
                 raw_data, self._last_checked_data, self._last_checked_time
             )
-            result, is_daily_reset = self._energy.derive_daily(result)
-            result.update(self._energy.raw_daily_values(raw_data))
+            result, is_daily_reset = self._energy_processor.derive_daily(result)
+            result.update(self._energy_processor.raw_daily_values(raw_data))
             calculated_results = calculate_derived_values(
                 TelemetryData.from_mapping(result),
                 calculate_solar_power=self._ena_calc_solar_power,
@@ -300,7 +300,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 max_battery_discharge_power=MAX_BATTERY_DISCHARGED_POWER,
             )
             result.update(calculated_results)
-            result = self._energy.clamp_calculated(
+            result = self._energy_processor.clamp_calculated(
                 result, self._last_checked_data, is_daily_reset=is_daily_reset
             )
 
