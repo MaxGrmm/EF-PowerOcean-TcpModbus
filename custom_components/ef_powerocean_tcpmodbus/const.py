@@ -33,9 +33,6 @@ MAX_BATTERY_COUNT: Final = 9
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S: Final = 15
-DAILY_RESET_MIN_PERIOD_HOURS: Final = 20
-# We use >24h since there can be timezone differences and this will handle DST
-DAILY_RESET_FORCE_HOURS: Final = 26
 ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
