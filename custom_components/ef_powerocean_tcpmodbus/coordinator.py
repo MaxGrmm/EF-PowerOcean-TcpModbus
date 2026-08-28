@@ -18,7 +18,6 @@ from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from .const import (
-    CALCULATED_ENERGY_RESET_FRACTION,
     CONF_BATTERY_COUNT,
     CONF_CALC_SOLAR_POWER,
     CONF_HOST,
@@ -32,14 +31,11 @@ from .const import (
     DEFAULT_BATTERY_COUNT,
     DEFAULT_INVERTER_MODEL,
     DEFAULT_MAX_GRID_POWER,
-    DEFAULT_MAX_POWER,
     DEFAULT_MAX_SOLAR_POWER,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL_S,
     DEFAULT_SLAVE,
     DOMAIN,
-    ENERGY_RESOLUTION_KWH,
-    ENERGY_SENSOR_MAP,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MOD_REGISTER_MAP,
@@ -47,11 +43,11 @@ from .const import (
     SLEEP_TIME_AFTER_RECONNECT_S,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
-    UNREALISTIC_ENERGY_READ_THRESHOLD,
     CoordinatorStatus,
     InverterModel,
     NumberWritableDef,
 )
+from .energy import EnergyProcessor, parse_datetime
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
@@ -115,7 +111,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._lock = asyncio.Lock()
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
-        self._unrealistic_energy_read_counts: dict[str, int] = {}
+        self._energy = EnergyProcessor(self.limits)
         self._status: CoordinatorStatus | None = None
         self._store: Store[dict[str, Any]] | None = Store(
             hass, STORAGE_VERSION, f"{DOMAIN}.{config_entry.entry_id}.state"
@@ -141,27 +137,23 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         return pyModbusVersion
 
     def _persisted_state(self) -> dict[str, Any]:
-        """Return the validation baseline in a JSON-serializable form."""
+        """Return the state in a JSON-serializable form."""
         return {
             "last_checked_data": self._last_checked_data,
             "last_checked_time": self._last_checked_time.isoformat()
             if self._last_checked_time is not None
             else None,
+            **self._energy.dump_state(),
         }
 
     async def async_load_persisted_state(self) -> None:
-        """Seed the validation baseline from disk so the first poll is validated."""
+        """Seed the state from disk so the first poll is validated."""
         if self._store is None or (stored := await self._store.async_load()) is None:
             return
 
         self._last_checked_data = stored.get("last_checked_data") or {}
-        raw_time = stored.get("last_checked_time")
-        try:
-            self._last_checked_time = (
-                datetime.fromisoformat(raw_time) if raw_time else None
-            )
-        except ValueError:
-            self._last_checked_time = None
+        self._last_checked_time = parse_datetime(stored.get("last_checked_time"))
+        self._energy.load_state(stored)
 
     async def async_client_shutdown(self) -> None:
         """Integration-Shutdown, closing connection"""
@@ -278,139 +270,17 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
             return data
 
-    def _sanitize_energy_values(self, data: dict[str, Any]) -> dict[str, Any]:
-        result: dict[str, Any] = dict(data)
-
-        now = dt.now()
-        if self._last_checked_time is None or self._last_checked_data is None:
-            _LOGGER.debug(
-                "Last checked time or last checked data is None. Return current data."
-            )
-            return result
-
-        elapsed_seconds = (now - self._last_checked_time).total_seconds()
-        if elapsed_seconds < 1:
-            _LOGGER.debug(
-                f"dt is less than one second. Return last data. Delta-t: {elapsed_seconds}"
-            )
-            return dict(self._last_checked_data)
-
-        dt_hours = elapsed_seconds / 3600
-        for energy_sensor in ENERGY_SENSOR_MAP:
-            if energy_sensor.is_calculated:
-                continue
-
-            current_energy = result.get(energy_sensor.key, None)
-            last_energy = self._last_checked_data.get(energy_sensor.key, None)
-            if current_energy is None or last_energy is None:
-                _LOGGER.debug(
-                    f"Current energy or last energy is None of entity {energy_sensor.key}"
-                )
-                self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
-                continue
-
-            energy_delta = current_energy - last_energy
-            if dt_hours > 1:
-                _LOGGER.debug(
-                    f"Time window is too large of entity {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 4)} dt: {dt_hours} last check: {self._last_checked_time.time()})"
-                )
-                self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
-                continue
-
-            limit = self.limits.get(energy_sensor.max_power, DEFAULT_MAX_POWER)
-
-            # A total counter must never decrease; hold the last value indefinitely.
-            if energy_delta < 0 and not energy_sensor.resets_daily:
-                result[energy_sensor.key] = last_energy
-                _LOGGER.debug(
-                    f"Clamp decreasing total {energy_sensor.key}! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} dt: {dt_hours} limit: {limit} last check: {self._last_checked_time.time()})"
-                )
-                continue
-
-            # Largest believable rise this interval (kWh): max power over the
-            # actual elapsed time, plus one register step so a short poll is not
-            # flagged for a single 0.01 kWh tick.
-            max_believable_delta = limit * dt_hours / 1000 + ENERGY_RESOLUTION_KWH
-            is_unrealistic = energy_delta < 0 or energy_delta > max_believable_delta
-            if is_unrealistic:
-                read_count = (
-                    self._unrealistic_energy_read_counts.get(energy_sensor.key, 0) + 1
-                )
-                self._unrealistic_energy_read_counts[energy_sensor.key] = read_count
-                if read_count < UNREALISTIC_ENERGY_READ_THRESHOLD:
-                    result[energy_sensor.key] = last_energy
-                    _LOGGER.debug(
-                        f"Ignore unrealistic value of {energy_sensor.key} ({read_count}/{UNREALISTIC_ENERGY_READ_THRESHOLD})! (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} max delta: {round(max_believable_delta, 4)} dt: {dt_hours} last check: {self._last_checked_time.time()})"
-                    )
-                    continue
-
-                self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
-                _LOGGER.warning(
-                    f"Accept unrealistic value of {energy_sensor.key} after {UNREALISTIC_ENERGY_READ_THRESHOLD} consecutive readings. (raw energy: {current_energy} last energy: {last_energy} delta energy: {round(energy_delta, 2)} max delta: {round(max_believable_delta, 4)} dt: {dt_hours} last check: {self._last_checked_time.time()})"
-                )
-                continue
-
-            self._unrealistic_energy_read_counts.pop(energy_sensor.key, None)
-
-        return result
-
-    def _clamp_calculated_energy_values(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Keep calculated total-increasing sensors monotonic between resets.
-
-        Derived values sum independently validated counters, so they can dip by
-        a small kWh without a real decrease, or go transiently negative when the
-        raw daily counters reset out of sync at midnight. Hold the last value to
-        prevent this, but let a real daily reset toward zero pass through. As a
-        hard invariant, a total_increasing sensor must never be negative.
-        """
-        result = dict(data)
-
-        for energy_sensor in ENERGY_SENSOR_MAP:
-            if not energy_sensor.is_calculated:
-                continue
-
-            current_energy = result.get(energy_sensor.key)
-            if current_energy is None:
-                continue
-
-            last_energy = self._last_checked_data.get(energy_sensor.key)
-
-            is_daily_reset = (
-                energy_sensor.resets_daily
-                and last_energy is not None
-                and 0 <= current_energy < last_energy * CALCULATED_ENERGY_RESET_FRACTION
-            )
-            # guarded_energy is the value we publish after enforcing the invariants
-            guarded_energy = current_energy
-            if (
-                last_energy is not None
-                and guarded_energy < last_energy
-                and not is_daily_reset
-            ):
-                guarded_energy = last_energy
-
-            # Never publish a negative total_increasing value
-            guarded_energy = max(guarded_energy, 0)
-            if current_energy < 0:
-                _LOGGER.warning(
-                    f"Calculated {energy_sensor.key} came out negative ({current_energy}); guarded to {guarded_energy}. (last: {last_energy} daily_reset: {is_daily_reset})"
-                )
-            elif guarded_energy - current_energy > ENERGY_RESOLUTION_KWH:
-                _LOGGER.debug(
-                    f"Keep last calculated {energy_sensor.key} {guarded_energy} (raw: {current_energy} last: {last_energy} daily_reset: {is_daily_reset})"
-                )
-
-            result[energy_sensor.key] = guarded_energy
-
-        return result
-
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             if (raw_data := await self.async_get_raw_data()) is None:
                 self._status = CoordinatorStatus.READ_FAILED
                 return dict(self._last_checked_data)
 
-            result = self._sanitize_energy_values(raw_data)
+            result = self._energy.validate_totals(
+                raw_data, self._last_checked_data, self._last_checked_time
+            )
+            result, is_daily_reset = self._energy.derive_daily(result)
+            result.update(self._energy.raw_daily_values(raw_data))
             calculated_results = calculate_derived_values(
                 TelemetryData.from_mapping(result),
                 calculate_solar_power=self._ena_calc_solar_power,
@@ -419,7 +289,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 max_battery_discharge_power=MAX_BATTERY_DISCHARGED_POWER,
             )
             result.update(calculated_results)
-            result = self._clamp_calculated_energy_values(result)
+            result = self._energy.clamp_calculated(
+                result, self._last_checked_data, is_daily_reset=is_daily_reset
+            )
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()

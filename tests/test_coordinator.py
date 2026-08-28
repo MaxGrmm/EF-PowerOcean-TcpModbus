@@ -19,9 +19,9 @@ def coordinator():
     )
     instance._last_checked_data = {}
     instance._last_checked_time = None
-    instance._unrealistic_energy_read_counts = {}
     instance._status = None
     instance._store = None
+    instance._ena_calc_solar_power = False
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
     instance.limits = {
         const.CONF_MAX_GRID_POWER: 15_000,
@@ -29,17 +29,32 @@ def coordinator():
         const.CONF_MAX_BATTERY_CHARGED_POWER: 5_000,
         const.CONF_MAX_BATTERY_DISCHARGED_POWER: 6_600,
     }
+    instance._energy = coordinator_module.EnergyProcessor(instance.limits)
     return instance
 
 
-def sanitize(
+def validate_totals(
     coordinator,
     data: dict[str, float],
     now: datetime,
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, float]:
     monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
-    return coordinator._sanitize_energy_values(data)
+    return coordinator._energy.validate_totals(
+        data, coordinator._last_checked_data, coordinator._last_checked_time
+    )
+
+
+def run_update(
+    coordinator,
+    raw_data: dict[str, float | None],
+    now: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, float]:
+    """Run a full coordinator update cycle with a fixed frame and clock."""
+    coordinator.async_get_raw_data = AsyncMock(return_value=dict(raw_data))
+    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+    return asyncio.run(coordinator._async_update_data())
 
 
 @pytest.mark.parametrize(
@@ -71,7 +86,7 @@ def test_returns_current_data_for_first_observation(
 ) -> None:
     data = {"grid_import_total": 10.0}
 
-    result = sanitize(
+    result = validate_totals(
         coordinator,
         data,
         datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc),
@@ -101,7 +116,9 @@ def test_handles_minimum_update_interval_boundary(
     coordinator._last_checked_time = now - elapsed
     coordinator._last_checked_data = {"grid_import_total": 10.0}
 
-    result = sanitize(coordinator, {"grid_import_total": 10.004}, now, monkeypatch)
+    result = validate_totals(
+        coordinator, {"grid_import_total": 10.004}, now, monkeypatch
+    )
 
     assert result["grid_import_total"] == expected
 
@@ -136,7 +153,9 @@ def test_validates_energy_changes_within_one_hour(
         "previous_snapshot_marker": 1.0,
     }
 
-    result = sanitize(coordinator, {"grid_import_total": current}, now, monkeypatch)
+    result = validate_totals(
+        coordinator, {"grid_import_total": current}, now, monkeypatch
+    )
 
     assert result["grid_import_total"] == expected
     assert "previous_snapshot_marker" not in result
@@ -152,7 +171,9 @@ def test_accepts_single_register_step_regardless_of_scan_interval(
     coordinator._last_checked_time = now - timedelta(seconds=scan_interval)
     coordinator._last_checked_data = {"grid_import_total": 10.0}
 
-    result = sanitize(coordinator, {"grid_import_total": 10.01}, now, monkeypatch)
+    result = validate_totals(
+        coordinator, {"grid_import_total": 10.01}, now, monkeypatch
+    )
 
     assert result["grid_import_total"] == 10.01
 
@@ -177,61 +198,51 @@ def test_holds_over_budget_increase_scaled_to_interval(
     coordinator._last_checked_time = now - timedelta(seconds=scan_interval)
     coordinator._last_checked_data = {"grid_import_total": 10.0}
 
-    result = sanitize(coordinator, {"grid_import_total": current}, now, monkeypatch)
+    result = validate_totals(
+        coordinator, {"grid_import_total": current}, now, monkeypatch
+    )
 
     assert result["grid_import_total"] == expected
 
 
-def test_debounces_unrealistic_energy_read_without_discarding_frame(
+def test_holds_implausible_energy_read_without_discarding_frame(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A held energy read must not discard the rest of the frame.
     now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
     coordinator._last_checked_time = now - timedelta(seconds=30)
-    coordinator._last_checked_data = {"bat_discharged_today": 1.77, "battery_soc": 50.0}
+    coordinator._last_checked_data = {"bat_discharged_total": 1.77, "battery_soc": 50.0}
 
-    result = sanitize(
+    result = validate_totals(
         coordinator,
-        {"bat_discharged_today": 0.0, "battery_soc": 45.0},
+        {"bat_discharged_total": 0.0, "battery_soc": 45.0},
         now,
         monkeypatch,
     )
 
-    assert result["bat_discharged_today"] == 1.77
+    assert result["bat_discharged_total"] == 1.77
     assert result["battery_soc"] == 45.0
 
 
-@pytest.mark.parametrize(
-    ("sensor_key", "last", "current", "expected_sequence"),
-    (
-        ("bat_discharged_today", 1.77, 0.0, [1.77, 1.77, 0.0]),
-        ("grid_import_today", 10.0, 1.0, [10.0, 10.0, 1.0]),
-        ("grid_import_total", 10.0, 0.0, [10.0, 10.0, 10.0]),
-    ),
-    ids=("daily-reset-to-zero", "daily-drop-nonzero", "total-never-decreases"),
-)
-def test_debounces_decreasing_energy(
-    coordinator,
-    monkeypatch: pytest.MonkeyPatch,
-    sensor_key: str,
-    last: float,
-    current: float,
-    expected_sequence: list[float],
+def test_holds_decreasing_total_regardless_of_repetition(
+    coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Daily counters accept a decrease after the threshold; totals never do.
+    # Unlike the old debounce, repetition must never grant a decrease amnesty.
     now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
     coordinator._last_checked_time = now - timedelta(seconds=30)
-    coordinator._last_checked_data = {sensor_key: last}
+    coordinator._last_checked_data = {"grid_import_total": 10.0}
 
     actual = [
-        sanitize(coordinator, {sensor_key: current}, now, monkeypatch)[sensor_key]
-        for _ in range(3)
+        validate_totals(coordinator, {"grid_import_total": 0.0}, now, monkeypatch)[
+            "grid_import_total"
+        ]
+        for _ in range(5)
     ]
 
-    assert actual == expected_sequence
+    assert actual == [10.0] * 5
 
 
-def test_seeds_baseline_from_persisted_state(coordinator) -> None:
+def test_seeds_baseline_from_legacy_persisted_state(coordinator) -> None:
     stored = {
         "last_checked_data": {"grid_import_total": 12.5},
         "last_checked_time": "2026-08-07T12:00:00+00:00",
@@ -244,6 +255,41 @@ def test_seeds_baseline_from_persisted_state(coordinator) -> None:
     assert coordinator._last_checked_time == datetime(
         2026, 8, 7, 12, 0, tzinfo=timezone.utc
     )
+    assert coordinator._energy.daily_snapshots == {}
+    assert coordinator._energy.last_rollover is None
+
+
+def test_persisted_state_round_trips(coordinator) -> None:
+    coordinator._last_checked_data = {"grid_import_total": 12.5}
+    coordinator._last_checked_time = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    coordinator._energy.accepted_at = {
+        "grid_import_total": datetime(2026, 8, 7, 11, 0, tzinfo=timezone.utc)
+    }
+    coordinator._energy.daily_snapshots = {"grid_import_today": 10.0}
+    coordinator._energy.last_rollover = datetime(2026, 8, 7, 0, 0, tzinfo=timezone.utc)
+    coordinator._energy.reset_learned = True
+
+    stored = coordinator._persisted_state()
+
+    coordinator._last_checked_data = {}
+    coordinator._last_checked_time = None
+    coordinator._energy.accepted_at = {}
+    coordinator._energy.daily_snapshots = {}
+    coordinator._energy.last_rollover = None
+    coordinator._energy.reset_learned = False
+    coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
+
+    asyncio.run(coordinator.async_load_persisted_state())
+
+    assert coordinator._last_checked_data == {"grid_import_total": 12.5}
+    assert coordinator._energy.accepted_at == {
+        "grid_import_total": datetime(2026, 8, 7, 11, 0, tzinfo=timezone.utc)
+    }
+    assert coordinator._energy.daily_snapshots == {"grid_import_today": 10.0}
+    assert coordinator._energy.last_rollover == datetime(
+        2026, 8, 7, 0, 0, tzinfo=timezone.utc
+    )
+    assert coordinator._energy.reset_learned is True
 
 
 def test_accepted_update_publishes_successful_coordinator_status(
@@ -251,8 +297,11 @@ def test_accepted_update_publishes_successful_coordinator_status(
 ) -> None:
     now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
     coordinator.async_get_raw_data = AsyncMock(return_value={"grid_import_total": 10.0})
-    coordinator._sanitize_energy_values = Mock(return_value={"grid_import_total": 10.0})
-    coordinator._clamp_calculated_energy_values = Mock(side_effect=lambda data: data)
+    coordinator._energy.validate_totals = Mock(return_value={"grid_import_total": 10.0})
+    coordinator._energy.derive_daily = Mock(side_effect=lambda data: (data, False))
+    coordinator._energy.clamp_calculated = Mock(
+        side_effect=lambda data, _prev, **_: data
+    )
     coordinator._ena_calc_solar_power = False
     coordinator._store = None
     monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
@@ -297,7 +346,7 @@ def test_reconnect_failure_updates_coordinator_status(coordinator) -> None:
 
 def test_processing_failure_updates_coordinator_status(coordinator) -> None:
     coordinator.async_get_raw_data = AsyncMock(return_value={})
-    coordinator._sanitize_energy_values = Mock(side_effect=ValueError("Invalid data"))
+    coordinator._energy.validate_totals = Mock(side_effect=ValueError("Invalid data"))
 
     result = asyncio.run(coordinator._async_update_data())
 
@@ -316,52 +365,225 @@ def test_persisted_state_after_reload_clamps_total_reset(
     asyncio.run(coordinator.async_load_persisted_state())
 
     now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
-    result = sanitize(coordinator, {"grid_import_total": 0.0}, now, monkeypatch)
+    result = validate_totals(coordinator, {"grid_import_total": 0.0}, now, monkeypatch)
 
     assert result["grid_import_total"] == 10.0
 
 
-def test_valid_energy_read_clears_unrealistic_read_count(
+def test_accepts_true_value_after_hours_of_bogus_zero(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
-    coordinator._last_checked_time = now - timedelta(seconds=30)
-    coordinator._last_checked_data = {"grid_import_total": 10.0}
+    """Replay: the counter reads a bogus 0 for hours mid-day.
 
-    sanitize(coordinator, {"grid_import_total": 1_000.0}, now, monkeypatch)
-    sanitize(coordinator, {"grid_import_total": 10.1}, now, monkeypatch)
-    result = sanitize(coordinator, {"grid_import_total": 1_000.0}, now, monkeypatch)
+    The published value must hold the baseline the whole time, and the true
+    value must be accepted on recovery because the rise budget accrues from
+    the last genuine acceptance.
+    """
+    start = datetime(2026, 8, 7, 9, 0, tzinfo=timezone.utc)
+    coordinator._last_checked_data = {"bat_discharged_total": 1000.0}
+    coordinator._energy.accepted_at = {"bat_discharged_total": start}
 
-    assert result["grid_import_total"] == 10.0
-    assert coordinator._unrealistic_energy_read_counts == {"grid_import_total": 1}
+    now = start
+    for _ in range(10):
+        now += timedelta(minutes=18)
+        result = validate_totals(
+            coordinator, {"bat_discharged_total": 0.0}, now, monkeypatch
+        )
+        assert result["bat_discharged_total"] == 1000.0
 
-
-def test_accepted_nonzero_daily_reset_updates_derived_house_energy(
-    coordinator, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    now = datetime(2026, 8, 8, 0, 1, tzinfo=timezone.utc)
-    daily_energy = {
-        "solar_today": 20.0,
-        "grid_import_today": 5.0,
-        "bat_discharged_today": 2.0,
-        "grid_export_today": 3.0,
-        "bat_charged_today": 4.0,
-    }
-    coordinator._last_checked_time = now - timedelta(seconds=30)
-    coordinator._last_checked_data = {
-        **daily_energy,
-        "house_energy_today": 20.0,
-    }
-    coordinator._unrealistic_energy_read_counts = dict.fromkeys(daily_energy, 2)
-    coordinator._ena_calc_solar_power = False
-    coordinator.async_get_raw_data = AsyncMock(
-        return_value=dict.fromkeys(daily_energy, 0.1)
+    recovered = validate_totals(
+        coordinator,
+        {"bat_discharged_total": 1003.5},
+        now + timedelta(seconds=5),
+        monkeypatch,
     )
-    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
 
-    result = asyncio.run(coordinator._async_update_data())
+    assert recovered["bat_discharged_total"] == 1003.5
 
-    assert result["house_energy_today"] == 0.1
+
+def test_rolls_daily_counters_when_device_registers_reset(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The rollover follows the device's own reset signal, not any wall clock,
+    # so HA and inverter timezone configurations do not need to match.
+    totals = {
+        "solar_total": 1000.0,
+        "grid_import_total": 500.0,
+        "grid_export_total": 300.0,
+        "bat_charged_total": 200.0,
+        "bat_discharged_total": 180.0,
+    }
+    device_dailies = {
+        "solar_today": 8.0,
+        "grid_import_today": 1.0,
+        "grid_export_today": 2.0,
+        "bat_charged_today": 3.0,
+        "bat_discharged_today": 2.5,
+    }
+    reset_dailies = dict.fromkeys(device_dailies, 0.0)
+
+    before = run_update(
+        coordinator,
+        {**totals, **device_dailies},
+        datetime(2026, 8, 27, 23, 59, 55),
+        monkeypatch,
+    )
+    # The device's registers have not reset yet: nothing rolls.
+    unrolled = run_update(
+        coordinator,
+        {**totals, **device_dailies},
+        datetime(2026, 8, 28, 0, 0, 0),
+        monkeypatch,
+    )
+    # The device resets its daily registers: detected and rolled.
+    after = run_update(
+        coordinator,
+        {**totals, **reset_dailies},
+        datetime(2026, 8, 28, 0, 0, 5),
+        monkeypatch,
+    )
+    grown = run_update(
+        coordinator,
+        {**totals, "solar_total": 1000.01, **reset_dailies},
+        datetime(2026, 8, 28, 0, 0, 10),
+        monkeypatch,
+    )
+
+    assert before["solar_today"] == 8.0
+    assert before["house_energy_today"] == 6.5
+    assert unrolled["solar_today"] == 8.0
+    assert all(after[key] == 0.0 for key in device_dailies)
+    assert after["house_energy_today"] == 0.0
+    # Growth after the reset counts from zero, driven by the lifetime counters.
+    assert grown["solar_today"] == 0.01
+    assert coordinator._energy.last_rollover == datetime(2026, 8, 28, 0, 0, 5)
+
+
+def test_ignores_bogus_zero_registers_before_reset_is_due(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replay: the daily registers read a bogus 0 mid-day.
+
+    A reset is not due yet, so the drop must be ignored and the derived daily
+    values held.
+    """
+    totals = {"solar_total": 1000.0, "bat_discharged_total": 180.0}
+    device_dailies = {"solar_today": 8.0, "bat_discharged_today": 2.5}
+    coordinator._energy.last_rollover = datetime(2026, 8, 27, 0, 0, 3)
+    coordinator._energy.reset_learned = True
+
+    seeded = run_update(
+        coordinator,
+        {**totals, **device_dailies},
+        datetime(2026, 8, 27, 12, 0, 0),
+        monkeypatch,
+    )
+    bogus = run_update(
+        coordinator,
+        {**totals, "solar_today": 0.0, "bat_discharged_today": 0.0},
+        datetime(2026, 8, 27, 12, 0, 5),
+        monkeypatch,
+    )
+
+    assert seeded["solar_today"] == 8.0
+    assert bogus["solar_today"] == 8.0
+    assert bogus["bat_discharged_today"] == 2.5
+    assert coordinator._energy.last_rollover == datetime(2026, 8, 27, 0, 0, 3)
+
+
+def test_detects_reset_on_near_zero_production_day(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A cloudy day may end with only 0.01 kWh on a daily register. The reset
+    # is detected from the register dropping at all, not from any kWh
+    # threshold, so the tiny 0.01 -> 0.00 drop still rolls the day.
+    coordinator._energy.last_rollover = datetime(2026, 8, 27, 0, 0, 1)
+    coordinator._energy.reset_learned = True
+
+    end_of_day = run_update(
+        coordinator,
+        {"solar_total": 1000.0, "solar_today": 0.01},
+        datetime(2026, 8, 27, 23, 59, 55),
+        monkeypatch,
+    )
+    after_reset = run_update(
+        coordinator,
+        {"solar_total": 1000.0, "solar_today": 0.0},
+        datetime(2026, 8, 28, 0, 0, 5),
+        monkeypatch,
+    )
+
+    assert end_of_day["solar_today"] == 0.01
+    assert after_reset["solar_today"] == 0.0
+    assert coordinator._energy.last_rollover == datetime(2026, 8, 28, 0, 0, 5)
+
+
+def test_forces_rollover_when_device_reset_unobserved(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Registers unreadable across the reset: roll anyway after the force
+    # window, keeping the phase of the last observed reset.
+    coordinator._energy.last_rollover = datetime(2026, 8, 26, 0, 0, 0)
+    coordinator._energy.reset_learned = True
+    coordinator._energy.daily_snapshots = {"solar_today": 990.0}
+
+    result = run_update(
+        coordinator,
+        {"solar_total": 1000.0, "solar_today": None},
+        datetime(2026, 8, 27, 3, 0, 0),
+        monkeypatch,
+    )
+
+    assert result["solar_today"] == 0.0
+    assert coordinator._energy.last_rollover == datetime(2026, 8, 27, 0, 0, 0)
+
+
+@pytest.mark.parametrize(
+    ("device_daily", "expected_daily", "expected_snapshot"),
+    (
+        (5.0, 5.0, 995.0),
+        (None, 0.0, 1000.0),
+        (1200.0, 0.0, 1000.0),
+        (-1.0, 0.0, 1000.0),
+    ),
+    ids=("plausible-carry-over", "missing", "above-total", "negative"),
+)
+def test_seeds_first_daily_snapshot_from_device_register(
+    coordinator,
+    monkeypatch: pytest.MonkeyPatch,
+    device_daily: float | None,
+    expected_daily: float,
+    expected_snapshot: float,
+) -> None:
+    result = run_update(
+        coordinator,
+        {"solar_total": 1000.0, "solar_today": device_daily},
+        datetime(2026, 8, 27, 14, 0, 0),
+        monkeypatch,
+    )
+
+    assert result["solar_today"] == expected_daily
+    assert coordinator._energy.daily_snapshots["solar_today"] == expected_snapshot
+
+
+def test_publishes_raw_device_daily_as_diagnostic(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The device's own register is published unmodified under a *_device key so
+    # it can be compared against the derived value in the UI.
+    coordinator._energy.last_rollover = datetime(2026, 8, 27, 0, 0, 0)
+    coordinator._energy.reset_learned = True
+    coordinator._energy.daily_snapshots = {"solar_today": 990.0}
+
+    result = run_update(
+        coordinator,
+        {"solar_total": 1000.0, "solar_today": 9.5},
+        datetime(2026, 8, 27, 12, 0, 0),
+        monkeypatch,
+    )
+
+    assert result["solar_today"] == 10.0
+    assert result["solar_today_raw"] == 9.5
 
 
 def test_clamps_derived_house_energy_rounding_jitter(
@@ -403,8 +625,6 @@ def test_clamps_derived_house_energy_jitter_during_raw_counter_reset(
     }
     coordinator._last_checked_time = now - timedelta(seconds=5)
     coordinator._last_checked_data = previous
-    # A raw daily counter completes an accepted downward wobble this poll.
-    coordinator._unrealistic_energy_read_counts = {"solar_today": 2}
     coordinator._ena_calc_solar_power = False
     coordinator.async_get_raw_data = AsyncMock(
         return_value={**previous, "solar_today": 5.62}
@@ -416,40 +636,108 @@ def test_clamps_derived_house_energy_jitter_during_raw_counter_reset(
     assert result["house_energy_today"] == 5.63
 
 
-def test_holds_derived_house_energy_on_negative_transient_at_midnight(
+def test_replays_daily_register_flap_without_spike(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    previous = {
+    """Replay: the device reset its daily registers at local
+    midnight, but around 00:00 UTC (02:00 CEST) a ghost of yesterday's values
+    flaps onto the daily registers for several polls. The published daily
+    sensors derive from the lifetime counters and must not follow the ghost.
+    """
+    totals = {
+        "solar_total": 12408.0,
+        "grid_import_total": 820.55,
+        "grid_export_total": 9640.02,
+        "bat_charged_total": 3120.4,
+        "bat_discharged_total": 2980.11,
+    }
+    ghost_of_yesterday = {
+        "solar_today": 62.09,
+        "grid_import_today": 0.03,
+        "grid_export_today": 42.58,
+        "bat_charged_today": 7.35,
+        "bat_discharged_today": 6.43,
+    }
+    new_day = {
         "solar_today": 0.0,
         "grid_import_today": 0.0,
-        "bat_discharged_today": 0.76,
         "grid_export_today": 0.01,
         "bat_charged_today": 0.0,
-        "house_energy_today": 0.75,
+        "bat_discharged_today": 0.51,
     }
-    spike = {
-        "solar_today": 0.04,
-        "grid_import_today": 0.0,
-        "bat_discharged_today": 9.02,
-        "grid_export_today": 9.73,
-        "bat_charged_today": 6.32,
-    }
-    now = datetime(2026, 8, 25, 23, 59, 49, tzinfo=timezone.utc)
-    coordinator._last_checked_time = now
-    coordinator._last_checked_data = previous
-    coordinator._ena_calc_solar_power = False
-    coordinator.async_get_raw_data = AsyncMock(return_value=dict(spike))
-    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
 
-    results = []
-    for _ in range(const.UNREALISTIC_ENERGY_READ_THRESHOLD):
-        now += timedelta(seconds=5)
-        results.append(asyncio.run(coordinator._async_update_data()))
+    # The device's reset was observed at local midnight, two hours earlier.
+    coordinator._energy.last_rollover = datetime(2026, 8, 28, 0, 0, 2)
+    coordinator._energy.reset_learned = True
+    now = datetime(2026, 8, 28, 1, 59, 57)
+    previous = run_update(coordinator, {**totals, **new_day}, now, monkeypatch)
+    assert previous["solar_today"] == 0.0  # seeded from the device register
+    assert previous["bat_discharged_today"] == 0.51
 
-    # The invariant that was violated: house energy is never negative.
-    assert all(result["house_energy_today"] >= 0 for result in results)
-    # The spike is held below the threshold, then accepted on it.
-    assert results[2]["bat_charged_today"] == 6.32
+    flap = [ghost_of_yesterday] * 3 + [new_day] * 3 + [ghost_of_yesterday] * 3
+    for raw_dailies in flap:
+        now += timedelta(seconds=2)
+        # The battery keeps discharging slowly through the night.
+        totals["bat_discharged_total"] = round(totals["bat_discharged_total"] + 0.01, 2)
+        published = run_update(coordinator, {**totals, **raw_dailies}, now, monkeypatch)
+
+        for key in new_day:
+            delta = published[key] - previous[key]
+            assert 0 <= round(delta, 2) <= 0.02, f"{key} moved by {delta}"
+        assert published["house_energy_today"] >= previous["house_energy_today"] >= 0
+        previous = published
+
+    # The ghost never made it through: still the new day's small values.
+    assert previous["solar_today"] == 0.0
+    assert previous["bat_discharged_today"] == 0.6
+
+
+def test_replays_hours_long_total_read_gap_with_clean_recovery(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replay of the reported statistics gap: solar_total reads failed for
+    ~9 h overnight. Published values must hold the last validated value while
+    the device's reset cannot be confirmed, then roll and accept the first
+    genuine reading the next morning, aligned to the device's register.
+    """
+    seeded = run_update(
+        coordinator,
+        {"solar_total": 12408.0, "solar_today": 20.0},
+        datetime(2026, 8, 27, 21, 0, 0),
+        monkeypatch,
+    )
+    assert seeded["solar_today"] == 20.0
+
+    for hour in (22, 23):
+        held = run_update(
+            coordinator,
+            {"solar_total": None, "solar_today": None},
+            datetime(2026, 8, 27, hour, 0, 0),
+            monkeypatch,
+        )
+        assert held["solar_total"] == 12408.0
+        assert held["solar_today"] == 20.0
+
+    past_midnight = run_update(
+        coordinator,
+        {"solar_total": None, "solar_today": None},
+        datetime(2026, 8, 28, 0, 30, 0),
+        monkeypatch,
+    )
+    recovered = run_update(
+        coordinator,
+        {"solar_total": 12408.01, "solar_today": 0.01},
+        datetime(2026, 8, 28, 6, 20, 0),
+        monkeypatch,
+    )
+
+    # While reads fail, the reset cannot be confirmed: hold the derived value.
+    assert past_midnight["solar_total"] == 12408.0
+    assert past_midnight["solar_today"] == 20.0
+    # On recovery the register reads far below the derived value: reset
+    # detected, and the daily value aligns exactly with the device's own.
+    assert recovered["solar_total"] == 12408.01
+    assert recovered["solar_today"] == 0.01
 
 
 def test_floors_derived_house_energy_at_zero_without_baseline(
@@ -475,51 +763,62 @@ def test_floors_derived_house_energy_at_zero_without_baseline(
 
 
 @pytest.mark.parametrize(
-    ("current_data", "previous_data"),
+    ("current_data", "previous_data", "expected"),
     (
-        ({}, {"grid_import_total": 10.0}),
-        ({"grid_import_total": 11.0}, {}),
-        ({"grid_import_total": None}, {"grid_import_total": 10.0}),
-        ({"grid_import_total": 11.0}, {"grid_import_total": None}),
+        ({}, {"grid_import_total": 10.0}, {"grid_import_total": 10.0}),
+        ({"grid_import_total": 11.0}, {}, {"grid_import_total": 11.0}),
+        (
+            {"grid_import_total": None},
+            {"grid_import_total": 10.0},
+            {"grid_import_total": 10.0},
+        ),
+        (
+            {"grid_import_total": 11.0},
+            {"grid_import_total": None},
+            {"grid_import_total": 11.0},
+        ),
     ),
     ids=("current-missing", "previous-missing", "current-none", "previous-none"),
 )
-def test_leaves_values_unchanged_when_a_reading_is_missing(
+def test_fills_missing_readings_from_last_validated_value(
     coordinator,
     monkeypatch: pytest.MonkeyPatch,
     current_data: dict[str, float | None],
     previous_data: dict[str, float | None],
+    expected: dict[str, float | None],
 ) -> None:
     now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
     coordinator._last_checked_time = now - timedelta(minutes=30)
     coordinator._last_checked_data = previous_data
 
-    result = sanitize(coordinator, current_data, now, monkeypatch)
+    result = validate_totals(coordinator, current_data, now, monkeypatch)
 
-    assert result == current_data
+    assert result == expected
 
 
 @pytest.mark.parametrize(
-    ("elapsed", "expected"),
+    ("elapsed", "current", "expected"),
     (
-        (timedelta(hours=1), 25.0),
-        (timedelta(hours=1, microseconds=1), 20_000.0),
-        (timedelta(hours=2), 20_000.0),
+        (timedelta(hours=1), 25.0, 25.0),
+        (timedelta(hours=2), 20_000.0, 10.0),
+        (timedelta(days=30), 500.0, 500.0),
     ),
-    ids=("exactly-one-hour", "just-over-one-hour", "two-hours"),
+    ids=("one-hour-budget", "implausible-jump-held", "month-long-gap-accepted"),
 )
-def test_handles_maximum_validation_window_boundary(
+def test_scales_rise_budget_with_time_since_last_acceptance(
     coordinator,
     monkeypatch: pytest.MonkeyPatch,
     elapsed: timedelta,
+    current: float,
     expected: float,
 ) -> None:
     now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
     coordinator._last_checked_time = now - elapsed
     coordinator._last_checked_data = {"grid_import_total": 10.0}
 
-    current = 25.0 if elapsed == timedelta(hours=1) else 20_000.0
-    result = sanitize(coordinator, {"grid_import_total": current}, now, monkeypatch)
+    result = validate_totals(
+        coordinator, {"grid_import_total": current}, now, monkeypatch
+    )
 
     assert result["grid_import_total"] == expected
 

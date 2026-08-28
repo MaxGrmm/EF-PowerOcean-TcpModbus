@@ -234,6 +234,21 @@
       "bat_discharged_today": {
         "name": "Batterieentladeenergie Heute"
       },
+      "solar_today_raw": {
+        "name": "Solarenergie Heute (Gerät)"
+      },
+      "grid_import_today_raw": {
+        "name": "Netzbezugsenergie Heute (Gerät)"
+      },
+      "grid_export_today_raw": {
+        "name": "Netzeinspeiseenergie Heute (Gerät)"
+      },
+      "bat_charged_today_raw": {
+        "name": "Batterieladeenergie Heute (Gerät)"
+      },
+      "bat_discharged_today_raw": {
+        "name": "Batterieentladeenergie Heute (Gerät)"
+      },
       "house_energy_total": {
         "name": "Hausenergie Gesamt"
       },

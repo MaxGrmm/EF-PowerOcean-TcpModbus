@@ -33,8 +33,9 @@ MAX_BATTERY_COUNT: Final = 9
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S: Final = 15
-UNREALISTIC_ENERGY_READ_THRESHOLD: Final = 3
-CALCULATED_ENERGY_RESET_FRACTION: Final = 0.5
+DAILY_RESET_MIN_PERIOD_HOURS: Final = 20
+# We use >24h since there can be timezone differences and this will handle DST
+DAILY_RESET_FORCE_HOURS: Final = 26
 ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
@@ -134,6 +135,8 @@ class EnergySensorDef:
     is_calculated: bool = False
     resets_daily: bool = False
     max_power: int | None = None
+    # The _total value of the energy counter, used to validate daily resets and prevent invalid spikes.
+    total_source: str | None = None
     device_class: str = "energy"
     state_class: str = "total_increasing"
     entity_category: str | None = None
@@ -529,17 +532,24 @@ SENSOR_MAP: list[SensorDef] = [
 ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
     EnergySensorDef("grid_import_total", max_power=CONF_MAX_GRID_POWER),
     EnergySensorDef(
-        "grid_import_today", resets_daily=True, max_power=CONF_MAX_GRID_POWER
+        "grid_import_today",
+        resets_daily=True,
+        max_power=CONF_MAX_GRID_POWER,
+        total_source="grid_import_total",
     ),
     EnergySensorDef("grid_export_total", max_power=CONF_MAX_SOLAR_POWER),
     EnergySensorDef(
-        "grid_export_today", resets_daily=True, max_power=CONF_MAX_SOLAR_POWER
+        "grid_export_today",
+        resets_daily=True,
+        max_power=CONF_MAX_SOLAR_POWER,
+        total_source="grid_export_total",
     ),
     EnergySensorDef("bat_charged_total", max_power=CONF_MAX_BATTERY_CHARGED_POWER),
     EnergySensorDef(
         "bat_charged_today",
         resets_daily=True,
         max_power=CONF_MAX_BATTERY_CHARGED_POWER,
+        total_source="bat_charged_total",
     ),
     EnergySensorDef(
         "bat_discharged_total", max_power=CONF_MAX_BATTERY_DISCHARGED_POWER
@@ -548,9 +558,15 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
         "bat_discharged_today",
         resets_daily=True,
         max_power=CONF_MAX_BATTERY_DISCHARGED_POWER,
+        total_source="bat_discharged_total",
     ),
     EnergySensorDef("solar_total", max_power=CONF_MAX_SOLAR_POWER),
-    EnergySensorDef("solar_today", resets_daily=True, max_power=CONF_MAX_SOLAR_POWER),
+    EnergySensorDef(
+        "solar_today",
+        resets_daily=True,
+        max_power=CONF_MAX_SOLAR_POWER,
+        total_source="solar_total",
+    ),
     EnergySensorDef(
         "house_energy_today",
         is_calculated=True,
@@ -562,6 +578,20 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
         is_calculated=True,
         max_power=CONF_MAX_GRID_POWER,
     ),
+]
+
+
+# During testing of the new logic deriving daily from total, publish the real daily registers as debug sensors.
+DEVICE_DAILY_DEBUG_SENSORS: list[SensorDef] = [
+    SensorDef(
+        key=f"{energy_sensor.key}_raw",
+        unit="kWh",
+        device_class="energy",
+        state_class="measurement",
+        entity_category="diagnostic",
+    )
+    for energy_sensor in ENERGY_SENSOR_MAP
+    if energy_sensor.resets_daily
 ]
 
 
