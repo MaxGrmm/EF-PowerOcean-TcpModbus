@@ -587,7 +587,7 @@ DEVICE_DAILY_DEBUG_SENSORS: list[SensorDef] = [
         key=f"{energy_sensor.key}_raw",
         unit="kWh",
         device_class="energy",
-        state_class="measurement",
+        state_class="total_increasing",
         entity_category="diagnostic",
     )
     for energy_sensor in ENERGY_SENSOR_MAP

@@ -281,7 +281,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             )
 
         if raw_data is None:
-            # No usable frame: surface a gap instead of repeating stale values.
             self._status = CoordinatorStatus.READ_FAILED
             raise UpdateFailed(
                 "Read failed; entities stay unavailable until the next successful read."
