@@ -320,17 +320,16 @@ def test_accepted_update_publishes_successful_coordinator_status(
     assert "coordinator_status" not in coordinator._last_checked_data
 
 
-def test_unsuccessful_update_publishes_failed_coordinator_status(
-    coordinator, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_read_failure_raises_to_show_gap(coordinator) -> None:
     coordinator._last_checked_data = {"grid_import_total": 10.0}
     coordinator.async_get_raw_data = AsyncMock(return_value=None)
 
-    result = asyncio.run(coordinator._async_update_data())
+    with pytest.raises(coordinator_module.UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
 
-    assert result == {"grid_import_total": 10.0}
     assert coordinator.status == const.CoordinatorStatus.READ_FAILED
-    assert "coordinator_status" not in coordinator._last_checked_data
+    # The stale frame is not republished; entities go unavailable instead.
+    assert coordinator._last_checked_data == {"grid_import_total": 10.0}
 
 
 def test_reconnect_failure_updates_coordinator_status(coordinator) -> None:

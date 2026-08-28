@@ -272,10 +272,22 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
-            if (raw_data := await self.async_get_raw_data()) is None:
-                self._status = CoordinatorStatus.READ_FAILED
-                return dict(self._last_checked_data)
+            raw_data = await self.async_get_raw_data()
+        except UpdateFailed:
+            self._status = CoordinatorStatus.RECONNECT_FAILED
+            raise UpdateFailed(
+                "Reconnect attempts failed! Integration stopped. Retry after 120s.",
+                retry_after=120,
+            )
 
+        if raw_data is None:
+            # No usable frame: surface a gap instead of repeating stale values.
+            self._status = CoordinatorStatus.READ_FAILED
+            raise UpdateFailed(
+                "Read failed; entities stay unavailable until the next successful read."
+            )
+
+        try:
             result = self._energy.validate_totals(
                 raw_data, self._last_checked_data, self._last_checked_time
             )
@@ -300,12 +312,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
 
             return dict(result)
-        except UpdateFailed:  # noqa: BLE001
-            self._status = CoordinatorStatus.RECONNECT_FAILED
-            raise UpdateFailed(
-                "Reconnect attempts failed! Integration stopped. Retry after 120s.",
-                retry_after=120,
-            )
         except Exception as err:
             self._status = CoordinatorStatus.PROCESSING_FAILED
             _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
