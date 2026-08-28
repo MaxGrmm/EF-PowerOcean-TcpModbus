@@ -31,10 +31,10 @@ def parse_datetime(raw: Any) -> datetime | None:
 class EnergyProcessor:
     """Turns raw PowerOcean energy registers into trustworthy sensor values.
 
-    - Lifetime ``*_total`` counters are the source of truth. They are validated
+    - Lifetime *_total counters are the source of truth. They are validated
       against a physical-power budget that accrues from the last accepted
       reading, so a counter is never stuck and never spikes.
-    - Daily ``*_today`` values are derived as ``total - snapshot``, where the
+    - Daily *_today values are derived as total - snapshot, where the
       snapshot is taken at the device's own daily reset. The device's own daily
       registers are never published, because a ghost of the previous day flaps
       onto them around 00:00 UTC; they are only read to detect the reset.
@@ -173,7 +173,7 @@ class EnergyProcessor:
 
     @staticmethod
     def raw_daily_values(raw_data: dict[str, Any]) -> dict[str, Any]:
-        """Echo each device daily register under a ``*_raw`` diagnostic key.
+        """Echo each device daily register under a *_raw diagnostic key.
 
         Independent of the derivation: it just exposes the device's own
         reading so it can be compared against the derived value in the UI.
@@ -250,7 +250,7 @@ class EnergyProcessor:
     ) -> float:
         """Return the lifetime total that today's zero maps to.
 
-        Chosen so the derived daily (``total - snapshot``) equals the device's
+        Chosen so the derived daily (total - snapshot) equals the device's
         own daily register. Falls back to the current total (day starts at 0)
         when that register is missing or implausible.
         """
