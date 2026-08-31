@@ -35,6 +35,8 @@ class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
             "serial_number": self.coordinator.serial_number,
             "entry_type": DeviceEntryType.SERVICE,
         }
+        if self.coordinator.firmware_version:
+            info["sw_version"] = self.coordinator.firmware_version
 
         return DeviceInfo(**info)
 

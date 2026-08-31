@@ -13,10 +13,10 @@ from ef_powerocean_tcpmodbus.telemetry import (
 
 
 @pytest.mark.parametrize(
-    ("registers", "register_index", "register_size", "expected"),
+    ("registers", "register_size", "expected"),
     (
-        ([17], 0, 1, 17.0),
-        ([0xFFFF, 0x0000, 0x42F7], 1, 2, 123.5),
+        ([17], 1, 17.0),
+        ([0x0000, 0x42F7], 2, 123.5),
     ),
     ids=(
         "single-register",
@@ -25,22 +25,21 @@ from ef_powerocean_tcpmodbus.telemetry import (
 )
 def test_decodes_register_values(
     registers: list[int],
-    register_index: int,
     register_size: int,
     expected: float,
 ) -> None:
-    assert decode_register(registers, register_index, register_size) == expected
+    assert decode_register(registers, register_size) == expected
 
 
 @pytest.mark.parametrize(
-    ("registers", "register_index", "register_size"),
+    ("registers", "register_size"),
     (
-        ([], 0, 1),
-        ([0], 0, 2),
-        ([0, 0x7FC0], 0, 2),
-        ([0, 0x7F80], 0, 2),
-        ([0, 0xFF80], 0, 2),
-        ([0x10000, 0], 0, 2),
+        ([], 1),
+        ([0], 2),
+        ([0, 0x7FC0], 2),
+        ([0, 0x7F80], 2),
+        ([0, 0xFF80], 2),
+        ([0x10000, 0], 2),
     ),
     ids=(
         "empty",
@@ -52,9 +51,9 @@ def test_decodes_register_values(
     ),
 )
 def test_rejects_invalid_register_values(
-    registers: list[int], register_index: int, register_size: int
+    registers: list[int], register_size: int
 ) -> None:
-    assert decode_register(registers, register_index, register_size) is None
+    assert decode_register(registers, register_size) is None
 
 
 class CalculateValuesTest(unittest.TestCase):
@@ -90,16 +89,12 @@ class CalculateValuesTest(unittest.TestCase):
             TelemetryData.from_mapping(self.data),
             calculate_solar_power=calculate_solar_power,
             startup_voltage=250,
-            max_battery_charge_power=2500,
-            max_battery_discharge_power=3300,
         )
 
     def test_calculates_energy_and_battery_values(self) -> None:
         result = self.calculate()
 
         self.assertEqual(result["bat_remaining"], 6.0)
-        self.assertEqual(result["limit_charge"], 5000)
-        self.assertEqual(result["limit_discharge"], 6600)
         self.assertEqual(result["bat_net_energy"], 20.25)
         self.assertEqual(result["house_energy_today"], 20.0)
         self.assertEqual(result["house_energy_total"], 2180.0)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
@@ -39,7 +39,13 @@ CONF_INVERTER_MODEL: Final = "inverter_model"
 
 MAX_BATTERY_CHARGED_POWER: Final = 2500
 MAX_BATTERY_DISCHARGED_POWER: Final = 3300
-MAX_BATTERY_COUNT: Final = 9
+MAX_BATTERY_COUNT: Final = 12
+MAX_FAULT_EVENTS: Final = 20
+
+MAX_REGISTERS_PER_READ: Final = 125
+# Reading a few unused registers is cheaper than a second round trip, so registers
+# closer together than this share one request.
+MAX_REGISTER_GAP: Final = 48
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S: Final = 15
@@ -83,6 +89,27 @@ class InverterModel(StrEnum):
             self.OCEAN_2: "Ocean 2",
         }[self]
 
+    @classmethod
+    def from_product_info(
+        cls, product_number: int | None, product_category: int | None
+    ) -> InverterModel | None:
+        """Map the device's product registers to a model, or None if unknown.
+
+        We are not sure of the product number for the remaining models. Feel free
+        to contribute this if you own such a model.
+        """
+        if product_number == 1:
+            return (
+                cls.POWEROCEAN_SINGLE_PHASE
+                if product_category == 2
+                else cls.POWEROCEAN_THREE_PHASE
+            )
+        if product_number == 2:
+            return cls.POWEROCEAN_SINGLE_PHASE
+        if product_number == 3:
+            return cls.POWEROCEAN_PLUS
+        return None
+
 
 DEFAULT_INVERTER_MODEL: Final = InverterModel.POWEROCEAN_THREE_PHASE
 
@@ -94,32 +121,77 @@ class CoordinatorStatus(StrEnum):
     PROCESSING_FAILED = "processing_failed"
 
 
-@dataclass(frozen=True)
-class ModelBlockIndex:
-    default: int
-    overrides: Mapping[InverterModel, int]
-
-    def for_model(self, inverter_model: InverterModel) -> int:
-        return self.overrides.get(inverter_model, self.default)
+class OperatingMode(StrEnum):
+    STANDBY = "standby"
+    SELF_CONSUMPTION = "self_consumption"
+    AI = "ai"
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
 class RegisterDef:
     key: str
-    block_index: int | ModelBlockIndex
+    address: int
     size: int = 2
 
-    def block_index_for(self, inverter_model: InverterModel) -> int:
-        if isinstance(self.block_index, int):
-            return self.block_index
-        return self.block_index.for_model(inverter_model)
+    @property
+    def end(self) -> int:
+        """Return the address just past this register."""
+        return self.address + self.size
 
 
 @dataclass(frozen=True)
-class BlockDef:
-    start_register: int
-    content: list[RegisterDef]
-    num_read_regs: int = 100
+class RegisterBlock:
+    """Registers that are fetched with a single Modbus request."""
+
+    registers: tuple[RegisterDef, ...]
+
+    def __post_init__(self) -> None:
+        if self.count > MAX_REGISTERS_PER_READ:
+            raise ValueError(
+                f"Block at {self.start} spans {self.count} registers, "
+                f"more than the {MAX_REGISTERS_PER_READ} a Modbus read allows."
+            )
+
+    @property
+    def start(self) -> int:
+        return min(register.address for register in self.registers)
+
+    @property
+    def count(self) -> int:
+        return max(register.end for register in self.registers) - self.start
+
+    def index_of(self, register: RegisterDef) -> int:
+        """Return the register's offset within this block's response."""
+        return register.address - self.start
+
+    def registers_for(self, raw: Sequence[int], register: RegisterDef) -> list[int]:
+        """Return the raw words of *register* within this block's response."""
+        index = self.index_of(register)
+        return list(raw[index : index + register.size])
+
+
+def plan_blocks(registers: Iterable[RegisterDef]) -> tuple[RegisterBlock, ...]:
+    """Group registers into the fewest Modbus reads.
+
+    A new read starts when the next register is too far away to be worth reading
+    through, or when the block would outgrow a single Modbus response.
+    """
+    blocks: list[RegisterBlock] = []
+    current: list[RegisterDef] = []
+
+    for register in sorted(registers, key=lambda register: register.address):
+        if current:
+            gap = register.address - max(mapped.end for mapped in current)
+            span = register.end - current[0].address
+            if gap > MAX_REGISTER_GAP or span > MAX_REGISTERS_PER_READ:
+                blocks.append(RegisterBlock(tuple(current)))
+                current = []
+        current.append(register)
+
+    if current:
+        blocks.append(RegisterBlock(tuple(current)))
+    return tuple(blocks)
 
 
 @dataclass(frozen=True)
@@ -158,91 +230,79 @@ class BinarySensorDef:
     entity_category: str | None = None
 
 
-SERIAL_NUMBER_REGISTER: Final = 40004
-MAIN_BLOCK_START_REGISTER: Final = 40519
-MAIN_BLOCK_REGISTER_COUNT: Final = 100
-BATTERY_TEMPERATURE_BLOCK_INDEX: Final = 59
-BATTERY_TEMPERATURE_REGISTER_SIZE: Final = 2
+PRODUCT_CATEGORY: Final = RegisterDef("product_category", 40002, size=1)
+PRODUCT_NUMBER: Final = RegisterDef("product_number", 40003, size=1)
+SERIAL_NUMBER: Final = RegisterDef("serial_number", 40004, size=8)
+FIRMWARE_VERSION: Final = RegisterDef("firmware_version", 40012, size=2)
 
-MOD_REGISTER_MAP = {
-    "serial_number": SERIAL_NUMBER_REGISTER,
-    "blocks": [
-        BlockDef(
-            start_register=MAIN_BLOCK_START_REGISTER,
-            num_read_regs=MAIN_BLOCK_REGISTER_COUNT,
-            content=[
-                RegisterDef(key="house_power", block_index=0),
-                RegisterDef(key="grid_power", block_index=2),
-                RegisterDef(key="solar_power", block_index=4),
-                RegisterDef(key="battery_power", block_index=6),
-                RegisterDef(key="battery_soc", block_index=8, size=1),
-                RegisterDef(key="inverter_rated_power", block_index=9, size=1),
-                RegisterDef(key="system_modes", block_index=11, size=1),
-                RegisterDef(key="min_soc_limit", block_index=17, size=1),
-                RegisterDef(key="bat_temp_warn_max", block_index=21, size=1),
-                RegisterDef(key="device_led_brightness", block_index=22, size=1),
-                RegisterDef(key="limit_inv_power", block_index=27, size=1),
-                RegisterDef(key="limit_inv_max", block_index=29, size=1),
-                RegisterDef(key="battery_capacity", block_index=33, size=1),
-                RegisterDef(key="battery_charge_power_limit", block_index=37, size=1),
-                RegisterDef(key="battery_voltage", block_index=55),
-                RegisterDef(key="battery_current", block_index=57),
-                RegisterDef(
-                    key="battery_temperature",
-                    block_index=BATTERY_TEMPERATURE_BLOCK_INDEX,
-                    size=BATTERY_TEMPERATURE_REGISTER_SIZE,
-                ),
-                RegisterDef(key="voltage_l1", block_index=61),
-                RegisterDef(key="voltage_l2", block_index=63),
-                RegisterDef(key="voltage_l3", block_index=65),
-                RegisterDef(key="current_l1", block_index=67),
-                RegisterDef(key="current_l2", block_index=69),
-                RegisterDef(key="current_l3", block_index=71),
-                RegisterDef(key="inverter_temperature", block_index=73),
-                RegisterDef(key="frequency", block_index=75),
-                RegisterDef(key="pv1_voltage", block_index=77),
-                RegisterDef(key="pv2_voltage", block_index=79),
-                RegisterDef(key="pv3_voltage", block_index=81),
-                RegisterDef(key="pv1_current", block_index=83),
-                RegisterDef(key="pv2_current", block_index=85),
-                RegisterDef(key="pv3_current", block_index=87),
-                RegisterDef(
-                    key="feed_in_power_max",
-                    block_index=ModelBlockIndex(
-                        default=90,
-                        overrides={InverterModel.POWEROCEAN_PLUS: 19},
-                    ),
-                    size=1,
-                ),
-            ],
-        ),
-        BlockDef(
-            start_register=42081,
-            num_read_regs=4,
-            content=[
-                RegisterDef(key="battery_count", block_index=0, size=1),
-                RegisterDef(key="soc_battery_1", block_index=1, size=1),
-                RegisterDef(key="soc_battery_2", block_index=2, size=1),
-                RegisterDef(key="soc_battery_3", block_index=3, size=1),
-            ],
-        ),
-        BlockDef(
-            start_register=42161,
-            content=[
-                RegisterDef(key="grid_import_total", block_index=0),
-                RegisterDef(key="grid_import_today", block_index=2),
-                RegisterDef(key="grid_export_total", block_index=16),
-                RegisterDef(key="grid_export_today", block_index=18),
-                RegisterDef(key="bat_charged_total", block_index=64),
-                RegisterDef(key="bat_charged_today", block_index=66),
-                RegisterDef(key="bat_discharged_total", block_index=80),
-                RegisterDef(key="bat_discharged_today", block_index=82),
-                RegisterDef(key="solar_total", block_index=96),
-                RegisterDef(key="solar_today", block_index=98),
-            ],
-        ),
-    ],
-}
+# Read once when the connection is established, not on every poll.
+DEVICE_INFO_BLOCK: Final = RegisterBlock(
+    (PRODUCT_CATEGORY, PRODUCT_NUMBER, SERIAL_NUMBER, FIRMWARE_VERSION)
+)
+
+BATTERY_SOC_KEYS: Final = tuple(
+    f"soc_battery_{battery_number}"
+    for battery_number in range(1, MAX_BATTERY_COUNT + 1)
+)
+
+# Every polled register, by absolute Modbus address. Order is for readability only;
+# the reads are worked out by plan_blocks().
+MODBUS_REGISTERS: tuple[RegisterDef, ...] = (
+    RegisterDef("house_power", 40519),
+    RegisterDef("grid_power", 40521),
+    RegisterDef("solar_power", 40523),
+    RegisterDef("battery_power", 40525),
+    RegisterDef("battery_soc", 40527, size=1),
+    RegisterDef("inverter_rated_power", 40528, size=1),
+    RegisterDef("system_modes", 40530, size=1),
+    RegisterDef("min_soc_limit", 40536, size=1),
+    RegisterDef("feed_in_power_max", 40538, size=1),
+    RegisterDef("device_led_brightness", 40541, size=1),
+    RegisterDef("limit_inv_power", 40546, size=1),
+    RegisterDef("limit_inv_max", 40548, size=1),
+    RegisterDef("battery_capacity", 40552, size=1),
+    RegisterDef("battery_discharge_power_limit", 40554, size=1),
+    RegisterDef("battery_charge_power_limit", 40556, size=1),
+    RegisterDef("battery_voltage", 40574),
+    RegisterDef("battery_current", 40576),
+    RegisterDef("battery_temperature", 40578),
+    RegisterDef("voltage_l1", 40580),
+    RegisterDef("voltage_l2", 40582),
+    RegisterDef("voltage_l3", 40584),
+    RegisterDef("current_l1", 40586),
+    RegisterDef("current_l2", 40588),
+    RegisterDef("current_l3", 40590),
+    RegisterDef("inverter_temperature", 40592),
+    RegisterDef("frequency", 40594),
+    RegisterDef("pv1_voltage", 40596),
+    RegisterDef("pv2_voltage", 40598),
+    RegisterDef("pv3_voltage", 40600),
+    RegisterDef("pv1_current", 40602),
+    RegisterDef("pv2_current", 40604),
+    RegisterDef("pv3_current", 40606),
+    RegisterDef("fault_count", 42049, size=1),
+    *(
+        RegisterDef(f"fault_{fault_number}", 42049 + fault_number, size=1)
+        for fault_number in range(1, MAX_FAULT_EVENTS + 1)
+    ),
+    RegisterDef("battery_count", 42081, size=1),
+    *(
+        RegisterDef(key, 42081 + battery_number, size=1)
+        for battery_number, key in enumerate(BATTERY_SOC_KEYS, start=1)
+    ),
+    RegisterDef("grid_import_total", 42161),
+    RegisterDef("grid_import_today", 42163),
+    RegisterDef("grid_export_total", 42177),
+    RegisterDef("grid_export_today", 42179),
+    RegisterDef("bat_charged_total", 42225),
+    RegisterDef("bat_charged_today", 42227),
+    RegisterDef("bat_discharged_total", 42241),
+    RegisterDef("bat_discharged_today", 42243),
+    RegisterDef("solar_total", 42257),
+    RegisterDef("solar_today", 42259),
+)
+
+REGISTER_BLOCKS: Final = plan_blocks(MODBUS_REGISTERS)
 
 
 SENSOR_MAP: list[SensorDef] = [
@@ -295,11 +355,10 @@ SENSOR_MAP: list[SensorDef] = [
         state_class="measurement",
     ),
     SensorDef(
-        key="bat_temp_warn_max",
-        unit=UnitOfTemperature.CELSIUS,
-        device_class="temperature",
+        key="battery_discharge_power_limit",
+        unit=UnitOfPower.WATT,
+        device_class="power",
         state_class="measurement",
-        entity_category="diagnostic",
     ),
     SensorDef(
         key="device_led_brightness",
@@ -469,27 +528,16 @@ SENSOR_MAP: list[SensorDef] = [
         state_class="measurement",
         entity_category="diagnostic",
     ),
-    SensorDef(
-        key="soc_battery_1",
-        unit=UnitOfRatio.PERCENTAGE,
-        device_class="battery",
-        state_class="measurement",
-        entity_category="diagnostic",
-    ),
-    SensorDef(
-        key="soc_battery_2",
-        unit=UnitOfRatio.PERCENTAGE,
-        device_class="battery",
-        state_class="measurement",
-        entity_category="diagnostic",
-    ),
-    SensorDef(
-        key="soc_battery_3",
-        unit=UnitOfRatio.PERCENTAGE,
-        device_class="battery",
-        state_class="measurement",
-        entity_category="diagnostic",
-    ),
+    *[
+        SensorDef(
+            key=key,
+            unit=UnitOfRatio.PERCENTAGE,
+            device_class="battery",
+            state_class="measurement",
+            entity_category="diagnostic",
+        )
+        for key in BATTERY_SOC_KEYS
+    ],
     SensorDef(
         key="bat_remaining",
         unit=UnitOfEnergy.KILO_WATT_HOUR,
@@ -526,6 +574,23 @@ SENSOR_MAP: list[SensorDef] = [
         device_class="enum",
         state_class=None,
         icon="mdi:transmission-tower",
+    ),
+    SensorDef(
+        key="operating_mode",
+        device_class="enum",
+        options=tuple(OperatingMode),
+        icon="mdi:home-lightning-bolt",
+    ),
+    SensorDef(
+        key="fault_count",
+        state_class="measurement",
+        entity_category="diagnostic",
+        icon="mdi:alert-circle-outline",
+    ),
+    SensorDef(
+        key="active_faults",
+        entity_category="diagnostic",
+        icon="mdi:alert-circle-outline",
     ),
     SensorDef(
         key="coordinator_status",
@@ -609,13 +674,19 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
     BinarySensorDef("self_use_mode_ena", "battery"),
     BinarySensorDef("intelligent_mode_ena", "battery"),
     BinarySensorDef("battery_saver_mode_ena", "battery"),
+    BinarySensorDef(
+        "system_fault", device_class="problem", entity_category="diagnostic"
+    ),
+    BinarySensorDef(
+        "system_power_on", device_class="running", entity_category="diagnostic"
+    ),
 ]
 
 
 @dataclass(frozen=True)
 class NumberWritableDef:
     key: str  # Unique key for the number entity (e.g., "min_soc_limit_control")
-    read_key: str  # The original key from MOD_REGISTER_MAP used for reading (e.g., "min_soc_limit")
+    read_key: str  # The original key from MODBUS_REGISTERS used for reading (e.g., "min_soc_limit")
     name: str  # Display name for Home Assistant UI
     register: int  # Physical Modbus register address for writing
     min_value: float  # Slider minimum value

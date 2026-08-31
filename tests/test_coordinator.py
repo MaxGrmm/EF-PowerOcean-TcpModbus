@@ -572,15 +572,13 @@ def test_reads_register_block(coordinator, is_error: bool) -> None:
 def test_gets_and_decodes_raw_data(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    block = SimpleNamespace(
-        start_register=100,
-        num_read_regs=2,
-        content=(
-            const.RegisterDef(key="battery_count", block_index=0, size=1),
-            const.RegisterDef(key="grid_power", block_index=1, size=1),
-        ),
+    block = const.RegisterBlock(
+        (
+            const.RegisterDef("battery_count", 100, size=1),
+            const.RegisterDef("grid_power", 101, size=1),
+        )
     )
-    monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
+    monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
     decode_register = Mock(side_effect=(2.0, 42.0))
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     coordinator._client = SimpleNamespace(connected=True)
@@ -596,15 +594,13 @@ def test_gets_and_decodes_raw_data(
 def test_captures_disabled_state_when_battery_count_guard_drops_frame(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    block = SimpleNamespace(
-        start_register=100,
-        num_read_regs=2,
-        content=(
-            const.RegisterDef(key="battery_count", block_index=0, size=1),
-            const.RegisterDef(key="inverter_temperature", block_index=1, size=1),
-        ),
+    block = const.RegisterBlock(
+        (
+            const.RegisterDef("battery_count", 100, size=1),
+            const.RegisterDef("inverter_temperature", 101, size=1),
+        )
     )
-    monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
+    monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
     decode_register = Mock(side_effect=(0.0, 0.0))
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     monkeypatch.setattr(coordinator_module.asyncio, "sleep", AsyncMock())
@@ -623,15 +619,13 @@ def test_captures_disabled_state_when_battery_count_guard_drops_frame(
 def test_modbus_disabled_recovers_when_telemetry_returns(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    block = SimpleNamespace(
-        start_register=100,
-        num_read_regs=2,
-        content=(
-            const.RegisterDef(key="battery_count", block_index=0, size=1),
-            const.RegisterDef(key="inverter_temperature", block_index=1, size=1),
-        ),
+    block = const.RegisterBlock(
+        (
+            const.RegisterDef("battery_count", 100, size=1),
+            const.RegisterDef("inverter_temperature", 101, size=1),
+        )
     )
-    monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
+    monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
     # Provide values for two polls, first with all zeroes and second with values
     decode_register = Mock(side_effect=(0.0, 0.0, 2.0, 21.5))
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
@@ -654,24 +648,116 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
 
 
 @pytest.mark.parametrize(
-    ("inverter_model", "expected_index"),
-    (
-        (const.InverterModel.POWEROCEAN_THREE_PHASE, 90),
-        (const.InverterModel.POWEROCEAN_PLUS, 19),
-    ),
-    ids=("three-phase-default", "powerocean-plus-override"),
+    "inverter_model",
+    tuple(const.InverterModel),
 )
-def test_resolves_model_specific_feed_in_register_index(
-    inverter_model: const.InverterModel, expected_index: int
+def test_feed_in_register_address_is_model_independent(
+    inverter_model: const.InverterModel,
 ) -> None:
-    registers = {
-        register.key: register
-        for register in const.MOD_REGISTER_MAP["blocks"][0].content
-    }
+    registers = {register.key: register for register in const.MODBUS_REGISTERS}
 
     assert "feed_in_power_max_ai" not in registers
+    # 0x0219 "Maximum Grid Feed Power" in the official register table.
+    assert registers["feed_in_power_max"].address == 40538
+
+
+def test_registers_are_unique() -> None:
+    keys = [register.key for register in const.MODBUS_REGISTERS]
+    addresses = [register.address for register in const.MODBUS_REGISTERS]
+
+    assert len(keys) == len(set(keys))
+    assert len(addresses) == len(set(addresses))
+
+
+def _device_info_registers(
+    serial: str = "R371ZD1AZH3X0450",
+    product_number: int = 3,
+    product_category: int = 1,
+    firmware: int = 0x03001313,
+) -> list[int]:
+    registers = [0] * const.DEVICE_INFO_BLOCK.count
+    registers[const.DEVICE_INFO_BLOCK.index_of(const.PRODUCT_CATEGORY)] = (
+        product_category
+    )
+    registers[const.DEVICE_INFO_BLOCK.index_of(const.PRODUCT_NUMBER)] = product_number
+    serial_index = const.DEVICE_INFO_BLOCK.index_of(const.SERIAL_NUMBER)
+    for offset in range(const.SERIAL_NUMBER.size):
+        high, low = serial[offset * 2], serial[offset * 2 + 1]
+        registers[serial_index + offset] = (ord(high) << 8) | ord(low)
+    firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
+    registers[firmware_index] = firmware & 0xFFFF
+    registers[firmware_index + 1] = firmware >> 16
+    return registers
+
+
+def test_device_info_block_covers_one_read() -> None:
+    assert (const.DEVICE_INFO_BLOCK.start, const.DEVICE_INFO_BLOCK.count) == (40002, 12)
+
+
+def test_reads_device_info_in_a_single_request(coordinator) -> None:
+    coordinator.firmware_version = None
+    coordinator.detected_model = None
+    coordinator.inverter_model = const.InverterModel.POWEROCEAN_PLUS
+    coordinator.async_read_block = AsyncMock(return_value=_device_info_registers())
+
+    serial = asyncio.run(coordinator.async_read_device_info())
+
+    assert serial == "R371ZD1AZH3X0450"
+    assert coordinator.firmware_version == "3.0.19.19"
+    assert coordinator.detected_model == const.InverterModel.POWEROCEAN_PLUS
+    coordinator.async_read_block.assert_awaited_once_with(40002, 12)
+
+
+def test_device_info_read_failure_closes_connection(coordinator) -> None:
+    coordinator.firmware_version = None
+    coordinator.detected_model = None
+    coordinator._client = SimpleNamespace(close=Mock())
+    coordinator.async_read_block = AsyncMock(
+        side_effect=coordinator_module.ModbusException("boom")
+    )
+
+    assert asyncio.run(coordinator.async_read_device_info()) == "unknown"
+    coordinator._client.close.assert_called_once()
+
+
+def test_registers_are_grouped_into_three_reads() -> None:
+    """Pin the read plan so a distant new register cannot silently add a round trip."""
+    assert [(block.start, block.count) for block in const.REGISTER_BLOCKS] == [
+        (40519, 89),
+        (42049, 45),
+        (42161, 100),
+    ]
+
+
+def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
+    with pytest.raises(ValueError, match="more than the 125"):
+        const.RegisterBlock(
+            (
+                const.RegisterDef("first", 40000, size=1),
+                const.RegisterDef("last", 40200, size=1),
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("product_number", "product_category", "expected"),
+    (
+        (1, 1, const.InverterModel.POWEROCEAN_THREE_PHASE),
+        (1, 2, const.InverterModel.POWEROCEAN_SINGLE_PHASE),
+        (2, 2, const.InverterModel.POWEROCEAN_SINGLE_PHASE),
+        (3, 1, const.InverterModel.POWEROCEAN_PLUS),
+        (0, 1, None),
+        (None, None, None),
+    ),
+)
+def test_detects_inverter_model_from_product_info(
+    product_number: int | None,
+    product_category: int | None,
+    expected: const.InverterModel | None,
+) -> None:
     assert (
-        registers["feed_in_power_max"].block_index_for(inverter_model) == expected_index
+        const.InverterModel.from_product_info(product_number, product_category)
+        == expected
     )
 
 

@@ -130,6 +130,8 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
             if value is not None:
                 if isinstance(value, datetime):
                     return value
+                if isinstance(value, str):
+                    return value
                 if self._definition.device_class == "enum":
                     return str(value)
                 if precision := VALUE_PRECISION.get(self._definition.unit, None):

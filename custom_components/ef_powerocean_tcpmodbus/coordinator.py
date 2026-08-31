@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -35,10 +36,15 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL_S,
     DEFAULT_SLAVE,
+    DEVICE_INFO_BLOCK,
     DOMAIN,
+    FIRMWARE_VERSION,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
-    MOD_REGISTER_MAP,
+    PRODUCT_CATEGORY,
+    PRODUCT_NUMBER,
+    REGISTER_BLOCKS,
+    SERIAL_NUMBER,
     SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S,
     SLEEP_TIME_AFTER_RECONNECT_S,
     STATE_SAVE_DELAY_S,
@@ -51,6 +57,7 @@ from .energy_processor import EnergyProcessor
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
+    decode_firmware_version,
     decode_register,
     decode_serial_number,
     is_modbus_disabled,
@@ -104,6 +111,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         )
 
         self.serial_number: str | None = None
+        self.firmware_version: str | None = None
+        self.detected_model: InverterModel | None = None
         self._last_inverter_temperature: float | None = None
         self._client: AsyncModbusTcpClient = AsyncModbusTcpClient(
             host=self.host, port=self.port, timeout=20, reconnect_delay=0, retries=0
@@ -173,21 +182,42 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"Modbus TCP not connected to {self.host}:{self.port}")
             return
 
-        self.serial_number = await self.async_get_serial_number()
+        self.serial_number = await self.async_read_device_info()
         _LOGGER.info(
             f"Modbus TCP is connected to {self.host}:{self.port} (SN: {self.serial_number})"
         )
 
-    async def async_get_serial_number(self) -> str:
-        """Read serial number"""
+    async def async_read_device_info(self) -> str:
+        """Read serial number, firmware and product type, and validate the model."""
         try:
-            raw = await self.async_read_block(MOD_REGISTER_MAP["serial_number"], 8)
+            raw = await self.async_read_block(
+                DEVICE_INFO_BLOCK.start, DEVICE_INFO_BLOCK.count
+            )
         except ModbusException as err:
-            _LOGGER.error(f"Can not read serial number. {err.string}.")
+            _LOGGER.error(f"Can not read device information. {err.string}.")
             self._client.close()
             return "unknown"
 
-        return decode_serial_number(raw) or "unknown"
+        if not raw or len(raw) < DEVICE_INFO_BLOCK.count:
+            return "unknown"
+
+        registers_for = partial(DEVICE_INFO_BLOCK.registers_for, raw)
+
+        if firmware := decode_firmware_version(registers_for(FIRMWARE_VERSION)):
+            self.firmware_version = firmware
+
+        self.detected_model = InverterModel.from_product_info(
+            registers_for(PRODUCT_NUMBER)[0], registers_for(PRODUCT_CATEGORY)[0]
+        )
+        if self.detected_model and self.detected_model != self.inverter_model:
+            _LOGGER.warning(
+                "Inverter reports %s but %s is configured. Update the integration "
+                "options if this is wrong; the model affects PV startup voltage.",
+                self.detected_model.display_name,
+                self.inverter_model.display_name,
+            )
+
+        return decode_serial_number(registers_for(SERIAL_NUMBER)) or "unknown"
 
     async def async_reconnect(self) -> bool:
         """Client-Reconnect"""
@@ -240,17 +270,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         try:
             # Read all register blocks
-            for register_block in MOD_REGISTER_MAP["blocks"]:
+            for register_block in REGISTER_BLOCKS:
                 raw = await self.async_read_block(
-                    register_block.start_register, register_block.num_read_regs
+                    register_block.start, register_block.count
                 )
-                for register in register_block.content:
-                    decode_value = decode_register(
-                        raw,
-                        register.block_index_for(self.inverter_model),
-                        register.size,
+                for register in register_block.registers:
+                    data[register.key] = decode_register(
+                        register_block.registers_for(raw, register), register.size
                     )
-                    data[register.key] = decode_value
 
             # Store the inverter temperature used for the modbus tcp disabled check, before we do any data validations.
             self._last_inverter_temperature = data.get("inverter_temperature")
@@ -297,8 +324,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 TelemetryData.from_mapping(result),
                 calculate_solar_power=self._ena_calc_solar_power,
                 startup_voltage=self.inverter_model.startup_voltage,
-                max_battery_charge_power=MAX_BATTERY_CHARGED_POWER,
-                max_battery_discharge_power=MAX_BATTERY_DISCHARGED_POWER,
             )
             result.update(calculated_results)
             result = self._energy_processor.clamp_calculated(
