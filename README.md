@@ -164,6 +164,18 @@ branches in this repository.
 | Battery Charged Today    | kWh  | Energy charged today               |
 | Battery Discharged Today | kWh  | Energy discharged today            |
 
+#### Energy - Today (Diagnostic)
+
+Daily energy values are calculated from the corresponding lifetime counters because device-reported daily values have been shown to not reliably reset. The original device values remain available through these diagnostic sensors.
+
+| Sensor                            | Entity key                 | Unit |
+| --------------------------------- | -------------------------- | ---- |
+| Solar Yield Today (Device)        | `solar_today_raw`          | kWh  |
+| Grid Import Today (Device)        | `grid_import_today_raw`    | kWh  |
+| Grid Export Today (Device)        | `grid_export_today_raw`    | kWh  |
+| Battery Charged Today (Device)    | `bat_charged_today_raw`    | kWh  |
+| Battery Discharged Today (Device) | `bat_discharged_today_raw` | kWh  |
+
 ### Energy – Lifetime
 
 | Sensor                   | Unit | Description                    |
