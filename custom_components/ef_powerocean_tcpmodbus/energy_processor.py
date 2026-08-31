@@ -13,21 +13,13 @@ from .const import (
     ENERGY_RESOLUTION_KWH,
     ENERGY_SENSOR_MAP,
 )
+from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def parse_datetime(raw: Any) -> datetime | None:
-    if not raw:
-        return None
-    try:
-        return datetime.fromisoformat(raw)
-    except (TypeError, ValueError):
-        return None
-
-
 class EnergyProcessor:
-    """Turns raw PowerOcean energy registers into trustworthy sensor values.
+    """Processor to validate and derive energy sensors.
 
     - Lifetime _total counters are the source of truth. They are validated
       against a max believable power since the last accepted read.

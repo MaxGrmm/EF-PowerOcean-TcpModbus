@@ -47,7 +47,7 @@ from .const import (
     InverterModel,
     NumberWritableDef,
 )
-from .energy_processor import EnergyProcessor, parse_datetime
+from .energy_processor import EnergyProcessor
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
@@ -55,6 +55,7 @@ from .telemetry import (
     decode_serial_number,
     is_modbus_disabled,
 )
+from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
