@@ -9,13 +9,13 @@ from typing import Final
 from homeassistant.components.sensor import RestoreSensor
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    PERCENTAGE,
     EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
     UnitOfFrequency,
     UnitOfPower,
+    UnitOfRatio,
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant, callback
@@ -36,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 VALUE_PRECISION: Final = {
-    PERCENTAGE: 0,
+    UnitOfRatio.PERCENTAGE: 0,
     UnitOfPower.WATT: 0,
     UnitOfEnergy.KILO_WATT_HOUR: 2,
     UnitOfTemperature.CELSIUS: 1,

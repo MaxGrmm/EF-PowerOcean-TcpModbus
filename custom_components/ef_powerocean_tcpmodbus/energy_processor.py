@@ -137,7 +137,7 @@ class EnergyProcessor:
 
             total_energy = result.get(energy_sensor.total_source)
             if total_energy is None:
-                # Avoid publishing raw daily data or carrying yesterday's snapshot forward.
+                # Avoid publishing raw daily data or yesterday's snapshot
                 result.pop(energy_sensor.key, None)
                 if is_daily_reset:
                     self.daily_snapshots.pop(energy_sensor.key, None)
