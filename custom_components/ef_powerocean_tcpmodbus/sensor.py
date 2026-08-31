@@ -9,19 +9,20 @@ from typing import Final
 from homeassistant.components.sensor import RestoreSensor
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    PERCENTAGE,
     EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
     UnitOfFrequency,
     UnitOfPower,
+    UnitOfRatio,
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    DAILY_ENERGY_SENSORS_DEVICE_RAW,
     DOMAIN,
     ENERGY_SENSOR_MAP,
     SENSOR_MAP,
@@ -35,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 VALUE_PRECISION: Final = {
-    PERCENTAGE: 0,
+    UnitOfRatio.PERCENTAGE: 0,
     UnitOfPower.WATT: 0,
     UnitOfEnergy.KILO_WATT_HOUR: 2,
     UnitOfTemperature.CELSIUS: 1,
@@ -57,6 +58,9 @@ async def async_setup_entry(
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 
     for sensor in ENERGY_SENSOR_MAP:
+        entities.append(EcoflowSensor(coordinator, entry, sensor))
+
+    for sensor in DAILY_ENERGY_SENSORS_DEVICE_RAW:
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 
     async_add_entities(entities)

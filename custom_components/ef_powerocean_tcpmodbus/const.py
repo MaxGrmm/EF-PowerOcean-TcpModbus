@@ -7,6 +7,16 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
+from homeassistant.const import (
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+    UnitOfEnergy,
+    UnitOfFrequency,
+    UnitOfPower,
+    UnitOfRatio,
+    UnitOfTemperature,
+)
+
 DOMAIN: Final = "ef_powerocean_tcpmodbus"
 DEFAULT_PORT: Final = 502
 DEFAULT_SLAVE: Final = 1
@@ -33,8 +43,6 @@ MAX_BATTERY_COUNT: Final = 9
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S: Final = 15
-UNREALISTIC_ENERGY_READ_THRESHOLD: Final = 3
-CALCULATED_ENERGY_RESET_FRACTION: Final = 0.5
 ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
@@ -130,10 +138,12 @@ class SensorDef:
 class EnergySensorDef:
     key: str
     name: str | None = None
-    unit: str = "kWh"
+    unit: str = UnitOfEnergy.KILO_WATT_HOUR
     is_calculated: bool = False
     resets_daily: bool = False
     max_power: int | None = None
+    # The _total value of the energy counter, used to validate daily resets and prevent invalid spikes.
+    total_source: str | None = None
     device_class: str = "energy"
     state_class: str = "total_increasing"
     entity_category: str | None = None
@@ -244,210 +254,210 @@ SENSOR_MAP: list[SensorDef] = [
     ),
     SensorDef(
         key="house_power",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
     ),
     SensorDef(
         key="grid_power",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
     ),
     SensorDef(
         key="solar_power",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
     ),
     SensorDef(
         key="battery_power",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
     ),
     SensorDef(
         key="battery_soc",
-        unit="%",
+        unit=UnitOfRatio.PERCENTAGE,
         device_class="battery",
         state_class="measurement",
     ),
     SensorDef(
         key="min_soc_limit",
-        unit="%",
+        unit=UnitOfRatio.PERCENTAGE,
         device_class="battery",
         state_class="measurement",
     ),
     SensorDef(
         key="battery_charge_power_limit",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
     ),
     SensorDef(
         key="bat_temp_warn_max",
-        unit="°C",
+        unit=UnitOfTemperature.CELSIUS,
         device_class="temperature",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="device_led_brightness",
-        unit="%",
+        unit=UnitOfRatio.PERCENTAGE,
         device_class=None,
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="limit_inv_power",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="limit_inv_max",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="battery_capacity",
-        unit="Wh",
+        unit=UnitOfEnergy.WATT_HOUR,
         device_class="storage",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="battery_voltage",
-        unit="V",
+        unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="battery_current",
-        unit="A",
+        unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="battery_temperature",
-        unit="°C",
+        unit=UnitOfTemperature.CELSIUS,
         device_class="temperature",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="voltage_l1",
-        unit="V",
+        unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="voltage_l2",
-        unit="V",
+        unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="voltage_l3",
-        unit="V",
+        unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="current_l1",
-        unit="A",
+        unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="current_l2",
-        unit="A",
+        unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="current_l3",
-        unit="A",
+        unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="inverter_temperature",
-        unit="°C",
+        unit=UnitOfTemperature.CELSIUS,
         device_class="temperature",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="frequency",
-        unit="Hz",
+        unit=UnitOfFrequency.HERTZ,
         device_class="frequency",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="pv1_voltage",
-        unit="V",
+        unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="pv2_voltage",
-        unit="V",
+        unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="pv3_voltage",
-        unit="V",
+        unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="pv1_current",
-        unit="A",
+        unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="pv2_current",
-        unit="A",
+        unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="pv3_current",
-        unit="A",
+        unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="feed_in_power_max",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="inverter_rated_power",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
         entity_category="diagnostic",
@@ -461,52 +471,52 @@ SENSOR_MAP: list[SensorDef] = [
     ),
     SensorDef(
         key="soc_battery_1",
-        unit="%",
+        unit=UnitOfRatio.PERCENTAGE,
         device_class="battery",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="soc_battery_2",
-        unit="%",
+        unit=UnitOfRatio.PERCENTAGE,
         device_class="battery",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="soc_battery_3",
-        unit="%",
+        unit=UnitOfRatio.PERCENTAGE,
         device_class="battery",
         state_class="measurement",
         entity_category="diagnostic",
     ),
     SensorDef(
         key="bat_remaining",
-        unit="kWh",
+        unit=UnitOfEnergy.KILO_WATT_HOUR,
         device_class="energy_storage",
         state_class="measurement",
     ),
     SensorDef(
         key="pv1_power",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
     ),
     SensorDef(
         key="pv2_power",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
     ),
     SensorDef(
         key="pv3_power",
-        unit="W",
+        unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
     ),
     SensorDef(
         key="bat_net_energy",
-        unit="kWh",
+        unit=UnitOfEnergy.KILO_WATT_HOUR,
         device_class="energy",
         state_class="total",
     ),
@@ -529,17 +539,24 @@ SENSOR_MAP: list[SensorDef] = [
 ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
     EnergySensorDef("grid_import_total", max_power=CONF_MAX_GRID_POWER),
     EnergySensorDef(
-        "grid_import_today", resets_daily=True, max_power=CONF_MAX_GRID_POWER
+        "grid_import_today",
+        resets_daily=True,
+        max_power=CONF_MAX_GRID_POWER,
+        total_source="grid_import_total",
     ),
     EnergySensorDef("grid_export_total", max_power=CONF_MAX_SOLAR_POWER),
     EnergySensorDef(
-        "grid_export_today", resets_daily=True, max_power=CONF_MAX_SOLAR_POWER
+        "grid_export_today",
+        resets_daily=True,
+        max_power=CONF_MAX_SOLAR_POWER,
+        total_source="grid_export_total",
     ),
     EnergySensorDef("bat_charged_total", max_power=CONF_MAX_BATTERY_CHARGED_POWER),
     EnergySensorDef(
         "bat_charged_today",
         resets_daily=True,
         max_power=CONF_MAX_BATTERY_CHARGED_POWER,
+        total_source="bat_charged_total",
     ),
     EnergySensorDef(
         "bat_discharged_total", max_power=CONF_MAX_BATTERY_DISCHARGED_POWER
@@ -548,9 +565,15 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
         "bat_discharged_today",
         resets_daily=True,
         max_power=CONF_MAX_BATTERY_DISCHARGED_POWER,
+        total_source="bat_discharged_total",
     ),
     EnergySensorDef("solar_total", max_power=CONF_MAX_SOLAR_POWER),
-    EnergySensorDef("solar_today", resets_daily=True, max_power=CONF_MAX_SOLAR_POWER),
+    EnergySensorDef(
+        "solar_today",
+        resets_daily=True,
+        max_power=CONF_MAX_SOLAR_POWER,
+        total_source="solar_total",
+    ),
     EnergySensorDef(
         "house_energy_today",
         is_calculated=True,
@@ -562,6 +585,23 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
         is_calculated=True,
         max_power=CONF_MAX_GRID_POWER,
     ),
+]
+
+
+# The daily sensors have been shown to not reliably reset at midnight. They are
+# therefore calculated using the respective total sensor, but we still expose the
+# device raw values under a *_raw diagnostic key. This is also used for the initial
+# snapshot when initializing the daily counters for the first time after installing.
+DAILY_ENERGY_SENSORS_DEVICE_RAW: list[SensorDef] = [
+    SensorDef(
+        key=f"{energy_sensor.key}_raw",
+        unit=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class="energy",
+        state_class="total_increasing",
+        entity_category="diagnostic",
+    )
+    for energy_sensor in ENERGY_SENSOR_MAP
+    if energy_sensor.resets_daily
 ]
 
 
@@ -581,7 +621,7 @@ class NumberWritableDef:
     min_value: float  # Slider minimum value
     max_value: float  # Slider maximum value
     step: float  # Step size (1.0 for integers, 0.1 for floats)
-    unit: str | None = None  # Unit of measurement ("%", "W", or None)
+    unit: str | None = None  # Unit of measurement
     device_class: str | None = None  # Device class type
     icon: str | None = None  # Custom icon for the slider
 
@@ -596,7 +636,7 @@ WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
         min_value=0.0,
         max_value=100.0,
         step=1.0,
-        unit="%",
+        unit=UnitOfRatio.PERCENTAGE,
         device_class="battery",
     ),
     NumberWritableDef(
@@ -607,7 +647,7 @@ WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
         min_value=0.0,
         max_value=100.0,
         step=10.0,
-        unit="%",
+        unit=UnitOfRatio.PERCENTAGE,
         icon="mdi:led-on",
     ),
 ]

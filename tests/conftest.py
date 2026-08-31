@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 import types
 from datetime import datetime
+from enum import StrEnum
 
 homeassistant = types.ModuleType("homeassistant")
 homeassistant_util = types.ModuleType("homeassistant.util")
@@ -23,6 +24,19 @@ homeassistant_const.Platform = type(
     (),
     {"BINARY_SENSOR": "binary_sensor", "SENSOR": "sensor", "NUMBER": "number"},
 )
+homeassistant_const.UnitOfRatio = StrEnum("UnitOfRatio", {"PERCENTAGE": "%"})
+homeassistant_const.UnitOfElectricCurrent = StrEnum(
+    "UnitOfElectricCurrent", {"AMPERE": "A"}
+)
+homeassistant_const.UnitOfElectricPotential = StrEnum(
+    "UnitOfElectricPotential", {"VOLT": "V"}
+)
+homeassistant_const.UnitOfEnergy = StrEnum(
+    "UnitOfEnergy", {"WATT_HOUR": "Wh", "KILO_WATT_HOUR": "kWh"}
+)
+homeassistant_const.UnitOfFrequency = StrEnum("UnitOfFrequency", {"HERTZ": "Hz"})
+homeassistant_const.UnitOfPower = StrEnum("UnitOfPower", {"WATT": "W"})
+homeassistant_const.UnitOfTemperature = StrEnum("UnitOfTemperature", {"CELSIUS": "°C"})
 homeassistant_core = types.ModuleType("homeassistant.core")
 homeassistant_core.HomeAssistant = type("HomeAssistant", (), {})
 homeassistant_config_entries = types.ModuleType("homeassistant.config_entries")
