@@ -213,6 +213,21 @@ def test_persisted_state_after_reload_clamps_total_reset(
     assert result["grid_import_total"] == 10.0
 
 
+def test_initial_daily_snapshot_uses_device_daily_value(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = run_update(
+        coordinator,
+        {"grid_import_total": 1000.0, "grid_import_today": 5.0},
+        datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc),
+        monkeypatch,
+    )
+
+    assert result["grid_import_today"] == 5.0
+    assert result["grid_import_today_raw"] == 5.0
+    assert coordinator._energy_processor.daily_snapshots["grid_import_today"] == 995.0
+
+
 def test_rolls_daily_counters_at_local_midnight(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
