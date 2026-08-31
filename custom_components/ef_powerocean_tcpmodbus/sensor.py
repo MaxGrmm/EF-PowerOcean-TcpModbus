@@ -22,7 +22,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    DEVICE_DAILY_DEBUG_SENSORS,
+    DAILY_ENERGY_SENSORS_DEVICE_RAW,
     DOMAIN,
     ENERGY_SENSOR_MAP,
     SENSOR_MAP,
@@ -60,7 +60,7 @@ async def async_setup_entry(
     for sensor in ENERGY_SENSOR_MAP:
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 
-    for sensor in DEVICE_DAILY_DEBUG_SENSORS:
+    for sensor in DAILY_ENERGY_SENSORS_DEVICE_RAW:
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 
     async_add_entities(entities)

@@ -345,6 +345,24 @@ def test_derive_daily_initial_observation_starts_at_zero(
     assert processor.daily_snapshots["grid_import_today"] == 1000.0
 
 
+def test_derive_daily_initial_observation_uses_raw_when_present(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    # A restart without a snapshot must resume from the device's own daily
+    # register rather than restarting the count at zero.
+    result, is_reset = derive_daily(
+        processor,
+        {"grid_import_total": 1000.0, "grid_import_today_raw": 5.0},
+        now,
+        monkeypatch,
+    )
+
+    assert result["grid_import_today"] == 5.0
+    assert not is_reset
+    assert processor.daily_snapshots["grid_import_today"] == 995.0
+
+
 def test_derive_daily_accrues_on_same_date(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:

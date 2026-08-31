@@ -578,8 +578,11 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
 ]
 
 
-# During testing of the new logic deriving daily from total, publish the real daily registers as debug sensors.
-DEVICE_DAILY_DEBUG_SENSORS: list[SensorDef] = [
+# The daily sensors have been shown to not reliably reset at midnight. They are
+# therefore calculated using the respective total sensor, but we still expose the
+# device raw values under a *_raw diagnostic key. This is also used for the initial
+# snapshot when initializing the daily counters for the first time after installing.
+DAILY_ENERGY_SENSORS_DEVICE_RAW: list[SensorDef] = [
     SensorDef(
         key=f"{energy_sensor.key}_raw",
         unit="kWh",

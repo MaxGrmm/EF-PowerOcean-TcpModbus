@@ -140,11 +140,26 @@ class EnergyProcessor:
                 continue
 
             snapshot = self.daily_snapshots.get(energy_sensor.key)
-            if is_daily_reset or snapshot is None:
+            if is_daily_reset:
                 snapshot = total_energy
                 _LOGGER.debug(
                     f"Snapshot {energy_sensor.key} at {snapshot} (total: {total_energy} reset: {is_daily_reset})"
                 )
+            elif snapshot is None:
+                raw_sensor_key = f"{energy_sensor.key}_raw"
+                raw_daily = (
+                    result.get(raw_sensor_key) if energy_sensor.resets_daily else None
+                )
+                if raw_daily is not None:
+                    snapshot = total_energy - raw_daily
+                    _LOGGER.debug(
+                        f"Initial snapshot for {energy_sensor.key} set to {snapshot} using {raw_sensor_key} (total: {total_energy})"
+                    )
+                else:
+                    snapshot = total_energy
+                    _LOGGER.debug(
+                        f"Initial snapshot for {energy_sensor.key} set to {snapshot} (total: {total_energy})"
+                    )
 
             snapshot = min(snapshot, total_energy)
             self.daily_snapshots[energy_sensor.key] = snapshot
