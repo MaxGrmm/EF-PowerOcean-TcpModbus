@@ -101,7 +101,7 @@ pymodbus_exceptions = types.ModuleType("pymodbus.exceptions")
 
 
 class ModbusException(Exception):
-    """Mirror pymodbus, which exposes the message as ``.string``."""
+    """Mirror the pymodbus implementation."""
 
     def __init__(self, string: str = "") -> None:
         self.string = string
