@@ -323,6 +323,11 @@ def test_clamps_derived_house_energy_rounding_jitter(
 ) -> None:
     now = datetime(2026, 8, 21, 8, 24, 19, tzinfo=timezone.utc)
     previous = {
+        "solar_total": 104.0,
+        "grid_import_total": 102.0,
+        "bat_discharged_total": 101.0,
+        "grid_export_total": 100.5,
+        "bat_charged_total": 101.35,
         "solar_today": 4.0,
         "grid_import_today": 2.0,
         "bat_discharged_today": 1.0,
@@ -333,8 +338,19 @@ def test_clamps_derived_house_energy_rounding_jitter(
     coordinator._last_checked_time = now - timedelta(seconds=5)
     coordinator._last_checked_data = previous
     coordinator._ena_calc_solar_power = False
+    coordinator._energy_processor.daily_snapshots = {
+        "solar_today": 100.0,
+        "grid_import_today": 100.0,
+        "bat_discharged_today": 100.0,
+        "grid_export_today": 100.0,
+        "bat_charged_today": 100.0,
+    }
     coordinator.async_get_raw_data = AsyncMock(
-        return_value={**previous, "bat_charged_today": 1.36}
+        return_value={
+            **previous,
+            "bat_charged_total": 101.36,
+            "bat_charged_today": 1.36,
+        }
     )
     monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
 
@@ -348,6 +364,11 @@ def test_clamps_derived_house_energy_jitter_during_raw_counter_reset(
 ) -> None:
     now = datetime(2026, 8, 21, 9, 10, 54, tzinfo=timezone.utc)
     previous = {
+        "solar_total": 105.63,
+        "grid_import_total": 100.0,
+        "bat_discharged_total": 100.0,
+        "grid_export_total": 100.0,
+        "bat_charged_total": 100.0,
         "solar_today": 5.63,
         "grid_import_today": 0.0,
         "bat_discharged_today": 0.0,
@@ -358,6 +379,13 @@ def test_clamps_derived_house_energy_jitter_during_raw_counter_reset(
     coordinator._last_checked_time = now - timedelta(seconds=5)
     coordinator._last_checked_data = previous
     coordinator._ena_calc_solar_power = False
+    coordinator._energy_processor.daily_snapshots = {
+        "solar_today": 100.0,
+        "grid_import_today": 100.0,
+        "bat_discharged_today": 100.0,
+        "grid_export_today": 100.0,
+        "bat_charged_today": 100.0,
+    }
     coordinator.async_get_raw_data = AsyncMock(
         return_value={**previous, "solar_today": 5.62}
     )
@@ -481,8 +509,13 @@ def test_replays_hours_long_total_read_gap_with_clean_recovery(
 def test_floors_derived_house_energy_at_zero_without_baseline(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    now = datetime(2026, 8, 26, 0, 0, 4, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 26, 12, 0, 4, tzinfo=timezone.utc)
     raw = {
+        "solar_total": 100.0,
+        "grid_import_total": 100.04,
+        "bat_discharged_total": 100.76,
+        "grid_export_total": 100.01,
+        "bat_charged_total": 107.75,
         "solar_today": 0.0,
         "grid_import_today": 0.04,
         "bat_discharged_today": 0.76,
@@ -492,6 +525,13 @@ def test_floors_derived_house_energy_at_zero_without_baseline(
     coordinator._last_checked_time = None
     coordinator._last_checked_data = {}
     coordinator._ena_calc_solar_power = False
+    coordinator._energy_processor.daily_snapshots = {
+        "solar_today": 100.0,
+        "grid_import_today": 100.0,
+        "bat_discharged_today": 100.0,
+        "grid_export_today": 100.0,
+        "bat_charged_today": 100.0,
+    }
     coordinator.async_get_raw_data = AsyncMock(return_value=dict(raw))
     monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
 

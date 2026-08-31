@@ -363,6 +363,41 @@ def test_derive_daily_initial_observation_uses_raw_when_present(
     assert processor.daily_snapshots["grid_import_today"] == 995.0
 
 
+@pytest.mark.parametrize(
+    "raw_daily",
+    (-1.0, 1001.0, float("inf"), float("nan"), 1.0),
+    ids=("negative", "above-total", "infinite", "nan", "over-power-budget"),
+)
+def test_derive_daily_rejects_invalid_initial_raw_value(
+    processor: EnergyProcessor,
+    monkeypatch: pytest.MonkeyPatch,
+    raw_daily: float,
+) -> None:
+    result, _ = derive_daily(
+        processor,
+        {"grid_import_total": 1000.0, "grid_import_today_raw": raw_daily},
+        datetime(2026, 8, 7, 0, 1, tzinfo=timezone.utc),
+        monkeypatch,
+    )
+
+    assert result["grid_import_today"] == 0.0
+    assert processor.daily_snapshots["grid_import_today"] == 1000.0
+
+
+def test_derive_daily_omits_daily_value_when_total_is_missing(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result, _ = derive_daily(
+        processor,
+        {"grid_import_today": 5.0, "grid_import_today_raw": 5.0},
+        datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc),
+        monkeypatch,
+    )
+
+    assert "grid_import_today" not in result
+    assert result["grid_import_today_raw"] == 5.0
+
+
 def test_derive_daily_accrues_on_same_date(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -392,3 +427,56 @@ def test_derive_daily_rolls_on_local_midnight_date_crossing(
     assert is_reset
     assert result["grid_import_today"] == 0.0
     assert processor.daily_snapshots["grid_import_today"] == 1005.0
+
+
+def test_derive_daily_preserves_energy_before_first_poll_after_midnight(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    derive_daily(
+        processor,
+        {"grid_import_total": 1000.0},
+        datetime(2026, 8, 7, 23, 59, tzinfo=timezone.utc),
+        monkeypatch,
+    )
+    result, is_reset = derive_daily(
+        processor,
+        {"grid_import_total": 1000.01, "grid_import_today_raw": 0.01},
+        datetime(2026, 8, 8, 0, 0, 10, tzinfo=timezone.utc),
+        monkeypatch,
+    )
+
+    assert is_reset
+    assert result["grid_import_today"] == 0.01
+    assert processor.daily_snapshots["grid_import_today"] == 1000.0
+
+
+def test_derive_daily_defers_rollover_for_missing_total(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    derive_daily(
+        processor,
+        {"grid_import_total": 1000.0},
+        datetime(2026, 8, 7, 23, 59, tzinfo=timezone.utc),
+        monkeypatch,
+    )
+    missing_result, is_reset = derive_daily(
+        processor,
+        {"grid_import_today": 0.01, "grid_import_today_raw": 0.01},
+        datetime(2026, 8, 8, 0, 0, 10, tzinfo=timezone.utc),
+        monkeypatch,
+    )
+
+    assert is_reset
+    assert "grid_import_today" not in missing_result
+    assert "grid_import_today" not in processor.daily_snapshots
+
+    recovered_result, is_reset = derive_daily(
+        processor,
+        {"grid_import_total": 1000.02, "grid_import_today_raw": 0.02},
+        datetime(2026, 8, 8, 0, 1, tzinfo=timezone.utc),
+        monkeypatch,
+    )
+
+    assert not is_reset
+    assert recovered_result["grid_import_today"] == 0.02
+    assert processor.daily_snapshots["grid_import_today"] == 1000.0

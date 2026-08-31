@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from typing import Any
 
@@ -24,9 +25,8 @@ class EnergyProcessor:
     - Lifetime _total counters are the source of truth. They are validated
       against a max believable power since the last accepted read.
     - Daily _today values are derived as total - snapshot, where the snapshot is
-      taken at local midnight. The device's own daily registers are never used for
-      derived values because we experienced illogical spikes indicating timezone/ghost
-      bugs in the inverter itself.
+      taken at local midnight. The raw daily registers of the device is only used
+      to reconstruct a missing snapshot or preserve energy before the first poll after midnight.
     - The daily reset is triggered when the local calendar date advances.
     """
 
@@ -137,28 +137,25 @@ class EnergyProcessor:
 
             total_energy = result.get(energy_sensor.total_source)
             if total_energy is None:
+                # Avoid publishing raw daily data or carrying yesterday's snapshot forward.
+                result.pop(energy_sensor.key, None)
+                if is_daily_reset:
+                    self.daily_snapshots.pop(energy_sensor.key, None)
                 continue
 
             snapshot = self.daily_snapshots.get(energy_sensor.key)
-            if is_daily_reset:
-                snapshot = total_energy
-                _LOGGER.debug(
-                    f"Snapshot {energy_sensor.key} at {snapshot} (total: {total_energy} reset: {is_daily_reset})"
-                )
-            elif snapshot is None:
+            if is_daily_reset or snapshot is None:
                 raw_sensor_key = f"{energy_sensor.key}_raw"
-                raw_daily = (
-                    result.get(raw_sensor_key) if energy_sensor.resets_daily else None
-                )
-                if raw_daily is not None:
+                raw_daily = result.get(raw_sensor_key)
+                if self._is_valid_raw_daily(energy_sensor, raw_daily, total_energy):
                     snapshot = total_energy - raw_daily
                     _LOGGER.debug(
-                        f"Initial snapshot for {energy_sensor.key} set to {snapshot} using {raw_sensor_key} (total: {total_energy})"
+                        f"Snapshot {energy_sensor.key} set to {snapshot} using {raw_sensor_key} (total: {total_energy} reset: {is_daily_reset})"
                     )
                 else:
                     snapshot = total_energy
                     _LOGGER.debug(
-                        f"Initial snapshot for {energy_sensor.key} set to {snapshot} (total: {total_energy})"
+                        f"Snapshot {energy_sensor.key} set to {snapshot} (total: {total_energy} reset: {is_daily_reset})"
                     )
 
             snapshot = min(snapshot, total_energy)
@@ -166,6 +163,28 @@ class EnergyProcessor:
             result[energy_sensor.key] = round(total_energy - snapshot, 2)
 
         return result, is_daily_reset
+
+    def _is_valid_raw_daily(
+        self, energy_sensor: Any, raw_daily: Any, total_energy: float
+    ) -> bool:
+        """Return whether a device daily value can safely reconstruct a snapshot."""
+        if not isinstance(raw_daily, (int, float)) or not math.isfinite(raw_daily):
+            return False
+        if raw_daily < 0 or raw_daily > total_energy:
+            return False
+
+        now = dt.now()
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        max_believable_daily = self._max_believable_energy_delta(
+            energy_sensor, midnight, now
+        )
+        if raw_daily > max_believable_daily:
+            _LOGGER.debug(
+                f"Ignore implausible raw daily {energy_sensor.key} {raw_daily} (max: {round(max_believable_daily, 2)})"
+            )
+            return False
+
+        return True
 
     @staticmethod
     def raw_daily_values(raw_data: dict[str, Any]) -> dict[str, Any]:
