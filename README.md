@@ -98,8 +98,7 @@ Run all linting and formatting checks manually with:
 pre-commit run --all-files
 ```
 
-CI also runs these checks. Formatting fixes are committed automatically to
-branches in this repository.
+CI also runs these checks and will fail the workflow on any deviation.
 
 ---
 
@@ -216,7 +215,7 @@ Daily energy values are calculated from the corresponding lifetime counters beca
 | Grid Export Total        | kWh  | Lifetime grid export           |
 | Battery Charged Total    | kWh  | Lifetime energy charged        |
 | Battery Discharged Total | kWh  | Lifetime energy discharged     |
-| Battery Net Energy       | kWh  | Charged minus discharged       |
+| Battery Energy Loss      | kWh  | Charged minus discharged       |
 
 ---
 
