@@ -61,6 +61,7 @@ class CalculateValuesTest(unittest.TestCase):
         self.data = {
             "battery_soc": 60,
             "battery_count": 2,
+            "battery_capacity": 10000.0,
             "bat_charged_total": 100.5,
             "bat_discharged_total": 80.25,
             "solar_today": 20.0,

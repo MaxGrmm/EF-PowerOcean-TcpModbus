@@ -7,7 +7,7 @@ import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from .const import OperatingMode
+from .const import GridMode, OperatingMode
 
 
 def decode_serial_number(registers: list[int] | None) -> str | None:
@@ -51,7 +51,6 @@ class TelemetryData:
     """Raw telemetry values used to calculate derived values."""
 
     battery_soc: float | None = None
-    battery_count: float | None = None
     bat_charged_total: float | None = None
     bat_discharged_total: float | None = None
     solar_today: float | None = None
@@ -69,6 +68,7 @@ class TelemetryData:
     pv3_current: float | None = None
     pv3_voltage: float | None = None
     system_modes: float | None = None
+    battery_capacity: float | None = None
     fault_codes: tuple[float | None, ...] = ()
 
     @classmethod
@@ -81,7 +81,6 @@ class TelemetryData:
         ]
         return cls(
             battery_soc=data.get("battery_soc"),
-            battery_count=data.get("battery_count"),
             bat_charged_total=data.get("bat_charged_total"),
             bat_discharged_total=data.get("bat_discharged_total"),
             solar_today=data.get("solar_today"),
@@ -99,6 +98,7 @@ class TelemetryData:
             pv3_current=data.get("pv3_current"),
             pv3_voltage=data.get("pv3_voltage"),
             system_modes=data.get("system_modes"),
+            battery_capacity=data.get("battery_capacity"),
             fault_codes=tuple(value for _, value in sorted(faults)),
         )
 
@@ -169,9 +169,7 @@ _OPERATING_MODES = {
 }
 
 
-def _format_active_faults(fault_codes: tuple[float | None, ...]) -> str | None:
-    if not fault_codes:
-        return None
+def _format_active_faults(fault_codes: tuple[float | None, ...]) -> str:
     active = [f"0x{int(code):04X}" for code in fault_codes if code]
     return ", ".join(active) if active else "none"
 
@@ -186,10 +184,11 @@ def calculate_derived_values(
     calculated: dict[str, float | bool | str | None] = {}
 
     battery_soc = data.battery_soc
-    battery_count = data.battery_count
+    # The device reports its pack capacity in Wh.
+    battery_capacity = data.battery_capacity
     calculated["bat_remaining"] = (
-        round(battery_count * 5 * battery_soc / 100, 2)
-        if battery_soc is not None and battery_count is not None
+        round(battery_capacity / 1000 * battery_soc / 100, 2)
+        if battery_soc is not None and battery_capacity is not None
         else None
     )
 
@@ -240,7 +239,9 @@ def calculate_derived_values(
 
     if data.system_modes is not None:
         system_modes = int(data.system_modes)
-        calculated["grid_mode"] = "islanded" if _is_bit_set(system_modes, 0) else "grid"
+        calculated["grid_mode"] = (
+            GridMode.ISLANDED if _is_bit_set(system_modes, 0) else GridMode.GRID
+        )
         calculated["system_fault"] = _is_bit_set(system_modes, 1)
         calculated["system_power_on"] = _is_bit_set(system_modes, 2)
         calculated["battery_saver_mode_ena"] = _is_bit_set(system_modes, 3)

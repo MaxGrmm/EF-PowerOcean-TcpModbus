@@ -31,6 +31,8 @@ async def async_get_config_entry_diagnostics(
             "entry": entry.as_dict(),
             "domain": DOMAIN,
             "serial_number": serial_number,
+            "firmware_version": coordinator.firmware_version,
+            "detected_model": coordinator.detected_model,
             "pymodbus": coordinator.get_pymodbus_version(),
         },
         TO_REDACT,

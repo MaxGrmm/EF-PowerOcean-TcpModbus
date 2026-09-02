@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Final
 
 from homeassistant.const import (
+    EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -128,6 +129,11 @@ class OperatingMode(StrEnum):
     UNKNOWN = "unknown"
 
 
+class GridMode(StrEnum):
+    GRID = "grid"
+    ISLANDED = "islanded"
+
+
 @dataclass(frozen=True)
 class RegisterDef:
     key: str
@@ -201,7 +207,7 @@ class SensorDef:
     unit: str | None = None
     device_class: str | None = None
     state_class: str | None = None
-    entity_category: str | None = None
+    entity_category: EntityCategory | None = None
     icon: str | None = None
     options: tuple[str, ...] | None = None
 
@@ -218,7 +224,7 @@ class EnergySensorDef:
     total_source: str | None = None
     device_class: str = "energy"
     state_class: str = "total_increasing"
-    entity_category: str | None = None
+    entity_category: EntityCategory | None = None
     icon: str | None = None
 
 
@@ -227,7 +233,7 @@ class BinarySensorDef:
     key: str
     name: str | None = None
     device_class: str | None = None
-    entity_category: str | None = None
+    entity_category: EntityCategory | None = None
 
 
 PRODUCT_CATEGORY: Final = RegisterDef("product_category", 40002, size=1)
@@ -247,7 +253,7 @@ BATTERY_SOC_KEYS: Final = tuple(
 
 # Every polled register, by absolute Modbus address. Order is for readability only;
 # the reads are worked out by plan_blocks().
-MODBUS_REGISTERS: tuple[RegisterDef, ...] = (
+MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("house_power", 40519),
     RegisterDef("grid_power", 40521),
     RegisterDef("solar_power", 40523),
@@ -303,6 +309,7 @@ MODBUS_REGISTERS: tuple[RegisterDef, ...] = (
 )
 
 REGISTER_BLOCKS: Final = plan_blocks(MODBUS_REGISTERS)
+REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTERS}
 
 
 SENSOR_MAP: list[SensorDef] = [
@@ -365,168 +372,168 @@ SENSOR_MAP: list[SensorDef] = [
         unit=UnitOfRatio.PERCENTAGE,
         device_class=None,
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="limit_inv_power",
         unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="limit_inv_max",
         unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_capacity",
         unit=UnitOfEnergy.WATT_HOUR,
-        device_class="storage",
+        device_class="energy_storage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_voltage",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_current",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_temperature",
         unit=UnitOfTemperature.CELSIUS,
         device_class="temperature",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="voltage_l1",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="voltage_l2",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="voltage_l3",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="current_l1",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="current_l2",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="current_l3",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="inverter_temperature",
         unit=UnitOfTemperature.CELSIUS,
         device_class="temperature",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="frequency",
         unit=UnitOfFrequency.HERTZ,
         device_class="frequency",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv1_voltage",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv2_voltage",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv3_voltage",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv1_current",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv2_current",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv3_current",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="feed_in_power_max",
         unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="inverter_rated_power",
         unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_count",
         unit=None,
         device_class=None,
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     *[
         SensorDef(
@@ -534,7 +541,7 @@ SENSOR_MAP: list[SensorDef] = [
             unit=UnitOfRatio.PERCENTAGE,
             device_class="battery",
             state_class="measurement",
-            entity_category="diagnostic",
+            entity_category=EntityCategory.DIAGNOSTIC,
         )
         for key in BATTERY_SOC_KEYS
     ],
@@ -573,6 +580,7 @@ SENSOR_MAP: list[SensorDef] = [
         unit=None,
         device_class="enum",
         state_class=None,
+        options=tuple(GridMode),
         icon="mdi:transmission-tower",
     ),
     SensorDef(
@@ -584,18 +592,18 @@ SENSOR_MAP: list[SensorDef] = [
     SensorDef(
         key="fault_count",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:alert-circle-outline",
     ),
     SensorDef(
         key="active_faults",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:alert-circle-outline",
     ),
     SensorDef(
         key="coordinator_status",
         device_class="enum",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
         options=tuple(CoordinatorStatus),
     ),
 ]
@@ -663,22 +671,26 @@ DAILY_ENERGY_SENSORS_DEVICE_RAW: list[SensorDef] = [
         unit=UnitOfEnergy.KILO_WATT_HOUR,
         device_class="energy",
         state_class="total_increasing",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     )
     for energy_sensor in ENERGY_SENSOR_MAP
-    if energy_sensor.resets_daily
+    if energy_sensor.total_source is not None
 ]
 
 
 BINARY_SENSOR_MAP: list[BinarySensorDef] = [
-    BinarySensorDef("self_use_mode_ena", "battery"),
-    BinarySensorDef("intelligent_mode_ena", "battery"),
-    BinarySensorDef("battery_saver_mode_ena", "battery"),
+    BinarySensorDef("self_use_mode_ena"),
+    BinarySensorDef("intelligent_mode_ena"),
+    BinarySensorDef("battery_saver_mode_ena"),
     BinarySensorDef(
-        "system_fault", device_class="problem", entity_category="diagnostic"
+        "system_fault",
+        device_class="problem",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     BinarySensorDef(
-        "system_power_on", device_class="running", entity_category="diagnostic"
+        "system_power_on",
+        device_class="running",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
 ]
 
@@ -688,7 +700,6 @@ class NumberWritableDef:
     key: str  # Unique key for the number entity (e.g., "min_soc_limit_control")
     read_key: str  # The original key from MODBUS_REGISTERS used for reading (e.g., "min_soc_limit")
     name: str  # Display name for Home Assistant UI
-    register: int  # Physical Modbus register address for writing
     min_value: float  # Slider minimum value
     max_value: float  # Slider maximum value
     step: float  # Step size (1.0 for integers, 0.1 for floats)
@@ -696,14 +707,18 @@ class NumberWritableDef:
     device_class: str | None = None  # Device class type
     icon: str | None = None  # Custom icon for the slider
 
+    @property
+    def register(self) -> int:
+        """Write back to the same address the value is read from."""
+        return REGISTERS_BY_KEY[self.read_key].address
+
 
 # Map of all modbus registers available for writing operations.
 WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
     NumberWritableDef(
         key="min_soc_limit_control",
-        read_key="min_soc_limit",  # Points to the existing read sensor data
+        read_key="min_soc_limit",
         name="Minimum SOC Limit Control",
-        register=40536,  # 40519 + 17
         min_value=0.0,
         max_value=100.0,
         step=1.0,
@@ -712,9 +727,8 @@ WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
     ),
     NumberWritableDef(
         key="device_led_brightness_control",
-        read_key="device_led_brightness",  # Points to the existing read sensor data
+        read_key="device_led_brightness",
         name="LED Brightness Control",
-        register=40541,  # 40519 + 22
         min_value=0.0,
         max_value=100.0,
         step=10.0,

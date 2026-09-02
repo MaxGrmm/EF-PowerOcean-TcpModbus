@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from ef_powerocean_tcpmodbus import const
 from ef_powerocean_tcpmodbus import coordinator as coordinator_module
+from ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
 
 
 @pytest.fixture
@@ -647,13 +648,7 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
     assert coordinator.is_modbus_disabled is False
 
 
-@pytest.mark.parametrize(
-    "inverter_model",
-    tuple(const.InverterModel),
-)
-def test_feed_in_register_address_is_model_independent(
-    inverter_model: const.InverterModel,
-) -> None:
+def test_feed_in_register_address_is_model_independent() -> None:
     registers = {register.key: register for register in const.MODBUS_REGISTERS}
 
     assert "feed_in_power_max_ai" not in registers
@@ -661,12 +656,62 @@ def test_feed_in_register_address_is_model_independent(
     assert registers["feed_in_power_max"].address == 40538
 
 
-def test_registers_are_unique() -> None:
-    keys = [register.key for register in const.MODBUS_REGISTERS]
-    addresses = [register.address for register in const.MODBUS_REGISTERS]
+@pytest.mark.parametrize(
+    "registers",
+    (const.MODBUS_REGISTERS, const.DEVICE_INFO_BLOCK.registers),
+    ids=("polled", "device-info"),
+)
+def test_registers_do_not_overlap(registers: tuple[const.RegisterDef, ...]) -> None:
+    """A multi-word register must not extend into the next register's address."""
+    ordered = sorted(registers, key=lambda register: register.address)
 
-    assert len(keys) == len(set(keys))
-    assert len(addresses) == len(set(addresses))
+    for register, following in zip(ordered, ordered[1:]):
+        assert register.end <= following.address, (
+            f"{register.key} at {register.address} spans {register.size} words "
+            f"and overlaps {following.key} at {following.address}"
+        )
+
+
+def test_register_sizes_are_positive() -> None:
+    for register in (*const.MODBUS_REGISTERS, *const.DEVICE_INFO_BLOCK.registers):
+        assert register.size >= 1, f"{register.key} has a non-positive size"
+
+
+def test_blocks_cover_every_register_word_they_map() -> None:
+    """Every register must decode from inside the block that was read for it."""
+    mapped = [
+        register for block in const.REGISTER_BLOCKS for register in block.registers
+    ]
+
+    assert sorted(register.key for register in mapped) == sorted(
+        register.key for register in const.MODBUS_REGISTERS
+    )
+    for block in const.REGISTER_BLOCKS:
+        for register in block.registers:
+            assert block.index_of(register) >= 0
+            assert block.index_of(register) + register.size <= block.count
+
+
+def test_writable_numbers_write_to_the_register_they_read() -> None:
+    for number in const.WRITABLE_NUMBERS_MAP:
+        assert number.register == const.REGISTERS_BY_KEY[number.read_key].address
+
+
+def test_raw_daily_sensors_exist_only_for_device_read_values() -> None:
+    """The processor only echoes dailies backed by a total, so entities must match."""
+    produced = EnergyProcessor.raw_daily_values(
+        {energy_sensor.key: 1.0 for energy_sensor in const.ENERGY_SENSOR_MAP}
+    )
+
+    assert {sensor.key for sensor in const.DAILY_ENERGY_SENSORS_DEVICE_RAW} == set(
+        produced
+    )
+
+
+def test_enum_sensors_declare_their_options() -> None:
+    for sensor in const.SENSOR_MAP:
+        if sensor.device_class == "enum":
+            assert sensor.options, f"{sensor.key} is an enum without options"
 
 
 def _device_info_registers(

@@ -9,7 +9,6 @@ from typing import Final
 from homeassistant.components.sensor import RestoreSensor
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -22,6 +21,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    BATTERY_SOC_KEYS,
+    CONF_BATTERY_COUNT,
     DAILY_ENERGY_SENSORS_DEVICE_RAW,
     DOMAIN,
     ENERGY_SENSOR_MAP,
@@ -54,7 +55,13 @@ async def async_setup_entry(
     coordinator: EcoflowCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities: list[EcoflowSensor] = []
 
+    empty_battery_slots = set(
+        BATTERY_SOC_KEYS[coordinator.limits[CONF_BATTERY_COUNT] :]
+    )
+
     for sensor in SENSOR_MAP:
+        if sensor.key in empty_battery_slots:
+            continue
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 
     for sensor in ENERGY_SENSOR_MAP:
@@ -87,8 +94,7 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
                 self._definition.unit
             )
 
-        if self._definition.entity_category == "diagnostic":
-            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_entity_category = self._definition.entity_category
 
         if self._definition.icon:
             self._attr_icon = self._definition.icon
