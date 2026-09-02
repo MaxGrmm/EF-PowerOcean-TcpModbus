@@ -72,7 +72,7 @@ The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled b
 | -------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | IP Address                 | –                      | Local IP of your PowerOcean Plus                                                                                                                                 |
 | Port                       | 502                    | Modbus TCP port                                                                                                                                                  |
-| Inverter model             | PowerOcean Three Phase | Validated against the model the device reports                                                                                                                   |
+| Inverter model             | PowerOcean Three Phase |                                                                                                                                                                  |
 | Number of Batteries        | 0                      | Number of installed battery modules (0–12)                                                                                                                       |
 | Maximum solar power        | 12kW                   | Installed solar power                                                                                                                                            |
 | Maximum grid power         | 15kW                   | Expected maximum grid power to detect unauthorized values                                                                                                        |
@@ -131,7 +131,7 @@ branches in this repository.
 | Min SOC Limit                     | %    | Backup reserve configured in the EcoFlow app       |
 
 > _Available Charge/Discharge Power_ are live headroom values, not static limits. A
-> reading of 0 W for charging means the battery is full.
+> reading of 0W for charging means the battery is full.
 
 ### Solar
 
