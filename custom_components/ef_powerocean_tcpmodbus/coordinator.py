@@ -182,13 +182,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"Modbus TCP not connected to {self.host}:{self.port}")
             return
 
-        self.serial_number = await self.async_read_device_info()
+        await self.async_read_device_info()
         _LOGGER.info(
             f"Modbus TCP is connected to {self.host}:{self.port} (SN: {self.serial_number})"
         )
 
-    async def async_read_device_info(self) -> str:
-        """Read serial number, firmware and product type, and validate the model."""
+    async def async_read_device_info(self) -> None:
+        """Populate the serial number, firmware and detected model from the device."""
+        self.serial_number = "unknown"
+
         try:
             raw = await self.async_read_block(
                 DEVICE_INFO_BLOCK.start, DEVICE_INFO_BLOCK.count
@@ -196,12 +198,16 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         except ModbusException as err:
             _LOGGER.error(f"Can not read device information. {err.string}.")
             self._client.close()
-            return "unknown"
+            return
 
         if not raw or len(raw) < DEVICE_INFO_BLOCK.count:
-            return "unknown"
+            return
 
         registers_for = partial(DEVICE_INFO_BLOCK.registers_for, raw)
+
+        self.serial_number = (
+            decode_serial_number(registers_for(SERIAL_NUMBER)) or "unknown"
+        )
 
         if firmware := decode_firmware_version(registers_for(FIRMWARE_VERSION)):
             self.firmware_version = firmware
@@ -216,8 +222,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self.detected_model.display_name,
                 self.inverter_model.display_name,
             )
-
-        return decode_serial_number(registers_for(SERIAL_NUMBER)) or "unknown"
 
     async def async_reconnect(self) -> bool:
         """Client-Reconnect"""

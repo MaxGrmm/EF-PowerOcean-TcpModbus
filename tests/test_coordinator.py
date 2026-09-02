@@ -745,9 +745,9 @@ def test_reads_device_info_in_a_single_request(coordinator) -> None:
     coordinator.inverter_model = const.InverterModel.POWEROCEAN_PLUS
     coordinator.async_read_block = AsyncMock(return_value=_device_info_registers())
 
-    serial = asyncio.run(coordinator.async_read_device_info())
+    asyncio.run(coordinator.async_read_device_info())
 
-    assert serial == "R371ZD1AZH3X0450"
+    assert coordinator.serial_number == "R371ZD1AZH3X0450"
     assert coordinator.firmware_version == "3.0.19.19"
     assert coordinator.detected_model == const.InverterModel.POWEROCEAN_PLUS
     coordinator.async_read_block.assert_awaited_once_with(40002, 12)
@@ -761,7 +761,9 @@ def test_device_info_read_failure_closes_connection(coordinator) -> None:
         side_effect=coordinator_module.ModbusException("boom")
     )
 
-    assert asyncio.run(coordinator.async_read_device_info()) == "unknown"
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.serial_number == "unknown"
     coordinator._client.close.assert_called_once()
 
 
