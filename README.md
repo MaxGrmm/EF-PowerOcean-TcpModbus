@@ -245,7 +245,7 @@ To enable debug logging without editing `configuration.yaml`:
 - **Tested firmware:** 3.0.19.19
 - **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 
-The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses.
+The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. For address numbering, word order, decoding and known gaps, see [EcoFlow_PowerOcean_Modbus.md](EcoFlow_PowerOcean_Modbus.md).
 
 ---
 

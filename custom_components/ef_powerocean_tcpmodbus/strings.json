@@ -25,7 +25,7 @@
           "calc_solar_power": "Calculation of solar power"
         },
         "data_description": {
-          "inverter_model": "Select the Ecoflow inverter model.",
+          "inverter_model": "Select the inverter model.",
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",
@@ -71,7 +71,7 @@
           "calc_solar_power": "Calculation of solar power"
         },
         "data_description": {
-          "inverter_model": "Select the Ecoflow inverter model.",
+          "inverter_model": "Select the inverter model.",
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",

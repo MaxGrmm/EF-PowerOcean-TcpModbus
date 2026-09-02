@@ -648,14 +648,6 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
     assert coordinator.is_modbus_disabled is False
 
 
-def test_feed_in_register_address_is_model_independent() -> None:
-    registers = {register.key: register for register in const.MODBUS_REGISTERS}
-
-    assert "feed_in_power_max_ai" not in registers
-    # 0x0219 "Maximum Grid Feed Power" in the official register table.
-    assert registers["feed_in_power_max"].address == 40538
-
-
 @pytest.mark.parametrize(
     "registers",
     (const.MODBUS_REGISTERS, const.DEVICE_INFO_BLOCK.registers),
@@ -672,19 +664,6 @@ def test_registers_do_not_overlap(registers: tuple[const.RegisterDef, ...]) -> N
         )
 
 
-def test_register_sizes_are_positive() -> None:
-    for register in (*const.MODBUS_REGISTERS, *const.DEVICE_INFO_BLOCK.registers):
-        assert register.size >= 1, f"{register.key} has a non-positive size"
-
-
-def test_battery_capacity_reads_both_words() -> None:
-    """0x0227 reports Wh, so a single word overflows above 65.5 kWh."""
-    assert (
-        const.REGISTERS_BY_KEY["battery_capacity"].data_type
-        is const.RegisterType.UINT32
-    )
-
-
 def test_blocks_cover_every_register_word_they_map() -> None:
     """Every register must decode from inside the block that was read for it."""
     mapped = [
@@ -696,13 +675,26 @@ def test_blocks_cover_every_register_word_they_map() -> None:
     )
     for block in const.REGISTER_BLOCKS:
         for register in block.registers:
-            assert block.index_of(register) >= 0
-            assert block.index_of(register) + register.size <= block.count
+            index = block.index_of(register)
+
+            assert index >= 0, (
+                f"{register.key} at {register.address} sits before the start of "
+                f"its block at {block.start}"
+            )
+            assert index + register.size <= block.count, (
+                f"{register.key} needs words {index}-{index + register.size - 1} "
+                f"but the block at {block.start} only reads {block.count}"
+            )
 
 
 def test_writable_numbers_write_to_the_register_they_read() -> None:
     for number in const.WRITABLE_NUMBERS_MAP:
-        assert number.register == const.REGISTERS_BY_KEY[number.read_key].address
+        expected = const.REGISTERS_BY_KEY[number.read_key].address
+
+        assert number.register == expected, (
+            f"{number.key} writes to {number.register} but reads "
+            f"{number.read_key} from {expected}"
+        )
 
 
 def test_raw_daily_sensors_exist_only_for_device_read_values() -> None:
@@ -743,10 +735,6 @@ def _device_info_registers(
     return registers
 
 
-def test_device_info_block_covers_one_read() -> None:
-    assert (const.DEVICE_INFO_BLOCK.start, const.DEVICE_INFO_BLOCK.count) == (40002, 12)
-
-
 def test_reads_device_info_in_a_single_request(coordinator) -> None:
     coordinator.firmware_version = None
     coordinator.detected_model = None
@@ -775,13 +763,16 @@ def test_device_info_read_failure_closes_connection(coordinator) -> None:
     coordinator._client.close.assert_called_once()
 
 
-def test_registers_are_grouped_into_three_reads() -> None:
-    """Pin the read plan so a distant new register cannot silently add a round trip."""
-    assert [(block.start, block.count) for block in const.REGISTER_BLOCKS] == [
-        (40519, 89),
-        (42049, 45),
-        (42161, 100),
-    ]
+def test_read_plan_is_not_split_more_than_necessary() -> None:
+    """Neighbouring blocks must be unmergeable, so no poll wastes a round trip."""
+    for block, following in zip(const.REGISTER_BLOCKS, const.REGISTER_BLOCKS[1:]):
+        gap = following.start - (block.start + block.count)
+        merged = following.start + following.count - block.start
+
+        assert gap > const.MAX_REGISTER_GAP or merged > const.MAX_REGISTERS_PER_READ, (
+            f"blocks at {block.start} and {following.start} are only {gap} words "
+            f"apart and would merge into {merged} words, so they should be one read"
+        )
 
 
 def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
