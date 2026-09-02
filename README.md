@@ -152,25 +152,22 @@ branches in this repository.
 
 ### Status
 
-| Sensor         | Values                          | Description                           |
-| -------------- | ------------------------------- | ------------------------------------- |
-| Grid Mode      | Grid-connected / Islanded       | On-grid or off-grid operation         |
-| Operating Mode | Standby / Self-consumption / AI | Working mode reported by the inverter |
-
-| Binary sensor      | Description                             |
-| ------------------ | --------------------------------------- |
-| Self-powered Mode  | Self-consumption mode active            |
-| Intelligent Mode   | AI mode active                          |
-| Battery Saver Mode | Low-power mode enabled                  |
-| System Fault       | Device reports an abnormal system state |
-| System Powered On  | Device is powered on                    |
+| Sensor             | Values                          | Description                             |
+| ------------------ | ------------------------------- | --------------------------------------- |
+| Grid Mode          | Grid-connected / Islanded       | On-grid or off-grid operation           |
+| Operating Mode     | Standby / Self-consumption / AI | Working mode reported by the inverter   |
+| Self-powered Mode  | Active / Inactive               | Self-consumption mode                   |
+| Intelligent Mode   | Active / Inactive               | AI mode                                 |
+| Battery Saver Mode | Enabled / Disabled              | Low-power mode                          |
+| System Fault       |                                 | Device reports an abnormal system state |
+| System Powered On  |                                 | Device is powered on                    |
 
 ### Faults (Diagnostic)
 
 | Sensor             | Description                                               |
 | ------------------ | --------------------------------------------------------- |
 | Active Fault Count | Number of faults the device is currently reporting (0–20) |
-| Active Fault Codes | Comma-separated raw fault codes, or `none`                |
+| Active Fault Codes | Comma-separated raw fault codes                           |
 
 The meaning of the fault codes is not known, so we only publish the raw values.
 
@@ -219,7 +216,7 @@ Daily energy values are calculated from the corresponding lifetime counters beca
 | Grid Export Total        | kWh  | Lifetime grid export           |
 | Battery Charged Total    | kWh  | Lifetime energy charged        |
 | Battery Discharged Total | kWh  | Lifetime energy discharged     |
-| Battery Energy Loss      | kWh  | Charged minus discharged       |
+| Battery Net Energy       | kWh  | Charged minus discharged       |
 
 ---
 
