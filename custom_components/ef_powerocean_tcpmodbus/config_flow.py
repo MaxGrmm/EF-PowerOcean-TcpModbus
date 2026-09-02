@@ -34,8 +34,8 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_S,
     DOMAIN,
     MAX_BATTERY_COUNT,
-    InverterModel,
 )
+from .models import InverterModel
 
 _LOGGER = logging.getLogger(__name__)
 

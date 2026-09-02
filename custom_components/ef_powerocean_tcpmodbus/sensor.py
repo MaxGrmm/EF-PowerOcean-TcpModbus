@@ -27,11 +27,10 @@ from .const import (
     DOMAIN,
     ENERGY_SENSOR_MAP,
     SENSOR_MAP,
-    EnergySensorDef,
-    SensorDef,
 )
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
+from .models import EnergySensorDef, SensorDef
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -64,7 +64,7 @@ For a 32-bit value at address _N_:
 A `battery_capacity` of 100000 Wh (`0x000186A0`) therefore arrives as
 `registers[0] = 0x86A0` and `registers[1] = 0x0001`.
 
-Four layouts occur, modelled as `RegisterType` in `const.py`:
+Four layouts occur, modelled as `RegisterType` in `models.py`:
 
 | `RegisterType` | Words | Notes |
 | -- | -- | |

@@ -7,7 +7,7 @@ import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from .const import REGISTER_SIZES, GridMode, OperatingMode, RegisterType
+from .models import REGISTER_SIZES, GridMode, OperatingMode, RegisterType
 
 
 def decode_serial_number(registers: list[int] | None) -> str | None:

@@ -10,9 +10,10 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, WRITABLE_NUMBERS_MAP, NumberWritableDef
+from .const import DOMAIN, WRITABLE_NUMBERS_MAP
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
+from .models import NumberWritableDef
 
 _LOGGER = logging.getLogger(__name__)
 

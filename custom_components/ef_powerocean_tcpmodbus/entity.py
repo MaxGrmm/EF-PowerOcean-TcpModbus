@@ -6,8 +6,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, BinarySensorDef, EnergySensorDef, SensorDef
+from .const import DOMAIN
 from .coordinator import EcoflowCoordinator
+from .models import BinarySensorDef, EnergySensorDef, SensorDef
 
 
 class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):

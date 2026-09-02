@@ -49,11 +49,9 @@ from .const import (
     SLEEP_TIME_AFTER_RECONNECT_S,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
-    CoordinatorStatus,
-    InverterModel,
-    NumberWritableDef,
 )
 from .energy_processor import EnergyProcessor
+from .models import CoordinatorStatus, InverterModel, NumberWritableDef
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,

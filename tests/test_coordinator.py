@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from ef_powerocean_tcpmodbus import const
+from ef_powerocean_tcpmodbus import const, models
 from ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
 
@@ -159,7 +159,7 @@ def test_accepted_update_publishes_successful_coordinator_status(
 
     asyncio.run(coordinator._async_update_data())
 
-    assert coordinator.status == const.CoordinatorStatus.SUCCESS
+    assert coordinator.status == models.CoordinatorStatus.SUCCESS
     assert "coordinator_status" not in coordinator._last_checked_data
 
 
@@ -170,7 +170,7 @@ def test_read_failure_raises_to_show_gap(coordinator) -> None:
     with pytest.raises(coordinator_module.UpdateFailed):
         asyncio.run(coordinator._async_update_data())
 
-    assert coordinator.status == const.CoordinatorStatus.READ_FAILED
+    assert coordinator.status == models.CoordinatorStatus.READ_FAILED
     # The stale frame is not republished; entities go unavailable instead.
     assert coordinator._last_checked_data == {"grid_import_total": 10.0}
 
@@ -183,7 +183,7 @@ def test_reconnect_failure_updates_coordinator_status(coordinator) -> None:
     with pytest.raises(coordinator_module.UpdateFailed):
         asyncio.run(coordinator._async_update_data())
 
-    assert coordinator.status == const.CoordinatorStatus.RECONNECT_FAILED
+    assert coordinator.status == models.CoordinatorStatus.RECONNECT_FAILED
 
 
 def test_processing_failure_updates_coordinator_status(coordinator) -> None:
@@ -195,7 +195,7 @@ def test_processing_failure_updates_coordinator_status(coordinator) -> None:
     result = asyncio.run(coordinator._async_update_data())
 
     assert result is None
-    assert coordinator.status == const.CoordinatorStatus.PROCESSING_FAILED
+    assert coordinator.status == models.CoordinatorStatus.PROCESSING_FAILED
 
 
 def test_persisted_state_after_reload_clamps_total_reset(
@@ -573,10 +573,10 @@ def test_reads_register_block(coordinator, is_error: bool) -> None:
 def test_gets_and_decodes_raw_data(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    block = const.RegisterBlock(
+    block = models.RegisterBlock(
         (
-            const.RegisterDef("battery_count", 100, const.RegisterType.UINT16),
-            const.RegisterDef("grid_power", 101, const.RegisterType.UINT16),
+            models.RegisterDef("battery_count", 100, models.RegisterType.UINT16),
+            models.RegisterDef("grid_power", 101, models.RegisterType.UINT16),
         )
     )
     monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
@@ -595,10 +595,10 @@ def test_gets_and_decodes_raw_data(
 def test_captures_disabled_state_when_battery_count_guard_drops_frame(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    block = const.RegisterBlock(
+    block = models.RegisterBlock(
         (
-            const.RegisterDef("battery_count", 100, const.RegisterType.UINT16),
-            const.RegisterDef("inverter_temperature", 101, const.RegisterType.UINT16),
+            models.RegisterDef("battery_count", 100, models.RegisterType.UINT16),
+            models.RegisterDef("inverter_temperature", 101, models.RegisterType.UINT16),
         )
     )
     monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
@@ -620,10 +620,10 @@ def test_captures_disabled_state_when_battery_count_guard_drops_frame(
 def test_modbus_disabled_recovers_when_telemetry_returns(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    block = const.RegisterBlock(
+    block = models.RegisterBlock(
         (
-            const.RegisterDef("battery_count", 100, const.RegisterType.UINT16),
-            const.RegisterDef("inverter_temperature", 101, const.RegisterType.UINT16),
+            models.RegisterDef("battery_count", 100, models.RegisterType.UINT16),
+            models.RegisterDef("inverter_temperature", 101, models.RegisterType.UINT16),
         )
     )
     monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
@@ -653,7 +653,7 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
     (const.MODBUS_REGISTERS, const.DEVICE_INFO_BLOCK.registers),
     ids=("polled", "device-info"),
 )
-def test_registers_do_not_overlap(registers: tuple[const.RegisterDef, ...]) -> None:
+def test_registers_do_not_overlap(registers: tuple[models.RegisterDef, ...]) -> None:
     """A multi-word register must not extend into the next register's address."""
     ordered = sorted(registers, key=lambda register: register.address)
 
@@ -738,14 +738,14 @@ def _device_info_registers(
 def test_reads_device_info_in_a_single_request(coordinator) -> None:
     coordinator.firmware_version = None
     coordinator.detected_model = None
-    coordinator.inverter_model = const.InverterModel.POWEROCEAN_PLUS
+    coordinator.inverter_model = models.InverterModel.POWEROCEAN_PLUS
     coordinator.async_read_block = AsyncMock(return_value=_device_info_registers())
 
     asyncio.run(coordinator.async_read_device_info())
 
     assert coordinator.serial_number == "R371ZD1AZH3X0450"
     assert coordinator.firmware_version == "3.0.19.19"
-    assert coordinator.detected_model == const.InverterModel.POWEROCEAN_PLUS
+    assert coordinator.detected_model == models.InverterModel.POWEROCEAN_PLUS
     coordinator.async_read_block.assert_awaited_once_with(40002, 12)
 
 
@@ -769,7 +769,9 @@ def test_read_plan_is_not_split_more_than_necessary() -> None:
         gap = following.start - (block.start + block.count)
         merged = following.start + following.count - block.start
 
-        assert gap > const.MAX_REGISTER_GAP or merged > const.MAX_REGISTERS_PER_READ, (
+        assert (
+            gap > models.MAX_REGISTER_GAP or merged > models.MAX_REGISTERS_PER_READ
+        ), (
             f"blocks at {block.start} and {following.start} are only {gap} words "
             f"apart and would merge into {merged} words, so they should be one read"
         )
@@ -777,10 +779,10 @@ def test_read_plan_is_not_split_more_than_necessary() -> None:
 
 def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
     with pytest.raises(ValueError, match="more than the 125"):
-        const.RegisterBlock(
+        models.RegisterBlock(
             (
-                const.RegisterDef("first", 40000, const.RegisterType.UINT16),
-                const.RegisterDef("last", 40200, const.RegisterType.UINT16),
+                models.RegisterDef("first", 40000, models.RegisterType.UINT16),
+                models.RegisterDef("last", 40200, models.RegisterType.UINT16),
             )
         )
 
@@ -788,10 +790,10 @@ def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
 @pytest.mark.parametrize(
     ("product_number", "product_category", "expected"),
     (
-        (1, 1, const.InverterModel.POWEROCEAN_THREE_PHASE),
-        (1, 2, const.InverterModel.POWEROCEAN_SINGLE_PHASE),
-        (2, 2, const.InverterModel.POWEROCEAN_SINGLE_PHASE),
-        (3, 1, const.InverterModel.POWEROCEAN_PLUS),
+        (1, 1, models.InverterModel.POWEROCEAN_THREE_PHASE),
+        (1, 2, models.InverterModel.POWEROCEAN_SINGLE_PHASE),
+        (2, 2, models.InverterModel.POWEROCEAN_SINGLE_PHASE),
+        (3, 1, models.InverterModel.POWEROCEAN_PLUS),
         (0, 1, None),
         (None, None, None),
     ),
@@ -799,10 +801,10 @@ def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
 def test_detects_inverter_model_from_product_info(
     product_number: int | None,
     product_category: int | None,
-    expected: const.InverterModel | None,
+    expected: models.InverterModel | None,
 ) -> None:
     assert (
-        const.InverterModel.from_product_info(product_number, product_category)
+        models.InverterModel.from_product_info(product_number, product_category)
         == expected
     )
 
