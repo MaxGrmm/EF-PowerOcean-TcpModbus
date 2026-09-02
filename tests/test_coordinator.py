@@ -575,8 +575,8 @@ def test_gets_and_decodes_raw_data(
 ) -> None:
     block = const.RegisterBlock(
         (
-            const.RegisterDef("battery_count", 100, size=1),
-            const.RegisterDef("grid_power", 101, size=1),
+            const.RegisterDef("battery_count", 100, const.RegisterType.UINT16),
+            const.RegisterDef("grid_power", 101, const.RegisterType.UINT16),
         )
     )
     monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
@@ -597,8 +597,8 @@ def test_captures_disabled_state_when_battery_count_guard_drops_frame(
 ) -> None:
     block = const.RegisterBlock(
         (
-            const.RegisterDef("battery_count", 100, size=1),
-            const.RegisterDef("inverter_temperature", 101, size=1),
+            const.RegisterDef("battery_count", 100, const.RegisterType.UINT16),
+            const.RegisterDef("inverter_temperature", 101, const.RegisterType.UINT16),
         )
     )
     monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
@@ -622,8 +622,8 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
 ) -> None:
     block = const.RegisterBlock(
         (
-            const.RegisterDef("battery_count", 100, size=1),
-            const.RegisterDef("inverter_temperature", 101, size=1),
+            const.RegisterDef("battery_count", 100, const.RegisterType.UINT16),
+            const.RegisterDef("inverter_temperature", 101, const.RegisterType.UINT16),
         )
     )
     monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
@@ -675,6 +675,14 @@ def test_registers_do_not_overlap(registers: tuple[const.RegisterDef, ...]) -> N
 def test_register_sizes_are_positive() -> None:
     for register in (*const.MODBUS_REGISTERS, *const.DEVICE_INFO_BLOCK.registers):
         assert register.size >= 1, f"{register.key} has a non-positive size"
+
+
+def test_battery_capacity_reads_both_words() -> None:
+    """0x0227 reports Wh, so a single word overflows above 65.5 kWh."""
+    assert (
+        const.REGISTERS_BY_KEY["battery_capacity"].data_type
+        is const.RegisterType.UINT32
+    )
 
 
 def test_blocks_cover_every_register_word_they_map() -> None:
@@ -780,8 +788,8 @@ def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
     with pytest.raises(ValueError, match="more than the 125"):
         const.RegisterBlock(
             (
-                const.RegisterDef("first", 40000, size=1),
-                const.RegisterDef("last", 40200, size=1),
+                const.RegisterDef("first", 40000, const.RegisterType.UINT16),
+                const.RegisterDef("last", 40200, const.RegisterType.UINT16),
             )
         )
 

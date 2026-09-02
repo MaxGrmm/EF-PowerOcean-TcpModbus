@@ -7,7 +7,7 @@ import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from .const import GridMode, OperatingMode
+from .const import REGISTER_SIZES, GridMode, OperatingMode, RegisterType
 
 
 def decode_serial_number(registers: list[int] | None) -> str | None:
@@ -132,19 +132,22 @@ def _calculate_house_energy(
     )
 
 
-def decode_register(registers: list[int], register_size: int) -> float | None:
-    """Decode a register's words, including word-swapped IEEE 754 floats."""
-    if len(registers) < register_size:
+def decode_register(registers: list[int], data_type: RegisterType) -> float | None:
+    """Decode a register's words, which are stored low word first."""
+    if len(registers) < REGISTER_SIZES[data_type]:
         return None
-    if register_size == 1:
+    if data_type is RegisterType.UINT16:
         return round(float(registers[0]), 2)
 
     try:
         raw = struct.pack("<HH", registers[0], registers[1])
-        value = struct.unpack("<f", raw)[0]
     except (struct.error, TypeError):
         return None
 
+    if data_type is RegisterType.UINT32:
+        return float(struct.unpack("<I", raw)[0])
+
+    value = struct.unpack("<f", raw)[0]
     if not math.isfinite(value) or abs(value) > 1e9:
         return None
     return round(value, 2)

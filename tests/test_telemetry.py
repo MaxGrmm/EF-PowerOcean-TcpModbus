@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 import pytest
+from ef_powerocean_tcpmodbus.const import RegisterType
 from ef_powerocean_tcpmodbus.telemetry import (
     TelemetryData,
     calculate_derived_values,
@@ -13,47 +14,56 @@ from ef_powerocean_tcpmodbus.telemetry import (
 
 
 @pytest.mark.parametrize(
-    ("registers", "register_size", "expected"),
+    ("registers", "data_type", "expected"),
     (
-        ([17], 1, 17.0),
-        ([0x0000, 0x42F7], 2, 123.5),
+        ([17], RegisterType.UINT16, 17.0),
+        ([0x0000, 0x42F7], RegisterType.FLOAT32, 123.5),
+        ([0x0000, 0x0001], RegisterType.UINT32, 65536.0),
+        # A value that fits the low word alone must decode the same as before.
+        ([15000, 0x0000], RegisterType.UINT32, 15000.0),
     ),
     ids=(
         "single-register",
         "word-swapped-float",
+        "uint32-uses-the-high-word",
+        "uint32-low-word-only",
     ),
 )
 def test_decodes_register_values(
     registers: list[int],
-    register_size: int,
+    data_type: RegisterType,
     expected: float,
 ) -> None:
-    assert decode_register(registers, register_size) == expected
+    assert decode_register(registers, data_type) == expected
 
 
 @pytest.mark.parametrize(
-    ("registers", "register_size"),
+    ("registers", "data_type"),
     (
-        ([], 1),
-        ([0], 2),
-        ([0, 0x7FC0], 2),
-        ([0, 0x7F80], 2),
-        ([0, 0xFF80], 2),
-        ([0x10000, 0], 2),
+        ([], RegisterType.UINT16),
+        ([0], RegisterType.FLOAT32),
+        ([0], RegisterType.UINT32),
+        ([0, 0x7FC0], RegisterType.FLOAT32),
+        ([0, 0x7F80], RegisterType.FLOAT32),
+        ([0, 0xFF80], RegisterType.FLOAT32),
+        ([0x10000, 0], RegisterType.FLOAT32),
+        ([0x10000, 0], RegisterType.UINT32),
     ),
     ids=(
         "empty",
         "incomplete-float",
+        "incomplete-uint32",
         "nan",
         "positive-infinity",
         "negative-infinity",
         "word-out-of-range",
+        "uint32-word-out-of-range",
     ),
 )
 def test_rejects_invalid_register_values(
-    registers: list[int], register_size: int
+    registers: list[int], data_type: RegisterType
 ) -> None:
-    assert decode_register(registers, register_size) is None
+    assert decode_register(registers, data_type) is None
 
 
 class CalculateValuesTest(unittest.TestCase):

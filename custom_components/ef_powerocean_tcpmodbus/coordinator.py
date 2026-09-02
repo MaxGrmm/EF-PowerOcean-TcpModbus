@@ -280,7 +280,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 )
                 for register in register_block.registers:
                     data[register.key] = decode_register(
-                        register_block.registers_for(raw, register), register.size
+                        register_block.registers_for(raw, register),
+                        register.data_type,
                     )
 
             # Store the inverter temperature used for the modbus tcp disabled check, before we do any data validations.

@@ -134,11 +134,34 @@ class GridMode(StrEnum):
     ISLANDED = "islanded"
 
 
+class RegisterType(StrEnum):
+    """Word layout of a register. Multi-word values are stored low word first."""
+
+    UINT16 = "uint16"
+    UINT32 = "uint32"
+    FLOAT32 = "float32"
+    SERIAL = "serial"
+
+
+REGISTER_SIZES: Final = {
+    RegisterType.UINT16: 1,
+    RegisterType.UINT32: 2,
+    RegisterType.FLOAT32: 2,
+    # 16 ASCII bytes.
+    RegisterType.SERIAL: 8,
+}
+
+
 @dataclass(frozen=True)
 class RegisterDef:
     key: str
     address: int
-    size: int = 2
+    data_type: RegisterType = RegisterType.FLOAT32
+
+    @property
+    def size(self) -> int:
+        """Return how many 16-bit words this register occupies."""
+        return REGISTER_SIZES[self.data_type]
 
     @property
     def end(self) -> int:
@@ -236,10 +259,10 @@ class BinarySensorDef:
     entity_category: EntityCategory | None = None
 
 
-PRODUCT_CATEGORY: Final = RegisterDef("product_category", 40002, size=1)
-PRODUCT_NUMBER: Final = RegisterDef("product_number", 40003, size=1)
-SERIAL_NUMBER: Final = RegisterDef("serial_number", 40004, size=8)
-FIRMWARE_VERSION: Final = RegisterDef("firmware_version", 40012, size=2)
+PRODUCT_CATEGORY: Final = RegisterDef("product_category", 40002, RegisterType.UINT16)
+PRODUCT_NUMBER: Final = RegisterDef("product_number", 40003, RegisterType.UINT16)
+SERIAL_NUMBER: Final = RegisterDef("serial_number", 40004, RegisterType.SERIAL)
+FIRMWARE_VERSION: Final = RegisterDef("firmware_version", 40012, RegisterType.UINT32)
 
 # Read once when the connection is established, not on every poll.
 DEVICE_INFO_BLOCK: Final = RegisterBlock(
@@ -258,17 +281,17 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("grid_power", 40521),
     RegisterDef("solar_power", 40523),
     RegisterDef("battery_power", 40525),
-    RegisterDef("battery_soc", 40527, size=1),
-    RegisterDef("inverter_rated_power", 40528, size=1),
-    RegisterDef("system_modes", 40530, size=1),
-    RegisterDef("min_soc_limit", 40536, size=1),
-    RegisterDef("feed_in_power_max", 40538, size=1),
-    RegisterDef("device_led_brightness", 40541, size=1),
-    RegisterDef("limit_inv_power", 40546, size=1),
-    RegisterDef("limit_inv_max", 40548, size=1),
-    RegisterDef("battery_capacity", 40552, size=1),
-    RegisterDef("battery_discharge_power_limit", 40554, size=1),
-    RegisterDef("battery_charge_power_limit", 40556, size=1),
+    RegisterDef("battery_soc", 40527, RegisterType.UINT16),
+    RegisterDef("inverter_rated_power", 40528, RegisterType.UINT32),
+    RegisterDef("system_modes", 40530, RegisterType.UINT32),
+    RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
+    RegisterDef("feed_in_power_max", 40538, RegisterType.UINT32),
+    RegisterDef("device_led_brightness", 40541, RegisterType.UINT16),
+    RegisterDef("limit_inv_power", 40546, RegisterType.UINT32),
+    RegisterDef("limit_inv_max", 40548, RegisterType.UINT32),
+    RegisterDef("battery_capacity", 40552, RegisterType.UINT32),
+    RegisterDef("battery_discharge_power_limit", 40554, RegisterType.UINT32),
+    RegisterDef("battery_charge_power_limit", 40556, RegisterType.UINT32),
     RegisterDef("battery_voltage", 40574),
     RegisterDef("battery_current", 40576),
     RegisterDef("battery_temperature", 40578),
@@ -286,14 +309,14 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("pv1_current", 40602),
     RegisterDef("pv2_current", 40604),
     RegisterDef("pv3_current", 40606),
-    RegisterDef("fault_count", 42049, size=1),
+    RegisterDef("fault_count", 42049, RegisterType.UINT16),
     *(
-        RegisterDef(f"fault_{fault_number}", 42049 + fault_number, size=1)
+        RegisterDef(f"fault_{fault_number}", 42049 + fault_number, RegisterType.UINT16)
         for fault_number in range(1, MAX_FAULT_EVENTS + 1)
     ),
-    RegisterDef("battery_count", 42081, size=1),
+    RegisterDef("battery_count", 42081, RegisterType.UINT16),
     *(
-        RegisterDef(key, 42081 + battery_number, size=1)
+        RegisterDef(key, 42081 + battery_number, RegisterType.UINT16)
         for battery_number, key in enumerate(BATTERY_SOC_KEYS, start=1)
     ),
     RegisterDef("grid_import_total", 42161),
