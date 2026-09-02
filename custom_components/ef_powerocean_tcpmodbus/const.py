@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
-from enum import StrEnum
 from typing import Final
 
 from homeassistant.const import (
+    EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -15,6 +13,21 @@ from homeassistant.const import (
     UnitOfPower,
     UnitOfRatio,
     UnitOfTemperature,
+)
+
+from .models import (
+    BinarySensorDef,
+    CoordinatorStatus,
+    EnergySensorDef,
+    GridMode,
+    InverterModel,
+    NumberWritableDef,
+    OperatingMode,
+    RegisterBlock,
+    RegisterDef,
+    RegisterType,
+    SensorDef,
+    plan_blocks,
 )
 
 DOMAIN: Final = "ef_powerocean_tcpmodbus"
@@ -39,7 +52,8 @@ CONF_INVERTER_MODEL: Final = "inverter_model"
 
 MAX_BATTERY_CHARGED_POWER: Final = 2500
 MAX_BATTERY_DISCHARGED_POWER: Final = 3300
-MAX_BATTERY_COUNT: Final = 9
+MAX_BATTERY_COUNT: Final = 12
+MAX_FAULT_EVENTS: Final = 20
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S: Final = 15
@@ -47,202 +61,83 @@ ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
 
-
-class InverterModel(StrEnum):
-    POWEROCEAN_SINGLE_PHASE = "powerocean_single_phase"
-    POWEROCEAN_THREE_PHASE = "powerocean_three_phase"
-    POWEROCEAN_PLUS = "powerocean_plus"
-    POWEROCEAN_DC_FIT = "powerocean_dc_fit"
-    OCEAN_2 = "ocean_2"
-
-    @property
-    def startup_voltage(self) -> int:
-        return {
-            # The startup voltage is used to filter out phantom string power when the PV input is not actually producing power.
-            # The values are based on the datasheets of each model. However, the single phase does not have a dedicated startup voltage specification
-            # so this value is deducted from the MPPT operating range.
-            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/content/2024-03-27-1485da5d-eae4-4a38-830a-4e340517d968.pdf
-            self.POWEROCEAN_SINGLE_PHASE: 90,
-            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1772090325968/EcoFlow%20PowerOcean%20(Three-phase)_Datasheet_EN.pdf
-            self.POWEROCEAN_THREE_PHASE: 160,
-            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1754035729875/PowerOcean%20Plus%20(three-phase)_Brochure_20241223_EN.pdf
-            self.POWEROCEAN_PLUS: 160,
-            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1735192805714/EcoFlow%20PowerOcean%20DC%20Fit_Datasheet_EN_20241225.pdf
-            self.POWEROCEAN_DC_FIT: 90,
-            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1779447439219/OCEAN%202%20Three-Phase_Datasheet_EN_260522.pdf
-            self.OCEAN_2: 120,
-        }[self]
-
-    @property
-    def display_name(self) -> str:
-        return {
-            self.POWEROCEAN_SINGLE_PHASE: "PowerOcean Single Phase",
-            self.POWEROCEAN_THREE_PHASE: "PowerOcean Three Phase",
-            self.POWEROCEAN_PLUS: "PowerOcean Plus",
-            self.POWEROCEAN_DC_FIT: "PowerOcean DC Fit",
-            self.OCEAN_2: "Ocean 2",
-        }[self]
-
-
 DEFAULT_INVERTER_MODEL: Final = InverterModel.POWEROCEAN_THREE_PHASE
 
 
-class CoordinatorStatus(StrEnum):
-    SUCCESS = "success"
-    READ_FAILED = "read_failed"
-    RECONNECT_FAILED = "reconnect_failed"
-    PROCESSING_FAILED = "processing_failed"
+PRODUCT_CATEGORY: Final = RegisterDef("product_category", 40002, RegisterType.UINT16)
+PRODUCT_NUMBER: Final = RegisterDef("product_number", 40003, RegisterType.UINT16)
+SERIAL_NUMBER: Final = RegisterDef("serial_number", 40004, RegisterType.SERIAL)
+FIRMWARE_VERSION: Final = RegisterDef("firmware_version", 40012, RegisterType.UINT32)
 
+# Read once when the connection is established, not on every poll.
+DEVICE_INFO_BLOCK: Final = RegisterBlock(
+    (PRODUCT_CATEGORY, PRODUCT_NUMBER, SERIAL_NUMBER, FIRMWARE_VERSION)
+)
 
-@dataclass(frozen=True)
-class ModelBlockIndex:
-    default: int
-    overrides: Mapping[InverterModel, int]
+BATTERY_SOC_KEYS: Final = tuple(
+    f"soc_battery_{battery_number}"
+    for battery_number in range(1, MAX_BATTERY_COUNT + 1)
+)
 
-    def for_model(self, inverter_model: InverterModel) -> int:
-        return self.overrides.get(inverter_model, self.default)
+# Every polled register, by absolute Modbus address. Order is for readability only;
+# the reads are worked out by plan_blocks().
+MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
+    RegisterDef("house_power", 40519),
+    RegisterDef("grid_power", 40521),
+    RegisterDef("solar_power", 40523),
+    RegisterDef("battery_power", 40525),
+    RegisterDef("battery_soc", 40527, RegisterType.UINT16),
+    RegisterDef("inverter_rated_power", 40528, RegisterType.UINT32),
+    RegisterDef("system_modes", 40530, RegisterType.UINT32),
+    RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
+    RegisterDef("feed_in_power_max", 40538, RegisterType.UINT32),
+    RegisterDef("device_led_brightness", 40541, RegisterType.UINT16),
+    RegisterDef("limit_inv_power", 40546, RegisterType.UINT32),
+    RegisterDef("limit_inv_max", 40548, RegisterType.UINT32),
+    RegisterDef("battery_capacity", 40552, RegisterType.UINT32),
+    RegisterDef("battery_discharge_power_limit", 40554, RegisterType.UINT32),
+    RegisterDef("battery_charge_power_limit", 40556, RegisterType.UINT32),
+    RegisterDef("battery_voltage", 40574),
+    RegisterDef("battery_current", 40576),
+    RegisterDef("battery_temperature", 40578),
+    RegisterDef("voltage_l1", 40580),
+    RegisterDef("voltage_l2", 40582),
+    RegisterDef("voltage_l3", 40584),
+    RegisterDef("current_l1", 40586),
+    RegisterDef("current_l2", 40588),
+    RegisterDef("current_l3", 40590),
+    RegisterDef("inverter_temperature", 40592),
+    RegisterDef("frequency", 40594),
+    RegisterDef("pv1_voltage", 40596),
+    RegisterDef("pv2_voltage", 40598),
+    RegisterDef("pv3_voltage", 40600),
+    RegisterDef("pv1_current", 40602),
+    RegisterDef("pv2_current", 40604),
+    RegisterDef("pv3_current", 40606),
+    RegisterDef("fault_count", 42049, RegisterType.UINT16),
+    *(
+        RegisterDef(f"fault_{fault_number}", 42049 + fault_number, RegisterType.UINT16)
+        for fault_number in range(1, MAX_FAULT_EVENTS + 1)
+    ),
+    RegisterDef("battery_count", 42081, RegisterType.UINT16),
+    *(
+        RegisterDef(key, 42081 + battery_number, RegisterType.UINT16)
+        for battery_number, key in enumerate(BATTERY_SOC_KEYS, start=1)
+    ),
+    RegisterDef("grid_import_total", 42161),
+    RegisterDef("grid_import_today", 42163),
+    RegisterDef("grid_export_total", 42177),
+    RegisterDef("grid_export_today", 42179),
+    RegisterDef("bat_charged_total", 42225),
+    RegisterDef("bat_charged_today", 42227),
+    RegisterDef("bat_discharged_total", 42241),
+    RegisterDef("bat_discharged_today", 42243),
+    RegisterDef("solar_total", 42257),
+    RegisterDef("solar_today", 42259),
+)
 
-
-@dataclass(frozen=True)
-class RegisterDef:
-    key: str
-    block_index: int | ModelBlockIndex
-    size: int = 2
-
-    def block_index_for(self, inverter_model: InverterModel) -> int:
-        if isinstance(self.block_index, int):
-            return self.block_index
-        return self.block_index.for_model(inverter_model)
-
-
-@dataclass(frozen=True)
-class BlockDef:
-    start_register: int
-    content: list[RegisterDef]
-    num_read_regs: int = 100
-
-
-@dataclass(frozen=True)
-class SensorDef:
-    key: str
-    name: str | None = None
-    unit: str | None = None
-    device_class: str | None = None
-    state_class: str | None = None
-    entity_category: str | None = None
-    icon: str | None = None
-    options: tuple[str, ...] | None = None
-
-
-@dataclass(frozen=True)
-class EnergySensorDef:
-    key: str
-    name: str | None = None
-    unit: str = UnitOfEnergy.KILO_WATT_HOUR
-    is_calculated: bool = False
-    resets_daily: bool = False
-    max_power: int | None = None
-    # The _total value of the energy counter, used to validate daily resets and prevent invalid spikes.
-    total_source: str | None = None
-    device_class: str = "energy"
-    state_class: str = "total_increasing"
-    entity_category: str | None = None
-    icon: str | None = None
-
-
-@dataclass(frozen=True)
-class BinarySensorDef:
-    key: str
-    name: str | None = None
-    device_class: str | None = None
-    entity_category: str | None = None
-
-
-SERIAL_NUMBER_REGISTER: Final = 40004
-MAIN_BLOCK_START_REGISTER: Final = 40519
-MAIN_BLOCK_REGISTER_COUNT: Final = 100
-BATTERY_TEMPERATURE_BLOCK_INDEX: Final = 59
-BATTERY_TEMPERATURE_REGISTER_SIZE: Final = 2
-
-MOD_REGISTER_MAP = {
-    "serial_number": SERIAL_NUMBER_REGISTER,
-    "blocks": [
-        BlockDef(
-            start_register=MAIN_BLOCK_START_REGISTER,
-            num_read_regs=MAIN_BLOCK_REGISTER_COUNT,
-            content=[
-                RegisterDef(key="house_power", block_index=0),
-                RegisterDef(key="grid_power", block_index=2),
-                RegisterDef(key="solar_power", block_index=4),
-                RegisterDef(key="battery_power", block_index=6),
-                RegisterDef(key="battery_soc", block_index=8, size=1),
-                RegisterDef(key="inverter_rated_power", block_index=9, size=1),
-                RegisterDef(key="system_modes", block_index=11, size=1),
-                RegisterDef(key="min_soc_limit", block_index=17, size=1),
-                RegisterDef(key="bat_temp_warn_max", block_index=21, size=1),
-                RegisterDef(key="device_led_brightness", block_index=22, size=1),
-                RegisterDef(key="limit_inv_power", block_index=27, size=1),
-                RegisterDef(key="limit_inv_max", block_index=29, size=1),
-                RegisterDef(key="battery_capacity", block_index=33, size=1),
-                RegisterDef(key="battery_charge_power_limit", block_index=37, size=1),
-                RegisterDef(key="battery_voltage", block_index=55),
-                RegisterDef(key="battery_current", block_index=57),
-                RegisterDef(
-                    key="battery_temperature",
-                    block_index=BATTERY_TEMPERATURE_BLOCK_INDEX,
-                    size=BATTERY_TEMPERATURE_REGISTER_SIZE,
-                ),
-                RegisterDef(key="voltage_l1", block_index=61),
-                RegisterDef(key="voltage_l2", block_index=63),
-                RegisterDef(key="voltage_l3", block_index=65),
-                RegisterDef(key="current_l1", block_index=67),
-                RegisterDef(key="current_l2", block_index=69),
-                RegisterDef(key="current_l3", block_index=71),
-                RegisterDef(key="inverter_temperature", block_index=73),
-                RegisterDef(key="frequency", block_index=75),
-                RegisterDef(key="pv1_voltage", block_index=77),
-                RegisterDef(key="pv2_voltage", block_index=79),
-                RegisterDef(key="pv3_voltage", block_index=81),
-                RegisterDef(key="pv1_current", block_index=83),
-                RegisterDef(key="pv2_current", block_index=85),
-                RegisterDef(key="pv3_current", block_index=87),
-                RegisterDef(
-                    key="feed_in_power_max",
-                    block_index=ModelBlockIndex(
-                        default=90,
-                        overrides={InverterModel.POWEROCEAN_PLUS: 19},
-                    ),
-                    size=1,
-                ),
-            ],
-        ),
-        BlockDef(
-            start_register=42081,
-            num_read_regs=4,
-            content=[
-                RegisterDef(key="battery_count", block_index=0, size=1),
-                RegisterDef(key="soc_battery_1", block_index=1, size=1),
-                RegisterDef(key="soc_battery_2", block_index=2, size=1),
-                RegisterDef(key="soc_battery_3", block_index=3, size=1),
-            ],
-        ),
-        BlockDef(
-            start_register=42161,
-            content=[
-                RegisterDef(key="grid_import_total", block_index=0),
-                RegisterDef(key="grid_import_today", block_index=2),
-                RegisterDef(key="grid_export_total", block_index=16),
-                RegisterDef(key="grid_export_today", block_index=18),
-                RegisterDef(key="bat_charged_total", block_index=64),
-                RegisterDef(key="bat_charged_today", block_index=66),
-                RegisterDef(key="bat_discharged_total", block_index=80),
-                RegisterDef(key="bat_discharged_today", block_index=82),
-                RegisterDef(key="solar_total", block_index=96),
-                RegisterDef(key="solar_today", block_index=98),
-            ],
-        ),
-    ],
-}
+REGISTER_BLOCKS: Final = plan_blocks(MODBUS_REGISTERS)
+REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTERS}
 
 
 SENSOR_MAP: list[SensorDef] = [
@@ -295,201 +190,189 @@ SENSOR_MAP: list[SensorDef] = [
         state_class="measurement",
     ),
     SensorDef(
-        key="bat_temp_warn_max",
-        unit=UnitOfTemperature.CELSIUS,
-        device_class="temperature",
+        key="battery_discharge_power_limit",
+        unit=UnitOfPower.WATT,
+        device_class="power",
         state_class="measurement",
-        entity_category="diagnostic",
     ),
     SensorDef(
         key="device_led_brightness",
         unit=UnitOfRatio.PERCENTAGE,
         device_class=None,
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="limit_inv_power",
         unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="limit_inv_max",
         unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_capacity",
         unit=UnitOfEnergy.WATT_HOUR,
-        device_class="storage",
+        device_class="energy_storage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_voltage",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_current",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_temperature",
         unit=UnitOfTemperature.CELSIUS,
         device_class="temperature",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="voltage_l1",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="voltage_l2",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="voltage_l3",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="current_l1",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="current_l2",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="current_l3",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="inverter_temperature",
         unit=UnitOfTemperature.CELSIUS,
         device_class="temperature",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="frequency",
         unit=UnitOfFrequency.HERTZ,
         device_class="frequency",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv1_voltage",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv2_voltage",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv3_voltage",
         unit=UnitOfElectricPotential.VOLT,
         device_class="voltage",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv1_current",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv2_current",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv3_current",
         unit=UnitOfElectricCurrent.AMPERE,
         device_class="current",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="feed_in_power_max",
         unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="inverter_rated_power",
         unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_count",
         unit=None,
         device_class=None,
         state_class="measurement",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    SensorDef(
-        key="soc_battery_1",
-        unit=UnitOfRatio.PERCENTAGE,
-        device_class="battery",
-        state_class="measurement",
-        entity_category="diagnostic",
-    ),
-    SensorDef(
-        key="soc_battery_2",
-        unit=UnitOfRatio.PERCENTAGE,
-        device_class="battery",
-        state_class="measurement",
-        entity_category="diagnostic",
-    ),
-    SensorDef(
-        key="soc_battery_3",
-        unit=UnitOfRatio.PERCENTAGE,
-        device_class="battery",
-        state_class="measurement",
-        entity_category="diagnostic",
-    ),
+    *[
+        SensorDef(
+            key=key,
+            unit=UnitOfRatio.PERCENTAGE,
+            device_class="battery",
+            state_class="measurement",
+            entity_category=EntityCategory.DIAGNOSTIC,
+        )
+        for key in BATTERY_SOC_KEYS
+    ],
     SensorDef(
         key="bat_remaining",
         unit=UnitOfEnergy.KILO_WATT_HOUR,
@@ -525,12 +408,30 @@ SENSOR_MAP: list[SensorDef] = [
         unit=None,
         device_class="enum",
         state_class=None,
+        options=tuple(GridMode),
         icon="mdi:transmission-tower",
+    ),
+    SensorDef(
+        key="operating_mode",
+        device_class="enum",
+        options=tuple(OperatingMode),
+        icon="mdi:home-lightning-bolt",
+    ),
+    SensorDef(
+        key="fault_count",
+        state_class="measurement",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:alert-circle-outline",
+    ),
+    SensorDef(
+        key="active_faults",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:alert-circle-outline",
     ),
     SensorDef(
         key="coordinator_status",
         device_class="enum",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
         options=tuple(CoordinatorStatus),
     ),
 ]
@@ -598,41 +499,37 @@ DAILY_ENERGY_SENSORS_DEVICE_RAW: list[SensorDef] = [
         unit=UnitOfEnergy.KILO_WATT_HOUR,
         device_class="energy",
         state_class="total_increasing",
-        entity_category="diagnostic",
+        entity_category=EntityCategory.DIAGNOSTIC,
     )
     for energy_sensor in ENERGY_SENSOR_MAP
-    if energy_sensor.resets_daily
+    if energy_sensor.total_source is not None
 ]
 
 
 BINARY_SENSOR_MAP: list[BinarySensorDef] = [
-    BinarySensorDef("self_use_mode_ena", "battery"),
-    BinarySensorDef("intelligent_mode_ena", "battery"),
-    BinarySensorDef("battery_saver_mode_ena", "battery"),
+    BinarySensorDef("self_use_mode_ena"),
+    BinarySensorDef("intelligent_mode_ena"),
+    BinarySensorDef("battery_saver_mode_ena"),
+    BinarySensorDef(
+        "system_fault",
+        device_class="problem",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    BinarySensorDef(
+        "system_power_on",
+        device_class="running",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
 ]
-
-
-@dataclass(frozen=True)
-class NumberWritableDef:
-    key: str  # Unique key for the number entity (e.g., "min_soc_limit_control")
-    read_key: str  # The original key from MOD_REGISTER_MAP used for reading (e.g., "min_soc_limit")
-    name: str  # Display name for Home Assistant UI
-    register: int  # Physical Modbus register address for writing
-    min_value: float  # Slider minimum value
-    max_value: float  # Slider maximum value
-    step: float  # Step size (1.0 for integers, 0.1 for floats)
-    unit: str | None = None  # Unit of measurement
-    device_class: str | None = None  # Device class type
-    icon: str | None = None  # Custom icon for the slider
 
 
 # Map of all modbus registers available for writing operations.
 WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
     NumberWritableDef(
         key="min_soc_limit_control",
-        read_key="min_soc_limit",  # Points to the existing read sensor data
+        read_key="min_soc_limit",
         name="Minimum SOC Limit Control",
-        register=40536,  # 40519 + 17
+        register=REGISTERS_BY_KEY["min_soc_limit"].address,
         min_value=0.0,
         max_value=100.0,
         step=1.0,
@@ -641,9 +538,9 @@ WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
     ),
     NumberWritableDef(
         key="device_led_brightness_control",
-        read_key="device_led_brightness",  # Points to the existing read sensor data
+        read_key="device_led_brightness",
         name="LED Brightness Control",
-        register=40541,  # 40519 + 22
+        register=REGISTERS_BY_KEY["device_led_brightness"].address,
         min_value=0.0,
         max_value=100.0,
         step=10.0,

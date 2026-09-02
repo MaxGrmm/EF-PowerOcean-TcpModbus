@@ -6,8 +6,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, BinarySensorDef, EnergySensorDef, SensorDef
+from .const import DOMAIN
 from .coordinator import EcoflowCoordinator
+from .models import BinarySensorDef, EnergySensorDef, SensorDef
 
 
 class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
@@ -35,6 +36,8 @@ class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
             "serial_number": self.coordinator.serial_number,
             "entry_type": DeviceEntryType.SERVICE,
         }
+        if self.coordinator.firmware_version:
+            info["sw_version"] = self.coordinator.firmware_version
 
         return DeviceInfo(**info)
 

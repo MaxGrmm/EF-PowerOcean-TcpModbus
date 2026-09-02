@@ -24,6 +24,9 @@ homeassistant_const.Platform = type(
     (),
     {"BINARY_SENSOR": "binary_sensor", "SENSOR": "sensor", "NUMBER": "number"},
 )
+homeassistant_const.EntityCategory = StrEnum(
+    "EntityCategory", {"CONFIG": "config", "DIAGNOSTIC": "diagnostic"}
+)
 homeassistant_const.UnitOfRatio = StrEnum("UnitOfRatio", {"PERCENTAGE": "%"})
 homeassistant_const.UnitOfElectricCurrent = StrEnum(
     "UnitOfElectricCurrent", {"AMPERE": "A"}
@@ -98,7 +101,17 @@ pymodbus.__version__ = "test"
 pymodbus_client = types.ModuleType("pymodbus.client")
 pymodbus_client.AsyncModbusTcpClient = type("AsyncModbusTcpClient", (), {})
 pymodbus_exceptions = types.ModuleType("pymodbus.exceptions")
-pymodbus_exceptions.ModbusException = type("ModbusException", (Exception,), {})
+
+
+class ModbusException(Exception):
+    """Mirror the pymodbus implementation."""
+
+    def __init__(self, string: str = "") -> None:
+        self.string = string
+        super().__init__(string)
+
+
+pymodbus_exceptions.ModbusException = ModbusException
 
 DEPENDENCY_STUBS = {
     "homeassistant": homeassistant,

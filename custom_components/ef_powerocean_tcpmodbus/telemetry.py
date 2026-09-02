@@ -7,6 +7,8 @@ import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from .models import REGISTER_SIZES, GridMode, OperatingMode, RegisterType
+
 
 def decode_serial_number(registers: list[int] | None) -> str | None:
     """Decode a serial number from Modbus registers."""
@@ -23,6 +25,18 @@ def decode_serial_number(registers: list[int] | None) -> str | None:
     return serial_number or None
 
 
+def decode_firmware_version(registers: list[int] | None) -> str | None:
+    """Decode the UINT32 firmware version, low word first, as a dotted string."""
+    if not registers or len(registers) < 2:
+        return None
+
+    firmware = (registers[1] << 16) | registers[0]
+    if not firmware:
+        return None
+
+    return ".".join(str((firmware >> shift) & 0xFF) for shift in (24, 16, 8, 0))
+
+
 def is_modbus_disabled(
     serial_number: str | None, inverter_temperature: float | None
 ) -> bool:
@@ -37,7 +51,6 @@ class TelemetryData:
     """Raw telemetry values used to calculate derived values."""
 
     battery_soc: float | None = None
-    battery_count: float | None = None
     bat_charged_total: float | None = None
     bat_discharged_total: float | None = None
     solar_today: float | None = None
@@ -55,13 +68,19 @@ class TelemetryData:
     pv3_current: float | None = None
     pv3_voltage: float | None = None
     system_modes: float | None = None
+    battery_capacity: float | None = None
+    fault_codes: tuple[float | None, ...] = ()
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, float | None]) -> TelemetryData:
         """Create calculation input from the coordinator's raw telemetry."""
+        faults = [
+            (int(key.removeprefix("fault_")), value)
+            for key, value in data.items()
+            if key.startswith("fault_") and key.removeprefix("fault_").isdigit()
+        ]
         return cls(
             battery_soc=data.get("battery_soc"),
-            battery_count=data.get("battery_count"),
             bat_charged_total=data.get("bat_charged_total"),
             bat_discharged_total=data.get("bat_discharged_total"),
             solar_today=data.get("solar_today"),
@@ -79,6 +98,8 @@ class TelemetryData:
             pv3_current=data.get("pv3_current"),
             pv3_voltage=data.get("pv3_voltage"),
             system_modes=data.get("system_modes"),
+            battery_capacity=data.get("battery_capacity"),
+            fault_codes=tuple(value for _, value in sorted(faults)),
         )
 
 
@@ -111,25 +132,22 @@ def _calculate_house_energy(
     )
 
 
-def decode_register(
-    registers: list[int], register_index: int, register_size: int
-) -> float | None:
-    """Decode a register value, including word-swapped IEEE 754 floats."""
-    if not registers:
+def decode_register(registers: list[int], data_type: RegisterType) -> float | None:
+    """Decode a register's words, which are stored low word first."""
+    if len(registers) < REGISTER_SIZES[data_type]:
         return None
-    if register_size == 1:
-        return round(float(registers[register_index]), 2)
-    if len(registers) < register_index + 2:
-        return None
+    if data_type is RegisterType.UINT16:
+        return round(float(registers[0]), 2)
 
     try:
-        raw = struct.pack(
-            "<HH", registers[register_index], registers[register_index + 1]
-        )
-        value = struct.unpack("<f", raw)[0]
+        raw = struct.pack("<HH", registers[0], registers[1])
     except (struct.error, TypeError):
         return None
 
+    if data_type is RegisterType.UINT32:
+        return float(struct.unpack("<I", raw)[0])
+
+    value = struct.unpack("<f", raw)[0]
     if not math.isfinite(value) or abs(value) > 1e9:
         return None
     return round(value, 2)
@@ -147,32 +165,33 @@ def _calculate_pv_power(
     return round(current * voltage, 1)
 
 
+_OPERATING_MODES = {
+    0: OperatingMode.STANDBY,
+    1: OperatingMode.SELF_CONSUMPTION,
+    2: OperatingMode.AI,
+}
+
+
+def _format_active_faults(fault_codes: tuple[float | None, ...]) -> str:
+    active = [f"0x{int(code):04X}" for code in fault_codes if code]
+    return ", ".join(active) if active else "none"
+
+
 def calculate_derived_values(
     data: TelemetryData,
     *,
     calculate_solar_power: bool,
     startup_voltage: int,
-    max_battery_charge_power: float,
-    max_battery_discharge_power: float,
-) -> dict[str, float | bool | None]:
+) -> dict[str, float | bool | str | None]:
     """Calculate values derived from raw PowerOcean telemetry."""
-    calculated: dict[str, float | bool | None] = {}
+    calculated: dict[str, float | bool | str | None] = {}
 
     battery_soc = data.battery_soc
-    battery_count = data.battery_count
+    # The device reports its pack capacity in Wh.
+    battery_capacity = data.battery_capacity
     calculated["bat_remaining"] = (
-        round(battery_count * 5 * battery_soc / 100, 2)
-        if battery_soc is not None and battery_count is not None
-        else None
-    )
-    calculated["limit_discharge"] = (
-        round(battery_count * max_battery_discharge_power)
-        if battery_count is not None
-        else None
-    )
-    calculated["limit_charge"] = (
-        round(battery_count * max_battery_charge_power)
-        if battery_count is not None
+        round(battery_capacity / 1000 * battery_soc / 100, 2)
+        if battery_soc is not None and battery_capacity is not None
         else None
     )
 
@@ -222,11 +241,19 @@ def calculate_derived_values(
         )
 
     if data.system_modes is not None:
+        system_modes = int(data.system_modes)
         calculated["grid_mode"] = (
-            "islanded" if _is_bit_set(int(data.system_modes), 0) else "grid"
+            GridMode.ISLANDED if _is_bit_set(system_modes, 0) else GridMode.GRID
         )
-        calculated["battery_saver_mode_ena"] = _is_bit_set(int(data.system_modes), 3)
-        calculated["self_use_mode_ena"] = _is_bit_set(int(data.system_modes), 4)
-        calculated["intelligent_mode_ena"] = _is_bit_set(int(data.system_modes), 5)
+        calculated["system_fault"] = _is_bit_set(system_modes, 1)
+        calculated["system_power_on"] = _is_bit_set(system_modes, 2)
+        calculated["battery_saver_mode_ena"] = _is_bit_set(system_modes, 3)
+        calculated["self_use_mode_ena"] = _is_bit_set(system_modes, 4)
+        calculated["intelligent_mode_ena"] = _is_bit_set(system_modes, 5)
+        calculated["operating_mode"] = _OPERATING_MODES.get(
+            (system_modes >> 4) & 0b111, OperatingMode.UNKNOWN
+        )
+
+    calculated["active_faults"] = _format_active_faults(data.fault_codes)
 
     return calculated

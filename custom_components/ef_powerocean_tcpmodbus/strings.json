@@ -25,7 +25,7 @@
           "calc_solar_power": "Calculation of solar power"
         },
         "data_description": {
-          "inverter_model": "Select the Ecoflow inverter model.",
+          "inverter_model": "Select the inverter model.",
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",
@@ -71,7 +71,7 @@
           "calc_solar_power": "Calculation of solar power"
         },
         "data_description": {
-          "inverter_model": "Select the Ecoflow inverter model.",
+          "inverter_model": "Select the inverter model.",
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",
@@ -115,6 +115,33 @@
       "soc_battery_3": {
         "name": "Battery 3 SOC"
       },
+      "soc_battery_4": {
+        "name": "Battery 4 SOC"
+      },
+      "soc_battery_5": {
+        "name": "Battery 5 SOC"
+      },
+      "soc_battery_6": {
+        "name": "Battery 6 SOC"
+      },
+      "soc_battery_7": {
+        "name": "Battery 7 SOC"
+      },
+      "soc_battery_8": {
+        "name": "Battery 8 SOC"
+      },
+      "soc_battery_9": {
+        "name": "Battery 9 SOC"
+      },
+      "soc_battery_10": {
+        "name": "Battery 10 SOC"
+      },
+      "soc_battery_11": {
+        "name": "Battery 11 SOC"
+      },
+      "soc_battery_12": {
+        "name": "Battery 12 SOC"
+      },
       "battery_power": {
         "name": "Battery Power"
       },
@@ -135,9 +162,6 @@
       },
       "min_soc_limit": {
         "name": "Min SOC Limit"
-      },
-      "bat_temp_warn_max": {
-        "name": "Battery Temp Warning Max"
       },
       "device_led_brightness": {
         "name": "Device LED brightness"
@@ -212,10 +236,10 @@
         }
       },
       "limit_inv_max": {
-        "name": "Inverter Nominal Power Limit"
+        "name": "Maximum Rectifier Power (AC to DC)"
       },
       "limit_inv_power": {
-        "name": "Inverter Current Max Power"
+        "name": "Maximum Inverter Power (DC to AC)"
       },
       "house_energy_today": {
         "name": "House Consumption Today"
@@ -229,11 +253,26 @@
       "grid_export_today": {
         "name": "Grid Export Today"
       },
-      "bat_charge_today": {
+      "bat_charged_today": {
         "name": "Battery Charged Today"
       },
-      "bat_discharge_today": {
+      "bat_discharged_today": {
         "name": "Battery Discharged Today"
+      },
+      "solar_today_raw": {
+        "name": "Solar Yield Today (Device)"
+      },
+      "grid_import_today_raw": {
+        "name": "Grid Import Today (Device)"
+      },
+      "grid_export_today_raw": {
+        "name": "Grid Export Today (Device)"
+      },
+      "bat_charged_today_raw": {
+        "name": "Battery Charged Today (Device)"
+      },
+      "bat_discharged_today_raw": {
+        "name": "Battery Discharged Today (Device)"
       },
       "house_energy_total": {
         "name": "House Consumption Total"
@@ -263,7 +302,25 @@
         "name": "Inverter Rated Power"
       },
       "battery_charge_power_limit": {
-        "name": "Maximum Battery Charge Power"
+        "name": "Available Battery Charge Power"
+      },
+      "battery_discharge_power_limit": {
+        "name": "Available Battery Discharge Power"
+      },
+      "operating_mode": {
+        "name": "Operating Mode",
+        "state": {
+          "standby": "Standby",
+          "self_consumption": "Self-consumption",
+          "ai": "AI",
+          "unknown": "Unknown"
+        }
+      },
+      "fault_count": {
+        "name": "Active Fault Count"
+      },
+      "active_faults": {
+        "name": "Active Fault Codes"
       },
       "grid_mode": {
         "name": "Grid Mode",
@@ -282,6 +339,12 @@
       },
       "battery_saver_mode_ena": {
         "name": "Battery Saver Mode"
+      },
+      "system_fault": {
+        "name": "System Fault"
+      },
+      "system_power_on": {
+        "name": "System Powered On"
       }
     },
     "number": {

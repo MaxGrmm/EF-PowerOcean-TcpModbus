@@ -114,6 +114,33 @@
       "soc_battery_3": {
         "name": "Batterie 3 Ladezustand"
       },
+      "soc_battery_4": {
+        "name": "Batterie 4 Ladezustand"
+      },
+      "soc_battery_5": {
+        "name": "Batterie 5 Ladezustand"
+      },
+      "soc_battery_6": {
+        "name": "Batterie 6 Ladezustand"
+      },
+      "soc_battery_7": {
+        "name": "Batterie 7 Ladezustand"
+      },
+      "soc_battery_8": {
+        "name": "Batterie 8 Ladezustand"
+      },
+      "soc_battery_9": {
+        "name": "Batterie 9 Ladezustand"
+      },
+      "soc_battery_10": {
+        "name": "Batterie 10 Ladezustand"
+      },
+      "soc_battery_11": {
+        "name": "Batterie 11 Ladezustand"
+      },
+      "soc_battery_12": {
+        "name": "Batterie 12 Ladezustand"
+      },
       "battery_power": {
         "name": "Batterieleistung"
       },
@@ -134,9 +161,6 @@
       },
       "min_soc_limit": {
         "name": "Batterie Backup-Reserve"
-      },
-      "bat_temp_warn_max": {
-        "name": "Batterie Temp Warnung Max"
       },
       "device_led_brightness": {
         "name": "Helligkeit LED-Geräteanzeige"
@@ -211,10 +235,10 @@
         }
       },
       "limit_inv_max": {
-        "name": "WR-Nennleistungsgrenze"
+        "name": "Max. Gleichrichterleistung (AC zu DC)"
       },
       "limit_inv_power": {
-        "name": "WR-Maximalleistung"
+        "name": "Max. Wechselrichterleistung (DC zu AC)"
       },
       "house_energy_today": {
         "name": "Hausenergie Heute"
@@ -277,7 +301,25 @@
         "name": "Wechselrichter-Nennleistung"
       },
       "battery_charge_power_limit": {
-        "name": "Max. Batterieladeleistung"
+        "name": "Verfügbare Batterieladeleistung"
+      },
+      "battery_discharge_power_limit": {
+        "name": "Verfügbare Batterieentladeleistung"
+      },
+      "operating_mode": {
+        "name": "Betriebsmodus",
+        "state": {
+          "standby": "Standby",
+          "self_consumption": "Eigenverbrauch",
+          "ai": "KI",
+          "unknown": "Unbekannt"
+        }
+      },
+      "fault_count": {
+        "name": "Anzahl aktiver Fehler"
+      },
+      "active_faults": {
+        "name": "Aktive Fehlercodes"
       },
       "grid_mode": {
         "name": "Netzmodus",
@@ -296,6 +338,12 @@
       },
       "battery_saver_mode_ena": {
         "name": "Batteriesparmodus"
+      },
+      "system_fault": {
+        "name": "Systemfehler"
+      },
+      "system_power_on": {
+        "name": "System eingeschaltet"
       }
     },
     "number": {

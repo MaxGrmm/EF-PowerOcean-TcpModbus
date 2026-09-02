@@ -7,9 +7,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import BINARY_SENSOR_MAP, DOMAIN, BinarySensorDef
+from .const import BINARY_SENSOR_MAP, DOMAIN
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
+from .models import BinarySensorDef
 
 
 async def async_setup_entry(
@@ -19,7 +20,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up EcoFlow binary sensors from a config entry."""
     coordinator: EcoflowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities: list[BinarySensorDef] = []
+    entities: list[EcoFlowBinarySensor] = []
 
     for definition in BINARY_SENSOR_MAP:
         entities.append(EcoFlowBinarySensor(coordinator, entry, definition))
@@ -36,6 +37,8 @@ class EcoFlowBinarySensor(EcoFlowBaseEntity, BinarySensorEntity):
     ) -> None:
         super().__init__(coordinator, entry, definition)
         self._last_written_value: bool | None = None
+        self._attr_device_class = definition.device_class
+        self._attr_entity_category = definition.entity_category
 
     @callback
     def _handle_coordinator_update(self) -> None:

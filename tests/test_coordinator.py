@@ -8,8 +8,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from ef_powerocean_tcpmodbus import const
+from ef_powerocean_tcpmodbus import const, models
 from ef_powerocean_tcpmodbus import coordinator as coordinator_module
+from ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
 
 
 @pytest.fixture
@@ -158,7 +159,7 @@ def test_accepted_update_publishes_successful_coordinator_status(
 
     asyncio.run(coordinator._async_update_data())
 
-    assert coordinator.status == const.CoordinatorStatus.SUCCESS
+    assert coordinator.status == models.CoordinatorStatus.SUCCESS
     assert "coordinator_status" not in coordinator._last_checked_data
 
 
@@ -169,7 +170,7 @@ def test_read_failure_raises_to_show_gap(coordinator) -> None:
     with pytest.raises(coordinator_module.UpdateFailed):
         asyncio.run(coordinator._async_update_data())
 
-    assert coordinator.status == const.CoordinatorStatus.READ_FAILED
+    assert coordinator.status == models.CoordinatorStatus.READ_FAILED
     # The stale frame is not republished; entities go unavailable instead.
     assert coordinator._last_checked_data == {"grid_import_total": 10.0}
 
@@ -182,7 +183,7 @@ def test_reconnect_failure_updates_coordinator_status(coordinator) -> None:
     with pytest.raises(coordinator_module.UpdateFailed):
         asyncio.run(coordinator._async_update_data())
 
-    assert coordinator.status == const.CoordinatorStatus.RECONNECT_FAILED
+    assert coordinator.status == models.CoordinatorStatus.RECONNECT_FAILED
 
 
 def test_processing_failure_updates_coordinator_status(coordinator) -> None:
@@ -194,7 +195,7 @@ def test_processing_failure_updates_coordinator_status(coordinator) -> None:
     result = asyncio.run(coordinator._async_update_data())
 
     assert result is None
-    assert coordinator.status == const.CoordinatorStatus.PROCESSING_FAILED
+    assert coordinator.status == models.CoordinatorStatus.PROCESSING_FAILED
 
 
 def test_persisted_state_after_reload_clamps_total_reset(
@@ -572,15 +573,13 @@ def test_reads_register_block(coordinator, is_error: bool) -> None:
 def test_gets_and_decodes_raw_data(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    block = SimpleNamespace(
-        start_register=100,
-        num_read_regs=2,
-        content=(
-            const.RegisterDef(key="battery_count", block_index=0, size=1),
-            const.RegisterDef(key="grid_power", block_index=1, size=1),
-        ),
+    block = models.RegisterBlock(
+        (
+            models.RegisterDef("battery_count", 100, models.RegisterType.UINT16),
+            models.RegisterDef("grid_power", 101, models.RegisterType.UINT16),
+        )
     )
-    monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
+    monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
     decode_register = Mock(side_effect=(2.0, 42.0))
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     coordinator._client = SimpleNamespace(connected=True)
@@ -596,15 +595,13 @@ def test_gets_and_decodes_raw_data(
 def test_captures_disabled_state_when_battery_count_guard_drops_frame(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    block = SimpleNamespace(
-        start_register=100,
-        num_read_regs=2,
-        content=(
-            const.RegisterDef(key="battery_count", block_index=0, size=1),
-            const.RegisterDef(key="inverter_temperature", block_index=1, size=1),
-        ),
+    block = models.RegisterBlock(
+        (
+            models.RegisterDef("battery_count", 100, models.RegisterType.UINT16),
+            models.RegisterDef("inverter_temperature", 101, models.RegisterType.UINT16),
+        )
     )
-    monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
+    monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
     decode_register = Mock(side_effect=(0.0, 0.0))
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     monkeypatch.setattr(coordinator_module.asyncio, "sleep", AsyncMock())
@@ -623,15 +620,13 @@ def test_captures_disabled_state_when_battery_count_guard_drops_frame(
 def test_modbus_disabled_recovers_when_telemetry_returns(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    block = SimpleNamespace(
-        start_register=100,
-        num_read_regs=2,
-        content=(
-            const.RegisterDef(key="battery_count", block_index=0, size=1),
-            const.RegisterDef(key="inverter_temperature", block_index=1, size=1),
-        ),
+    block = models.RegisterBlock(
+        (
+            models.RegisterDef("battery_count", 100, models.RegisterType.UINT16),
+            models.RegisterDef("inverter_temperature", 101, models.RegisterType.UINT16),
+        )
     )
-    monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
+    monkeypatch.setattr(coordinator_module, "REGISTER_BLOCKS", (block,))
     # Provide values for two polls, first with all zeroes and second with values
     decode_register = Mock(side_effect=(0.0, 0.0, 2.0, 21.5))
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
@@ -654,24 +649,163 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
 
 
 @pytest.mark.parametrize(
-    ("inverter_model", "expected_index"),
-    (
-        (const.InverterModel.POWEROCEAN_THREE_PHASE, 90),
-        (const.InverterModel.POWEROCEAN_PLUS, 19),
-    ),
-    ids=("three-phase-default", "powerocean-plus-override"),
+    "registers",
+    (const.MODBUS_REGISTERS, const.DEVICE_INFO_BLOCK.registers),
+    ids=("polled", "device-info"),
 )
-def test_resolves_model_specific_feed_in_register_index(
-    inverter_model: const.InverterModel, expected_index: int
-) -> None:
-    registers = {
-        register.key: register
-        for register in const.MOD_REGISTER_MAP["blocks"][0].content
-    }
+def test_registers_do_not_overlap(registers: tuple[models.RegisterDef, ...]) -> None:
+    """A multi-word register must not extend into the next register's address."""
+    ordered = sorted(registers, key=lambda register: register.address)
 
-    assert "feed_in_power_max_ai" not in registers
+    for register, following in zip(ordered, ordered[1:]):
+        assert register.end <= following.address, (
+            f"{register.key} at {register.address} spans {register.size} words "
+            f"and overlaps {following.key} at {following.address}"
+        )
+
+
+def test_blocks_cover_every_register_word_they_map() -> None:
+    """Every register must decode from inside the block that was read for it."""
+    mapped = [
+        register for block in const.REGISTER_BLOCKS for register in block.registers
+    ]
+
+    assert sorted(register.key for register in mapped) == sorted(
+        register.key for register in const.MODBUS_REGISTERS
+    )
+    for block in const.REGISTER_BLOCKS:
+        for register in block.registers:
+            index = block.index_of(register)
+
+            assert index >= 0, (
+                f"{register.key} at {register.address} sits before the start of "
+                f"its block at {block.start}"
+            )
+            assert index + register.size <= block.count, (
+                f"{register.key} needs words {index}-{index + register.size - 1} "
+                f"but the block at {block.start} only reads {block.count}"
+            )
+
+
+def test_writable_numbers_write_to_the_register_they_read() -> None:
+    for number in const.WRITABLE_NUMBERS_MAP:
+        expected = const.REGISTERS_BY_KEY[number.read_key].address
+
+        assert number.register == expected, (
+            f"{number.key} writes to {number.register} but reads "
+            f"{number.read_key} from {expected}"
+        )
+
+
+def test_raw_daily_sensors_exist_only_for_device_read_values() -> None:
+    """The processor only echoes dailies backed by a total, so entities must match."""
+    produced = EnergyProcessor.raw_daily_values(
+        {energy_sensor.key: 1.0 for energy_sensor in const.ENERGY_SENSOR_MAP}
+    )
+
+    assert {sensor.key for sensor in const.DAILY_ENERGY_SENSORS_DEVICE_RAW} == set(
+        produced
+    )
+
+
+def test_enum_sensors_declare_their_options() -> None:
+    for sensor in const.SENSOR_MAP:
+        if sensor.device_class == "enum":
+            assert sensor.options, f"{sensor.key} is an enum without options"
+
+
+def _device_info_registers(
+    serial: str = "R371ZD1AZH3X0450",
+    product_number: int = 3,
+    product_category: int = 1,
+    firmware: int = 0x03001313,
+) -> list[int]:
+    registers = [0] * const.DEVICE_INFO_BLOCK.count
+    registers[const.DEVICE_INFO_BLOCK.index_of(const.PRODUCT_CATEGORY)] = (
+        product_category
+    )
+    registers[const.DEVICE_INFO_BLOCK.index_of(const.PRODUCT_NUMBER)] = product_number
+    serial_index = const.DEVICE_INFO_BLOCK.index_of(const.SERIAL_NUMBER)
+    for offset in range(const.SERIAL_NUMBER.size):
+        high, low = serial[offset * 2], serial[offset * 2 + 1]
+        registers[serial_index + offset] = (ord(high) << 8) | ord(low)
+    firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
+    registers[firmware_index] = firmware & 0xFFFF
+    registers[firmware_index + 1] = firmware >> 16
+    return registers
+
+
+def test_reads_device_info_in_a_single_request(coordinator) -> None:
+    coordinator.firmware_version = None
+    coordinator.detected_model = None
+    coordinator.inverter_model = models.InverterModel.POWEROCEAN_PLUS
+    coordinator.async_read_block = AsyncMock(return_value=_device_info_registers())
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.serial_number == "R371ZD1AZH3X0450"
+    assert coordinator.firmware_version == "3.0.19.19"
+    assert coordinator.detected_model == models.InverterModel.POWEROCEAN_PLUS
+    coordinator.async_read_block.assert_awaited_once_with(40002, 12)
+
+
+def test_device_info_read_failure_closes_connection(coordinator) -> None:
+    coordinator.firmware_version = None
+    coordinator.detected_model = None
+    coordinator._client = SimpleNamespace(close=Mock())
+    coordinator.async_read_block = AsyncMock(
+        side_effect=coordinator_module.ModbusException("boom")
+    )
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.serial_number == "unknown"
+    coordinator._client.close.assert_called_once()
+
+
+def test_read_plan_is_not_split_more_than_necessary() -> None:
+    """Neighbouring blocks must be unmergeable, so no poll wastes a round trip."""
+    for block, following in zip(const.REGISTER_BLOCKS, const.REGISTER_BLOCKS[1:]):
+        gap = following.start - (block.start + block.count)
+        merged = following.start + following.count - block.start
+
+        assert (
+            gap > models.MAX_REGISTER_GAP or merged > models.MAX_REGISTERS_PER_READ
+        ), (
+            f"blocks at {block.start} and {following.start} are only {gap} words "
+            f"apart and would merge into {merged} words, so they should be one read"
+        )
+
+
+def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
+    with pytest.raises(ValueError, match="more than the 125"):
+        models.RegisterBlock(
+            (
+                models.RegisterDef("first", 40000, models.RegisterType.UINT16),
+                models.RegisterDef("last", 40200, models.RegisterType.UINT16),
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("product_number", "product_category", "expected"),
+    (
+        (1, 1, models.InverterModel.POWEROCEAN_THREE_PHASE),
+        (1, 2, models.InverterModel.POWEROCEAN_SINGLE_PHASE),
+        (2, 2, models.InverterModel.POWEROCEAN_SINGLE_PHASE),
+        (3, 1, models.InverterModel.POWEROCEAN_PLUS),
+        (0, 1, None),
+        (None, None, None),
+    ),
+)
+def test_detects_inverter_model_from_product_info(
+    product_number: int | None,
+    product_category: int | None,
+    expected: models.InverterModel | None,
+) -> None:
     assert (
-        registers["feed_in_power_max"].block_index_for(inverter_model) == expected_index
+        models.InverterModel.from_product_info(product_number, product_category)
+        == expected
     )
 
 
