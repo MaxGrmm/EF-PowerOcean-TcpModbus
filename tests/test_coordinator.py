@@ -63,13 +63,12 @@ def run_update(
     ("disabled_reads", "expected"),
     (
         (0, False),
-        (1, False),
-        (2, False),
-        (3, True),
-        (4, True),
+        (const.MODBUS_DISABLED_READ_THRESHOLD - 1, False),
+        (const.MODBUS_DISABLED_READ_THRESHOLD, True),
+        (const.MODBUS_DISABLED_READ_THRESHOLD + 1, True),
     ),
 )
-def test_reports_modbus_disabled_after_three_consecutive_reads(
+def test_reports_modbus_disabled_after_consecutive_read_threshold(
     coordinator,
     disabled_reads: int,
     expected: bool,
@@ -604,21 +603,11 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
         ),
     )
     monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
+    disabled_frame = (0.0, 0.0, 0.0)
+    enabled_frame = (2.0, 6000.0, 5000.0)
     decode_register = Mock(
-        side_effect=(
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            2.0,
-            6000.0,
-            5000.0,
-        )
+        side_effect=disabled_frame * const.MODBUS_DISABLED_READ_THRESHOLD
+        + enabled_frame
     )
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     coordinator._client = SimpleNamespace(connected=True)
@@ -626,7 +615,7 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
     coordinator.limits[const.CONF_BATTERY_COUNT] = 2
     coordinator.serial_number = "R123456789"
 
-    for _ in range(2):
+    for _ in range(const.MODBUS_DISABLED_READ_THRESHOLD - 1):
         asyncio.run(coordinator.async_get_raw_data())
         assert coordinator.is_modbus_disabled is False
 
