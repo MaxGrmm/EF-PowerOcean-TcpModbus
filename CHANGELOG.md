@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.4.2] - 2026-09-04
+
+### Fixed
+
+- Revert the usage of UnitOfRatio since that only was introduced in 2026.7
+- Let the configured battery count override, and only log when they don't match
+- Rework modbus disabled to use inverter_rated_power+limit_inv_max = 0 for 3 consecutive reads
+
+## [2.4.1] - 2026-09-02
+
+### Added
+
+- Control LED brightness and minimum battery SOC limit
+
+### Changed
+
+- Fix display values for grid mode
+- Rework the energy validation and the daily reset
+
 ## [2.4.0] - 2026-08-18
 
 ### Added
