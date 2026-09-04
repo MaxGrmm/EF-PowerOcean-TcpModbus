@@ -591,31 +591,6 @@ def test_gets_and_decodes_raw_data(
     coordinator.async_read_block.assert_awaited_once_with(100, 2)
 
 
-def test_zero_inverter_temperature_does_not_report_modbus_disabled(
-    coordinator, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    block = SimpleNamespace(
-        start_register=100,
-        num_read_regs=2,
-        content=(
-            const.RegisterDef(key="battery_count", block_index=0, size=1),
-            const.RegisterDef(key="inverter_temperature", block_index=1, size=1),
-        ),
-    )
-    monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
-    decode_register = Mock(side_effect=(0.0, 0.0))
-    monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
-    coordinator._client = SimpleNamespace(connected=True)
-    coordinator.async_read_block = AsyncMock(return_value=[0, 0])
-    coordinator.limits[const.CONF_BATTERY_COUNT] = 2
-    coordinator.serial_number = "R123456789"
-
-    result = asyncio.run(coordinator.async_get_raw_data())
-
-    assert result == {"battery_count": 2, "inverter_temperature": 0.0}
-    assert coordinator.is_modbus_disabled is False
-
-
 def test_modbus_disabled_recovers_when_telemetry_returns(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:

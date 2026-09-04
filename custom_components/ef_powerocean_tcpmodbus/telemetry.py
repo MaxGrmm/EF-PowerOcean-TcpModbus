@@ -28,7 +28,7 @@ def is_modbus_disabled(
     inverter_rated_power: float | None,
     limit_inv_max: float | None,
 ) -> bool:
-    """Return whether static capability values indicate Modbus is disabled."""
+    """Return whether Modbus responds but telemetry appears disabled."""
     return bool(
         serial_number
         and serial_number != "unknown"
