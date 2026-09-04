@@ -25,9 +25,9 @@ from .const import (
     DOMAIN,
     ENERGY_SENSOR_MAP,
     SENSOR_MAP,
+    UNIT_OF_RATIO,
     EnergySensorDef,
     SensorDef,
-    UNIT_OF_RATIO,
 )
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
