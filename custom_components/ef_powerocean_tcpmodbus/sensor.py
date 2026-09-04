@@ -15,7 +15,6 @@ from homeassistant.const import (
     UnitOfEnergy,
     UnitOfFrequency,
     UnitOfPower,
-    UnitOfRatio,
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant, callback
@@ -26,6 +25,7 @@ from .const import (
     DOMAIN,
     ENERGY_SENSOR_MAP,
     SENSOR_MAP,
+    UNIT_OF_RATIO,
     EnergySensorDef,
     SensorDef,
 )
@@ -36,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 VALUE_PRECISION: Final = {
-    UnitOfRatio.PERCENTAGE: 0,
+    UNIT_OF_RATIO: 0,
     UnitOfPower.WATT: 0,
     UnitOfEnergy.KILO_WATT_HOUR: 2,
     UnitOfTemperature.CELSIUS: 1,
