@@ -9,7 +9,31 @@ from ef_powerocean_tcpmodbus.telemetry import (
     TelemetryData,
     calculate_derived_values,
     decode_register,
+    is_modbus_disabled,
 )
+
+
+@pytest.mark.parametrize(
+    ("serial_number", "inverter_rated_power", "limit_inv_max", "expected"),
+    (
+        ("R123456789", 0, 0, True),
+        ("R123456789", 6000, 0, False),
+        ("R123456789", 0, 5000, False),
+        ("R123456789", None, 0, False),
+        ("unknown", 0, 0, False),
+        (None, 0, 0, False),
+    ),
+)
+def test_detects_disabled_modbus_from_static_capabilities(
+    serial_number: str | None,
+    inverter_rated_power: float | None,
+    limit_inv_max: float | None,
+    expected: bool,
+) -> None:
+    assert (
+        is_modbus_disabled(serial_number, inverter_rated_power, limit_inv_max)
+        is expected
+    )
 
 
 @pytest.mark.parametrize(

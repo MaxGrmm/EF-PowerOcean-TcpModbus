@@ -44,6 +44,7 @@ SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
+MODBUS_DISABLED_READ_THRESHOLD: Final = 3
 
 # Home Assistant only introdcued UnitOfRatio in 2026.7, so for backwards compatibility
 # we hardcode this

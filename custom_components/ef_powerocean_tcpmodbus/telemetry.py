@@ -24,11 +24,16 @@ def decode_serial_number(registers: list[int] | None) -> str | None:
 
 
 def is_modbus_disabled(
-    serial_number: str | None, inverter_temperature: float | None
+    serial_number: str | None,
+    inverter_rated_power: float | None,
+    limit_inv_max: float | None,
 ) -> bool:
-    """Return whether Modbus responds but telemetry appears disabled."""
+    """Return whether static capability values indicate Modbus is disabled."""
     return bool(
-        serial_number and serial_number != "unknown" and inverter_temperature == 0
+        serial_number
+        and serial_number != "unknown"
+        and inverter_rated_power == 0
+        and limit_inv_max == 0
     )
 
 
