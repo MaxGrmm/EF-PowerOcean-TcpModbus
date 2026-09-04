@@ -24,7 +24,6 @@ homeassistant_const.Platform = type(
     (),
     {"BINARY_SENSOR": "binary_sensor", "SENSOR": "sensor", "NUMBER": "number"},
 )
-homeassistant_const.UnitOfRatio = StrEnum("UnitOfRatio", {"PERCENTAGE": "%"})
 homeassistant_const.UnitOfElectricCurrent = StrEnum(
     "UnitOfElectricCurrent", {"AMPERE": "A"}
 )

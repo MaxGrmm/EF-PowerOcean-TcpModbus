@@ -39,7 +39,7 @@ from .const import (
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MOD_REGISTER_MAP,
-    SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S,
+    MODBUS_DISABLED_READ_THRESHOLD,
     SLEEP_TIME_AFTER_RECONNECT_S,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
@@ -104,7 +104,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         )
 
         self.serial_number: str | None = None
-        self._last_inverter_temperature: float | None = None
+        self._consecutive_modbus_disabled_reads = 0
         self._client: AsyncModbusTcpClient = AsyncModbusTcpClient(
             host=self.host, port=self.port, timeout=20, reconnect_delay=0, retries=0
         )
@@ -129,10 +129,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     @property
     def is_modbus_disabled(self) -> bool:
         """Return whether the last telemetry read indicates Modbus is disabled."""
-        return is_modbus_disabled(
-            self.serial_number,
-            self._last_inverter_temperature,
-        )
+        return self._consecutive_modbus_disabled_reads >= MODBUS_DISABLED_READ_THRESHOLD
 
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
@@ -252,15 +249,24 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     )
                     data[register.key] = decode_value
 
-            # Store the inverter temperature used for the modbus tcp disabled check, before we do any data validations.
-            self._last_inverter_temperature = data.get("inverter_temperature")
+            if is_modbus_disabled(
+                self.serial_number,
+                data.get("inverter_rated_power"),
+                data.get("limit_inv_max"),
+            ):
+                self._consecutive_modbus_disabled_reads += 1
+            else:
+                self._consecutive_modbus_disabled_reads = 0
 
-            if data["battery_count"] != self.limits[CONF_BATTERY_COUNT]:
+            configured_battery_count = self.limits[CONF_BATTERY_COUNT]
+            if data["battery_count"] != configured_battery_count:
                 _LOGGER.debug(
-                    f"Read battery count {data['battery_count']} is unequal -> Skip data! Wait {SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S}s."
+                    "Inverter reported battery count %s, but %s is configured; "
+                    "using the configured count for this update",
+                    data["battery_count"],
+                    configured_battery_count,
                 )
-                await asyncio.sleep(SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S)
-                return None
+                data["battery_count"] = configured_battery_count
 
             return data
         except ModbusException as err:
