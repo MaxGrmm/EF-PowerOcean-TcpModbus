@@ -15,7 +15,6 @@ from homeassistant.const import (
     UnitOfEnergy,
     UnitOfFrequency,
     UnitOfPower,
-    UnitOfRatio,
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant, callback
@@ -28,6 +27,7 @@ from .const import (
     SENSOR_MAP,
     EnergySensorDef,
     SensorDef,
+    UNIT_OF_RATIO,
 )
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
@@ -36,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 VALUE_PRECISION: Final = {
-    UnitOfRatio.PERCENTAGE: 0,
+    UNIT_OF_RATIO: 0,
     UnitOfPower.WATT: 0,
     UnitOfEnergy.KILO_WATT_HOUR: 2,
     UnitOfTemperature.CELSIUS: 1,
