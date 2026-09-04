@@ -593,7 +593,7 @@ def test_gets_and_decodes_raw_data(
     coordinator.async_read_block.assert_awaited_once_with(100, 2)
 
 
-def test_captures_disabled_state_when_battery_count_guard_drops_frame(
+def test_uses_configured_battery_count_without_dropping_frame(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     block = SimpleNamespace(
@@ -607,7 +607,6 @@ def test_captures_disabled_state_when_battery_count_guard_drops_frame(
     monkeypatch.setitem(coordinator_module.MOD_REGISTER_MAP, "blocks", (block,))
     decode_register = Mock(side_effect=(0.0, 0.0))
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
-    monkeypatch.setattr(coordinator_module.asyncio, "sleep", AsyncMock())
     coordinator._client = SimpleNamespace(connected=True)
     coordinator.async_read_block = AsyncMock(return_value=[0, 0])
     coordinator.limits[const.CONF_BATTERY_COUNT] = 2
@@ -615,7 +614,7 @@ def test_captures_disabled_state_when_battery_count_guard_drops_frame(
 
     result = asyncio.run(coordinator.async_get_raw_data())
 
-    assert result is None
+    assert result == {"battery_count": 2, "inverter_temperature": 0.0}
     assert coordinator._last_inverter_temperature == 0.0
     assert coordinator.is_modbus_disabled is True
 
@@ -635,14 +634,16 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
     # Provide values for two polls, first with all zeroes and second with values
     decode_register = Mock(side_effect=(0.0, 0.0, 2.0, 21.5))
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
-    monkeypatch.setattr(coordinator_module.asyncio, "sleep", AsyncMock())
     coordinator._client = SimpleNamespace(connected=True)
     coordinator.async_read_block = AsyncMock(return_value=[0, 0])
     coordinator.limits[const.CONF_BATTERY_COUNT] = 2
     coordinator.serial_number = "R123456789"
 
     # Run first poll, returning zeros to simulate a Modbus-disabled state.
-    assert asyncio.run(coordinator.async_get_raw_data()) is None
+    assert asyncio.run(coordinator.async_get_raw_data()) == {
+        "battery_count": 2,
+        "inverter_temperature": 0.0,
+    }
     assert coordinator.is_modbus_disabled is True
 
     # Run second poll, returning valid telemetry to simulate recovery.

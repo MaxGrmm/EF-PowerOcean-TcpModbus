@@ -39,7 +39,6 @@ from .const import (
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MOD_REGISTER_MAP,
-    SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S,
     SLEEP_TIME_AFTER_RECONNECT_S,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
@@ -255,12 +254,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             # Store the inverter temperature used for the modbus tcp disabled check, before we do any data validations.
             self._last_inverter_temperature = data.get("inverter_temperature")
 
-            if data["battery_count"] != self.limits[CONF_BATTERY_COUNT]:
+            configured_battery_count = self.limits[CONF_BATTERY_COUNT]
+            if data["battery_count"] != configured_battery_count:
                 _LOGGER.debug(
-                    f"Read battery count {data['battery_count']} is unequal -> Skip data! Wait {SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S}s."
+                    "Inverter reported battery count %s, but %s is configured; "
+                    "using the configured count for this update",
+                    data["battery_count"],
+                    configured_battery_count,
                 )
-                await asyncio.sleep(SLEEP_TIME_AFTER_BATTERY_CHECK_FAILED_S)
-                return None
+                data["battery_count"] = configured_battery_count
 
             return data
         except ModbusException as err:
