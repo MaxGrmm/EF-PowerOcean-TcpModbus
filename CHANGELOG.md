@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.43] - 2026-09-04
+
+### Fixed
+
+- Remove remaining last usage of UnitOfRatio preventing launch on pre 2026.7
+
 ## [2.4.2] - 2026-09-04
 
 ### Fixed
