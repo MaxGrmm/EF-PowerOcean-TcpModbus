@@ -38,8 +38,8 @@ from .const import (
     CONTROL_FEATURES,
     CONTROL_POWER_FALLBACK_MAX,
     DEFAULT_BATTERY_COUNT,
+    DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
-    DEFAULT_DISCHARGE_LIMIT_SOC,
     DEFAULT_INVERTER_MODEL,
     DEFAULT_MAX_GRID_POWER,
     DEFAULT_MAX_SOLAR_POWER,
@@ -48,14 +48,17 @@ from .const import (
     DEFAULT_SLAVE,
     DEVICE_INFO_BLOCK,
     DOMAIN,
-    FEATURE_SOC_HYSTERESIS,
     FIRMWARE_VERSION,
+    GUARD_POWER_DEADBAND_W,
+    GUARD_SOC_HYSTERESIS,
     HEARTBEAT_INTERVAL_S,
     HEARTBEAT_LAPSE_S,
     HEARTBEAT_REGISTER,
     HEARTBEAT_VALUE,
+    HOLD_SETPOINT_W,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
+    MIN_CONTROL_DWELL_S,
     MODBUS_DISABLED_READ_THRESHOLD,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
@@ -63,8 +66,6 @@ from .const import (
     SLEEP_TIME_AFTER_RECONNECT_S,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
-    SYSTEM_STATE_2_CONTROL_MODE_MASK,
-    SYSTEM_STATE_2_CONTROL_MODE_SHIFT,
     register_blocks_for,
 )
 from .energy_processor import EnergyProcessor
@@ -168,9 +169,12 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             if definition.has_power
         }
         self._charge_limit_soc = DEFAULT_CHARGE_LIMIT_SOC
-        self._discharge_limit_soc = DEFAULT_DISCHARGE_LIMIT_SOC
-        # Latched so the mode does not chatter on a SOC sitting at its limit.
-        self._soc_limit_reached = False
+        self._battery_reserve_soc = DEFAULT_BATTERY_RESERVE_SOC
+        # Latched so a guard does not chatter on a SOC sitting at its limit.
+        self._charge_guard = False
+        self._reserve_guard = False
+        # Which guard, if any, is forcing the current command.
+        self._blocking_guard: ControlStatus | None = None
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
@@ -233,8 +237,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         return self._charge_limit_soc
 
     @property
-    def discharge_limit_soc(self) -> float:
-        return self._discharge_limit_soc
+    def battery_reserve_soc(self) -> float:
+        return self._battery_reserve_soc
 
     def feature_power(self, feature: ControlFeature) -> float:
         """Return the configured power, or zero for a mode that has none."""
@@ -248,12 +252,12 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         """Explain, in one word, what the selected mode is achieving."""
         if not self._heartbeat_enabled:
             return ControlStatus.NO_MODBUS_CONTROL
+        if self._blocking_guard is not None:
+            return self._blocking_guard
 
-        definition = CONTROL_FEATURES[self._feature]
+        definition = CONTROL_FEATURES[self._commanded_feature]
         if not definition.commands_power:
             return ControlStatus.AUTOMATIC
-        if self._soc_limit_reached:
-            return ControlStatus.WAITING_FOR_SOC
 
         data = self.data or {}
         measured = (
@@ -261,11 +265,13 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             if definition.measure_key is not None
             else None
         )
+        # The effective floor is whichever of ours and the device's own bites first.
+        device_floor = float(data.get("min_soc_limit") or 0.0)
         return deviation_state(
             signed_target=self._commanded_power * definition.sign,
             measured=None if measured is None else float(measured),
             soc=None if (soc := data.get("battery_soc")) is None else float(soc),
-            min_soc=float(data.get("min_soc_limit") or 0.0),
+            min_soc=max(device_floor, self._battery_reserve_soc),
         )
 
     def _control_power_ceiling(self, feature: ControlFeature) -> float:
@@ -308,29 +314,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         """Return the control command word that the commanded state composes to."""
         return self._compose_control_command()
 
-    @property
-    def last_control_write_time(self) -> datetime | None:
-        return self._last_control_write_time
-
-    def reported_control_method(
-        self, data: dict[str, Any] | None = None
-    ) -> ControlMode | None:
-        """Return the control method the device reports in System State 2, if usable.
-
-        Bits 0-6 of System State 2 mirror System Modes, so an all-zero word on a
-        system that is reporting anything at all means the register is not
-        implemented. The PowerOcean Plus is such a unit: it would otherwise report
-        "default" forever and provoke an endless re-send of the control word.
-        """
-        source = data if data is not None else self.data
-        state = (source or {}).get("system_state_2")
-        if state is None or int(state) == 0:
-            return None
-        return ControlMode.from_command_value(
-            (int(state) >> SYSTEM_STATE_2_CONTROL_MODE_SHIFT)
-            & SYSTEM_STATE_2_CONTROL_MODE_MASK
-        )
-
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
 
@@ -347,7 +330,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 str(feature): power for feature, power in self._feature_power.items()
             },
             "charge_limit_soc": self._charge_limit_soc,
-            "discharge_limit_soc": self._discharge_limit_soc,
+            "battery_reserve_soc": self._battery_reserve_soc,
             **self._energy_processor.dump_state(),
         }
 
@@ -370,8 +353,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._feature_power[feature] = float(power)
         if (charge := stored.get("charge_limit_soc")) is not None:
             self._charge_limit_soc = float(charge)
-        if (discharge := stored.get("discharge_limit_soc")) is not None:
-            self._discharge_limit_soc = float(discharge)
+        if (reserve := stored.get("battery_reserve_soc")) is not None:
+            self._battery_reserve_soc = float(reserve)
 
     # ── Connection ────────────────────────────────────────────────────────────
 
@@ -567,7 +550,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         System control command (0x0215)
         """
-        method = self.control_method.command_value or 0
+        method = self.control_method.command_value
         word = (method & CONTROL_COMMAND_METHOD_MASK) << CONTROL_COMMAND_METHOD_SHIFT
         if self._power_saving:
             word |= 1 << CONTROL_COMMAND_POWER_SAVING_BIT
@@ -582,87 +565,150 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     async def async_select_feature(self, feature: ControlFeature) -> None:
         """Select a mode, replacing whatever was selected before.
 
-        Selecting one does not necessarily command anything: a mode whose SOC limit
-        is already reached waits until the state of charge moves back.
+        Selecting one does not necessarily command anything: a mode a guard is
+        blocking waits, holding the battery, until the state of charge moves back.
         """
         if feature is not ControlFeature.AUTOMATIC:
             self._require_modbus_control()
 
         self._feature = feature
-        self._soc_limit_reached = False
-        await self.async_apply_feature()
+        await self.async_apply_feature(force=True)
 
     async def async_set_feature_power(
         self, feature: ControlFeature, watts: float
     ) -> None:
         """Set a mode's power. Editable whether or not that mode is selected."""
         self._feature_power[feature] = self._clamp_power(watts, feature)
-        await self.async_apply_feature()
+        await self.async_apply_feature(force=True)
 
     async def async_set_charge_limit_soc(self, soc: float) -> None:
-        """Set the SOC at which charging stops."""
+        """Set the state of charge above which the battery must not be charged."""
         self._charge_limit_soc = max(0.0, min(100.0, soc))
-        self._soc_limit_reached = False
-        await self.async_apply_feature()
+        self._charge_guard = False
+        await self.async_apply_feature(force=True)
 
-    async def async_set_discharge_limit_soc(self, soc: float) -> None:
-        """Set the SOC at which discharging and exporting stop."""
-        self._discharge_limit_soc = max(0.0, min(100.0, soc))
-        self._soc_limit_reached = False
-        await self.async_apply_feature()
+    async def async_set_battery_reserve_soc(self, soc: float) -> None:
+        """Set the state of charge below which the battery must not be drained."""
+        self._battery_reserve_soc = max(0.0, min(100.0, soc))
+        self._reserve_guard = False
+        await self.async_apply_feature(force=True)
 
-    def _update_soc_limit_reached(self, data: dict[str, Any]) -> None:
-        """Latch whether the selected mode has reached the limit that ends it."""
-        definition = CONTROL_FEATURES[self._feature]
-        if not definition.has_power:
-            self._soc_limit_reached = False
-            return
+    def _update_guards(self, data: dict[str, Any]) -> None:
+        """Latch both guards, each releasing well clear of where it engaged.
 
+        A ceiling of 100 and a floor of 0 mean the guard is off, so an untouched
+        install never takes control away from the app.
+        """
         soc = data.get("battery_soc")
         if soc is None:
             return
-
         soc = float(soc)
-        if definition.stops_when_charged:
-            limit = self._charge_limit_soc
-            reached, released = soc >= limit, soc <= limit - FEATURE_SOC_HYSTERESIS
-        else:
-            limit = self._discharge_limit_soc
-            reached, released = soc <= limit, soc >= limit + FEATURE_SOC_HYSTERESIS
 
-        if reached:
-            self._soc_limit_reached = True
-        elif released:
-            self._soc_limit_reached = False
+        if self._charge_limit_soc >= 100.0:
+            self._charge_guard = False
+        elif soc >= self._charge_limit_soc:
+            self._charge_guard = True
+        elif soc <= self._charge_limit_soc - GUARD_SOC_HYSTERESIS:
+            self._charge_guard = False
 
-    def _desired_command(self) -> tuple[ControlFeature, float]:
-        """Return what the device should be told right now.
+        if self._battery_reserve_soc <= 0.0:
+            self._reserve_guard = False
+        elif soc <= self._battery_reserve_soc:
+            self._reserve_guard = True
+        elif soc >= self._battery_reserve_soc + GUARD_SOC_HYSTERESIS:
+            self._reserve_guard = False
 
-        A mode that has reached its limit keeps its control method with a setpoint
-        of zero rather than releasing it: dropping back to the default method would
-        let the inverter resume self-consumption and lose the selection.
+    def _measured_direction(self, data: dict[str, Any]) -> int:
+        """Return which way the battery would move if left alone.
+
+        Only used while the inverter is running itself, where no mode declares a
+        direction. Solar against house load says it without depending on the
+        battery, so guarding cannot feed back into its own input.
         """
-        if not self._heartbeat_enabled or self._feature is ControlFeature.AUTOMATIC:
-            return ControlFeature.AUTOMATIC, 0.0
-        if self._soc_limit_reached:
-            return self._feature, 0.0
-        return self._feature, self._clamp_power(
-            self.feature_power(self._feature), self._feature
+        solar, house = data.get("solar_power"), data.get("house_power")
+        if solar is None or house is None:
+            return 0
+        if float(solar) > float(house) + GUARD_POWER_DEADBAND_W:
+            return 1
+        if float(house) > float(solar) + GUARD_POWER_DEADBAND_W:
+            return -1
+        return 0
+
+    def _guard_blocks(self, direction: int) -> ControlStatus | None:
+        """Return the guard forbidding movement in *direction*, if one does."""
+        if direction > 0 and self._charge_guard:
+            return ControlStatus.CHARGE_LIMIT_REACHED
+        if direction < 0 and self._reserve_guard:
+            return ControlStatus.RESERVE_REACHED
+        return None
+
+    def _desired_command(
+        self, data: dict[str, Any]
+    ) -> tuple[ControlFeature, float, ControlStatus | None]:
+        """Return what the device should be told right now, and why.
+
+        Guards come first and only ever restrict: whatever the mode asks for, the
+        battery is held still rather than pushed past a limit. Holding needs a
+        setpoint of 1 W because this device reads 0 as "no limit" and resumes
+        self-consumption.
+        """
+        if not self._heartbeat_enabled:
+            return ControlFeature.AUTOMATIC, 0.0, None
+
+        definition = CONTROL_FEATURES[self._feature]
+        direction = (
+            self._measured_direction(data)
+            if self._feature is ControlFeature.AUTOMATIC
+            else definition.direction
+        )
+        if (blocked := self._guard_blocks(direction)) is not None:
+            return ControlFeature.HOLD_BATTERY, HOLD_SETPOINT_W, blocked
+
+        if self._feature is ControlFeature.AUTOMATIC:
+            return ControlFeature.AUTOMATIC, 0.0, None
+        if not definition.has_power:
+            return self._feature, HOLD_SETPOINT_W, None
+        return (
+            self._feature,
+            self._clamp_power(self.feature_power(self._feature), self._feature),
+            None,
         )
 
-    async def async_apply_feature(
-        self, data: dict[str, Any] | None = None, *, notify: bool = True
-    ) -> None:
-        """Send what the selected mode asks for, if it differs from the last send."""
-        self._update_soc_limit_reached(data if data is not None else self.data or {})
+    def _within_dwell(self) -> bool:
+        """Return whether the last command is too recent to be worth replacing."""
+        if self._last_control_write_time is None:
+            return False
+        age = (dt.now() - self._last_control_write_time).total_seconds()
+        return age < MIN_CONTROL_DWELL_S
 
-        feature, power = self._desired_command()
+    async def async_apply_feature(
+        self,
+        data: dict[str, Any] | None = None,
+        *,
+        notify: bool = True,
+        force: bool = False,
+    ) -> None:
+        """Send what the mode and guards add up to, if it differs from the last send."""
+        data = data if data is not None else self.data or {}
+        self._update_guards(data)
+
+        feature, power, blocked = self._desired_command(data)
         changed = (feature, round(power)) != (
             self._commanded_feature,
             round(self._commanded_power),
         )
+
+        # A guard flipping back and forth must not out-pace the inverter's ramp.
+        # Anything the user asked for, and any re-assert after losing control
+        # authority, goes out immediately.
+        if changed and not force and not self._control_stale and self._within_dwell():
+            if notify:
+                self.async_update_listeners()
+            return
+
         self._commanded_feature = feature
         self._commanded_power = power
+        self._blocking_guard = blocked
 
         try:
             if changed or self._control_stale:
@@ -794,21 +840,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 f"Modbus rejected control command 0x{value:08X}: {response}"
             )
 
-    def _log_state_word_changes(self, data: dict[str, Any]) -> None:
-        """Trace the raw status words, so any reaction to a command is visible."""
-        for key in ("system_modes", "system_state_2"):
-            new_value = data.get(key)
-            previous = self._last_checked_data.get(key)
-            if new_value is None or new_value == previous:
-                continue
-            _LOGGER.debug(
-                "%s changed 0x%08X -> 0x%08X (commanding 0x%08X)",
-                key,
-                int(previous or 0),
-                int(new_value),
-                self._compose_control_command(),
-            )
-
     async def async_get_raw_data(self) -> dict[str, Any]:
         data: dict[str, Any] = {}
 
@@ -890,7 +921,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 result, self._last_checked_data, is_daily_reset=is_daily_reset
             )
 
-            self._log_state_word_changes(result)
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
             self._status = CoordinatorStatus.SUCCESS

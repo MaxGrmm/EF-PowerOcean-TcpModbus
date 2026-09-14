@@ -75,13 +75,15 @@ def test_holding_the_battery_commands_a_method_but_no_power() -> None:
     assert not definition.has_power
 
 
-def test_the_sign_decides_which_soc_limit_ends_a_mode() -> None:
-    """Charging stops at the ceiling, discharging and exporting at the floor."""
+def test_the_sign_says_which_guard_can_block_a_mode() -> None:
+    """Charging is blocked by the charge limit, draining by the battery reserve."""
     features = const.CONTROL_FEATURES
 
-    assert features[ControlFeature.CHARGE_BATTERY].stops_when_charged
-    assert not features[ControlFeature.DISCHARGE_BATTERY].stops_when_charged
-    assert not features[ControlFeature.EXPORT_TO_GRID].stops_when_charged
+    assert features[ControlFeature.CHARGE_BATTERY].direction == 1
+    assert features[ControlFeature.DISCHARGE_BATTERY].direction == -1
+    assert features[ControlFeature.EXPORT_TO_GRID].direction == -1
+    # Hold moves nothing in either direction, so no guard applies to it.
+    assert features[ControlFeature.HOLD_BATTERY].direction == 0
 
 
 def test_the_select_offers_every_mode() -> None:

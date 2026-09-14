@@ -44,11 +44,10 @@ async def async_get_config_entry_diagnostics(
                 for feature in CONTROL_FEATURES
             },
             "charge_limit_soc": coordinator.charge_limit_soc,
-            "discharge_limit_soc": coordinator.discharge_limit_soc,
+            "battery_reserve_soc": coordinator.battery_reserve_soc,
             "control_method": str(coordinator.control_method),
             "control_power": coordinator.control_power,
             "control_command": f"0x{coordinator.control_command:08X}",
-            "system_state_2": (coordinator.data or {}).get("system_state_2"),
         },
         TO_REDACT,
     )

@@ -97,38 +97,25 @@ class GridMode(StrEnum):
 class ControlMode(StrEnum):
     """Control method the device follows.
 
-    Commanded through bits 4-7 of the System Control Command (0x0215) and reported
-    back through bits 7-10 of System State 2 (0x0213). Both use the same numbering.
+    Commanded through bits 4-7 of the System Control Command (0x0215). The device
+    is also meant to report it back through System State 2 (0x0213), but that
+    register reads zero on a PowerOcean Plus, so it is never read back.
     """
 
     DEFAULT = "default"
     SYSTEM_FEED = "system_feed"
     INVERTER_FEED = "inverter_feed"
     BATTERY_LIMITS = "battery_limits"
-    UNKNOWN = "unknown"
 
     @property
-    def command_value(self) -> int | None:
-        """Return the protocol enumeration value, or None if not commandable."""
+    def command_value(self) -> int:
+        """Return the protocol enumeration value."""
         return {
             ControlMode.DEFAULT: 0,
             ControlMode.SYSTEM_FEED: 1,
             ControlMode.INVERTER_FEED: 2,
             ControlMode.BATTERY_LIMITS: 3,
-        }.get(self)
-
-    @classmethod
-    def from_command_value(cls, value: int) -> ControlMode:
-        """Map a protocol enumeration value to a mode, UNKNOWN if unrecognised."""
-        for mode in cls:
-            if mode.command_value == value:
-                return mode
-        return cls.UNKNOWN
-
-    @classmethod
-    def selectable(cls) -> tuple[ControlMode, ...]:
-        """Return the modes a user may command."""
-        return tuple(mode for mode in cls if mode.command_value is not None)
+        }[self]
 
 
 class ControlFeature(StrEnum):
@@ -150,7 +137,8 @@ class ControlStatus(StrEnum):
 
     NO_MODBUS_CONTROL = "no_modbus_control"
     AUTOMATIC = "automatic"
-    WAITING_FOR_SOC = "waiting_for_soc"
+    CHARGE_LIMIT_REACHED = "charge_limit_reached"
+    RESERVE_REACHED = "reserve_reached"
     ACTIVE = "active"
     RAMPING = "ramping"
     UNREACHABLE_BATTERY_FULL = "unreachable_battery_full"
@@ -162,8 +150,8 @@ class ControlFeatureDef:
     """A mode and the single instruction it sends.
 
     The sign lives here rather than in the user's value, so every power shown and
-    set is a positive magnitude. It also says which state-of-charge limit ends the
-    mode: charging stops at the ceiling, discharging and exporting at the floor.
+    set is a positive magnitude. It also says which guard can block the mode:
+    charging is blocked by the charge limit, discharging by the battery reserve.
     """
 
     method: ControlMode
@@ -176,7 +164,7 @@ class ControlFeatureDef:
     measure_key: str | None = None
     # Telemetry key holding the device's own ceiling for this mode, if it has one.
     limit_key: str | None = None
-    # None for a mode with no power to configure, which commands zero.
+    # None for a mode with no power to configure, which only holds the battery.
     default_power: float | None = None
 
     @property
@@ -188,8 +176,9 @@ class ControlFeatureDef:
         return self.default_power is not None
 
     @property
-    def stops_when_charged(self) -> bool:
-        return self.sign > 0
+    def direction(self) -> int:
+        """Return +1 while charging the battery, -1 while draining it, 0 for neither."""
+        return self.sign if self.has_power else 0
 
 
 @dataclass(frozen=True)
@@ -439,6 +428,9 @@ class NumberWritableDef:
     icon: str | None = None  # Custom icon for the slider
     # Not implemented on every model: hidden from the entity list unless enabled.
     advanced: bool = False
+    # Models whose firmware stores the write but never acts on it. Writing anyway
+    # would leave the matching sensor reporting a value the device is not using.
+    unsupported_models: tuple[InverterModel, ...] = ()
 
     @property
     def size(self) -> int:

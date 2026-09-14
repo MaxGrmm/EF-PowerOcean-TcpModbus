@@ -82,17 +82,6 @@ CONTROL_COMMAND_POWER_SAVING_BIT: Final = 3
 CONTROL_COMMAND_METHOD_SHIFT: Final = 4
 CONTROL_COMMAND_METHOD_MASK: Final = 0xF
 
-# System Status (0x0211) bit 3 reports whether low-power (power-saving) mode is
-# currently engaged. It is a status, not an echo of the command bit: while the
-# battery is working it stays 0 even if power saving is enabled.
-SYSTEM_STATUS_LOW_POWER_BIT: Final = 3
-
-# System State 2 (0x0213) reports the control method the device is actually
-# following in bits 7-10. It reads 0 on a PowerOcean Plus, where the register is not
-# implemented, so it is never treated as a read-back of the command.
-SYSTEM_STATE_2_CONTROL_MODE_SHIFT: Final = 7
-SYSTEM_STATE_2_CONTROL_MODE_MASK: Final = 0xF
-
 ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
@@ -130,7 +119,6 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("battery_soc", 40527, RegisterType.UINT16),
     RegisterDef("inverter_rated_power", 40528, RegisterType.UINT32),
     RegisterDef("system_modes", 40530, RegisterType.UINT32),
-    RegisterDef("system_state_2", 40532, RegisterType.UINT32),
     RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
     RegisterDef(
         "feed_in_power_max",
@@ -201,13 +189,6 @@ SENSOR_MAP: list[SensorDef] = [
         unit=None,
         device_class=None,
         state_class="measurement",
-    ),
-    SensorDef(
-        key="system_state_2",
-        unit=None,
-        device_class=None,
-        state_class="measurement",
-        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="house_power",
@@ -500,14 +481,6 @@ SENSOR_MAP: list[SensorDef] = [
         options=tuple(OperatingMode),
         icon="mdi:home-lightning-bolt",
     ),
-    SensorDef(
-        key="inverter_output_power",
-        unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:sine-wave",
-    ),
     *[
         SensorDef(
             key=key,
@@ -683,22 +656,38 @@ BATTERY_MODE_SELECT: Final = ControlEntityDef(
     icon="mdi:home-battery",
 )
 
-# One ceiling and one floor for the whole system, applying to whichever mode runs.
+# One ceiling and one floor for the whole system. They are guards, not modes: they
+# apply whatever the select says, including while the inverter runs itself.
 CHARGE_LIMIT_SOC_NUMBER: Final = ControlEntityDef(
     key="charge_limit_soc",
     entity_category=EntityCategory.CONFIG,
     icon="mdi:battery-charging-100",
 )
-DISCHARGE_LIMIT_SOC_NUMBER: Final = ControlEntityDef(
-    key="discharge_limit_soc",
+BATTERY_RESERVE_SOC_NUMBER: Final = ControlEntityDef(
+    key="battery_reserve_soc",
     entity_category=EntityCategory.CONFIG,
-    icon="mdi:battery-arrow-down",
+    icon="mdi:battery-lock",
 )
+# 100 disables the ceiling. LFP wants an occasional full charge so the BMS can
+# recalibrate its state of charge, so a permanently lower ceiling costs accuracy.
 DEFAULT_CHARGE_LIMIT_SOC: Final = 100.0
-DEFAULT_DISCHARGE_LIMIT_SOC: Final = 20.0
+# 0 disables the reserve, handing the floor back to the device and any external
+# optimiser. The device's own backup ratio is not writable on a PowerOcean Plus.
+DEFAULT_BATTERY_RESERVE_SOC: Final = 20.0
 
-# Re-engaging at exactly the limit would chatter on a SOC sitting on the boundary.
-FEATURE_SOC_HYSTERESIS: Final = 2.0
+# A guard releases well clear of where it engaged. State of charge arrives as whole
+# percent, so a narrow band would chase quantisation rather than real energy; a wide
+# one makes the swings coarser without moving any more energy through the battery.
+GUARD_SOC_HYSTERESIS: Final = 5.0
+# In automatic the guard has to infer which way the battery would move from PV
+# against house load. This keeps passing clouds from toggling it.
+GUARD_POWER_DEADBAND_W: Final = 200.0
+# The device slews at roughly 1.5 kW/min, so a command needs the better part of a
+# minute to take effect. Re-commanding faster than this only causes ramping.
+MIN_CONTROL_DWELL_S: Final = 300.0
+# 0 means "no limit" to this device rather than "hold at zero", so holding the
+# battery still needs a setpoint just above it.
+HOLD_SETPOINT_W: Final = 1.0
 
 # Not a device register: whether the selected mode is doing anything, and why not.
 CONTROL_STATUS_SENSOR: Final = SensorDef(
@@ -724,8 +713,10 @@ WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
         step=1.0,
         unit=UNIT_OF_RATIO,
         device_class="battery",
-        # Accepted and ignored on a PowerOcean Plus; it works on the 1ph/3ph models.
         advanced=True,
+        # The Plus stores this and never acts on it; writing would leave the sensor
+        # reporting our value while the device keeps enforcing the app's.
+        unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
     ),
     NumberWritableDef(
         key="device_led_brightness_control",

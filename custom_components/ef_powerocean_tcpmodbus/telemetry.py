@@ -73,10 +73,7 @@ class TelemetryData:
     pv3_current: float | None = None
     pv3_voltage: float | None = None
     system_modes: float | None = None
-    system_state_2: float | None = None
     battery_capacity: float | None = None
-    house_power: float | None = None
-    grid_power: float | None = None
     fault_codes: tuple[float | None, ...] = ()
 
     @classmethod
@@ -106,10 +103,7 @@ class TelemetryData:
             pv3_current=data.get("pv3_current"),
             pv3_voltage=data.get("pv3_voltage"),
             system_modes=data.get("system_modes"),
-            system_state_2=data.get("system_state_2"),
             battery_capacity=data.get("battery_capacity"),
-            house_power=data.get("house_power"),
-            grid_power=data.get("grid_power"),
             fault_codes=tuple(value for _, value in sorted(faults)),
         )
 
@@ -266,13 +260,6 @@ def calculate_derived_values(
         calculated["intelligent_mode_ena"] = _is_bit_set(system_modes, 5)
         calculated["operating_mode"] = _OPERATING_MODES.get(
             (system_modes >> 4) & 0b111, OperatingMode.UNKNOWN
-        )
-
-    # The inverter's AC output has no register: everything it feeds the house with
-    # plus whatever goes to the grid. Used to seed the inverter output limit.
-    if data.house_power is not None and data.grid_power is not None:
-        calculated["inverter_output_power"] = round(
-            data.house_power - data.grid_power, 1
         )
 
     calculated["active_faults"] = _format_active_faults(data.fault_codes)

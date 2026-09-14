@@ -104,9 +104,6 @@
       "system_modes": {
         "name": "System Modes"
       },
-      "system_state_2": {
-        "name": "System Modes 2"
-      },
       "system_power_setpoint": {
         "name": "System Power Setpoint"
       },
@@ -345,15 +342,13 @@
           "islanded": "Islanded"
         }
       },
-      "inverter_output_power": {
-        "name": "Inverter Output Power"
-      },
       "control_status": {
         "name": "Control Status",
         "state": {
           "no_modbus_control": "Modbus Control off",
           "automatic": "Automatic",
-          "waiting_for_soc": "Waiting for state of charge",
+          "charge_limit_reached": "Charge limit reached",
+          "reserve_reached": "Battery reserve reached",
           "active": "Active",
           "ramping": "Ramping",
           "unreachable_battery_full": "Battery full, target unreachable",
@@ -394,8 +389,8 @@
       "charge_limit_soc": {
         "name": "Charge Limit"
       },
-      "discharge_limit_soc": {
-        "name": "Discharge Limit"
+      "battery_reserve_soc": {
+        "name": "Battery Reserve"
       },
       "min_soc_limit_control": {
         "name": "Minimum SOC Limit Control"

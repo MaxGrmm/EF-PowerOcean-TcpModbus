@@ -20,6 +20,8 @@ def coordinator():
     )
     instance._last_checked_data = {}
     instance._last_checked_time = None
+    # DataUpdateCoordinator.__init__ would normally provide this.
+    instance.data = None
     instance._last_heartbeat_time = None
     instance._heartbeat_supported = None
     instance._heartbeat_enabled = True
@@ -30,8 +32,10 @@ def coordinator():
         if definition.has_power
     }
     instance._charge_limit_soc = const.DEFAULT_CHARGE_LIMIT_SOC
-    instance._discharge_limit_soc = const.DEFAULT_DISCHARGE_LIMIT_SOC
-    instance._soc_limit_reached = False
+    instance._battery_reserve_soc = const.DEFAULT_BATTERY_RESERVE_SOC
+    instance._charge_guard = False
+    instance._reserve_guard = False
+    instance._blocking_guard = None
     instance._commanded_feature = models.ControlFeature.AUTOMATIC
     instance._commanded_power = 0.0
     instance._power_saving = False
@@ -215,14 +219,23 @@ def set_charge_limit_soc(coordinator, soc: float):
     return asyncio.run(coordinator.async_set_charge_limit_soc(soc))
 
 
-def set_discharge_limit_soc(coordinator, soc: float):
+def set_battery_reserve_soc(coordinator, soc: float):
     coordinator._lock = asyncio.Lock()
-    return asyncio.run(coordinator.async_set_discharge_limit_soc(soc))
+    return asyncio.run(coordinator.async_set_battery_reserve_soc(soc))
 
 
 def apply_feature(coordinator, data: dict | None = None):
     coordinator._lock = asyncio.Lock()
     return asyncio.run(coordinator.async_apply_feature(data))
+
+
+def advance(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
+    """Move the clock past the dwell timer so a guard change is not suppressed."""
+    monkeypatch.setattr(
+        coordinator_module.dt,
+        "now",
+        lambda: HEARTBEAT_START + timedelta(seconds=seconds),
+    )
 
 
 def allow_writes(coordinator, monkeypatch: pytest.MonkeyPatch, *, is_error=False):
@@ -444,75 +457,174 @@ def test_selecting_a_mode_replaces_the_previous_one(
     select_feature(coordinator, models.ControlFeature.HOLD_BATTERY)
 
     assert coordinator.selected_feature is models.ControlFeature.HOLD_BATTERY
-    assert coordinator.control_power == 0.0
 
 
-def test_a_mode_selected_at_its_limit_waits_instead_of_being_refused(
+def test_holding_the_battery_commands_one_watt_not_zero(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Set charging up at a full battery and it waits until the SOC drops."""
+    """Zero reads as 'no limit' on this device, so it would resume self-consumption."""
+    write = allow_writes(coordinator, monkeypatch)
+    coordinator.data = {"battery_soc": 50.0}
+
+    select_feature(coordinator, models.ControlFeature.HOLD_BATTERY)
+
+    assert coordinator.control_power == 1.0
+    setpoint = const.REGISTERS_BY_KEY["battery_power_setpoint"].address
+    assert write.await_args_list[0].kwargs == {
+        "address": setpoint,
+        "values": [0x0000, 0x0001],
+        "device_id": 1,
+    }
+
+
+def test_the_charge_limit_blocks_a_charge_mode(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Selecting charge at the ceiling holds rather than being refused."""
     allow_writes(coordinator, monkeypatch)
-    coordinator.data = {"battery_soc": 100.0, "battery_charge_power_limit": 5000.0}
+    coordinator.data = {"battery_soc": 80.0, "battery_charge_power_limit": 5000.0}
     set_charge_limit_soc(coordinator, 80)
 
     select_feature(coordinator, models.ControlFeature.CHARGE_BATTERY)
 
     assert coordinator.selected_feature is models.ControlFeature.CHARGE_BATTERY
-    assert coordinator.control_status is models.ControlStatus.WAITING_FOR_SOC
-    # The method is held with a zero setpoint; dropping to the default method would
-    # let the inverter resume self-consumption and lose the selection.
     assert coordinator.control_method is models.ControlMode.BATTERY_LIMITS
+    assert coordinator.control_power == 1.0
+    assert coordinator.control_status is models.ControlStatus.CHARGE_LIMIT_REACHED
+
+
+def test_the_reserve_holds_the_battery_while_the_inverter_runs_itself(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reserve that only applied to our own modes would not be a reserve."""
+    allow_writes(coordinator, monkeypatch)
+    set_battery_reserve_soc(coordinator, 20)
+
+    # The house is drawing more than PV covers, so the battery would supply it.
+    apply_feature(
+        coordinator,
+        {"battery_soc": 20.0, "solar_power": 100.0, "house_power": 900.0},
+    )
+
+    assert coordinator.selected_feature is models.ControlFeature.AUTOMATIC
+    assert coordinator.control_method is models.ControlMode.BATTERY_LIMITS
+    assert coordinator.control_power == 1.0
+    assert coordinator.control_status is models.ControlStatus.RESERVE_REACHED
+
+
+def test_the_reserve_still_lets_solar_recharge_the_battery(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Holding in both directions would strand the battery at the floor forever."""
+    allow_writes(coordinator, monkeypatch)
+    set_battery_reserve_soc(coordinator, 20)
+
+    apply_feature(
+        coordinator,
+        {"battery_soc": 20.0, "solar_power": 2000.0, "house_power": 500.0},
+    )
+
+    assert coordinator.control_status is models.ControlStatus.AUTOMATIC
     assert coordinator.control_power == 0.0
 
 
-def test_a_waiting_mode_engages_when_the_soc_drops(
+def test_a_guard_releases_only_past_the_hysteresis_band(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     allow_writes(coordinator, monkeypatch)
-    coordinator.data = {"battery_soc": 100.0, "battery_charge_power_limit": 5000.0}
-    feature = models.ControlFeature.CHARGE_BATTERY
-    set_feature_power(coordinator, feature, 3000)
-    set_charge_limit_soc(coordinator, 80)
-    select_feature(coordinator, feature)
+    set_battery_reserve_soc(coordinator, 20)
+    drawing = {"solar_power": 100.0, "house_power": 900.0}
 
-    apply_feature(coordinator, {"battery_soc": 70.0})
+    apply_feature(coordinator, {"battery_soc": 20.0, **drawing})
+    assert coordinator.control_status is models.ControlStatus.RESERVE_REACHED
 
-    assert coordinator.control_status is not models.ControlStatus.WAITING_FOR_SOC
-    assert coordinator.control_power == 3000.0
+    advance(monkeypatch, const.MIN_CONTROL_DWELL_S + 1)
+    apply_feature(coordinator, {"battery_soc": 24.0, **drawing})
+    assert coordinator.control_status is models.ControlStatus.RESERVE_REACHED
+
+    advance(monkeypatch, 2 * const.MIN_CONTROL_DWELL_S + 2)
+    apply_feature(coordinator, {"battery_soc": 25.0, **drawing})
+    assert coordinator.control_status is models.ControlStatus.AUTOMATIC
 
 
-def test_the_discharge_floor_ends_an_export(
+def test_a_guard_does_not_out_pace_the_inverter_ramp(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The same floor serves discharging and exporting; the sign picks it."""
-    allow_writes(coordinator, monkeypatch)
-    coordinator.data = {"battery_soc": 50.0, "feed_in_power_max": 9000.0}
-    set_discharge_limit_soc(coordinator, 30)
-    select_feature(coordinator, models.ControlFeature.EXPORT_TO_GRID)
-    assert coordinator.control_power > 0
+    """The device needs most of a minute to answer a command; re-commanding churns."""
+    write = allow_writes(coordinator, monkeypatch)
+    set_battery_reserve_soc(coordinator, 20)
+    drawing = {"solar_power": 100.0, "house_power": 900.0}
+    apply_feature(coordinator, {"battery_soc": 20.0, **drawing})
+    write.reset_mock()
 
-    apply_feature(coordinator, {"battery_soc": 30.0})
+    apply_feature(coordinator, {"battery_soc": 40.0, **drawing})
 
-    assert coordinator.control_status is models.ControlStatus.WAITING_FOR_SOC
-    assert coordinator.control_power == 0.0
+    write.assert_not_awaited()
+    assert coordinator.control_power == 1.0
 
 
-def test_a_reached_limit_does_not_chatter_on_the_boundary(
+def test_a_user_change_ignores_the_dwell_timer(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    allow_writes(coordinator, monkeypatch)
+    write = allow_writes(coordinator, monkeypatch)
     coordinator.data = {"battery_soc": 50.0, "battery_charge_power_limit": 5000.0}
-    set_charge_limit_soc(coordinator, 80)
     select_feature(coordinator, models.ControlFeature.CHARGE_BATTERY)
+    write.reset_mock()
 
-    apply_feature(coordinator, {"battery_soc": 80.0})
-    assert coordinator.control_status is models.ControlStatus.WAITING_FOR_SOC
+    select_feature(coordinator, models.ControlFeature.HOLD_BATTERY)
 
-    apply_feature(coordinator, {"battery_soc": 81.0 - const.FEATURE_SOC_HYSTERESIS})
-    assert coordinator.control_status is models.ControlStatus.WAITING_FOR_SOC
+    assert coordinator.control_power == 1.0
+    assert write.await_count > 0
 
-    apply_feature(coordinator, {"battery_soc": 80.0 - const.FEATURE_SOC_HYSTERESIS})
-    assert coordinator.control_status is not models.ControlStatus.WAITING_FOR_SOC
+
+def test_losing_control_authority_is_re_asserted_despite_the_dwell_timer(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lapse hands the device back to the app; waiting out the dwell would leave it."""
+    write = allow_writes(coordinator, monkeypatch)
+    coordinator.data = {"battery_soc": 50.0, "battery_charge_power_limit": 5000.0}
+    select_feature(coordinator, models.ControlFeature.CHARGE_BATTERY)
+    write.reset_mock()
+
+    coordinator._control_stale = True
+    set_feature_power(coordinator, models.ControlFeature.CHARGE_BATTERY, 3000)
+    write.reset_mock()
+    coordinator._control_stale = True
+    apply_feature(coordinator, {"battery_soc": 50.0})
+
+    assert write.await_count > 0
+    assert coordinator._control_stale is False
+
+
+def test_the_default_limits_leave_the_device_alone(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ceiling of 100 is off, so a full battery must not make us seize control."""
+    write = allow_writes(coordinator, monkeypatch)
+
+    apply_feature(
+        coordinator,
+        {"battery_soc": 100.0, "solar_power": 3000.0, "house_power": 500.0},
+    )
+
+    assert coordinator.control_status is models.ControlStatus.AUTOMATIC
+    write.assert_not_awaited()
+
+
+def test_a_reserve_of_zero_disables_the_guard(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An external optimiser needs a way to take the floor off entirely."""
+    write = allow_writes(coordinator, monkeypatch)
+    set_battery_reserve_soc(coordinator, 0)
+
+    apply_feature(
+        coordinator,
+        {"battery_soc": 0.0, "solar_power": 100.0, "house_power": 900.0},
+    )
+
+    assert coordinator.control_status is models.ControlStatus.AUTOMATIC
+    write.assert_not_awaited()
 
 
 def test_automatic_writes_nothing(coordinator, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -597,7 +709,6 @@ def test_a_settled_command_is_not_re_sent_by_polling(
 
     apply_feature(coordinator)
 
-    assert coordinator.reported_control_method({"system_state_2": 0}) is None
     write.assert_not_awaited()
 
 

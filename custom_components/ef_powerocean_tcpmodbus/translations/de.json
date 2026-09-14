@@ -104,9 +104,6 @@
       "system_modes": {
         "name": "Betriebsmodi"
       },
-      "system_state_2": {
-        "name": "Betriebsmodi 2"
-      },
       "system_power_setpoint": {
         "name": "System-Leistungssollwert"
       },
@@ -348,15 +345,13 @@
           "islanded": "Inselbetrieb"
         }
       },
-      "inverter_output_power": {
-        "name": "Wechselrichter-Ausgangsleistung"
-      },
       "control_status": {
         "name": "Steuerungsstatus",
         "state": {
           "no_modbus_control": "Modbus-Steuerung aus",
           "automatic": "Automatisch",
-          "waiting_for_soc": "Wartet auf Ladezustand",
+          "charge_limit_reached": "Ladegrenze erreicht",
+          "reserve_reached": "Batteriereserve erreicht",
           "active": "Aktiv",
           "ramping": "Fährt hoch",
           "unreachable_battery_full": "Batterie voll, Ziel nicht erreichbar",
@@ -405,8 +400,8 @@
       "charge_limit_soc": {
         "name": "Ladegrenze"
       },
-      "discharge_limit_soc": {
-        "name": "Entladegrenze"
+      "battery_reserve_soc": {
+        "name": "Batteriereserve"
       },
       "min_soc_limit_control": {
         "name": "Batterie Backup-Reserve Steuerung"

@@ -12,9 +12,9 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    BATTERY_RESERVE_SOC_NUMBER,
     CHARGE_LIMIT_SOC_NUMBER,
     CONTROL_FEATURES,
-    DISCHARGE_LIMIT_SOC_NUMBER,
     DOMAIN,
     UNIT_OF_RATIO,
     WRITABLE_NUMBERS_MAP,
@@ -55,14 +55,15 @@ async def async_setup_entry(
         EcoFlowSocLimitNumber(
             coordinator,
             entry,
-            DISCHARGE_LIMIT_SOC_NUMBER,
-            coordinator.async_set_discharge_limit_soc,
-            lambda: coordinator.discharge_limit_soc,
+            BATTERY_RESERVE_SOC_NUMBER,
+            coordinator.async_set_battery_reserve_soc,
+            lambda: coordinator.battery_reserve_soc,
         )
     )
     entities.extend(
         EcoFlowGenericNumber(coordinator, entry, number_def)
         for number_def in WRITABLE_NUMBERS_MAP
+        if coordinator.inverter_model not in number_def.unsupported_models
     )
 
     async_add_entities(entities)
@@ -107,10 +108,11 @@ class EcoFlowFeaturePowerNumber(EcoFlowBaseEntity, NumberEntity):
 
 
 class EcoFlowSocLimitNumber(EcoFlowBaseEntity, NumberEntity):
-    """A state-of-charge limit that ends whichever mode is running.
+    """A state-of-charge guard that applies whatever mode is selected.
 
-    One ceiling for charging and one floor for discharging and exporting, rather
-    than a target per mode: it is a property of the battery, not of the command.
+    One ceiling for charging and one floor for discharging. They are properties of
+    the battery rather than of any command, so they also bound the inverter while
+    it is running itself.
     """
 
     _attr_mode = NumberMode.BOX
