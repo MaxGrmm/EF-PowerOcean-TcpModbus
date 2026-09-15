@@ -30,6 +30,14 @@ from .const import (
     CONF_MODBUS_CONTROL,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
+    CONTROL_COMMAND_BATTERY_SAVER_BIT,
+    CONTROL_COMMAND_METHOD_MASK,
+    CONTROL_COMMAND_METHOD_SHIFT,
+    CONTROL_COMMAND_REGISTER,
+    CONTROL_COMMAND_UNSAFE_BITS,
+    CONTROL_FEATURES,
+    CONTROL_POWER_FALLBACK_MAX,
+    CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_COUNT,
     DEFAULT_INVERTER_MODEL,
     DEFAULT_MAX_GRID_POWER,
@@ -44,6 +52,7 @@ from .const import (
     HEARTBEAT_LAPSE_S,
     HEARTBEAT_REGISTER,
     HEARTBEAT_VALUE,
+    HOLD_SETPOINT_W,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MODBUS_DISABLED_READ_THRESHOLD,
@@ -57,9 +66,14 @@ from .const import (
 )
 from .energy_processor import EnergyProcessor
 from .models import (
+    ControlFeature,
+    ControlMode,
+    ControlStatus,
     CoordinatorStatus,
     InverterModel,
     NumberWritableDef,
+    RegisterType,
+    deviation_state,
     encode_register,
 )
 from .telemetry import (
@@ -112,6 +126,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             config_entry.data.get(CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL)
         )
         self._register_blocks = register_blocks_for(self.inverter_model)
+        self._registers_by_key = {
+            register.key: register
+            for block in self._register_blocks
+            for register in block.registers
+        }
         super().__init__(
             hass,
             _LOGGER,
@@ -135,6 +154,30 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._heartbeat_enabled = config_entry.data.get(CONF_MODBUS_CONTROL, False)
         # None until the device has answered once, so an unsupported model is logged once.
         self._heartbeat_supported: bool | None = None
+
+        # A restart stops the heartbeat, so the device has already handed control back
+        # to the app by the time we get here: automatic is the truth, not a guess.
+        # The parameters are restored from disk, the mode deliberately is not.
+        self._feature = ControlFeature.AUTOMATIC
+        self._feature_power: dict[ControlFeature, float] = {
+            feature: definition.default_power
+            for feature, definition in CONTROL_FEATURES.items()
+            if definition.has_power
+        }
+
+        self._commanded_feature = ControlFeature.AUTOMATIC
+        self._commanded_power = 0.0
+        self._battery_saver = False
+        self._last_control_write_time: datetime | None = None
+        # A restart within the device's control window leaves it still following the
+        # method it was last told, so the first poll re-asserts rather than assuming
+        # control lapsed. Nothing is written at all while the gate is off.
+        self._control_stale = self._heartbeat_enabled
+        # How the commanded setpoint is being met, held over brief excursions.
+        self._deviation = ControlStatus.ACTIVE
+        self._deviation_candidate: ControlStatus | None = None
+        self._deviation_polls = 0
+
         self._energy_processor = EnergyProcessor(self.limits)
         self._status: CoordinatorStatus | None = None
         self._store: Store[dict[str, Any]] | None = Store(
@@ -168,6 +211,105 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         return self._last_heartbeat_time
 
     @property
+    def selected_feature(self) -> ControlFeature:
+        """Return the mode the user selected, running or merely waiting."""
+        return self._feature
+
+    @property
+    def control_method(self) -> ControlMode:
+        """Return the protocol control method currently being commanded."""
+        return CONTROL_FEATURES[self._commanded_feature].method
+
+    @property
+    def control_power(self) -> float:
+        """Return the power magnitude currently being commanded."""
+        return self._commanded_power
+
+    def feature_power(self, feature: ControlFeature) -> float:
+        """Return the configured power, or zero for a mode that has none."""
+        return self._feature_power.get(feature, 0.0)
+
+    def feature_power_max(self, feature: ControlFeature) -> float:
+        return self._control_power_ceiling(feature)
+
+    @property
+    def control_status(self) -> ControlStatus:
+        """Explain, in one word, what the selected mode is achieving."""
+        if not self.in_control:
+            return ControlStatus.NO_MODBUS_CONTROL
+        if not CONTROL_FEATURES[self._commanded_feature].commands_power:
+            return ControlStatus.AUTOMATIC
+        return self._deviation
+
+    def _reset_deviation(self) -> None:
+        """Forget how the last command was going; a new one starts from nothing."""
+        self._deviation = ControlStatus.ACTIVE
+        self._deviation_candidate = None
+        self._deviation_polls = 0
+
+    def _update_deviation(self, data: dict[str, Any]) -> None:
+        """Judge the commanded setpoint, ignoring a miss that passes in a poll or two.
+
+        A load switching on pulls the measurement well outside tolerance until the
+        battery takes the step up, which is the system working rather than failing.
+        """
+        definition = CONTROL_FEATURES[self._commanded_feature]
+        if not definition.commands_power:
+            self._reset_deviation()
+            return
+
+        data = data or {}
+        measured = (
+            data.get(definition.measure_key)
+            if definition.measure_key is not None
+            else None
+        )
+        state = deviation_state(
+            signed_target=self._commanded_power * definition.sign,
+            measured=None if measured is None else float(measured),
+            soc=None if (soc := data.get("battery_soc")) is None else float(soc),
+            min_soc=float(data.get("min_soc_limit") or 0.0),
+        )
+
+        if state is ControlStatus.ACTIVE:
+            self._reset_deviation()
+            return
+        if state is not self._deviation_candidate:
+            self._deviation_candidate = state
+            self._deviation_polls = 0
+        self._deviation_polls += 1
+        if self._deviation_polls >= CONTROL_STATUS_DAMPING_POLLS:
+            self._deviation = state
+
+    def _control_power_ceiling(self, feature: ControlFeature) -> float:
+        """Return the lowest ceiling that applies to *feature*.
+
+        Nothing can exceed the inverter's AC rating whatever the feature asks for,
+        and a ceiling the firmware publishes caps it further. The battery modes are
+        bounded by the configured module count instead: the device's charge and
+        discharge limit registers report the limit set in the EcoFlow app, which
+        Modbus control ignores, so honouring them would cap the user below what the
+        hardware accepts.
+        """
+        data = self.data or {}
+        definition = CONTROL_FEATURES[feature]
+        ceilings = [float(CONTROL_POWER_FALLBACK_MAX)]
+
+        if definition.limit_key is not None and (
+            limit := data.get(definition.limit_key)
+        ):
+            ceilings.append(float(limit))
+        # Zero means no battery count was configured, which bounds nothing.
+        if definition.config_limit_key is not None and (
+            limit := self.limits.get(definition.config_limit_key)
+        ):
+            ceilings.append(float(limit))
+        if rated := data.get("inverter_rated_power"):
+            ceilings.append(float(rated))
+
+        return min(ceilings)
+
+    @property
     def in_control(self) -> bool:
         """Return whether the device is currently accepting our commands."""
         if not self._heartbeat_enabled or self._heartbeat_supported is not True:
@@ -177,6 +319,16 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         return (
             dt.now() - self._last_heartbeat_time
         ).total_seconds() <= HEARTBEAT_LAPSE_S
+
+    @property
+    def battery_saver_commanded(self) -> bool:
+        """Return whether battery saver mode is being commanded."""
+        return self._battery_saver
+
+    @property
+    def control_command(self) -> int:
+        """Return the control command word that the commanded state composes to."""
+        return self._compose_control_command()
 
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
@@ -188,6 +340,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             "last_checked_time": self._last_checked_time.isoformat()
             if self._last_checked_time is not None
             else None,
+            "feature_power": {
+                str(feature): power for feature, power in self._feature_power.items()
+            },
+            "battery_saver": self._battery_saver,
             **self._energy_processor.dump_state(),
         }
 
@@ -198,7 +354,20 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         self._last_checked_data = stored.get("last_checked_data") or {}
         self._last_checked_time = parse_datetime(stored.get("last_checked_time"))
+        self._restore_feature_parameters(stored)
         self._energy_processor.load_state(stored)
+
+    def _restore_feature_parameters(self, stored: dict[str, Any]) -> None:
+        """Restore what each mode would command, but never which one was selected."""
+        for feature in self._feature_power:
+            if (
+                power := (stored.get("feature_power") or {}).get(str(feature))
+            ) is not None:
+                self._feature_power[feature] = float(power)
+        # A restart does not turn battery saver off on the device, so reporting it
+        # off would be a lie until the user toggled it twice.
+        if (saver := stored.get("battery_saver")) is not None:
+            self._battery_saver = bool(saver)
 
     async def async_client_shutdown(self) -> None:
         """Integration-Shutdown, closing connection"""
@@ -281,6 +450,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     # The outage may have outlasted the device's 60 s window, so send
                     # the next heartbeat directly rather than waiting for the interval.
                     self._last_heartbeat_time = None
+                    self._control_stale = True
                     await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
                     return True
                 self._client.close()
@@ -323,10 +493,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 return True
             if since_last > HEARTBEAT_LAPSE_S:
                 _LOGGER.debug(
-                    "Heartbeat gap of %.0fs exceeded the device window; control was "
-                    "handed back to the app",
+                    "Heartbeat gap of %.0fs exceeded the device window; the control "
+                    "word will be re-sent",
                     since_last,
                 )
+                self._control_stale = True
 
         try:
             async with self._lock:
@@ -360,6 +531,233 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._heartbeat_supported = True
         self._last_heartbeat_time = now
         return True
+
+    def _require_modbus_control(self) -> None:
+        """Refuse a command the device would store and ignore."""
+        if not self._heartbeat_enabled:
+            raise HomeAssistantError(
+                "Modbus control is off. Enable Modbus Control in the integration "
+                "configuration to command the inverter; nothing was written."
+            )
+
+    async def _async_require_control_authority(self) -> None:
+        """Confirm the device is still following us before the write that follows.
+
+        The device stores every write but only acts on it while the heartbeat is
+        current, so a command sent without one looks successful and does nothing.
+        """
+        self._require_modbus_control()
+
+        if not await self.async_send_heartbeat(force=True):
+            raise HomeAssistantError(
+                f"Heartbeat write to register {HEARTBEAT_REGISTER} failed or was "
+                "rejected, so the device would ignore the command. Nothing written."
+            )
+
+    def _compose_control_command(self, feature: ControlFeature | None = None) -> int:
+        """Build the control word for *feature*, or for the commanded one by default.
+
+        System control command (0x0215)
+        """
+        if feature is None:
+            feature = self._commanded_feature
+        method = CONTROL_FEATURES[feature].method.command_value
+        word = (method & CONTROL_COMMAND_METHOD_MASK) << CONTROL_COMMAND_METHOD_SHIFT
+        if self._battery_saver:
+            word |= 1 << CONTROL_COMMAND_BATTERY_SAVER_BIT
+        return word
+
+    def _clamp_power(self, watts: float, feature: ControlFeature) -> float:
+        """Clamp a magnitude to zero and the device's own ceiling for *feature*."""
+        return max(0.0, min(float(watts), self._control_power_ceiling(feature)))
+
+    # ── Features ──────────────────────────────────────────────────────────────
+
+    async def async_select_feature(self, feature: ControlFeature) -> None:
+        """Select a mode, replacing whatever was selected before."""
+        if feature is not ControlFeature.AUTOMATIC:
+            self._require_modbus_control()
+
+        self._feature = feature
+        await self.async_apply_feature()
+
+    async def async_set_feature_power(
+        self, feature: ControlFeature, watts: float
+    ) -> None:
+        """Set a mode's power. Editable whether or not that mode is selected."""
+        self._feature_power[feature] = self._clamp_power(watts, feature)
+        await self.async_apply_feature()
+
+    def _desired_command(self, data: dict[str, Any]) -> tuple[ControlFeature, float]:
+        """Return what the device should be told right now.
+
+        Holding needs a setpoint of 1 W because this device reads 0 as "no limit"
+        and resumes self-consumption.
+        """
+        if not self._heartbeat_enabled:
+            return ControlFeature.AUTOMATIC, 0.0
+
+        definition = CONTROL_FEATURES[self._feature]
+        if self._feature is ControlFeature.AUTOMATIC:
+            return ControlFeature.AUTOMATIC, 0.0
+        if not definition.has_power:
+            return self._feature, HOLD_SETPOINT_W
+        return (
+            self._feature,
+            self._clamp_power(self.feature_power(self._feature), self._feature),
+        )
+
+    async def async_apply_feature(
+        self,
+        data: dict[str, Any] | None = None,
+        *,
+        notify: bool = True,
+    ) -> None:
+        """Send what the mode adds up to, if it differs from the last send."""
+        data = data if data is not None else self.data or {}
+
+        feature, power = self._desired_command(data)
+        changed = (feature, round(power)) != (
+            self._commanded_feature,
+            round(self._commanded_power),
+        )
+
+        try:
+            if changed or self._control_stale:
+                await self._async_send_control(feature, power)
+            # Committed only once the device has been told: recording a command the
+            # write never delivered would look settled and never be retried.
+            self._commanded_feature = feature
+            self._commanded_power = power
+            if changed:
+                self._reset_deviation()
+            self._update_deviation(data)
+        finally:
+            if notify:
+                self.async_update_listeners()
+
+    async def _async_send_control(self, feature: ControlFeature, power: float) -> None:
+        """Write the setpoint and then the control word that selects its method."""
+        if not self.connected:
+            raise HomeAssistantError("Modbus client is not connected")
+
+        if CONTROL_FEATURES[feature].commands_power:
+            await self._async_require_control_authority()
+            await self._async_write_setpoint(feature, power)
+
+        await self._async_write_control_word(self._compose_control_command(feature))
+        self._last_control_write_time = dt.now()
+        self._control_stale = False
+
+    async def _async_apply_feature_safe(self, data: dict[str, Any]) -> None:
+        """Run from a poll, where a write failure must not stop the read."""
+        try:
+            await self.async_apply_feature(data, notify=False)
+        except HomeAssistantError as err:
+            _LOGGER.debug(f"Could not apply {self._feature} this poll: {err!r}")
+
+    async def _async_write_setpoint(
+        self, feature: ControlFeature, watts: float
+    ) -> None:
+        """Write the register the feature's method acts on, with the feature's sign."""
+        definition = CONTROL_FEATURES[feature]
+        if definition.setpoint_key is None:
+            return
+        try:
+            register = self._registers_by_key[definition.setpoint_key]
+        except KeyError as err:
+            raise HomeAssistantError(
+                f"No register mapped for setpoint {definition.setpoint_key} on "
+                f"{self.inverter_model}"
+            ) from err
+        value = int(round(watts)) * definition.sign
+
+        try:
+            words = encode_register(value, RegisterType.INT32)
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
+
+        _LOGGER.debug(
+            "Sending Modbus write command [FC16]: %sW as %s to address %s (%s)",
+            value,
+            [f"0x{word:04X}" for word in words],
+            register.address,
+            definition.setpoint_key,
+        )
+
+        try:
+            async with self._lock:
+                response = await self._client.write_registers(
+                    address=register.address,
+                    values=words,
+                    device_id=self._client_slave_id,
+                )
+        except (ModbusException, ConnectionError, asyncio.TimeoutError) as err:
+            raise HomeAssistantError(
+                f"Setpoint {value} W could not be sent to {register.address}: {err!r}"
+            ) from err
+
+        if response.isError():
+            raise HomeAssistantError(
+                f"Modbus rejected setpoint {value} W to {register.address}: {response}"
+            )
+
+    async def async_set_battery_saver(self, enabled: bool) -> None:
+        """Command battery saver mode without disturbing the control intent."""
+        previous = self._battery_saver
+        self._battery_saver = enabled
+        try:
+            await self._async_apply_control_command()
+        except HomeAssistantError:
+            self._battery_saver = previous
+            raise
+
+    async def _async_apply_control_command(self) -> None:
+        """Write the composed control word once and refresh so the read-back shows it."""
+        value = self._compose_control_command()
+        if value & CONTROL_COMMAND_UNSAFE_BITS:
+            raise HomeAssistantError(
+                f"Refusing control command 0x{value:08X}: it would take the system "
+                "off-grid or shut it down."
+            )
+        if not self.connected:
+            raise HomeAssistantError("Modbus client is not connected")
+
+        # Battery saver applies on its own, like the LED brightness does. Only a
+        # control method needs the app locked out, so only it takes control.
+        if CONTROL_FEATURES[self._commanded_feature].commands_power:
+            await self._async_require_control_authority()
+
+        await self._async_write_control_word(value)
+        self._last_control_write_time = dt.now()
+        self._control_stale = False
+        self.async_update_listeners()
+        await self.async_refresh()
+
+    async def _async_write_control_word(self, value: int) -> None:
+        _LOGGER.debug(
+            "Sending Modbus write command [FC16]: 0x%08X to address %s (Device ID: %s)",
+            value,
+            CONTROL_COMMAND_REGISTER,
+            self._client_slave_id,
+        )
+
+        try:
+            async with self._lock:
+                response = await self._client.write_registers(
+                    address=CONTROL_COMMAND_REGISTER,
+                    values=encode_register(value, RegisterType.UINT32),
+                    device_id=self._client_slave_id,
+                )
+        except (ModbusException, ConnectionError, asyncio.TimeoutError) as err:
+            raise HomeAssistantError(
+                f"Control command 0x{value:08X} could not be sent: {err!r}"
+            ) from err
+
+        if response.isError():
+            raise HomeAssistantError(
+                f"Modbus rejected control command 0x{value:08X}: {response}"
+            )
 
     async def async_get_raw_data(self) -> dict[str, Any]:
         data: dict[str, Any] = {}
@@ -401,6 +799,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 )
                 data["battery_count"] = configured_battery_count
 
+            await self._async_apply_feature_safe(data)
             return data
         except ModbusException as err:
             _LOGGER.debug(f"{err.string}. Connection closing...")

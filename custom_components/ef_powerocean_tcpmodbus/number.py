@@ -4,18 +4,25 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components.number import NumberEntity
+from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, UnitOfPower
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, WRITABLE_NUMBERS_MAP
+from .const import (
+    CONTROL_FEATURES,
+    DOMAIN,
+    WRITABLE_NUMBERS_MAP,
+)
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
-from .models import NumberWritableDef
+from .models import ControlEntityDef, ControlFeature, NumberWritableDef
 
 _LOGGER = logging.getLogger(__name__)
+
+# Ranges wider than this get a text box; a slider over tens of kilowatts is unusable.
+SLIDER_MAX_RANGE = 1000
 
 
 async def async_setup_entry(
@@ -26,16 +33,59 @@ async def async_setup_entry(
     """Automatically set up number entities from the WRITABLE_NUMBERS_MAP configuration list."""
     coordinator: EcoflowCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities = [
+    entities: list[NumberEntity] = [
+        EcoFlowFeaturePowerNumber(coordinator, entry, feature)
+        for feature, definition in CONTROL_FEATURES.items()
+        if definition.has_power
+    ]
+    entities.extend(
         EcoFlowGenericNumber(coordinator, entry, number_def)
         for number_def in WRITABLE_NUMBERS_MAP
-    ]
+        if coordinator.inverter_model not in number_def.unsupported_models
+    )
 
     async_add_entities(entities)
 
 
+class EcoFlowFeaturePowerNumber(EcoFlowBaseEntity, NumberEntity):
+    """How much power one mode asks for while it is running.
+
+    Always editable, whether or not that mode is selected, so a command can be set
+    up long before it is needed. Only the selected mode's value reaches the wire.
+    """
+
+    # A precise figure matters more than dragging across an inverter's whole range.
+    _attr_mode = NumberMode.BOX
+    _attr_native_min_value = 0.0
+    _attr_native_step = 100.0
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_device_class = "power"
+    _attr_icon = "mdi:speedometer"
+
+    def __init__(
+        self,
+        coordinator: EcoflowCoordinator,
+        entry: ConfigEntry,
+        feature: ControlFeature,
+    ) -> None:
+        super().__init__(coordinator, entry, ControlEntityDef(key=f"{feature}_power"))
+        self._feature = feature
+
+    @property
+    def native_max_value(self) -> float:
+        # The device publishes its own ceiling, and it moves with the battery.
+        return self.coordinator.feature_power_max(self._feature)
+
+    @property
+    def native_value(self) -> float:
+        return min(self.coordinator.feature_power(self._feature), self.native_max_value)
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_feature_power(self._feature, value)
+
+
 class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):
-    """Generic configuration slider entity dynamically driven by NumberWritableDef specifications."""
+    """Generic configuration entity dynamically driven by NumberWritableDef specifications."""
 
     def __init__(
         self,
@@ -43,11 +93,14 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):
         entry: ConfigEntry,
         definition: NumberWritableDef,
     ) -> None:
-        """Initialize the generic number slider entity."""
+        """Initialize the generic number entity."""
         super().__init__(coordinator, entry, definition)
 
         # Track the last written value to prevent redundant state updates
         self._last_written_value: float | None = None
+
+        # Raw register access the control mode already covers.
+        self._attr_entity_registry_enabled_default = not definition.advanced
 
         # Configure native Home Assistant number attributes
         self._attr_native_min_value = definition.min_value
@@ -55,8 +108,13 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):
         self._attr_native_step = definition.step
         self._attr_native_unit_of_measurement = definition.unit
         self._attr_device_class = definition.device_class
+        self._attr_mode = (
+            NumberMode.BOX
+            if definition.max_value - definition.min_value > SLIDER_MAX_RANGE
+            else NumberMode.SLIDER
+        )
 
-        # Categorize writeable management controls into the diagnostic section of the UI
+        # Categorize writeable management controls into the config section of the UI
         self._attr_entity_category = EntityCategory.CONFIG
 
         if definition.icon:
@@ -94,5 +152,5 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):
         """Set new value asynchronously (overrides NumberEntity abstract method)."""
         await self.coordinator.async_write_modbus_register(
             entity_def=self._definition,
-            value=int(value),
+            value=int(round(value)),
         )

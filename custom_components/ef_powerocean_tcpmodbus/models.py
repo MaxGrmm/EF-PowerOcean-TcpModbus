@@ -393,6 +393,15 @@ class BinarySensorDef:
 
 
 @dataclass(frozen=True)
+class SwitchDef:
+    key: str
+    name: str | None = None
+    device_class: str | None = None
+    entity_category: EntityCategory | None = None
+    icon: str | None = None
+
+
+@dataclass(frozen=True)
 class NumberWritableDef:
     key: str  # Unique key for the number entity (e.g., "min_soc_limit_control")
     read_key: str  # The original key from MODBUS_REGISTERS used for reading (e.g., "min_soc_limit")
@@ -405,6 +414,11 @@ class NumberWritableDef:
     unit: str | None = None  # Unit of measurement
     device_class: str | None = None  # Device class type
     icon: str | None = None  # Custom icon for the slider
+    # Not implemented on every model: hidden from the entity list unless enabled.
+    advanced: bool = False
+    # Models whose firmware stores the write but never acts on it. Writing anyway
+    # would leave the matching sensor reporting a value the device is not using.
+    unsupported_models: tuple[InverterModel, ...] = ()
 
     @property
     def size(self) -> int:

@@ -32,7 +32,7 @@
           "grid_power_max": "Maximum grid power",
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
-          "modbus_control": "Modbus Control gives this integration full control of the inverter. While enabled, the EcoFlow app cannot control the system. You can turn off Modbus Control at any time and the EcoFlow app takes over again after approximately 60 seconds."
+          "modbus_control": "Modbus Control gives this integration continuous control of the inverter. While enabled, the EcoFlow app cannot control the system. You can turn off Modbus Control at any time, the EcoFlow app takes control again after approximately 60 seconds."
         }
       },
       "warning": {
@@ -80,7 +80,7 @@
           "grid_power_max": "Maximum grid power",
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
-          "modbus_control": "Modbus Control gives this integration full control of the inverter. While enabled, the EcoFlow app cannot control the system. You can turn off Modbus Control at any time and the EcoFlow app takes over again after approximately 60 seconds."
+          "modbus_control": "Modbus Control gives this integration continuous control of the inverter. While enabled, the EcoFlow app cannot control the system. You can turn off Modbus Control at any time, the EcoFlow app takes control again after approximately 60 seconds."
         }
       }
     },
@@ -175,9 +175,6 @@
       },
       "min_soc_limit": {
         "name": "Min SOC Limit"
-      },
-      "device_led_brightness": {
-        "name": "Device LED brightness"
       },
       "solar_power": {
         "name": "Solar Power"
@@ -341,6 +338,19 @@
           "grid": "Grid-connected",
           "islanded": "Islanded"
         }
+      },
+      "control_status": {
+        "name": "Control Status",
+        "state": {
+          "no_modbus_control": "Modbus Control off",
+          "automatic": "Automatic",
+          "charge_limit_reached": "Charge limit reached",
+          "reserve_reached": "Battery reserve reached",
+          "active": "Active",
+          "ramping": "Ramping",
+          "unreachable_battery_full": "Battery full, target unreachable",
+          "unreachable_battery_empty": "Battery empty, target unreachable"
+        }
       }
     },
     "binary_sensor": {
@@ -353,9 +363,6 @@
       "intelligent_mode_ena": {
         "name": "Intelligent Mode"
       },
-      "battery_saver_mode_ena": {
-        "name": "Battery Saver Mode"
-      },
       "system_fault": {
         "name": "System Fault"
       },
@@ -364,11 +371,37 @@
       }
     },
     "number": {
+      "charge_battery_power": {
+        "name": "Charge Power"
+      },
+      "discharge_battery_power": {
+        "name": "Discharge Power"
+      },
+      "export_to_grid_power": {
+        "name": "Export Power"
+      },
       "min_soc_limit_control": {
-        "name": "Minimum SOC Limit Control"
+        "name": "Minimum SOC Limit"
       },
       "device_led_brightness_control": {
-        "name": "LED Brightness Control"
+        "name": "LED Brightness"
+      }
+    },
+    "select": {
+      "battery_mode": {
+        "name": "Battery Mode",
+        "state": {
+          "automatic": "Automatic",
+          "hold_battery": "Hold battery",
+          "charge_battery": "Charge battery",
+          "discharge_battery": "Discharge battery",
+          "export_to_grid": "Export to grid"
+        }
+      }
+    },
+    "switch": {
+      "battery_saver_mode_control": {
+        "name": "Battery Saver Mode"
       }
     }
   }

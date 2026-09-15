@@ -22,7 +22,13 @@ homeassistant_const = types.ModuleType("homeassistant.const")
 homeassistant_const.Platform = type(
     "Platform",
     (),
-    {"BINARY_SENSOR": "binary_sensor", "SENSOR": "sensor", "NUMBER": "number"},
+    {
+        "BINARY_SENSOR": "binary_sensor",
+        "SENSOR": "sensor",
+        "NUMBER": "number",
+        "SWITCH": "switch",
+        "SELECT": "select",
+    },
 )
 homeassistant_const.EntityCategory = StrEnum(
     "EntityCategory", {"CONFIG": "config", "DIAGNOSTIC": "diagnostic"}

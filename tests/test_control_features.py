@@ -142,6 +142,13 @@ def test_the_sign_says_which_guard_can_block_a_mode() -> None:
     assert features[ControlFeature.HOLD_BATTERY].direction == 0
 
 
+def test_the_select_offers_every_mode() -> None:
+    assert const.BATTERY_MODE_SELECT.key == "battery_mode"
+    assert const.CONTROL_STATUS_SENSOR.options == tuple(
+        str(status) for status in ControlStatus
+    )
+
+
 def test_a_setpoint_that_is_being_met_reads_as_active() -> None:
     state = deviation_state(
         signed_target=3000.0, measured=2900.0, soc=50.0, min_soc=10.0
