@@ -546,8 +546,7 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
 ]
 
 
-# Not a device register: whether the heartbeat currently holds control authority.
-# Kept out of diagnostics because it answers whether commands are reaching the device.
+# Whether the heartbeat currently holds control authority
 MODBUS_CONTROL_BINARY_SENSOR: Final = BinarySensorDef(
     key="modbus_control",
     device_class="running",

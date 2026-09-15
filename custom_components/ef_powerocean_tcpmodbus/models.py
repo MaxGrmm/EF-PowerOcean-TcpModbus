@@ -117,12 +117,12 @@ REGISTER_SIZES: Final = {
 def encode_register(value: int, data_type: RegisterType) -> list[int]:
     """Return the raw words for writing *value*, HIGH word first.
 
-    Reads and writes disagree on this device. It publishes 32-bit values low word
-    first (see decode_register) but parses multi-register writes high word first:
-    a setpoint of 500 sent low word first is taken as 500 << 16 and the command is
-    ignored, while the same value sent high word first is applied and then
-    re-published low word first. At least on the PowerOcean Plus, this behavior
-    has been observed consistently.
+    Reads and writes are not behaving the same in the inverter. It publishes
+    32-bit values low word first (see decode_register) but parses multi-register
+    writes high word first. For example, a setpoint of 500 sent low word first
+    is taken as 500 << 16 and the command is ignored, while the same value sent
+    high word first is applied and then re-published low word first. At least
+    on the PowerOcean Plus, this behavior has been observed consistently.
 
     Raises ValueError when the value does not fit the type or cannot be written.
     """

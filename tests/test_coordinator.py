@@ -20,7 +20,6 @@ def coordinator():
     )
     instance._last_checked_data = {}
     instance._last_checked_time = None
-    # DataUpdateCoordinator.__init__ would normally provide this.
     instance.data = None
     instance._last_heartbeat_time = None
     instance._heartbeat_supported = None

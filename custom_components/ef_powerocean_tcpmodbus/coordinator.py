@@ -279,7 +279,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                         f"Reconnect successful! (SN: {self.serial_number}) Atempts: {i + 1}/4"
                     )
                     # The outage may have outlasted the device's 60 s window, so send
-                    # the next heartbeat at once rather than waiting for the interval.
+                    # the next heartbeat directly rather than waiting for the interval.
                     self._last_heartbeat_time = None
                     await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
                     return True
@@ -308,8 +308,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     async def async_send_heartbeat(self, *, force: bool = False) -> bool:
         """Refresh Modbus control authority. Never raises; a miss only costs authority.
 
-        With *force* the register is written even if a previous attempt was rejected,
-        so a user action always gets a fresh verdict from the device.
+        With force the register is written even if a previous attempt was rejected,
+        so a user action always gets a fresh response from the device.
         """
         if not self._heartbeat_enabled:
             return False
@@ -336,7 +336,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     device_id=self._client_slave_id,
                 )
         except (ModbusException, ConnectionError, asyncio.TimeoutError) as err:
-            # Transport trouble, not a verdict on the register: retry next poll.
             _LOGGER.debug(f"Heartbeat write failed: {err!r}")
             return False
 
@@ -530,7 +529,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 f"but read back {readback_value}"
             )
 
-        _LOGGER.info(
+        _LOGGER.debug(
             "Register %s [%s] acknowledged value: %s (the device may still ignore "
             "it; confirm the effect, not the readback)",
             register_address,
