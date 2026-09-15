@@ -74,6 +74,7 @@ STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
 MODBUS_DISABLED_READ_THRESHOLD: Final = 3
 
+
 # Home Assistant only introdcued UnitOfRatio in 2026.7, so for backwards compatibility
 # we hardcode this
 UNIT_OF_RATIO: Final = "%"
@@ -573,8 +574,6 @@ MODBUS_CONTROL_BINARY_SENSOR: Final = BinarySensorDef(
     device_class="running",
 )
 
-# Everything the user can ask for, and what it means on the wire. The protocol
-# follows one control method at a time, so exactly one of these is ever in force.
 CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
     ControlFeature.AUTOMATIC: ControlFeatureDef(method=ControlMode.DEFAULT),
     ControlFeature.HOLD_BATTERY: ControlFeatureDef(

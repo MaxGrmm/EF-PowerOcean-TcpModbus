@@ -17,6 +17,15 @@ MAX_REGISTERS_PER_READ: Final = 125
 # closer together than this share one request.
 MAX_REGISTER_GAP: Final = 48
 
+# A commanded setpoint is never met exactly. The inverter reaches a new setpoint
+# within a poll or two, but house load steps instantly and the battery takes a moment
+# to give up the difference. We therefore have some tolerance to prevent over adjusting.
+POWER_TOLERANCE_W: Final = 500.0
+POWER_TOLERANCE_FRACTION: Final = 0.15
+# SOC readings are whole percent, so leave room rather than testing for exactly 100.
+BATTERY_FULL_SOC: Final = 99.0
+BATTERY_EMPTY_MARGIN_SOC: Final = 1.0
+
 
 class InverterModel(StrEnum):
     POWEROCEAN_SINGLE_PHASE = "powerocean_single_phase"
@@ -97,9 +106,7 @@ class GridMode(StrEnum):
 class ControlMode(StrEnum):
     """Control method the device follows.
 
-    Commanded through bits 4-7 of the System Control Command (0x0215). The device
-    is also meant to report it back through System State 2 (0x0213), but that
-    register reads zero on a PowerOcean Plus, so it is never read back.
+    Commanded through bits 4-7 of the System Control Command (0x0215).
     """
 
     DEFAULT = "default"
@@ -119,7 +126,7 @@ class ControlMode(StrEnum):
 
 
 class ControlFeature(StrEnum):
-    """What the user wants the inverter to do.
+    """The control that the inverter should follow.
 
     The protocol follows a single control method, so these are the options of one
     select rather than independent toggles.
@@ -147,28 +154,18 @@ class ControlStatus(StrEnum):
 
 @dataclass(frozen=True)
 class ControlFeatureDef:
-    """A mode and the single instruction it sends.
-
-    The sign lives here rather than in the user's value, so every power shown and
-    set is a positive magnitude. It also says which guard can block the mode:
-    charging is blocked by the charge limit, discharging by the battery reserve.
-    """
+    """A mode and the single instruction it sends."""
 
     method: ControlMode
-    # Read key of the setpoint register the method acts on; None for AUTOMATIC.
+    # Read key of the setpoint register the method acts on
     setpoint_key: str | None = None
+    # Whether the power should be considered positive or negative. +1 for charging, -1 for discharging
     sign: int = 1
-    # Telemetry key holding the quantity this mode pins, in the setpoint's sign
-    # convention. Comparing it against the command is the only way to tell "it is
-    # working" from "the battery has no headroom left".
+    # Sensor that this control measures against, e.g. battery_power for the battery_power_setpoint
     measure_key: str | None = None
-    # Telemetry key holding the device's own ceiling for this mode, if it has one.
-    # Only a ceiling the firmware actually enforces belongs here: the battery charge
-    # and discharge limit registers mirror the EcoFlow app's setting, which Modbus
-    # control overrides, so those modes bound themselves from the configuration.
+    # Sensor that stores the maximum allowed value for this mode, if available
     limit_key: str | None = None
-    # Key into the coordinator's configured limits, for a mode the device publishes
-    # no ceiling we can trust for.
+    # Configuration that stores the maximum allowed value for this mode, if available
     config_limit_key: str | None = None
     # None for a mode with no power to configure, which only holds the battery.
     default_power: float | None = None
@@ -196,17 +193,6 @@ class ControlEntityDef:
     entity_category: EntityCategory | None = None
 
 
-# A commanded setpoint is never met exactly. The inverter reaches a new setpoint
-# within a poll or two, but house load steps instantly and the battery takes a moment
-# to give up the difference: an excursion of nearly half the setpoint was measured on
-# a 2 kW export when a load switched on. Only a wide, sustained miss means anything.
-POWER_TOLERANCE_W: Final = 500.0
-POWER_TOLERANCE_FRACTION: Final = 0.15
-# SOC readings are whole percent, so leave room rather than testing for exactly 100.
-BATTERY_FULL_SOC: Final = 99.0
-BATTERY_EMPTY_MARGIN_SOC: Final = 1.0
-
-
 def deviation_state(
     *,
     signed_target: float,
@@ -214,13 +200,7 @@ def deviation_state(
     soc: float | None,
     min_soc: float,
 ) -> ControlStatus:
-    """Judge a setpoint that is already commanded against what the system is doing.
-
-    Every control method reaches its target by moving the battery, and the device
-    will not curtail PV to help, so a target is only reachable while the battery
-    has headroom in the direction the error points. A positive error needs the
-    battery to absorb, a negative one needs it to supply.
-    """
+    """Compare the deviation between what control we command and what the inverter reports."""
     if measured is None:
         return ControlStatus.ACTIVE
 
