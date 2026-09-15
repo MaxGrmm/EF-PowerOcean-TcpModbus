@@ -380,6 +380,12 @@
       "export_to_grid_power": {
         "name": "Export Power"
       },
+      "charge_limit_soc": {
+        "name": "Charge Limit"
+      },
+      "battery_reserve_soc": {
+        "name": "Battery Reserve"
+      },
       "min_soc_limit_control": {
         "name": "Minimum SOC Limit"
       },

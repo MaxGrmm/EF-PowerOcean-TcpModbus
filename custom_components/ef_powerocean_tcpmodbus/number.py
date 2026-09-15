@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
@@ -11,8 +12,11 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    BATTERY_RESERVE_SOC_NUMBER,
+    CHARGE_LIMIT_SOC_NUMBER,
     CONTROL_FEATURES,
     DOMAIN,
+    UNIT_OF_RATIO,
     WRITABLE_NUMBERS_MAP,
 )
 from .coordinator import EcoflowCoordinator
@@ -38,6 +42,24 @@ async def async_setup_entry(
         for feature, definition in CONTROL_FEATURES.items()
         if definition.has_power
     ]
+    entities.append(
+        EcoFlowSocLimitNumber(
+            coordinator,
+            entry,
+            CHARGE_LIMIT_SOC_NUMBER,
+            coordinator.async_set_charge_limit_soc,
+            lambda: coordinator.charge_limit_soc,
+        )
+    )
+    entities.append(
+        EcoFlowSocLimitNumber(
+            coordinator,
+            entry,
+            BATTERY_RESERVE_SOC_NUMBER,
+            coordinator.async_set_battery_reserve_soc,
+            lambda: coordinator.battery_reserve_soc,
+        )
+    )
     entities.extend(
         EcoFlowGenericNumber(coordinator, entry, number_def)
         for number_def in WRITABLE_NUMBERS_MAP
@@ -82,6 +104,44 @@ class EcoFlowFeaturePowerNumber(EcoFlowBaseEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_feature_power(self._feature, value)
+
+
+class EcoFlowSocLimitNumber(EcoFlowBaseEntity, NumberEntity):
+    """A state-of-charge guard that applies whatever mode is selected.
+
+    One ceiling for charging and one floor for discharging. They are properties of
+    the battery rather than of any command, so they also bound the inverter while
+    it is running itself.
+    """
+
+    _attr_mode = NumberMode.BOX
+    _attr_native_min_value = 0.0
+    _attr_native_max_value = 100.0
+    _attr_native_step = 1.0
+    _attr_native_unit_of_measurement = UNIT_OF_RATIO
+    _attr_device_class = "battery"
+
+    def __init__(
+        self,
+        coordinator: EcoflowCoordinator,
+        entry: ConfigEntry,
+        definition: ControlEntityDef,
+        setter: Callable[[float], Awaitable[None]],
+        getter: Callable[[], float],
+    ) -> None:
+        super().__init__(coordinator, entry, definition)
+        self._setter = setter
+        self._getter = getter
+        self._attr_entity_category = definition.entity_category
+        if definition.icon:
+            self._attr_icon = definition.icon
+
+    @property
+    def native_value(self) -> float:
+        return self._getter()
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self._setter(value)
 
 
 class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):

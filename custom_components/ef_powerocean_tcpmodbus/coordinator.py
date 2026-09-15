@@ -39,6 +39,8 @@ from .const import (
     CONTROL_POWER_FALLBACK_MAX,
     CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_COUNT,
+    DEFAULT_BATTERY_RESERVE_SOC,
+    DEFAULT_CHARGE_LIMIT_SOC,
     DEFAULT_INVERTER_MODEL,
     DEFAULT_MAX_GRID_POWER,
     DEFAULT_MAX_SOLAR_POWER,
@@ -48,6 +50,8 @@ from .const import (
     DEVICE_INFO_BLOCK,
     DOMAIN,
     FIRMWARE_VERSION,
+    GUARD_POWER_DEADBAND_W,
+    GUARD_SOC_HYSTERESIS,
     HEARTBEAT_INTERVAL_S,
     HEARTBEAT_LAPSE_S,
     HEARTBEAT_REGISTER,
@@ -55,6 +59,7 @@ from .const import (
     HOLD_SETPOINT_W,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
+    MIN_CONTROL_DWELL_S,
     MODBUS_DISABLED_READ_THRESHOLD,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
@@ -164,6 +169,13 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             for feature, definition in CONTROL_FEATURES.items()
             if definition.has_power
         }
+        self._charge_limit_soc = DEFAULT_CHARGE_LIMIT_SOC
+        self._battery_reserve_soc = DEFAULT_BATTERY_RESERVE_SOC
+        # Latched so a guard does not chatter on a SOC sitting at its limit.
+        self._charge_guard = False
+        self._reserve_guard = False
+        # Which guard, if any, is forcing the current command.
+        self._blocking_guard: ControlStatus | None = None
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
@@ -183,6 +195,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._store: Store[dict[str, Any]] | None = Store(
             hass, STORAGE_VERSION, f"{DOMAIN}.{config_entry.entry_id}.state"
         )
+
+    # ── Properties ────────────────────────────────────────────────────────────
 
     @property
     def connected(self) -> bool:
@@ -225,6 +239,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         """Return the power magnitude currently being commanded."""
         return self._commanded_power
 
+    @property
+    def charge_limit_soc(self) -> float:
+        return self._charge_limit_soc
+
+    @property
+    def battery_reserve_soc(self) -> float:
+        return self._battery_reserve_soc
+
     def feature_power(self, feature: ControlFeature) -> float:
         """Return the configured power, or zero for a mode that has none."""
         return self._feature_power.get(feature, 0.0)
@@ -237,6 +259,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         """Explain, in one word, what the selected mode is achieving."""
         if not self.in_control:
             return ControlStatus.NO_MODBUS_CONTROL
+        if self._blocking_guard is not None:
+            return self._blocking_guard
         if not CONTROL_FEATURES[self._commanded_feature].commands_power:
             return ControlStatus.AUTOMATIC
         return self._deviation
@@ -264,11 +288,13 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             if definition.measure_key is not None
             else None
         )
+        # The effective floor is whichever of ours and the device's own bites first.
+        device_floor = float(data.get("min_soc_limit") or 0.0)
         state = deviation_state(
             signed_target=self._commanded_power * definition.sign,
             measured=None if measured is None else float(measured),
             soc=None if (soc := data.get("battery_soc")) is None else float(soc),
-            min_soc=float(data.get("min_soc_limit") or 0.0),
+            min_soc=max(device_floor, self._battery_reserve_soc),
         )
 
         if state is ControlStatus.ACTIVE:
@@ -333,6 +359,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
 
+    # ── Persistence ───────────────────────────────────────────────────────────
+
     def _persisted_state(self) -> dict[str, Any]:
         """Return the state in a JSON-serializable form."""
         return {
@@ -343,6 +371,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             "feature_power": {
                 str(feature): power for feature, power in self._feature_power.items()
             },
+            "charge_limit_soc": self._charge_limit_soc,
+            "battery_reserve_soc": self._battery_reserve_soc,
             "battery_saver": self._battery_saver,
             **self._energy_processor.dump_state(),
         }
@@ -364,10 +394,16 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 power := (stored.get("feature_power") or {}).get(str(feature))
             ) is not None:
                 self._feature_power[feature] = float(power)
+        if (charge := stored.get("charge_limit_soc")) is not None:
+            self._charge_limit_soc = float(charge)
+        if (reserve := stored.get("battery_reserve_soc")) is not None:
+            self._battery_reserve_soc = float(reserve)
         # A restart does not turn battery saver off on the device, so reporting it
         # off would be a lie until the user toggled it twice.
         if (saver := stored.get("battery_saver")) is not None:
             self._battery_saver = bool(saver)
+
+    # ── Connection ────────────────────────────────────────────────────────────
 
     async def async_client_shutdown(self) -> None:
         """Integration-Shutdown, closing connection"""
@@ -448,7 +484,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                         f"Reconnect successful! (SN: {self.serial_number}) Atempts: {i + 1}/4"
                     )
                     # The outage may have outlasted the device's 60 s window, so send
-                    # the next heartbeat directly rather than waiting for the interval.
+                    # the next heartbeat directly and let the read-back re-assert the
+                    # command if it was dropped.
                     self._last_heartbeat_time = None
                     self._control_stale = True
                     await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
@@ -574,53 +611,154 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     # ── Features ──────────────────────────────────────────────────────────────
 
     async def async_select_feature(self, feature: ControlFeature) -> None:
-        """Select a mode, replacing whatever was selected before."""
+        """Select a mode, replacing whatever was selected before.
+
+        Selecting one does not necessarily command anything: a mode a guard is
+        blocking waits, holding the battery, until the state of charge moves back.
+        """
         if feature is not ControlFeature.AUTOMATIC:
             self._require_modbus_control()
 
         self._feature = feature
-        await self.async_apply_feature()
+        await self.async_apply_feature(force=True)
 
     async def async_set_feature_power(
         self, feature: ControlFeature, watts: float
     ) -> None:
         """Set a mode's power. Editable whether or not that mode is selected."""
         self._feature_power[feature] = self._clamp_power(watts, feature)
-        await self.async_apply_feature()
+        await self.async_apply_feature(force=True)
 
-    def _desired_command(self, data: dict[str, Any]) -> tuple[ControlFeature, float]:
-        """Return what the device should be told right now.
+    async def async_set_charge_limit_soc(self, soc: float) -> None:
+        """Set the state of charge above which the battery must not be charged."""
+        self._charge_limit_soc = max(0.0, min(100.0, soc))
+        self._charge_guard = False
+        await self.async_apply_feature(force=True)
 
-        Holding needs a setpoint of 1 W because this device reads 0 as "no limit"
-        and resumes self-consumption.
+    async def async_set_battery_reserve_soc(self, soc: float) -> None:
+        """Set the state of charge below which the battery must not be drained."""
+        self._battery_reserve_soc = max(0.0, min(100.0, soc))
+        self._reserve_guard = False
+        await self.async_apply_feature(force=True)
+
+    def _update_guards(self, data: dict[str, Any]) -> None:
+        """Latch both guards, each releasing well clear of where it engaged.
+
+        A ceiling of 100 and a floor of 0 mean the guard is off, so an untouched
+        install never takes control away from the app.
+        """
+        soc = data.get("battery_soc")
+        if soc is None:
+            return
+        soc = float(soc)
+
+        if self._charge_limit_soc >= 100.0:
+            self._charge_guard = False
+        elif soc >= self._charge_limit_soc:
+            self._charge_guard = True
+        elif soc <= self._charge_limit_soc - GUARD_SOC_HYSTERESIS:
+            self._charge_guard = False
+
+        if self._battery_reserve_soc <= 0.0:
+            self._reserve_guard = False
+        elif soc <= self._battery_reserve_soc:
+            self._reserve_guard = True
+        elif soc >= self._battery_reserve_soc + GUARD_SOC_HYSTERESIS:
+            self._reserve_guard = False
+
+    def _measured_direction(self, data: dict[str, Any]) -> int:
+        """Return which way the battery would move if left alone.
+
+        Only used while the inverter is running itself, where no mode declares a
+        direction. Solar against house load says it without depending on the
+        battery, so guarding cannot feed back into its own input.
+        """
+        solar, house = data.get("solar_power"), data.get("house_power")
+        if solar is None or house is None:
+            return 0
+        if float(solar) > float(house) + GUARD_POWER_DEADBAND_W:
+            return 1
+        if float(house) > float(solar) + GUARD_POWER_DEADBAND_W:
+            return -1
+        return 0
+
+    def _guard_blocks(self, direction: int) -> ControlStatus | None:
+        """Return the guard forbidding movement in *direction*, if one does."""
+        if direction > 0 and self._charge_guard:
+            return ControlStatus.CHARGE_LIMIT_REACHED
+        if direction < 0 and self._reserve_guard:
+            return ControlStatus.RESERVE_REACHED
+        return None
+
+    def _desired_command(
+        self, data: dict[str, Any]
+    ) -> tuple[ControlFeature, float, ControlStatus | None]:
+        """Return what the device should be told right now, and why.
+
+        Guards come first and only ever restrict: whatever the mode asks for, the
+        battery is held still rather than pushed past a limit. Holding needs a
+        setpoint of 1 W because this device reads 0 as "no limit" and resumes
+        self-consumption.
         """
         if not self._heartbeat_enabled:
-            return ControlFeature.AUTOMATIC, 0.0
+            return ControlFeature.AUTOMATIC, 0.0, None
 
         definition = CONTROL_FEATURES[self._feature]
+        direction = (
+            self._measured_direction(data)
+            if self._feature is ControlFeature.AUTOMATIC
+            else definition.direction
+        )
+        if (blocked := self._guard_blocks(direction)) is not None:
+            return ControlFeature.HOLD_BATTERY, HOLD_SETPOINT_W, blocked
+
         if self._feature is ControlFeature.AUTOMATIC:
-            return ControlFeature.AUTOMATIC, 0.0
+            return ControlFeature.AUTOMATIC, 0.0, None
         if not definition.has_power:
-            return self._feature, HOLD_SETPOINT_W
+            return self._feature, HOLD_SETPOINT_W, None
         return (
             self._feature,
             self._clamp_power(self.feature_power(self._feature), self._feature),
+            None,
         )
+
+    def _within_dwell(self) -> bool:
+        """Return whether the last command is too recent to be worth replacing."""
+        if self._last_control_write_time is None:
+            return False
+        age = (dt.now() - self._last_control_write_time).total_seconds()
+        return age < MIN_CONTROL_DWELL_S
 
     async def async_apply_feature(
         self,
         data: dict[str, Any] | None = None,
         *,
         notify: bool = True,
+        force: bool = False,
     ) -> None:
-        """Send what the mode adds up to, if it differs from the last send."""
+        """Send what the mode and guards add up to, if it differs from the last send."""
         data = data if data is not None else self.data or {}
+        self._update_guards(data)
 
-        feature, power = self._desired_command(data)
+        feature, power, blocked = self._desired_command(data)
         changed = (feature, round(power)) != (
             self._commanded_feature,
             round(self._commanded_power),
         )
+
+        # Only a guard letting go waits out the dwell, so a state of charge sitting
+        # on the threshold cannot churn. Engaging one, anything the user asked for
+        # and any re-assert after losing control authority all go out immediately.
+        if (
+            changed
+            and not force
+            and blocked is None
+            and not self._control_stale
+            and self._within_dwell()
+        ):
+            if notify:
+                self.async_update_listeners()
+            return
 
         try:
             if changed or self._control_stale:
@@ -629,6 +767,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             # write never delivered would look settled and never be retried.
             self._commanded_feature = feature
             self._commanded_power = power
+            self._blocking_guard = blocked
             if changed:
                 self._reset_deviation()
             self._update_deviation(data)
@@ -769,7 +908,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         await self.async_send_heartbeat()
 
         try:
-            # Read all register blocks
             for register_block in self._register_blocks:
                 raw = await self.async_read_block(
                     register_block.start, register_block.count
@@ -853,13 +991,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
             return None
 
+    # ── Parameter and setpoint writes ─────────────────────────────────────────
+
     async def async_write_modbus_register(
         self, entity_def: NumberWritableDef, value: int
     ) -> None:
         """Write a device setting and verify it by reading it back.
 
-        Settings apply without Modbus control authority, so this never takes
-        control away from the EcoFlow app.
+        Settings apply without Modbus control authority, unlike the control word and
+        its setpoints, so this never takes control away from the EcoFlow app.
         """
         if not self.connected:
             raise HomeAssistantError("Modbus client is not connected")

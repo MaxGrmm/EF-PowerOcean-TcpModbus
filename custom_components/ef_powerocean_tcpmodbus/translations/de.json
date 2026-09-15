@@ -391,6 +391,12 @@
       "export_to_grid_power": {
         "name": "Einspeiseleistung"
       },
+      "charge_limit_soc": {
+        "name": "Ladegrenze"
+      },
+      "battery_reserve_soc": {
+        "name": "Batteriereserve"
+      },
       "min_soc_limit_control": {
         "name": "Minimale Batterie-Reserve"
       },
