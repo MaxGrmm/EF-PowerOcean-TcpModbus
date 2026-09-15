@@ -28,6 +28,7 @@ from .const import (
     ENERGY_SENSOR_MAP,
     SENSOR_MAP,
     UNIT_OF_RATIO,
+    WRITABLE_NUMBERS_MAP,
 )
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
@@ -58,9 +59,16 @@ async def async_setup_entry(
     empty_battery_slots = set(
         BATTERY_SOC_KEYS[coordinator.limits[CONF_BATTERY_COUNT] :]
     )
+    # A writable number already shows its register's value, so a read-only twin would
+    # only be a second row saying the same thing.
+    controlled_keys = {
+        number_def.read_key
+        for number_def in WRITABLE_NUMBERS_MAP
+        if coordinator.inverter_model not in number_def.unsupported_models
+    }
 
     for sensor in SENSOR_MAP:
-        if sensor.key in empty_battery_slots:
+        if sensor.key in empty_battery_slots or sensor.key in controlled_keys:
             continue
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 

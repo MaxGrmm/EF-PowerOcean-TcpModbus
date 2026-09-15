@@ -176,9 +176,6 @@
       "min_soc_limit": {
         "name": "Batterie Backup-Reserve"
       },
-      "device_led_brightness": {
-        "name": "Helligkeit LED-Geräteanzeige"
-      },
       "solar_power": {
         "name": "Solarleistung"
       },
@@ -369,9 +366,6 @@
       "intelligent_mode_ena": {
         "name": "Intelligenter Modus"
       },
-      "battery_saver_mode_ena": {
-        "name": "Batteriesparmodus"
-      },
       "system_fault": {
         "name": "Systemfehler",
         "state": {
@@ -404,10 +398,10 @@
         "name": "Batteriereserve"
       },
       "min_soc_limit_control": {
-        "name": "Batterie Backup-Reserve Steuerung"
+        "name": "Minimale Batterie-Reserve"
       },
       "device_led_brightness_control": {
-        "name": "Helligkeit LED-Geräteanzeige Steuerung"
+        "name": "Helligkeit LED-Geräteanzeige"
       }
     },
     "select": {
@@ -424,7 +418,7 @@
     },
     "switch": {
       "battery_saver_mode_control": {
-        "name": "Batteriesparmodus Steuerung"
+        "name": "Batteriesparmodus"
       }
     }
   }

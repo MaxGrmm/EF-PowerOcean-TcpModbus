@@ -163,7 +163,13 @@ class ControlFeatureDef:
     # working" from "the battery has no headroom left".
     measure_key: str | None = None
     # Telemetry key holding the device's own ceiling for this mode, if it has one.
+    # Only a ceiling the firmware actually enforces belongs here: the battery charge
+    # and discharge limit registers mirror the EcoFlow app's setting, which Modbus
+    # control overrides, so those modes bound themselves from the configuration.
     limit_key: str | None = None
+    # Key into the coordinator's configured limits, for a mode the device publishes
+    # no ceiling we can trust for.
+    config_limit_key: str | None = None
     # None for a mode with no power to configure, which only holds the battery.
     default_power: float | None = None
 
@@ -190,10 +196,12 @@ class ControlEntityDef:
     entity_category: EntityCategory | None = None
 
 
-# A commanded setpoint is never met exactly: the device slews at roughly 1.5 kW/min
-# and settles with a standing offset, so only a wide miss means anything.
-POWER_TOLERANCE_W: Final = 250.0
-POWER_TOLERANCE_FRACTION: Final = 0.05
+# A commanded setpoint is never met exactly. The inverter reaches a new setpoint
+# within a poll or two, but house load steps instantly and the battery takes a moment
+# to give up the difference: an excursion of nearly half the setpoint was measured on
+# a 2 kW export when a load switched on. Only a wide, sustained miss means anything.
+POWER_TOLERANCE_W: Final = 500.0
+POWER_TOLERANCE_FRACTION: Final = 0.15
 # SOC readings are whole percent, so leave room rather than testing for exactly 100.
 BATTERY_FULL_SOC: Final = 99.0
 BATTERY_EMPTY_MARGIN_SOC: Final = 1.0

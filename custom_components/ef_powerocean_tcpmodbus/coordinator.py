@@ -30,13 +30,14 @@ from .const import (
     CONF_MODBUS_CONTROL,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
+    CONTROL_COMMAND_BATTERY_SAVER_BIT,
     CONTROL_COMMAND_METHOD_MASK,
     CONTROL_COMMAND_METHOD_SHIFT,
-    CONTROL_COMMAND_POWER_SAVING_BIT,
     CONTROL_COMMAND_REGISTER,
     CONTROL_COMMAND_UNSAFE_BITS,
     CONTROL_FEATURES,
     CONTROL_POWER_FALLBACK_MAX,
+    CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_COUNT,
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
@@ -178,10 +179,16 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
-        self._power_saving = False
+        self._battery_saver = False
         self._last_control_write_time: datetime | None = None
-        # Set when control authority may have lapsed; the next poll re-sends the word.
-        self._control_stale = False
+        # A restart within the device's control window leaves it still following the
+        # method it was last told, so the first poll re-asserts rather than assuming
+        # control lapsed. Nothing is written at all while the gate is off.
+        self._control_stale = self._heartbeat_enabled
+        # How the commanded setpoint is being met, held over brief excursions.
+        self._deviation = ControlStatus.ACTIVE
+        self._deviation_candidate: ControlStatus | None = None
+        self._deviation_polls = 0
 
         self._energy_processor = EnergyProcessor(self.limits)
         self._status: CoordinatorStatus | None = None
@@ -250,16 +257,32 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     @property
     def control_status(self) -> ControlStatus:
         """Explain, in one word, what the selected mode is achieving."""
-        if not self._heartbeat_enabled:
+        if not self.in_control:
             return ControlStatus.NO_MODBUS_CONTROL
         if self._blocking_guard is not None:
             return self._blocking_guard
+        if not CONTROL_FEATURES[self._commanded_feature].commands_power:
+            return ControlStatus.AUTOMATIC
+        return self._deviation
 
+    def _reset_deviation(self) -> None:
+        """Forget how the last command was going; a new one starts from nothing."""
+        self._deviation = ControlStatus.ACTIVE
+        self._deviation_candidate = None
+        self._deviation_polls = 0
+
+    def _update_deviation(self, data: dict[str, Any]) -> None:
+        """Judge the commanded setpoint, ignoring a miss that passes in a poll or two.
+
+        A load switching on pulls the measurement well outside tolerance until the
+        battery takes the step up, which is the system working rather than failing.
+        """
         definition = CONTROL_FEATURES[self._commanded_feature]
         if not definition.commands_power:
-            return ControlStatus.AUTOMATIC
+            self._reset_deviation()
+            return
 
-        data = self.data or {}
+        data = data or {}
         measured = (
             data.get(definition.measure_key)
             if definition.measure_key is not None
@@ -267,18 +290,32 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         )
         # The effective floor is whichever of ours and the device's own bites first.
         device_floor = float(data.get("min_soc_limit") or 0.0)
-        return deviation_state(
+        state = deviation_state(
             signed_target=self._commanded_power * definition.sign,
             measured=None if measured is None else float(measured),
             soc=None if (soc := data.get("battery_soc")) is None else float(soc),
             min_soc=max(device_floor, self._battery_reserve_soc),
         )
 
+        if state is ControlStatus.ACTIVE:
+            self._reset_deviation()
+            return
+        if state is not self._deviation_candidate:
+            self._deviation_candidate = state
+            self._deviation_polls = 0
+        self._deviation_polls += 1
+        if self._deviation_polls >= CONTROL_STATUS_DAMPING_POLLS:
+            self._deviation = state
+
     def _control_power_ceiling(self, feature: ControlFeature) -> float:
         """Return the lowest ceiling that applies to *feature*.
 
         Nothing can exceed the inverter's AC rating whatever the feature asks for,
-        and the device's own limit caps it further where one is published.
+        and a ceiling the firmware publishes caps it further. The battery modes are
+        bounded by the configured module count instead: the device's charge and
+        discharge limit registers report the limit set in the EcoFlow app, which
+        Modbus control ignores, so honouring them would cap the user below what the
+        hardware accepts.
         """
         data = self.data or {}
         definition = CONTROL_FEATURES[feature]
@@ -286,6 +323,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         if definition.limit_key is not None and (
             limit := data.get(definition.limit_key)
+        ):
+            ceilings.append(float(limit))
+        # Zero means no battery count was configured, which bounds nothing.
+        if definition.config_limit_key is not None and (
+            limit := self.limits.get(definition.config_limit_key)
         ):
             ceilings.append(float(limit))
         if rated := data.get("inverter_rated_power"):
@@ -305,9 +347,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         ).total_seconds() <= HEARTBEAT_LAPSE_S
 
     @property
-    def power_saving_commanded(self) -> bool:
-        """Return whether power saving is being commanded."""
-        return self._power_saving
+    def battery_saver_commanded(self) -> bool:
+        """Return whether battery saver mode is being commanded."""
+        return self._battery_saver
 
     @property
     def control_command(self) -> int:
@@ -331,6 +373,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             },
             "charge_limit_soc": self._charge_limit_soc,
             "battery_reserve_soc": self._battery_reserve_soc,
+            "battery_saver": self._battery_saver,
             **self._energy_processor.dump_state(),
         }
 
@@ -355,6 +398,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             self._charge_limit_soc = float(charge)
         if (reserve := stored.get("battery_reserve_soc")) is not None:
             self._battery_reserve_soc = float(reserve)
+        # A restart does not turn battery saver off on the device, so reporting it
+        # off would be a lie until the user toggled it twice.
+        if (saver := stored.get("battery_saver")) is not None:
+            self._battery_saver = bool(saver)
 
     # ── Connection ────────────────────────────────────────────────────────────
 
@@ -545,15 +592,17 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 "rejected, so the device would ignore the command. Nothing written."
             )
 
-    def _compose_control_command(self) -> int:
-        """Build the control word from the commanded intent and power-saving state.
+    def _compose_control_command(self, feature: ControlFeature | None = None) -> int:
+        """Build the control word for *feature*, or for the commanded one by default.
 
         System control command (0x0215)
         """
-        method = self.control_method.command_value
+        if feature is None:
+            feature = self._commanded_feature
+        method = CONTROL_FEATURES[feature].method.command_value
         word = (method & CONTROL_COMMAND_METHOD_MASK) << CONTROL_COMMAND_METHOD_SHIFT
-        if self._power_saving:
-            word |= 1 << CONTROL_COMMAND_POWER_SAVING_BIT
+        if self._battery_saver:
+            word |= 1 << CONTROL_COMMAND_BATTERY_SAVER_BIT
         return word
 
     def _clamp_power(self, watts: float, feature: ControlFeature) -> float:
@@ -698,21 +747,31 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             round(self._commanded_power),
         )
 
-        # A guard flipping back and forth must not out-pace the inverter's ramp.
-        # Anything the user asked for, and any re-assert after losing control
-        # authority, goes out immediately.
-        if changed and not force and not self._control_stale and self._within_dwell():
+        # Only a guard letting go waits out the dwell, so a state of charge sitting
+        # on the threshold cannot churn. Engaging one, anything the user asked for
+        # and any re-assert after losing control authority all go out immediately.
+        if (
+            changed
+            and not force
+            and blocked is None
+            and not self._control_stale
+            and self._within_dwell()
+        ):
             if notify:
                 self.async_update_listeners()
             return
 
-        self._commanded_feature = feature
-        self._commanded_power = power
-        self._blocking_guard = blocked
-
         try:
             if changed or self._control_stale:
                 await self._async_send_control(feature, power)
+            # Committed only once the device has been told: recording a command the
+            # write never delivered would look settled and never be retried.
+            self._commanded_feature = feature
+            self._commanded_power = power
+            self._blocking_guard = blocked
+            if changed:
+                self._reset_deviation()
+            self._update_deviation(data)
         finally:
             if notify:
                 self.async_update_listeners()
@@ -726,7 +785,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             await self._async_require_control_authority()
             await self._async_write_setpoint(feature, power)
 
-        await self._async_write_control_word(self._compose_control_command())
+        await self._async_write_control_word(self._compose_control_command(feature))
         self._last_control_write_time = dt.now()
         self._control_stale = False
 
@@ -783,14 +842,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 f"Modbus rejected setpoint {value} W to {register.address}: {response}"
             )
 
-    async def async_set_power_saving(self, enabled: bool) -> None:
-        """Command power-saving mode without disturbing the control intent."""
-        previous = self._power_saving
-        self._power_saving = enabled
+    async def async_set_battery_saver(self, enabled: bool) -> None:
+        """Command battery saver mode without disturbing the control intent."""
+        previous = self._battery_saver
+        self._battery_saver = enabled
         try:
             await self._async_apply_control_command()
         except HomeAssistantError:
-            self._power_saving = previous
+            self._battery_saver = previous
             raise
 
     async def _async_apply_control_command(self) -> None:
@@ -804,7 +863,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         if not self.connected:
             raise HomeAssistantError("Modbus client is not connected")
 
-        # Power saving applies on its own, like the LED brightness does. Only a
+        # Battery saver applies on its own, like the LED brightness does. Only a
         # control method needs the app locked out, so only it takes control.
         if CONTROL_FEATURES[self._commanded_feature].commands_power:
             await self._async_require_control_authority()

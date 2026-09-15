@@ -176,9 +176,6 @@
       "min_soc_limit": {
         "name": "Min SOC Limit"
       },
-      "device_led_brightness": {
-        "name": "Device LED brightness"
-      },
       "solar_power": {
         "name": "Solar Power"
       },
@@ -366,9 +363,6 @@
       "intelligent_mode_ena": {
         "name": "Intelligent Mode"
       },
-      "battery_saver_mode_ena": {
-        "name": "Battery Saver Mode"
-      },
       "system_fault": {
         "name": "System Fault"
       },
@@ -393,10 +387,10 @@
         "name": "Battery Reserve"
       },
       "min_soc_limit_control": {
-        "name": "Minimum SOC Limit Control"
+        "name": "Minimum SOC Limit"
       },
       "device_led_brightness_control": {
-        "name": "LED Brightness Control"
+        "name": "LED Brightness"
       }
     },
     "select": {
@@ -413,7 +407,7 @@
     },
     "switch": {
       "battery_saver_mode_control": {
-        "name": "Power-saving Mode Control"
+        "name": "Battery Saver Mode"
       }
     }
   }

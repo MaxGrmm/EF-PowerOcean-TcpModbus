@@ -10,7 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, POWER_SAVING_SWITCH
+from .const import BATTERY_SAVER_SWITCH, DOMAIN
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .models import SwitchDef
@@ -27,7 +27,7 @@ async def async_setup_entry(
     coordinator: EcoflowCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     async_add_entities(
-        [EcoFlowPowerSavingSwitch(coordinator, entry, POWER_SAVING_SWITCH)]
+        [EcoFlowBatterySaverSwitch(coordinator, entry, BATTERY_SAVER_SWITCH)]
     )
 
 
@@ -47,8 +47,8 @@ class EcoFlowSwitch(EcoFlowBaseEntity, SwitchEntity):
             self._attr_icon = definition.icon
 
 
-class EcoFlowPowerSavingSwitch(EcoFlowSwitch):
-    """Power-saving mode, bit 3 of the write-only control command.
+class EcoFlowBatterySaverSwitch(EcoFlowSwitch):
+    """Battery saver mode, bit 3 of the write-only control command.
 
     The coordinator composes the control word from this bit and whichever mode is
     selected, so toggling here never disturbs the mode.
@@ -58,18 +58,18 @@ class EcoFlowPowerSavingSwitch(EcoFlowSwitch):
     def is_on(self) -> bool:
         # System Modes bit 3 is a status, not an echo: it only rises once the
         # inverter has actually gone idle, so it cannot confirm the command.
-        return self.coordinator.power_saving_commanded
+        return self.coordinator.battery_saver_commanded
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
         return {
-            "device_reports_low_power": data.get("battery_saver_mode_ena"),
+            "device_reports_battery_saver": data.get("battery_saver_mode_ena"),
             "commanded_word": f"0x{self.coordinator.control_command:08X}",
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_power_saving(True)
+        await self.coordinator.async_set_battery_saver(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_power_saving(False)
+        await self.coordinator.async_set_battery_saver(False)

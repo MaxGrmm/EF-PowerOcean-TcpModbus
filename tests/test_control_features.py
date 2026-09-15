@@ -55,6 +55,62 @@ def test_feature_keys_all_resolve(feature: ControlFeature) -> None:
     if definition.setpoint_key is not None:
         assert definition.setpoint_key in const.REGISTERS_BY_KEY
 
+    if definition.config_limit_key is not None:
+        assert definition.config_limit_key in {
+            const.CONF_MAX_BATTERY_CHARGED_POWER,
+            const.CONF_MAX_BATTERY_DISCHARGED_POWER,
+        }
+
+
+def test_the_battery_modes_do_not_bound_themselves_by_the_apps_limit() -> None:
+    """Modbus control overrides the app's charge limit, so that register is not a cap.
+
+    Measured on a PowerOcean Plus: with the app limited to 500 W, a charge command
+    still drew the full 5 kW the modules accept.
+    """
+    for feature in (ControlFeature.CHARGE_BATTERY, ControlFeature.DISCHARGE_BATTERY):
+        definition = const.CONTROL_FEATURES[feature]
+        assert definition.limit_key is None
+        assert definition.config_limit_key is not None
+
+    # The export limit is a real firmware cap and stays in force.
+    assert const.CONTROL_FEATURES[ControlFeature.EXPORT_TO_GRID].limit_key == (
+        "feed_in_power_max"
+    )
+
+
+def test_the_signs_follow_the_devices_own_measurements() -> None:
+    """Confirmed on hardware: grid export reads negative, battery charging positive.
+
+    Nothing else in the code pins this down, and flipping either sign on the
+    assumption that export should be positive inverts the status of every mode.
+    """
+    export = const.CONTROL_FEATURES[ControlFeature.EXPORT_TO_GRID]
+    charge = const.CONTROL_FEATURES[ControlFeature.CHARGE_BATTERY]
+
+    assert (export.measure_key, export.sign) == ("grid_power", -1)
+    assert (charge.measure_key, charge.sign) == ("battery_power", 1)
+
+    # Exporting 2 kW against a 2 kW command is the mode working, not a deviation.
+    assert (
+        deviation_state(
+            signed_target=2000.0 * export.sign,
+            measured=-2000.0,
+            soc=59.0,
+            min_soc=0.0,
+        )
+        is ControlStatus.ACTIVE
+    )
+    assert (
+        deviation_state(
+            signed_target=1700.0 * charge.sign,
+            measured=1700.0,
+            soc=59.0,
+            min_soc=0.0,
+        )
+        is ControlStatus.ACTIVE
+    )
+
 
 def test_opposing_features_share_a_register_but_not_a_sign() -> None:
     """Charge and discharge are one register; the sign is what tells them apart."""
@@ -119,7 +175,7 @@ def test_an_empty_battery_explains_a_target_that_needs_supplying() -> None:
 
 
 def test_a_wide_miss_with_headroom_left_is_only_ramping() -> None:
-    """The device slews at roughly 1.5 kW/min, so a gap alone proves nothing."""
+    """A gap alone proves nothing while the battery can still close it."""
     state = deviation_state(
         signed_target=5000.0, measured=1000.0, soc=50.0, min_soc=10.0
     )

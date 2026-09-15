@@ -82,7 +82,6 @@ class EcoFlowFeaturePowerNumber(EcoFlowBaseEntity, NumberEntity):
     _attr_native_step = 100.0
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_device_class = "power"
-    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:speedometer"
 
     def __init__(

@@ -74,11 +74,11 @@ HEARTBEAT_LAPSE_S: Final = 60
 
 # 0x0215, write-only. Bit 0 forces the system off-grid and bit 1 shuts it down, so a
 # command touching either is refused before it reaches the wire. Bit 3 is the
-# power-saving switch and bits 4-7 select the control method; the setpoint registers
+# battery saver switch and bits 4-7 select the control method; the setpoint registers
 # only take effect while their control method is selected here.
 CONTROL_COMMAND_REGISTER: Final = 40534
 CONTROL_COMMAND_UNSAFE_BITS: Final = 0b11
-CONTROL_COMMAND_POWER_SAVING_BIT: Final = 3
+CONTROL_COMMAND_BATTERY_SAVER_BIT: Final = 3
 CONTROL_COMMAND_METHOD_SHIFT: Final = 4
 CONTROL_COMMAND_METHOD_MASK: Final = 0xF
 
@@ -189,6 +189,7 @@ SENSOR_MAP: list[SensorDef] = [
         unit=None,
         device_class=None,
         state_class="measurement",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="house_power",
@@ -231,17 +232,12 @@ SENSOR_MAP: list[SensorDef] = [
         unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_discharge_power_limit",
         unit=UnitOfPower.WATT,
         device_class="power",
-        state_class="measurement",
-    ),
-    SensorDef(
-        key="device_led_brightness",
-        unit=UNIT_OF_RATIO,
-        device_class=None,
         state_class="measurement",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
@@ -406,27 +402,6 @@ SENSOR_MAP: list[SensorDef] = [
         state_class="measurement",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    SensorDef(
-        key="soc_battery_1",
-        unit=UNIT_OF_RATIO,
-        device_class="battery",
-        state_class="measurement",
-        entity_category=EntityCategory.DIAGNOSTIC,
-    ),
-    SensorDef(
-        key="soc_battery_2",
-        unit=UNIT_OF_RATIO,
-        device_class="battery",
-        state_class="measurement",
-        entity_category=EntityCategory.DIAGNOSTIC,
-    ),
-    SensorDef(
-        key="soc_battery_3",
-        unit=UNIT_OF_RATIO,
-        device_class="battery",
-        state_class="measurement",
-        entity_category=EntityCategory.DIAGNOSTIC,
-    ),
     *[
         SensorDef(
             key=key,
@@ -466,6 +441,7 @@ SENSOR_MAP: list[SensorDef] = [
         unit=UnitOfEnergy.KILO_WATT_HOUR,
         device_class="energy",
         state_class="total",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="grid_mode",
@@ -587,11 +563,9 @@ DAILY_ENERGY_SENSORS_DEVICE_RAW: list[SensorDef] = [
 BINARY_SENSOR_MAP: list[BinarySensorDef] = [
     BinarySensorDef("self_use_mode_ena"),
     BinarySensorDef("intelligent_mode_ena"),
-    BinarySensorDef("battery_saver_mode_ena"),
     BinarySensorDef(
         "system_fault",
         device_class="problem",
-        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     BinarySensorDef(
         "system_power_on",
@@ -602,14 +576,15 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
 
 
 # Not a device register: whether the heartbeat currently holds control authority.
+# Kept out of diagnostics because it answers whether commands are reaching the device.
 MODBUS_CONTROL_BINARY_SENSOR: Final = BinarySensorDef(
     key="modbus_control",
     device_class="running",
-    entity_category=EntityCategory.DIAGNOSTIC,
 )
 
-# Written as bit 3 of the control command register; read back as battery_saver_mode_ena.
-POWER_SAVING_SWITCH: Final = SwitchDef(
+# Written as bit 3 of the control command register. The device's own report of the
+# state is bit 3 of System Modes, which the switch carries as an attribute.
+BATTERY_SAVER_SWITCH: Final = SwitchDef(
     key="battery_saver_mode_control",
     entity_category=EntityCategory.CONFIG,
     icon="mdi:leaf",
@@ -629,7 +604,7 @@ CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
         setpoint_key="battery_power_setpoint",
         sign=1,
         measure_key="battery_power",
-        limit_key="battery_charge_power_limit",
+        config_limit_key=CONF_MAX_BATTERY_CHARGED_POWER,
         default_power=2000.0,
     ),
     ControlFeature.DISCHARGE_BATTERY: ControlFeatureDef(
@@ -637,7 +612,7 @@ CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
         setpoint_key="battery_power_setpoint",
         sign=-1,
         measure_key="battery_power",
-        limit_key="battery_discharge_power_limit",
+        config_limit_key=CONF_MAX_BATTERY_DISCHARGED_POWER,
         default_power=2000.0,
     ),
     ControlFeature.EXPORT_TO_GRID: ControlFeatureDef(
@@ -650,14 +625,16 @@ CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
     ),
 }
 
+# No entity category, so Home Assistant shows the mode and its power next to each
+# other under Controls rather than mixed in with the settings that always apply.
 BATTERY_MODE_SELECT: Final = ControlEntityDef(
     key="battery_mode",
-    entity_category=EntityCategory.CONFIG,
     icon="mdi:home-battery",
 )
 
 # One ceiling and one floor for the whole system. They are guards, not modes: they
-# apply whatever the select says, including while the inverter runs itself.
+# apply whatever the select says, including while the inverter runs itself, which is
+# why they sit under Configuration instead of with the mode.
 CHARGE_LIMIT_SOC_NUMBER: Final = ControlEntityDef(
     key="charge_limit_soc",
     entity_category=EntityCategory.CONFIG,
@@ -672,8 +649,9 @@ BATTERY_RESERVE_SOC_NUMBER: Final = ControlEntityDef(
 # recalibrate its state of charge, so a permanently lower ceiling costs accuracy.
 DEFAULT_CHARGE_LIMIT_SOC: Final = 100.0
 # 0 disables the reserve, handing the floor back to the device and any external
-# optimiser. The device's own backup ratio is not writable on a PowerOcean Plus.
-DEFAULT_BATTERY_RESERVE_SOC: Final = 20.0
+# optimiser. Both guards are off by default: an untouched install must keep the app
+# in charge of the battery and never take control away from it on its own.
+DEFAULT_BATTERY_RESERVE_SOC: Final = 0.0
 
 # A guard releases well clear of where it engaged. State of charge arrives as whole
 # percent, so a narrow band would chase quantisation rather than real energy; a wide
@@ -682,9 +660,13 @@ GUARD_SOC_HYSTERESIS: Final = 5.0
 # In automatic the guard has to infer which way the battery would move from PV
 # against house load. This keeps passing clouds from toggling it.
 GUARD_POWER_DEADBAND_W: Final = 200.0
-# The device slews at roughly 1.5 kW/min, so a command needs the better part of a
-# minute to take effect. Re-commanding faster than this only causes ramping.
-MIN_CONTROL_DWELL_S: Final = 300.0
+# The inverter answers a command within a poll or two, so this is only here to keep a
+# guard sitting on its release threshold from churning. Engaging a guard bypasses it:
+# delaying the one thing that protects the battery is never worth it.
+MIN_CONTROL_DWELL_S: Final = 60.0
+# House loads step instantly and the battery needs a poll or two to absorb the step,
+# so a single reading outside tolerance is a transient rather than a failed command.
+CONTROL_STATUS_DAMPING_POLLS: Final = 3
 # 0 means "no limit" to this device rather than "hold at zero", so holding the
 # battery still needs a setpoint just above it.
 HOLD_SETPOINT_W: Final = 1.0
@@ -706,14 +688,13 @@ WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
     NumberWritableDef(
         key="min_soc_limit_control",
         read_key="min_soc_limit",
-        name="Minimum SOC Limit Control",
+        name="Minimum SOC Limit",
         register=REGISTERS_BY_KEY["min_soc_limit"].address,
         min_value=0.0,
         max_value=100.0,
         step=1.0,
         unit=UNIT_OF_RATIO,
         device_class="battery",
-        advanced=True,
         # The Plus stores this and never acts on it; writing would leave the sensor
         # reporting our value while the device keeps enforcing the app's.
         unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
@@ -721,7 +702,7 @@ WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
     NumberWritableDef(
         key="device_led_brightness_control",
         read_key="device_led_brightness",
-        name="LED Brightness Control",
+        name="LED Brightness",
         register=REGISTERS_BY_KEY["device_led_brightness"].address,
         min_value=0.0,
         max_value=100.0,
