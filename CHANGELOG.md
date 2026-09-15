@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.5.0] - Unreleased
+
+### Added
+
+- Modbus Control setting, off by default, that lets the integration command the inverter. While it is enabled the EcoFlow app cannot control the system, and turning it off hands control back after about 60 seconds.
+- Battery Mode control: automatic, hold battery, charge battery, discharge battery and export to grid, each with its own power setting.
+- Control Status sensor reporting whether the commanded mode is active, still ramping, or unreachable because the battery is full or empty.
+- Charge Limit and Battery Reserve guards, which apply in every mode including automatic. Both are off by default.
+- Battery Saver Mode switch.
+- Modbus Control binary sensor showing whether the inverter is currently following the integration.
+- System Power Setpoint, Inverter Power Setpoint and Battery Power Setpoint sensors.
+
+### Changed
+
+- Battery mode and its power sit under Controls, the two guards under Configuration.
+- Moved to Diagnostic: System Modes, Battery Charge Power Limit, Battery Discharge Power Limit and Battery Net Energy. System Fault is no longer diagnostic.
+- Writable controls dropped the "Control" suffix from their names.
+
+### Fixed
+
+- 32-bit register writes were sent low word first and silently ignored by the inverter. They are now sent high word first.
+
+### Removed
+
+- Device LED brightness sensor, which duplicated the LED Brightness control.
+- Battery Saver Mode binary sensor. The switch now carries the inverter's own state as an attribute instead.
+- Minimum SOC Limit control on PowerOcean Plus, whose firmware accepts the write and then ignores it.
+
 ## [2.4.3] - 2026-09-04
 
 ### Fixed
