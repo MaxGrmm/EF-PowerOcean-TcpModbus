@@ -171,7 +171,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         }
         self._charge_limit_soc = DEFAULT_CHARGE_LIMIT_SOC
         self._battery_reserve_soc = DEFAULT_BATTERY_RESERVE_SOC
-        # Latched so a guard does not chatter on a SOC sitting at its limit.
         self._charge_guard = False
         self._reserve_guard = False
         # Which guard, if any, is forcing the current command.
@@ -288,7 +287,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             if definition.measure_key is not None
             else None
         )
-        # The effective floor is whichever of ours and the device's own bites first.
         device_floor = float(data.get("min_soc_limit") or 0.0)
         state = deviation_state(
             signed_target=self._commanded_power * definition.sign,
@@ -611,11 +609,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     # ── Features ──────────────────────────────────────────────────────────────
 
     async def async_select_feature(self, feature: ControlFeature) -> None:
-        """Select a mode, replacing whatever was selected before.
-
-        Selecting one does not necessarily command anything: a mode a guard is
-        blocking waits, holding the battery, until the state of charge moves back.
-        """
+        """Select a control feature."""
         if feature is not ControlFeature.AUTOMATIC:
             self._require_modbus_control()
 
@@ -693,13 +687,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def _desired_command(
         self, data: dict[str, Any]
     ) -> tuple[ControlFeature, float, ControlStatus | None]:
-        """Return what the device should be told right now, and why.
-
-        Guards come first and only ever restrict: whatever the mode asks for, the
-        battery is held still rather than pushed past a limit. Holding needs a
-        setpoint of 1 W because this device reads 0 as "no limit" and resumes
-        self-consumption.
-        """
+        """Determine what command the inverter should do now."""
         if not self._heartbeat_enabled:
             return ControlFeature.AUTOMATIC, 0.0, None
 
@@ -722,7 +710,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             None,
         )
 
-    def _within_dwell(self) -> bool:
+    def _was_last_command_recent(self) -> bool:
         """Return whether the last command is too recent to be worth replacing."""
         if self._last_control_write_time is None:
             return False
@@ -746,15 +734,12 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             round(self._commanded_power),
         )
 
-        # Only a guard letting go waits out the dwell, so a state of charge sitting
-        # on the threshold cannot churn. Engaging one, anything the user asked for
-        # and any re-assert after losing control authority all go out immediately.
         if (
             changed
             and not force
             and blocked is None
             and not self._control_stale
-            and self._within_dwell()
+            and self._was_last_command_recent()
         ):
             if notify:
                 self.async_update_listeners()

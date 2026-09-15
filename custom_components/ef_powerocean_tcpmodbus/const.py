@@ -627,9 +627,6 @@ BATTERY_MODE_SELECT: Final = ControlEntityDef(
     icon="mdi:home-battery",
 )
 
-# One ceiling and one floor for the whole system. They are guards, not modes: they
-# apply whatever the select says, including while the inverter runs itself, which is
-# why they sit under Configuration instead of with the mode.
 CHARGE_LIMIT_SOC_NUMBER: Final = ControlEntityDef(
     key="charge_limit_soc",
     entity_category=EntityCategory.CONFIG,
@@ -640,30 +637,14 @@ BATTERY_RESERVE_SOC_NUMBER: Final = ControlEntityDef(
     entity_category=EntityCategory.CONFIG,
     icon="mdi:battery-lock",
 )
-# 100 disables the ceiling. LFP wants an occasional full charge so the BMS can
-# recalibrate its state of charge, so a permanently lower ceiling costs accuracy.
 DEFAULT_CHARGE_LIMIT_SOC: Final = 100.0
-# 0 disables the reserve, handing the floor back to the device and any external
-# optimiser. Both guards are off by default: an untouched install must keep the app
-# in charge of the battery and never take control away from it on its own.
 DEFAULT_BATTERY_RESERVE_SOC: Final = 0.0
 
-# A guard releases well clear of where it engaged. State of charge arrives as whole
-# percent, so a narrow band would chase quantisation rather than real energy; a wide
-# one makes the swings coarser without moving any more energy through the battery.
 GUARD_SOC_HYSTERESIS: Final = 5.0
-# In automatic the guard has to infer which way the battery would move from PV
-# against house load. This keeps passing clouds from toggling it.
 GUARD_POWER_DEADBAND_W: Final = 200.0
-# The inverter answers a command within a poll or two, so this is only here to keep a
-# guard sitting on its release threshold from churning. Engaging a guard bypasses it:
-# delaying the one thing that protects the battery is never worth it.
 MIN_CONTROL_DWELL_S: Final = 60.0
-# House loads step instantly and the battery needs a poll or two to absorb the step,
-# so a single reading outside tolerance is a transient rather than a failed command.
 CONTROL_STATUS_DAMPING_POLLS: Final = 3
-# 0 means "no limit" to this device rather than "hold at zero", so holding the
-# battery still needs a setpoint just above it.
+# 0 means "no limit" to the inverter and not "hold at zero", so we therefore set the lowest power to hold.
 HOLD_SETPOINT_W: Final = 1.0
 
 # Not a device register: whether the selected mode is doing anything, and why not.
