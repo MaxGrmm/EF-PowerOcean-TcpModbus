@@ -103,6 +103,15 @@
       "system_modes": {
         "name": "Betriebsmodi"
       },
+      "system_power_setpoint": {
+        "name": "System-Leistungssollwert"
+      },
+      "inverter_power_setpoint": {
+        "name": "Wechselrichter-Leistungssollwert"
+      },
+      "battery_power_setpoint": {
+        "name": "Batterie-Leistungssollwert"
+      },
       "battery_count": {
         "name": "Batterieanzahl"
       },

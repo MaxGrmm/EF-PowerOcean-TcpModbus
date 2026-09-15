@@ -94,6 +94,150 @@ class GridMode(StrEnum):
     ISLANDED = "islanded"
 
 
+class ControlMode(StrEnum):
+    """Control method the device follows.
+
+    Commanded through bits 4-7 of the System Control Command (0x0215). The device
+    is also meant to report it back through System State 2 (0x0213), but that
+    register reads zero on a PowerOcean Plus, so it is never read back.
+    """
+
+    DEFAULT = "default"
+    SYSTEM_FEED = "system_feed"
+    INVERTER_FEED = "inverter_feed"
+    BATTERY_LIMITS = "battery_limits"
+
+    @property
+    def command_value(self) -> int:
+        """Return the protocol enumeration value."""
+        return {
+            ControlMode.DEFAULT: 0,
+            ControlMode.SYSTEM_FEED: 1,
+            ControlMode.INVERTER_FEED: 2,
+            ControlMode.BATTERY_LIMITS: 3,
+        }[self]
+
+
+class ControlFeature(StrEnum):
+    """What the user wants the inverter to do.
+
+    The protocol follows a single control method, so these are the options of one
+    select rather than independent toggles.
+    """
+
+    AUTOMATIC = "automatic"
+    HOLD_BATTERY = "hold_battery"
+    CHARGE_BATTERY = "charge_battery"
+    DISCHARGE_BATTERY = "discharge_battery"
+    EXPORT_TO_GRID = "export_to_grid"
+
+
+class ControlStatus(StrEnum):
+    """What the inverter is doing about the selected mode."""
+
+    NO_MODBUS_CONTROL = "no_modbus_control"
+    AUTOMATIC = "automatic"
+    CHARGE_LIMIT_REACHED = "charge_limit_reached"
+    RESERVE_REACHED = "reserve_reached"
+    ACTIVE = "active"
+    RAMPING = "ramping"
+    UNREACHABLE_BATTERY_FULL = "unreachable_battery_full"
+    UNREACHABLE_BATTERY_EMPTY = "unreachable_battery_empty"
+
+
+@dataclass(frozen=True)
+class ControlFeatureDef:
+    """A mode and the single instruction it sends.
+
+    The sign lives here rather than in the user's value, so every power shown and
+    set is a positive magnitude. It also says which guard can block the mode:
+    charging is blocked by the charge limit, discharging by the battery reserve.
+    """
+
+    method: ControlMode
+    # Read key of the setpoint register the method acts on; None for AUTOMATIC.
+    setpoint_key: str | None = None
+    sign: int = 1
+    # Telemetry key holding the quantity this mode pins, in the setpoint's sign
+    # convention. Comparing it against the command is the only way to tell "it is
+    # working" from "the battery has no headroom left".
+    measure_key: str | None = None
+    # Telemetry key holding the device's own ceiling for this mode, if it has one.
+    # Only a ceiling the firmware actually enforces belongs here: the battery charge
+    # and discharge limit registers mirror the EcoFlow app's setting, which Modbus
+    # control overrides, so those modes bound themselves from the configuration.
+    limit_key: str | None = None
+    # Key into the coordinator's configured limits, for a mode the device publishes
+    # no ceiling we can trust for.
+    config_limit_key: str | None = None
+    # None for a mode with no power to configure, which only holds the battery.
+    default_power: float | None = None
+
+    @property
+    def commands_power(self) -> bool:
+        return self.setpoint_key is not None
+
+    @property
+    def has_power(self) -> bool:
+        return self.default_power is not None
+
+    @property
+    def direction(self) -> int:
+        """Return +1 while charging the battery, -1 while draining it, 0 for neither."""
+        return self.sign if self.has_power else 0
+
+
+@dataclass(frozen=True)
+class ControlEntityDef:
+    """An entity that carries commanded state rather than a device register."""
+
+    key: str
+    icon: str | None = None
+    entity_category: EntityCategory | None = None
+
+
+# A commanded setpoint is never met exactly. The inverter reaches a new setpoint
+# within a poll or two, but house load steps instantly and the battery takes a moment
+# to give up the difference: an excursion of nearly half the setpoint was measured on
+# a 2 kW export when a load switched on. Only a wide, sustained miss means anything.
+POWER_TOLERANCE_W: Final = 500.0
+POWER_TOLERANCE_FRACTION: Final = 0.15
+# SOC readings are whole percent, so leave room rather than testing for exactly 100.
+BATTERY_FULL_SOC: Final = 99.0
+BATTERY_EMPTY_MARGIN_SOC: Final = 1.0
+
+
+def deviation_state(
+    *,
+    signed_target: float,
+    measured: float | None,
+    soc: float | None,
+    min_soc: float,
+) -> ControlStatus:
+    """Judge a setpoint that is already commanded against what the system is doing.
+
+    Every control method reaches its target by moving the battery, and the device
+    will not curtail PV to help, so a target is only reachable while the battery
+    has headroom in the direction the error points. A positive error needs the
+    battery to absorb, a negative one needs it to supply.
+    """
+    if measured is None:
+        return ControlStatus.ACTIVE
+
+    error = signed_target - measured
+    tolerance = max(POWER_TOLERANCE_W, abs(signed_target) * POWER_TOLERANCE_FRACTION)
+    if abs(error) <= tolerance:
+        return ControlStatus.ACTIVE
+
+    if soc is not None:
+        if error > 0 and soc >= BATTERY_FULL_SOC:
+            return ControlStatus.UNREACHABLE_BATTERY_FULL
+        if error < 0 and soc <= min_soc + BATTERY_EMPTY_MARGIN_SOC:
+            return ControlStatus.UNREACHABLE_BATTERY_EMPTY
+
+    return ControlStatus.RAMPING
+
+
 class RegisterType(StrEnum):
     """Word layout of a register. Multi-word values are stored low word first."""
 

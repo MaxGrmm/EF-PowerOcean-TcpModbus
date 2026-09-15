@@ -104,6 +104,15 @@
       "system_modes": {
         "name": "System Modes"
       },
+      "system_power_setpoint": {
+        "name": "System Power Setpoint"
+      },
+      "inverter_power_setpoint": {
+        "name": "Inverter Power Setpoint"
+      },
+      "battery_power_setpoint": {
+        "name": "Battery Power Setpoint"
+      },
       "battery_count": {
         "name": "Battery Module Count"
       },
