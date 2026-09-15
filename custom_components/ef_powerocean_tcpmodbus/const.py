@@ -47,6 +47,7 @@ CONF_MAX_BATTERY_CHARGED_POWER: Final = "battery_charged_power_max"
 CONF_MAX_BATTERY_DISCHARGED_POWER: Final = "battery_discharged_power_max"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_CALC_SOLAR_POWER: Final = "calc_solar_power"
+CONF_MODBUS_CONTROL: Final = "modbus_control"
 CONF_INVERTER_MODEL: Final = "inverter_model"
 
 MAX_BATTERY_CHARGED_POWER: Final = 2500
@@ -55,6 +56,16 @@ MAX_BATTERY_COUNT: Final = 12
 MAX_FAULT_EVENTS: Final = 20
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
+
+# The device stores writes but acts on none of them unless this register is written
+# at least once a minute. Sent well inside that window so a missed poll is harmless.
+HEARTBEAT_REGISTER: Final = 40608
+HEARTBEAT_INTERVAL_S: Final = 20
+HEARTBEAT_VALUE: Final = 1
+# The device's own window. A gap longer than this means it has dropped Modbus
+# control and re-inherited the app settings.
+HEARTBEAT_LAPSE_S: Final = 60
+
 ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
@@ -533,6 +544,14 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
 ]
+
+
+# Not a device register: whether the heartbeat currently holds control authority.
+# Kept out of diagnostics because it answers whether commands are reaching the device.
+MODBUS_CONTROL_BINARY_SENSOR: Final = BinarySensorDef(
+    key="modbus_control",
+    device_class="running",
+)
 
 
 # Map of all modbus registers available for writing operations.

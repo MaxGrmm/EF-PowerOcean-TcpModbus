@@ -99,6 +99,7 @@ class RegisterType(StrEnum):
 
     UINT16 = "uint16"
     UINT32 = "uint32"
+    INT32 = "int32"
     FLOAT32 = "float32"
     SERIAL = "serial"
 
@@ -106,10 +107,42 @@ class RegisterType(StrEnum):
 REGISTER_SIZES: Final = {
     RegisterType.UINT16: 1,
     RegisterType.UINT32: 2,
+    RegisterType.INT32: 2,
     RegisterType.FLOAT32: 2,
     # 16 ASCII bytes.
     RegisterType.SERIAL: 8,
 }
+
+
+def encode_register(value: int, data_type: RegisterType) -> list[int]:
+    """Return the raw words for writing *value*, HIGH word first.
+
+    Reads and writes disagree on this device. It publishes 32-bit values low word
+    first (see decode_register) but parses multi-register writes high word first:
+    a setpoint of 500 sent low word first is taken as 500 << 16 and the command is
+    ignored, while the same value sent high word first is applied and then
+    re-published low word first. At least on the PowerOcean Plus, this behavior
+    has been observed consistently.
+
+    Raises ValueError when the value does not fit the type or cannot be written.
+    """
+    if data_type is RegisterType.UINT16:
+        if not 0 <= value <= 0xFFFF:
+            raise ValueError(f"{value} does not fit a UINT16 register")
+        return [value]
+
+    if data_type is RegisterType.UINT32:
+        if not 0 <= value <= 0xFFFFFFFF:
+            raise ValueError(f"{value} does not fit a UINT32 register")
+        word = value
+    elif data_type is RegisterType.INT32:
+        if not -0x80000000 <= value <= 0x7FFFFFFF:
+            raise ValueError(f"{value} does not fit an INT32 register")
+        word = value & 0xFFFFFFFF
+    else:
+        raise ValueError(f"Registers of type {data_type} cannot be written")
+
+    return [(word >> 16) & 0xFFFF, word & 0xFFFF]
 
 
 @dataclass(frozen=True)
@@ -244,6 +277,12 @@ class NumberWritableDef:
     min_value: float  # Slider minimum value
     max_value: float  # Slider maximum value
     step: float  # Step size (1.0 for integers, 0.1 for floats)
+    data_type: RegisterType = RegisterType.UINT16  # Word layout used for the write
     unit: str | None = None  # Unit of measurement
     device_class: str | None = None  # Device class type
     icon: str | None = None  # Custom icon for the slider
+
+    @property
+    def size(self) -> int:
+        """Return how many 16-bit words the write occupies."""
+        return REGISTER_SIZES[self.data_type]

@@ -20,6 +20,14 @@ def coordinator():
     )
     instance._last_checked_data = {}
     instance._last_checked_time = None
+    # DataUpdateCoordinator.__init__ would normally provide this.
+    instance.data = None
+    instance._last_heartbeat_time = None
+    instance._heartbeat_supported = None
+    instance._heartbeat_enabled = True
+    instance._client = Mock()
+    instance._client_slave_id = 1
+    instance._lock = asyncio.Lock()
     instance._status = None
     instance._store = None
     instance.serial_number = None
@@ -59,6 +67,115 @@ def run_update(
     coordinator.async_get_raw_data = AsyncMock(return_value=dict(raw_data))
     monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
     return asyncio.run(coordinator._async_update_data())
+
+
+HEARTBEAT_START = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
+
+
+def send_heartbeat(
+    coordinator,
+    now: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    force: bool = False,
+) -> bool:
+    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+    # asyncio.run() builds a fresh loop per call, and a lock binds to the first one.
+    coordinator._lock = asyncio.Lock()
+    return asyncio.run(coordinator.async_send_heartbeat(force=force))
+
+
+def heartbeat_response(coordinator, *, is_error: bool) -> AsyncMock:
+    coordinator._client.write_register = AsyncMock(
+        return_value=Mock(isError=Mock(return_value=is_error))
+    )
+    return coordinator._client.write_register
+
+
+def test_heartbeat_is_sent_at_most_once_per_interval(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write = heartbeat_response(coordinator, is_error=False)
+    interval = const.HEARTBEAT_INTERVAL_S
+
+    assert send_heartbeat(coordinator, HEARTBEAT_START, monkeypatch) is True
+    assert coordinator.heartbeat_supported is True
+
+    too_soon = HEARTBEAT_START + timedelta(seconds=interval - 1)
+    assert send_heartbeat(coordinator, too_soon, monkeypatch) is True
+    assert write.await_count == 1
+
+    due = HEARTBEAT_START + timedelta(seconds=interval)
+    assert send_heartbeat(coordinator, due, monkeypatch) is True
+    assert write.await_count == 2
+
+
+def test_forced_heartbeat_before_a_write_ignores_the_interval(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write = heartbeat_response(coordinator, is_error=False)
+
+    send_heartbeat(coordinator, HEARTBEAT_START, monkeypatch)
+    send_heartbeat(coordinator, HEARTBEAT_START, monkeypatch, force=True)
+
+    assert write.await_count == 2
+
+
+def test_heartbeat_stops_once_the_device_rejects_the_register(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write = heartbeat_response(coordinator, is_error=True)
+
+    assert send_heartbeat(coordinator, HEARTBEAT_START, monkeypatch) is False
+    assert coordinator.heartbeat_supported is False
+
+    # A rejection latches it off for polling, but a user action still re-probes.
+    later = HEARTBEAT_START + timedelta(minutes=5)
+    assert send_heartbeat(coordinator, later, monkeypatch) is False
+    assert write.await_count == 1
+
+    assert send_heartbeat(coordinator, later, monkeypatch, force=True) is False
+    assert write.await_count == 2
+
+
+def test_transport_failure_retries_instead_of_disabling_the_heartbeat(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    coordinator._client.write_register = AsyncMock(
+        side_effect=coordinator_module.ModbusException("connection reset")
+    )
+
+    assert send_heartbeat(coordinator, HEARTBEAT_START, monkeypatch) is False
+    assert coordinator.heartbeat_supported is None
+    assert coordinator.last_heartbeat_time is None
+
+    write = heartbeat_response(coordinator, is_error=False)
+    assert send_heartbeat(coordinator, HEARTBEAT_START, monkeypatch) is True
+    assert write.await_count == 1
+
+
+@pytest.mark.parametrize(
+    ("entry_data", "expected"),
+    [({}, False), ({const.CONF_MODBUS_CONTROL: True}, True)],
+)
+def test_heartbeat_enablement_comes_from_config_entry(
+    monkeypatch: pytest.MonkeyPatch, entry_data: dict, expected: bool
+) -> None:
+    monkeypatch.setattr(
+        coordinator_module.DataUpdateCoordinator,
+        "__init__",
+        lambda self, *args, **kwargs: setattr(self, "data", None),
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "AsyncModbusTcpClient",
+        lambda *args, **kwargs: Mock(connected=False),
+    )
+    config_entry = SimpleNamespace(data=entry_data, entry_id="test")
+
+    instance = coordinator_module.EcoflowCoordinator(Mock(), config_entry)
+
+    assert instance.heartbeat_enabled is expected
 
 
 @pytest.mark.parametrize(
@@ -581,6 +698,7 @@ def test_gets_and_decodes_raw_data(
     decode_register = Mock(side_effect=(2.0, 42.0))
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     coordinator._client = SimpleNamespace(connected=True)
+    coordinator.async_send_heartbeat = AsyncMock(return_value=True)
     coordinator.async_read_block = AsyncMock(return_value=[2, 42])
     coordinator.limits[const.CONF_BATTERY_COUNT] = 2
 
@@ -609,6 +727,7 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
     )
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     coordinator._client = SimpleNamespace(connected=True)
+    coordinator.async_send_heartbeat = AsyncMock(return_value=True)
     coordinator.async_read_block = AsyncMock(return_value=[0, 0, 0])
     coordinator.limits[const.CONF_BATTERY_COUNT] = 2
     coordinator.serial_number = "R123456789"

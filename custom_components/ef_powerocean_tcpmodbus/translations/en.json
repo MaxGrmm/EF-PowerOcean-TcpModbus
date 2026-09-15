@@ -22,7 +22,8 @@
           "solar_power_max": "Maximum solar power [W]",
           "grid_power_max": "Maximum grid power [W]",
           "scan_interval": "Poll Interval [s]",
-          "calc_solar_power": "Calculation of solar power"
+          "calc_solar_power": "Calculation of solar power",
+          "modbus_control": "Modbus Control"
         },
         "data_description": {
           "inverter_model": "Select the inverter model.",
@@ -30,7 +31,8 @@
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",
           "scan_interval": "How often values are polled (2-30 seconds)",
-          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
+          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
+          "modbus_control": "Modbus Control gives this integration full control of the inverter. While enabled, the EcoFlow app cannot control the system. You can turn off Modbus Control at any time and the EcoFlow app takes over again after approximately 60 seconds."
         }
       },
       "warning": {
@@ -68,7 +70,8 @@
           "solar_power_max": "Maximum solar power [W]",
           "grid_power_max": "Maximum grid power [W]",
           "scan_interval": "Poll Interval [s]",
-          "calc_solar_power": "Calculation of solar power"
+          "calc_solar_power": "Calculation of solar power",
+          "modbus_control": "Modbus Control"
         },
         "data_description": {
           "inverter_model": "Select the inverter model.",
@@ -76,7 +79,8 @@
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Maximum grid power",
           "scan_interval": "How often values are polled (2-30 seconds)",
-          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
+          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
+          "modbus_control": "Modbus Control gives this integration full control of the inverter. While enabled, the EcoFlow app cannot control the system. You can turn off Modbus Control at any time and the EcoFlow app takes over again after approximately 60 seconds."
         }
       }
     },
@@ -331,6 +335,9 @@
       }
     },
     "binary_sensor": {
+      "modbus_control": {
+        "name": "Modbus Control"
+      },
       "self_use_mode_ena": {
         "name": "Self-powered Mode"
       },

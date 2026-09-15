@@ -27,6 +27,7 @@ from .const import (
     CONF_MAX_BATTERY_DISCHARGED_POWER,
     CONF_MAX_GRID_POWER,
     CONF_MAX_SOLAR_POWER,
+    CONF_MODBUS_CONTROL,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
     DEFAULT_BATTERY_COUNT,
@@ -39,6 +40,10 @@ from .const import (
     DEVICE_INFO_BLOCK,
     DOMAIN,
     FIRMWARE_VERSION,
+    HEARTBEAT_INTERVAL_S,
+    HEARTBEAT_LAPSE_S,
+    HEARTBEAT_REGISTER,
+    HEARTBEAT_VALUE,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MODBUS_DISABLED_READ_THRESHOLD,
@@ -51,7 +56,12 @@ from .const import (
     register_blocks_for,
 )
 from .energy_processor import EnergyProcessor
-from .models import CoordinatorStatus, InverterModel, NumberWritableDef
+from .models import (
+    CoordinatorStatus,
+    InverterModel,
+    NumberWritableDef,
+    encode_register,
+)
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
@@ -121,6 +131,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._lock = asyncio.Lock()
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
+        self._last_heartbeat_time: datetime | None = None
+        self._heartbeat_enabled = config_entry.data.get(CONF_MODBUS_CONTROL, False)
+        # None until the device has answered once, so an unsupported model is logged once.
+        self._heartbeat_supported: bool | None = None
         self._energy_processor = EnergyProcessor(self.limits)
         self._status: CoordinatorStatus | None = None
         self._store: Store[dict[str, Any]] | None = Store(
@@ -139,6 +153,30 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def is_modbus_disabled(self) -> bool:
         """Return whether the last telemetry read indicates Modbus is disabled."""
         return self._consecutive_modbus_disabled_reads >= MODBUS_DISABLED_READ_THRESHOLD
+
+    @property
+    def heartbeat_supported(self) -> bool | None:
+        """Return whether the device accepts the heartbeat, or None if untested."""
+        return self._heartbeat_supported
+
+    @property
+    def heartbeat_enabled(self) -> bool:
+        return self._heartbeat_enabled
+
+    @property
+    def last_heartbeat_time(self) -> datetime | None:
+        return self._last_heartbeat_time
+
+    @property
+    def in_control(self) -> bool:
+        """Return whether the device is currently accepting our commands."""
+        if not self._heartbeat_enabled or self._heartbeat_supported is not True:
+            return False
+        if self._last_heartbeat_time is None:
+            return False
+        return (
+            dt.now() - self._last_heartbeat_time
+        ).total_seconds() <= HEARTBEAT_LAPSE_S
 
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
@@ -240,6 +278,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug(
                         f"Reconnect successful! (SN: {self.serial_number}) Atempts: {i + 1}/4"
                     )
+                    # The outage may have outlasted the device's 60 s window, so send
+                    # the next heartbeat at once rather than waiting for the interval.
+                    self._last_heartbeat_time = None
                     await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
                     return True
                 self._client.close()
@@ -262,12 +303,73 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 )
             return res.registers
 
+    # ── Heartbeat ─────────────────────────────────────────────────────────────
+
+    async def async_send_heartbeat(self, *, force: bool = False) -> bool:
+        """Refresh Modbus control authority. Never raises; a miss only costs authority.
+
+        With *force* the register is written even if a previous attempt was rejected,
+        so a user action always gets a fresh verdict from the device.
+        """
+        if not self._heartbeat_enabled:
+            return False
+        if self._heartbeat_supported is False and not force:
+            return False
+
+        now = dt.now()
+        if self._last_heartbeat_time is not None:
+            since_last = (now - self._last_heartbeat_time).total_seconds()
+            if not force and since_last < HEARTBEAT_INTERVAL_S:
+                return True
+            if since_last > HEARTBEAT_LAPSE_S:
+                _LOGGER.debug(
+                    "Heartbeat gap of %.0fs exceeded the device window; control was "
+                    "handed back to the app",
+                    since_last,
+                )
+
+        try:
+            async with self._lock:
+                response = await self._client.write_register(
+                    address=HEARTBEAT_REGISTER,
+                    value=HEARTBEAT_VALUE,
+                    device_id=self._client_slave_id,
+                )
+        except (ModbusException, ConnectionError, asyncio.TimeoutError) as err:
+            # Transport trouble, not a verdict on the register: retry next poll.
+            _LOGGER.debug(f"Heartbeat write failed: {err!r}")
+            return False
+
+        if response.isError():
+            if self._heartbeat_supported is not False:
+                _LOGGER.warning(
+                    "Heartbeat register %s rejected by the device (%s). Writes will "
+                    "be acknowledged but may never take effect on this model.",
+                    HEARTBEAT_REGISTER,
+                    response,
+                )
+            self._heartbeat_supported = False
+            return False
+
+        if self._heartbeat_supported is not True:
+            _LOGGER.info(
+                "Heartbeat register %s accepted; Modbus control authority is being "
+                "refreshed every %ss.",
+                HEARTBEAT_REGISTER,
+                HEARTBEAT_INTERVAL_S,
+            )
+        self._heartbeat_supported = True
+        self._last_heartbeat_time = now
+        return True
+
     async def async_get_raw_data(self) -> dict[str, Any]:
         data: dict[str, Any] = {}
 
         # ── Check Connection, if not -> start reconnection ──
         if not self._client.connected and not await self.async_reconnect():
             raise UpdateFailed("Reconnect failed!")
+
+        await self.async_send_heartbeat()
 
         try:
             # Read all register blocks
@@ -356,19 +458,28 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     async def async_write_modbus_register(
         self, entity_def: NumberWritableDef, value: int
     ) -> None:
-        """Universal method to write a 16-bit unsigned integer to any Modbus register."""
-        if not self._client or not self.connected:
-            _LOGGER.error("Modbus client is not initialized")
-            return
+        """Write a device setting and verify it by reading it back.
+
+        Settings apply without Modbus control authority, so this never takes
+        control away from the EcoFlow app.
+        """
+        if not self.connected:
+            raise HomeAssistantError("Modbus client is not connected")
 
         target_value = int(value)
-
         register_address = entity_def.register
         key = entity_def.read_key
 
+        try:
+            words = encode_register(target_value, entity_def.data_type)
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
+
         _LOGGER.debug(
-            "Sending Modbus write command [FC6]: value %s to address %s (Key: %s, Device ID: %s)",
+            "Sending Modbus write command [%s]: value %s -> %s to address %s (Key: %s, Device ID: %s)",
+            "FC6" if len(words) == 1 else "FC16",
             target_value,
+            [f"0x{word:04X}" for word in words],
             register_address,
             key,
             self._client_slave_id,
@@ -376,54 +487,56 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         try:
             async with self._lock:
-                # Execute write single register operation
-                response = await self._client.write_register(
-                    address=register_address,
-                    value=target_value,
-                    device_id=self._client_slave_id,
-                )
-
-                if response.isError():
-                    _LOGGER.error(
-                        "Modbus error response when writing to register %s: %s",
-                        register_address,
-                        response,
+                if len(words) == 1:
+                    response = await self._client.write_register(
+                        address=register_address,
+                        value=words[0],
+                        device_id=self._client_slave_id,
                     )
+                else:
+                    response = await self._client.write_registers(
+                        address=register_address,
+                        values=words,
+                        device_id=self._client_slave_id,
+                    )
+                if response.isError():
                     raise HomeAssistantError(
-                        f"Modbus rejected write operation for register {register_address}: {response}"
+                        f"Modbus rejected write to register {register_address}: {response}"
                     )
 
                 readback_response = await self._client.read_holding_registers(
                     address=register_address,
-                    count=1,
+                    count=len(words),
                     device_id=self._client_slave_id,
                 )
                 if readback_response.isError():
                     raise HomeAssistantError(
                         f"Could not verify write to register {register_address}: {readback_response}"
                     )
+                readback_words = list(readback_response.registers)
+        except (ModbusException, ConnectionError, asyncio.TimeoutError) as err:
+            raise HomeAssistantError(
+                f"Error writing register {register_address} via Modbus TCP: {err!r}"
+            ) from err
 
-                readback_value = readback_response.registers[0]
-
-            if readback_value != target_value:
-                raise HomeAssistantError(
-                    f"Register {register_address} acknowledged value {target_value}, "
-                    f"but read back {readback_value}"
-                )
-
-            _LOGGER.info(
-                "Register %s [%s] successfully updated to value: %s",
-                register_address,
-                key,
-                target_value,
+        readback_value = decode_register(readback_words, entity_def.data_type)
+        # A 32-bit register echoes the words just written and only swaps them into
+        # read order a few seconds later, so either form means the write landed.
+        if readback_words != words and (
+            readback_value is None or int(readback_value) != target_value
+        ):
+            raise HomeAssistantError(
+                f"Register {register_address} acknowledged value {target_value}, "
+                f"but read back {readback_value}"
             )
 
-            updated_data = {**(self.data or {}), key: target_value}
-            self.async_set_updated_data(updated_data)
-        except Exception as err:
-            _LOGGER.error(
-                "Failed to write to register %s via Modbus TCP: %s",
-                entity_def.register,
-                err,
-            )
-            raise HomeAssistantError(f"Error writing data to inverter: {err}")
+        _LOGGER.info(
+            "Register %s [%s] acknowledged value: %s (the device may still ignore "
+            "it; confirm the effect, not the readback)",
+            register_address,
+            key,
+            target_value,
+        )
+
+        updated_data = {**(self.data or {}), key: target_value}
+        self.async_set_updated_data(updated_data)
