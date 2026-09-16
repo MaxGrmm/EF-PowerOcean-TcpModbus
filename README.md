@@ -281,8 +281,6 @@ To enable debug logging without editing `configuration.yaml`:
 <img width="431" height="1539" alt="Sensor_Entities" src="https://github.com/user-attachments/assets/dca4b3c8-a56d-4d8d-ad13-6499f2cfd63c" />
 <img width="431" height="2075" alt="Diagnostics" src="https://github.com/user-attachments/assets/4380c0bb-a5f9-4a7d-8225-af3c5f2d3ab2" />
 
-
-
 ---
 
 ## Technical Details
@@ -313,6 +311,7 @@ review checklist.
 ## Credits
 
 Special thanks to all contributors for the massive amount of time and effort that helped this project grow so fast!
+
 <p>
   <a href="https://github.com/windmark">
     <img src="https://github.com/windmark.png" width="50" height="50" alt="windmark"/><br/>
