@@ -102,16 +102,16 @@ class EcoFlowControlStatusSensor(EcoFlowBaseEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
-        return str(self.coordinator.control_status)
+        return str(self.coordinator.control.status)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        coordinator = self.coordinator
+        control = self.coordinator.control
         return {
-            "mode": str(coordinator.selected_feature),
-            "commanded_power": coordinator.control_power,
-            "control_method": str(coordinator.control_method),
-            "in_control": coordinator.in_control,
+            "mode": str(control.selected_feature),
+            "commanded_power": control.power,
+            "control_method": str(control.method),
+            "in_control": control.in_control,
         }
 
 

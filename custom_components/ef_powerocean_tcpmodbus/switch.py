@@ -58,18 +58,18 @@ class EcoFlowBatterySaverSwitch(EcoFlowSwitch):
     def is_on(self) -> bool:
         # System Modes bit 3 is a status, not an echo: it only rises once the
         # inverter has actually gone idle, so it cannot confirm the command.
-        return self.coordinator.battery_saver_commanded
+        return self.coordinator.control.battery_saver_commanded
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
         return {
             "device_reports_battery_saver": data.get("battery_saver_mode_ena"),
-            "commanded_word": f"0x{self.coordinator.control_command:08X}",
+            "commanded_word": f"0x{self.coordinator.control.command:08X}",
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_battery_saver(True)
+        await self.coordinator.control.async_set_battery_saver(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_battery_saver(False)
+        await self.coordinator.control.async_set_battery_saver(False)

@@ -68,8 +68,19 @@ homeassistant_translation.async_get_translations = None
 homeassistant_update_coordinator = types.ModuleType(
     "homeassistant.helpers.update_coordinator"
 )
+
+
+async def _async_refresh(self) -> None:
+    return None
+
+
 homeassistant_update_coordinator.DataUpdateCoordinator = type(
-    "DataUpdateCoordinator", (), {}
+    "DataUpdateCoordinator",
+    (),
+    {
+        "async_update_listeners": lambda self: None,
+        "async_refresh": _async_refresh,
+    },
 )
 
 

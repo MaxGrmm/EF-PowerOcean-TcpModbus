@@ -62,6 +62,6 @@ class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
         # rest of the entities have none and stay available.
         availability = getattr(self._definition, "availability", None)
         if availability is not None:
-            return availability(self.coordinator.control_status)
+            return availability(self.coordinator.control.status)
 
         return True

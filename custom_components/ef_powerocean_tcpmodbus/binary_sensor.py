@@ -55,7 +55,7 @@ class EcoFlowModbusControlBinarySensor(EcoFlowBaseEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
-        return self.coordinator.in_control
+        return self.coordinator.control.in_control
 
 
 class EcoFlowBinarySensor(EcoFlowBaseEntity, BinarySensorEntity):
