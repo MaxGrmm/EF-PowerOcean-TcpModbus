@@ -52,8 +52,8 @@ async def async_setup_entry(
             coordinator,
             entry,
             CHARGE_LIMIT_SOC_NUMBER,
-            coordinator.async_set_charge_limit_soc,
-            lambda: coordinator.charge_limit_soc,
+            coordinator.control.async_set_charge_limit_soc,
+            lambda: coordinator.control.charge_limit_soc,
         )
     )
     entities.append(
@@ -61,8 +61,8 @@ async def async_setup_entry(
             coordinator,
             entry,
             BATTERY_RESERVE_SOC_NUMBER,
-            coordinator.async_set_battery_reserve_soc,
-            lambda: coordinator.battery_reserve_soc,
+            coordinator.control.async_set_battery_reserve_soc,
+            lambda: coordinator.control.battery_reserve_soc,
         )
     )
     entities.extend(
@@ -108,14 +108,16 @@ class EcoFlowFeaturePowerNumber(EcoFlowBaseEntity, NumberEntity):
     @property
     def native_max_value(self) -> float:
         # The device publishes its own ceiling, and it moves with the battery.
-        return self.coordinator.feature_power_max(self._feature)
+        return self.coordinator.control.feature_power_max(self._feature)
 
     @property
     def native_value(self) -> float:
-        return min(self.coordinator.feature_power(self._feature), self.native_max_value)
+        return min(
+            self.coordinator.control.feature_power(self._feature), self.native_max_value
+        )
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_feature_power(self._feature, value)
+        await self.coordinator.control.async_set_feature_power(self._feature, value)
 
 
 class EcoFlowSocLimitNumber(EcoFlowBaseEntity, NumberEntity):

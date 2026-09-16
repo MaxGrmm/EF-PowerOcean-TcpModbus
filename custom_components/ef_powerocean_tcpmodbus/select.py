@@ -50,14 +50,14 @@ class EcoFlowBatteryModeSelect(EcoFlowBaseEntity, SelectEntity):
 
     @property
     def current_option(self) -> str:
-        return str(self.coordinator.selected_feature)
+        return str(self.coordinator.control.selected_feature)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
-            "status": str(self.coordinator.control_status),
-            "commanded_power": self.coordinator.control_power,
+            "status": str(self.coordinator.control.status),
+            "commanded_power": self.coordinator.control.power,
         }
 
     async def async_select_option(self, option: str) -> None:
-        await self.coordinator.async_select_feature(ControlFeature(option))
+        await self.coordinator.control.async_select_feature(ControlFeature(option))
