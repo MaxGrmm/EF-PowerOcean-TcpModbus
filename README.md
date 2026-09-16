@@ -20,6 +20,7 @@
 - Per-phase AC measurements: voltage, current, frequency
 - Energy counters: daily and lifetime for grid, solar, battery charge/discharge, house consumption
 - Operating mode, grid mode and system status as dedicated entities
+- Optional **battery control**: charge, discharge, export or hold, with state-of-charge guards
 - Fault reporting: active fault count and raw fault codes
 - Model and firmware version read from the device
 - Reconfigurable after setup via **Settings → Configure** (no re-install needed)
@@ -77,9 +78,54 @@ The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled b
 | Maximum solar power        | 12kW                   | Installed solar power                                                                                                                                            |
 | Maximum grid power         | 15kW                   | Expected maximum grid power to detect unauthorized values                                                                                                        |
 | Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
+| Modbus Control             | false                  | Allow this integration to command the battery. See [Battery Control](#battery-control).                                                                          |
 | Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
 
 To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**
+
+---
+
+## Battery Control
+
+Off by default. Turning **Modbus Control** on makes the integration hold control
+authority over the inverter, which **locks the EcoFlow app out control** for
+as long as the integration is running and Modbus Control is turned on.
+
+The **Battery Mode** select is the whole interface:
+
+| Mode              | What the inverter does                                                         |
+| ----------------- | ------------------------------------------------------------------------------ |
+| Automatic         | Self-consumption, exactly as the app runs it                                   |
+| Hold battery      | Don't charge or discharge the battery. Surplus solar power is exported         |
+| Charge battery    | Charges at the set power, importing from the grid if solar power is not enough |
+| Discharge battery | Discharges at the set power                                                    |
+| Export to grid    | Exports at the set power, uses the battery if solar power is not enough        |
+
+Charge and Export are two views of the same thing: **Charge pins the battery and lets the
+grid float, Export pins the grid and lets the battery float.** The setpoint is a target
+rather than a cap in both directions, and as long as the battery has room the inverter
+reaches it without limiting solar, with whatever is left over going to the battery or is
+exported.
+
+Two guards apply in every mode, including Automatic, and only ever restrict:
+
+- **Charge Limit** – state of charge above which the battery is not charged (100 = off)
+- **Battery Reserve** – state of charge below which it is not drained (0 = off)
+
+Both default to off, so an untouched install never takes control away from the app.
+**Control Status** reports what the selected mode is achieving, including when a guard
+is holding it or when the battery has no headroom left to reach the target.
+
+On the device page the two are deliberately kept apart:
+
+| Section           | Entities                                                          | Meaning                                                          |
+| ----------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **Controls**      | Battery Mode, Charge/Discharge/Export Power                       | What you are asking the inverter to do right now                 |
+| **Configuration** | Charge Limit, Battery Reserve, LED Brightness, Battery Saver Mode | Standing settings; the two guards bind whatever mode is selected |
+| **Sensors**       | Control Status                                                    | What the inverter is actually doing about it                     |
+
+Each mode's power stays editable while another mode is selected, so a command can be
+set up before it is needed. Only the selected mode's value is ever sent.
 
 ---
 
@@ -115,22 +161,26 @@ CI also runs these checks and will fail the workflow on any deviation.
 
 ### Battery
 
-| Sensor                            | Unit | Description                                        |
-| --------------------------------- | ---- | -------------------------------------------------- |
-| Battery SOC                       | %    | System state of charge                             |
-| Battery 1–12 SOC                  | %    | Per-module state of charge (diagnostic)            |
-| Battery Module Count              | –    | Modules reported online by the device (diagnostic) |
-| Battery Remaining Energy          | kWh  | Estimated: 5 kWh × modules × SOC                   |
-| Battery Voltage                   | V    | Pack voltage                                       |
-| Battery Current                   | A    | Positive = charging, negative = discharging        |
-| Battery Temperature               | °C   | Mean module temperature                            |
-| Battery Nominal Capacity          | Wh   | Nominal pack capacity reported by the device       |
-| Available Battery Charge Power    | W    | Charge headroom right now – drops to 0 W when full |
-| Available Battery Discharge Power | W    | Discharge headroom right now                       |
-| Min SOC Limit                     | %    | Backup reserve configured in the EcoFlow app       |
+| Sensor                            | Unit | Description                                                     |
+| --------------------------------- | ---- | --------------------------------------------------------------- |
+| Battery SOC                       | %    | System state of charge                                          |
+| Battery 1–12 SOC                  | %    | Per-module state of charge (diagnostic)                         |
+| Battery Module Count              | –    | Modules reported online by the device (diagnostic)              |
+| Battery Remaining Energy          | kWh  | Estimated: 5 kWh × modules × SOC                                |
+| Battery Voltage                   | V    | Pack voltage                                                    |
+| Battery Current                   | A    | Positive = charging, negative = discharging                     |
+| Battery Temperature               | °C   | Mean module temperature                                         |
+| Battery Nominal Capacity          | Wh   | Nominal pack capacity reported by the device                    |
+| Available Battery Charge Power    | W    | Charge headroom right now - drops to 0 W when full (diagnostic) |
+| Available Battery Discharge Power | W    | Discharge headroom right now (diagnostic)                       |
+| Min SOC Limit                     | %    | Backup reserve configured in the EcoFlow app                    |
 
 > _Available Charge/Discharge Power_ are live headroom values, not static limits. A
 > reading of 0W for charging means the battery is full.
+
+> ⚠️ They also reflect the charge power limit set in the EcoFlow app, and **battery
+> control over Modbus ignores that limit** — as does _Min SOC Limit_. A 500 W app limit
+> will not stop a charge command from running at the full rated power of your batteries.
 
 ### Solar
 
@@ -151,15 +201,16 @@ CI also runs these checks and will fail the workflow on any deviation.
 
 ### Status
 
-| Sensor             | Values                          | Description                             |
-| ------------------ | ------------------------------- | --------------------------------------- |
-| Grid Mode          | Grid-connected / Islanded       | On-grid or off-grid operation           |
-| Operating Mode     | Standby / Self-consumption / AI | Working mode reported by the inverter   |
-| Self-powered Mode  | Active / Inactive               | Self-consumption mode                   |
-| Intelligent Mode   | Active / Inactive               | AI mode                                 |
-| Battery Saver Mode | Enabled / Disabled              | Low-power mode                          |
-| System Fault       |                                 | Device reports an abnormal system state |
-| System Powered On  |                                 | Device is powered on                    |
+| Sensor            | Values                          | Description                                 |
+| ----------------- | ------------------------------- | ------------------------------------------- |
+| Grid Mode         | Grid-connected / Islanded       | On-grid or off-grid operation               |
+| Operating Mode    | Standby / Self-consumption / AI | Working mode reported by the inverter       |
+| Self-powered Mode | Active / Inactive               | Self-consumption mode                       |
+| Intelligent Mode  | Active / Inactive               | AI mode                                     |
+| System Fault      |                                 | Device reports an abnormal system state     |
+| System Powered On |                                 | Device is powered on (diagnostic)           |
+| Modbus Control    |                                 | The device is accepting our commands        |
+| Control Status    |                                 | What the selected battery mode is achieving |
 
 ### Faults (Diagnostic)
 
@@ -178,7 +229,6 @@ The meaning of the fault codes is not known, so we only publish the raw values.
 | Maximum Inverter Power (DC to AC)  | W    | Nameplate inverter (discharge direction) capacity |
 | Maximum Rectifier Power (AC to DC) | W    | Nameplate rectifier (charge direction) capacity   |
 | Maximum feed-in Power              | W    | Export limit configured in the EcoFlow app        |
-| Device LED brightness              | %    | Indicator brightness                              |
 | System Modes                       | –    | Raw system status                                 |
 | Coordinator Status                 | –    | Integration polling state                         |
 
@@ -207,15 +257,15 @@ Daily energy values are calculated from the corresponding lifetime counters beca
 
 ### Energy – Lifetime
 
-| Sensor                   | Unit | Description                    |
-| ------------------------ | ---- | ------------------------------ |
-| House Consumption Total  | kWh  | Calculated from energy balance |
-| Solar Yield Total        | kWh  | Lifetime solar generation      |
-| Grid Import Total        | kWh  | Lifetime grid import           |
-| Grid Export Total        | kWh  | Lifetime grid export           |
-| Battery Charged Total    | kWh  | Lifetime energy charged        |
-| Battery Discharged Total | kWh  | Lifetime energy discharged     |
-| Battery Energy Loss      | kWh  | Charged minus discharged       |
+| Sensor                   | Unit | Description                           |
+| ------------------------ | ---- | ------------------------------------- |
+| House Consumption Total  | kWh  | Calculated from energy balance        |
+| Solar Yield Total        | kWh  | Lifetime solar generation             |
+| Grid Import Total        | kWh  | Lifetime grid import                  |
+| Grid Export Total        | kWh  | Lifetime grid export                  |
+| Battery Charged Total    | kWh  | Lifetime energy charged               |
+| Battery Discharged Total | kWh  | Lifetime energy discharged            |
+| Battery Energy Loss      | kWh  | Charged minus discharged (diagnostic) |
 
 ---
 

@@ -45,12 +45,17 @@ def test_detects_disabled_modbus_from_static_capabilities(
         ([0x0000, 0x0001], RegisterType.UINT32, 65536.0),
         # A value that fits the low word alone must decode the same as before.
         ([15000, 0x0000], RegisterType.UINT32, 15000.0),
+        ([3000, 0x0000], RegisterType.INT32, 3000.0),
+        # Feed-in setpoints are negative, so the sign bit must survive the swap.
+        ([0xF448, 0xFFFF], RegisterType.INT32, -3000.0),
     ),
     ids=(
         "single-register",
         "word-swapped-float",
         "uint32-uses-the-high-word",
         "uint32-low-word-only",
+        "int32-positive",
+        "int32-negative",
     ),
 )
 def test_decodes_register_values(

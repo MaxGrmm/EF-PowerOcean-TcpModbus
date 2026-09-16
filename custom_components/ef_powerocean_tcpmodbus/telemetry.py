@@ -152,6 +152,9 @@ def decode_register(registers: list[int], data_type: RegisterType) -> float | No
     if data_type is RegisterType.UINT32:
         return float(struct.unpack("<I", raw)[0])
 
+    if data_type is RegisterType.INT32:
+        return float(struct.unpack("<i", raw)[0])
+
     value = struct.unpack("<f", raw)[0]
     if not math.isfinite(value) or abs(value) > 1e9:
         return None

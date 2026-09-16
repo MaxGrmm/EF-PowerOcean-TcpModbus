@@ -8,7 +8,14 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import EcoflowCoordinator
-from .models import BinarySensorDef, EnergySensorDef, SensorDef
+from .models import (
+    BinarySensorDef,
+    ControlEntityDef,
+    EnergySensorDef,
+    NumberWritableDef,
+    SensorDef,
+    SwitchDef,
+)
 
 
 class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
@@ -16,7 +23,12 @@ class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
         self,
         coordinator: EcoflowCoordinator,
         entry: ConfigEntry,
-        definition: SensorDef | EnergySensorDef | BinarySensorDef,
+        definition: SensorDef
+        | EnergySensorDef
+        | BinarySensorDef
+        | NumberWritableDef
+        | ControlEntityDef
+        | SwitchDef,
     ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry.entry_id
@@ -43,4 +55,13 @@ class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
 
     @property
     def available(self) -> bool:
-        return super().available and self.coordinator.connected
+        if not super().available or not self.coordinator.connected:
+            return False
+
+        # Controls that only act while the device follows us carry a rule; the
+        # rest of the entities have none and stay available.
+        availability = getattr(self._definition, "availability", None)
+        if availability is not None:
+            return availability(self.coordinator.control_status)
+
+        return True

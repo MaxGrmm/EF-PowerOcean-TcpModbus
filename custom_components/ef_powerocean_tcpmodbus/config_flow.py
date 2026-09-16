@@ -24,6 +24,7 @@ from .const import (
     CONF_INVERTER_MODEL,
     CONF_MAX_GRID_POWER,
     CONF_MAX_SOLAR_POWER,
+    CONF_MODBUS_CONTROL,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
     DEFAULT_BATTERY_COUNT,
@@ -137,6 +138,10 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_CALC_SOLAR_POWER,
                         default=False,
                     ): BooleanSelector({}),
+                    vol.Required(
+                        CONF_MODBUS_CONTROL,
+                        default=False,
+                    ): BooleanSelector({}),
                 }
             ),
             errors=errors,
@@ -245,6 +250,10 @@ class EcoflowOptionsFlow(OptionsFlow):
                         default=self._config_entry.data.get(
                             CONF_CALC_SOLAR_POWER, False
                         ),
+                    ): BooleanSelector({}),
+                    vol.Required(
+                        CONF_MODBUS_CONTROL,
+                        default=self._config_entry.data.get(CONF_MODBUS_CONTROL, False),
                     ): BooleanSelector({}),
                 }
             ),
