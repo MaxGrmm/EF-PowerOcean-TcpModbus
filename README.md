@@ -147,31 +147,6 @@ set up before it is needed. Only the selected mode's value is ever sent.
 
 ---
 
-## Development
-
-Install the development dependencies and enable the formatting hooks:
-
-```shell
-python -m pip install -r requirements-development.txt
-pre-commit install
-```
-
-Run all linting and formatting checks manually with:
-
-```shell
-pre-commit run --all-files
-```
-
-Run the unit tests with:
-
-```shell
-python -m pytest
-```
-
-CI runs both the pre-commit checks and unit tests, and will fail on any deviation.
-
----
-
 ## Available Sensors
 
 ### Power (real-time)
@@ -325,14 +300,9 @@ The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus
 
 ## Contributing
 
-Pull requests are welcome! Especially:
-
-- Testing on other EcoFlow devices (PowerOcean Single Phase, PowerOcean DC Fit,
-  Ocean 2)
-- Identifying further Modbus registers
-- Home Assistant Energy Dashboard configuration examples
-
-Please open an issue before submitting large changes.
+Contributions use personal forks and pull requests. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, safety requirements, and the
+review checklist.
 
 ---
 
