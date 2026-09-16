@@ -226,7 +226,7 @@ def calculate_derived_values(
         battery_discharged=data.bat_discharged_total,
         grid_export=data.grid_export_total,
         battery_charged=data.bat_charged_total,
-        precision=0,
+        precision=2,
     )
 
     for pv_number in range(1, 4):
