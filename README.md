@@ -3,7 +3,7 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![GitHub release](https://img.shields.io/github/release/MaxGrmm/EF-PowerOcean-TcpModbus.svg)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases)
 
-**Local Modbus TCP integration for the EcoFlow PowerOcean Plus home battery system.**
+**Local Modbus TCP integration for the EcoFlow PowerOcean home battery system.**
 
 > ⚠️ This integration communicates directly with your device over your local network via Modbus TCP. No cloud connection required.
 
@@ -14,15 +14,15 @@
 - **Local polling** – no EcoFlow cloud account needed
 - **Configurable poll interval** (2–30 seconds, default 5 s)
 - Real-time power flow: house consumption, grid import/export, solar generation, battery
+- Optional **Battery Controls**: charge, discharge, export or hold, with state-of-charge guards
 - Full battery monitoring: SOC, voltage, current, power, temperature, remaining energy
 - Per-module state of charge for up to 12 battery modules
 - Per-string PV power, current and voltage (1–3 strings)
 - Per-phase AC measurements: voltage, current, frequency
 - Energy counters: daily and lifetime for grid, solar, battery charge/discharge, house consumption
 - Operating mode, grid mode and system status as dedicated entities
-- Optional **battery control**: charge, discharge, export or hold, with state-of-charge guards
 - Fault reporting: active fault count and raw fault codes
-- Model and firmware version read from the device
+- Firmware and product information read from the device, with model mismatch detection where supported
 - Reconfigurable after setup via **Settings → Configure** (no re-install needed)
 - Debug logging toggle directly in the HA UI
 - German and English translations
@@ -34,8 +34,10 @@
 | Device                     | Status                         |
 | -------------------------- | ------------------------------ |
 | EcoFlow PowerOcean Plus    | ✅ Confirmed                   |
-| EcoFlow PowerOcean         | ✅ Confirmed                   |
-| EcoFlow PowerOcean Connect | ❓ Untested – feedback welcome |
+| EcoFlow PowerOcean 3-phase | ✅ Confirmed                   |
+| EcoFlow PowerOcean 1-phase | ❓ Untested – feedback welcome |
+| EcoFlow PowerOcean DC Fit  | ❓ Untested – feedback welcome |
+| EcoFlow Ocean2             | ❓ Untested – feedback welcome |
 
 ---
 
@@ -49,10 +51,14 @@ The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled b
 
 ### Via HACS (recommended)
 
+[![Add to Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MaxGrmm&repository=EF-PowerOcean-TcpModbus&category=integration)
+
+To add it manually instead:
+
 1. Open HACS in Home Assistant
 2. Go to **Integrations** → **⋮** → **Custom repositories**
 3. Add `https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus` as category **Integration**
-4. Click **Install**
+4. Open the repository in HACS and click **Install**
 5. Restart Home Assistant
 
 ### Manual
@@ -71,12 +77,12 @@ The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled b
 
 | Field                      | Default                | Description                                                                                                                                                      |
 | -------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| IP Address                 | –                      | Local IP of your PowerOcean Plus                                                                                                                                 |
+| IP Address                 | –                      | Local IP of your PowerOcean inverter                                                                                                                             |
 | Port                       | 502                    | Modbus TCP port                                                                                                                                                  |
 | Inverter model             | PowerOcean Three Phase |                                                                                                                                                                  |
-| Number of Batteries        | 0                      | Number of installed battery modules (0–12)                                                                                                                       |
-| Maximum solar power        | 12kW                   | Installed solar power                                                                                                                                            |
-| Maximum grid power         | 15kW                   | Expected maximum grid power to detect unauthorized values                                                                                                        |
+| Number of Batteries        | 0                      | Number of installed battery modules (0–12); required for safe battery-control power limits                                                                       |
+| Maximum solar power        | 12 kW                  | Installed solar power (1–60 kW)                                                                                                                                  |
+| Maximum grid power         | 15 kW                  | Expected maximum grid power used to reject implausible readings (1–60 kW)                                                                                        |
 | Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
 | Modbus Control             | false                  | Allow this integration to command the battery. See [Battery Control](#battery-control).                                                                          |
 | Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
@@ -91,7 +97,7 @@ Off by default. Turning **Modbus Control** on makes the integration hold control
 authority over the inverter, which **locks the EcoFlow app out control** for
 as long as the integration is running and Modbus Control is turned on.
 
-The **Battery Mode** select is the whole interface:
+The **Battery Mode** select is the primary control:
 
 | Mode              | What the inverter does                                                         |
 | ----------------- | ------------------------------------------------------------------------------ |
@@ -112,9 +118,21 @@ Two guards apply in every mode, including Automatic, and only ever restrict:
 - **Charge Limit** – state of charge above which the battery is not charged (100 = off)
 - **Battery Reserve** – state of charge below which it is not drained (0 = off)
 
-Both default to off, so an untouched install never takes control away from the app.
+Both guards default to off. Separately, **Modbus Control** defaults to off, so an
+untouched install never takes control away from the app.
 **Control Status** reports what the selected mode is achieving, including when a guard
 is holding it or when the battery has no headroom left to reach the target.
+
+| Control Status             | Meaning                                                        |
+| -------------------------- | -------------------------------------------------------------- |
+| No Modbus control          | Modbus Control is disabled or control authority was lost       |
+| Automatic                  | The inverter is running its normal self-consumption mode       |
+| Active                     | The selected target is being maintained                        |
+| Ramping                    | The inverter is moving toward the selected target              |
+| Charge limit reached       | The Charge Limit guard is preventing further charging          |
+| Reserve reached            | The Battery Reserve guard is preventing further discharge      |
+| Unreachable: battery full  | The target requires the battery to absorb power, but it cannot |
+| Unreachable: battery empty | The target requires the battery to supply power, but it cannot |
 
 On the device page the two are deliberately kept apart:
 
@@ -144,7 +162,13 @@ Run all linting and formatting checks manually with:
 pre-commit run --all-files
 ```
 
-CI also runs these checks and will fail the workflow on any deviation.
+Run the unit tests with:
+
+```shell
+python -m pytest
+```
+
+CI runs both the pre-commit checks and unit tests, and will fail on any deviation.
 
 ---
 
@@ -161,26 +185,24 @@ CI also runs these checks and will fail the workflow on any deviation.
 
 ### Battery
 
-| Sensor                            | Unit | Description                                                     |
-| --------------------------------- | ---- | --------------------------------------------------------------- |
-| Battery SOC                       | %    | System state of charge                                          |
-| Battery 1–12 SOC                  | %    | Per-module state of charge (diagnostic)                         |
-| Battery Module Count              | –    | Modules reported online by the device (diagnostic)              |
-| Battery Remaining Energy          | kWh  | Estimated: 5 kWh × modules × SOC                                |
-| Battery Voltage                   | V    | Pack voltage                                                    |
-| Battery Current                   | A    | Positive = charging, negative = discharging                     |
-| Battery Temperature               | °C   | Mean module temperature                                         |
-| Battery Nominal Capacity          | Wh   | Nominal pack capacity reported by the device                    |
-| Available Battery Charge Power    | W    | Charge headroom right now - drops to 0 W when full (diagnostic) |
-| Available Battery Discharge Power | W    | Discharge headroom right now (diagnostic)                       |
-| Min SOC Limit                     | %    | Backup reserve configured in the EcoFlow app                    |
+| Sensor                            | Unit | Description                                                      |
+| --------------------------------- | ---- | ---------------------------------------------------------------- |
+| Battery SOC                       | %    | System state of charge                                           |
+| Battery 1–12 SOC                  | %    | Per-module state of charge (diagnostic)                          |
+| Battery Module Count              | –    | Modules reported online by the device (diagnostic)               |
+| Battery Remaining Energy          | kWh  | Estimated: 5 kWh × modules × SOC                                 |
+| Battery Voltage                   | V    | Pack voltage                                                     |
+| Battery Current                   | A    | Positive = charging, negative = discharging                      |
+| Battery Temperature               | °C   | Mean module temperature                                          |
+| Battery Nominal Capacity          | Wh   | Nominal pack capacity reported by the device                     |
+| Available Battery Charge Power    | W    | Charge power limit reported from the EcoFlow app (diagnostic)    |
+| Available Battery Discharge Power | W    | Discharge power limit reported from the EcoFlow app (diagnostic) |
+| Min SOC Limit                     | %    | Backup reserve configured in the EcoFlow app                     |
 
-> _Available Charge/Discharge Power_ are live headroom values, not static limits. A
-> reading of 0W for charging means the battery is full.
-
-> ⚠️ They also reflect the charge power limit set in the EcoFlow app, and **battery
-> control over Modbus ignores that limit** — as does _Min SOC Limit_. A 500 W app limit
-> will not stop a charge command from running at the full rated power of your batteries.
+> ⚠️ _Available Battery Charge/Discharge Power_ reflect limits configured in the
+> EcoFlow app, but **battery control over Modbus ignores those limits** — as it does
+> _Min SOC Limit_. For example, a 500 W app limit will not stop a Modbus charge command
+> from running at the configured battery-control ceiling.
 
 ### Solar
 
@@ -287,8 +309,11 @@ To enable debug logging without editing `configuration.yaml`:
 ## Technical Details
 
 - **Protocol:** Modbus TCP (port 502)
-- **Register type:** Holding Registers (Function Code 3)
-- **Float encoding:** 32-bit IEEE 754, little-endian word order (word-swapped)
+- **Reads:** Holding Registers (Function Code 3); multi-register values are decoded
+  low word first (word-swapped)
+- **Writes:** Function Code 6 for one register and Function Code 16 for multiple
+  registers; multi-register values are encoded high word first
+- **Float encoding:** 32-bit IEEE 754
 - **Read strategy:** 3 block reads per poll cycle, grouped automatically from the
   register addresses, plus one device-information read when the connection opens
 - **Tested firmware:** 3.0.19.19
@@ -302,7 +327,8 @@ The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus
 
 Pull requests are welcome! Especially:
 
-- Testing on other EcoFlow devices (PowerOcean DC, Connect)
+- Testing on other EcoFlow devices (PowerOcean Single Phase, PowerOcean DC Fit,
+  Ocean 2)
 - Identifying further Modbus registers
 - Home Assistant Energy Dashboard configuration examples
 
