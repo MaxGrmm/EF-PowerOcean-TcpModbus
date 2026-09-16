@@ -5,7 +5,7 @@ The values that fill these in live in const.py; this module must not import it.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Final
@@ -152,6 +152,15 @@ class ControlStatus(StrEnum):
     UNREACHABLE_BATTERY_EMPTY = "unreachable_battery_empty"
 
 
+def requires_modbus_control(status: ControlStatus) -> bool:
+    """Return whether the device is following Modbus commands at all.
+
+    Used as an entity availability rule: a control the inverter would store and
+    ignore is shown as unavailable rather than pretending to work.
+    """
+    return status is not ControlStatus.NO_MODBUS_CONTROL
+
+
 @dataclass(frozen=True)
 class ControlFeatureDef:
     """A mode and the single instruction it sends."""
@@ -191,6 +200,9 @@ class ControlEntityDef:
     key: str
     icon: str | None = None
     entity_category: EntityCategory | None = None
+    # When set, the entity is only available while this returns True for the
+    # coordinator's current control status. None means always available.
+    availability: Callable[[ControlStatus], bool] | None = None
 
 
 def deviation_state(

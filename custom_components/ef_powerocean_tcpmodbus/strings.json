@@ -372,16 +372,16 @@
     },
     "number": {
       "charge_battery_power": {
-        "name": "Charge Power"
+        "name": "Battery Charge Power"
       },
       "discharge_battery_power": {
-        "name": "Discharge Power"
+        "name": "Battery Discharge Power"
       },
       "export_to_grid_power": {
-        "name": "Export Power"
+        "name": "Grid Export Power"
       },
       "charge_limit_soc": {
-        "name": "Charge Limit"
+        "name": "Battery Charge Limit"
       },
       "battery_reserve_soc": {
         "name": "Battery Reserve"

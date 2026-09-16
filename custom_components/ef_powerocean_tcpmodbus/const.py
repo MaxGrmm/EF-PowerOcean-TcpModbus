@@ -33,6 +33,7 @@ from .models import (
     SensorDef,
     SwitchDef,
     plan_blocks_for_model,
+    requires_modbus_control,
 )
 
 DOMAIN: Final = "ef_powerocean_tcpmodbus"
@@ -625,17 +626,20 @@ CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
 BATTERY_MODE_SELECT: Final = ControlEntityDef(
     key="battery_mode",
     icon="mdi:home-battery",
+    availability=requires_modbus_control,
 )
 
 CHARGE_LIMIT_SOC_NUMBER: Final = ControlEntityDef(
     key="charge_limit_soc",
     entity_category=EntityCategory.CONFIG,
     icon="mdi:battery-charging-100",
+    availability=requires_modbus_control,
 )
 BATTERY_RESERVE_SOC_NUMBER: Final = ControlEntityDef(
     key="battery_reserve_soc",
     entity_category=EntityCategory.CONFIG,
     icon="mdi:battery-lock",
+    availability=requires_modbus_control,
 )
 DEFAULT_CHARGE_LIMIT_SOC: Final = 100.0
 DEFAULT_BATTERY_RESERVE_SOC: Final = 0.0

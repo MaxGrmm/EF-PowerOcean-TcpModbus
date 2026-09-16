@@ -21,7 +21,12 @@ from .const import (
 )
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
-from .models import ControlEntityDef, ControlFeature, NumberWritableDef
+from .models import (
+    ControlEntityDef,
+    ControlFeature,
+    NumberWritableDef,
+    requires_modbus_control,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -90,7 +95,14 @@ class EcoFlowFeaturePowerNumber(EcoFlowBaseEntity, NumberEntity):
         entry: ConfigEntry,
         feature: ControlFeature,
     ) -> None:
-        super().__init__(coordinator, entry, ControlEntityDef(key=f"{feature}_power"))
+        super().__init__(
+            coordinator,
+            entry,
+            ControlEntityDef(
+                key=f"{feature}_power",
+                availability=requires_modbus_control,
+            ),
+        )
         self._feature = feature
 
     @property
