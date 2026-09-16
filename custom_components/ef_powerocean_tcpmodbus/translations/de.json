@@ -349,6 +349,7 @@
           "automatic": "Automatisch",
           "charge_limit_reached": "Ladegrenze erreicht",
           "reserve_reached": "Batteriereserve erreicht",
+          "hold_not_needed": "Batterie voll, Halten nicht nötig",
           "active": "Aktiv",
           "ramping": "Fährt hoch",
           "unreachable_battery_full": "Batterie voll, Ziel nicht erreichbar",

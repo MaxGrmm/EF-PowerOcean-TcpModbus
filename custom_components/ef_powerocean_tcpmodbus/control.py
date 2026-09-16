@@ -180,6 +180,12 @@ class ControlManager:
             return ControlStatus.NO_MODBUS_CONTROL
         if self._blocking_guard is not None:
             return self._blocking_guard
+        # Only a hold the battery cannot need leaves a selected mode uncommanded.
+        if (
+            self._feature is not ControlFeature.AUTOMATIC
+            and self._commanded_feature is ControlFeature.AUTOMATIC
+        ):
+            return ControlStatus.HOLD_NOT_NEEDED
         if not CONTROL_FEATURES[self._commanded_feature].commands_power:
             return ControlStatus.AUTOMATIC
         return self._deviation

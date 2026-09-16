@@ -196,6 +196,7 @@ def test_a_full_battery_is_held_against_the_house_but_not_against_the_sun(
 
     assert control.selected_feature is Feature.HOLD_BATTERY
     assert control.power == 0.0
+    assert control.status is Status.HOLD_NOT_NEEDED
     assert commands(write) == [
         (setpoint, [0x0000, 0x0000]),
         (const.CONTROL_COMMAND_REGISTER, [0x0000, 0x0000]),
