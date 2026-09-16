@@ -276,8 +276,12 @@ To enable debug logging without editing `configuration.yaml`:
 
 ## Screenshots
 
-<img width="334" height="1202" alt="Screenshot 2026-04-02 132824" src="https://github.com/user-attachments/assets/dc73b934-ad8b-4610-8050-45d445dc318f" />
-<img width="326" height="1276" alt="Screenshot 2026-04-02 132833" src="https://github.com/user-attachments/assets/f5908343-ff6f-450b-9b55-8c7a0ad59859" />
+<img width="431" height="431" alt="Controls" src="https://github.com/user-attachments/assets/1c0f9217-cba7-47f4-8bc6-9a3632c1bdcd" />
+<img width="431" height="443" alt="Configuration" src="https://github.com/user-attachments/assets/320ce431-1d6b-4f3f-965c-912f9e4be31a" />
+<img width="431" height="1539" alt="Sensor_Entities" src="https://github.com/user-attachments/assets/dca4b3c8-a56d-4d8d-ad13-6499f2cfd63c" />
+<img width="431" height="2075" alt="Diagnostics" src="https://github.com/user-attachments/assets/4380c0bb-a5f9-4a7d-8225-af3c5f2d3ab2" />
+
+
 
 ---
 
@@ -308,7 +312,22 @@ review checklist.
 
 ## Credits
 
-Special thanks to **Kater Carlo** for his significant contributions to register mapping, sensor definitions and testing – this release would not have happened without him. 🐱
+Special thanks to all contributors for the massive amount of time and effort that helped this project grow so fast!
+<p>
+  <a href="https://github.com/windmark">
+    <img src="https://github.com/windmark.png" width="50" height="50" alt="windmark"/><br/>
+    windmark
+  </a>
+</p>
+<p>
+  <a href="https://github.com/fuchsi585">
+    <img src="https://github.com/fuchsi585.png" width="50" height="50" alt="fuchsi585"/><br/>
+    fuchsi585
+  </a>
+</p>
+<p>
+  Kater Carlo
+</p>
 
 ---
 
