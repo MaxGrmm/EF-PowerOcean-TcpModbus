@@ -13,7 +13,7 @@ Closes #<!-- issue number -->
 ## Checklist
 
 - [ ] Tests pass (`pytest`)
-- [ ] Added new tests for the new features, and all tests pass successfully
+- [ ] Tests added or updated for changed behavior
 - [ ] CHANGELOG.md updated
-- [ ] Version bumped in `manifest.json` (if code change)
 - [ ] README updated (if new sensors, features or behavior changes)
+- [ ] Required GitHub Actions checks pass
