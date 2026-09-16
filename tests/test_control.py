@@ -171,6 +171,48 @@ def test_holding_the_battery_commands_one_watt_not_zero(
     assert commands(write)[0] == (setpoint, [0x0000, 0x0001])
 
 
+def test_a_full_battery_is_held_against_the_house_but_not_against_the_sun(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A full battery cannot charge, so a limit set against a surplus only curtails."""
+    write = allow_writes(control, monkeypatch)
+    setpoint = const.REGISTERS_BY_KEY["battery_power_setpoint"].address
+    control._data = {"battery_soc": 100.0, "solar_power": 100.0, "house_power": 900.0}
+
+    asyncio.run(control.async_select_feature(Feature.HOLD_BATTERY))
+
+    assert commands(write) == [
+        (setpoint, [0x0000, 0x0001]),
+        (const.CONTROL_COMMAND_REGISTER, [0x0000, 0x0030]),
+    ]
+
+    write.reset_mock()
+    advance(control, monkeypatch, const.MIN_CONTROL_DWELL_S + 1)
+    asyncio.run(
+        control.async_apply(
+            {"battery_soc": 100.0, "solar_power": 5000.0, "house_power": 1000.0}
+        )
+    )
+
+    assert control.selected_feature is Feature.HOLD_BATTERY
+    assert control.power == 0.0
+    assert commands(write) == [
+        (setpoint, [0x0000, 0x0000]),
+        (const.CONTROL_COMMAND_REGISTER, [0x0000, 0x0000]),
+    ]
+
+    # Anything short of a clear surplus counts as a draw, so the hold is back before
+    # the house can reach the battery.
+    advance(control, monkeypatch, 2 * const.MIN_CONTROL_DWELL_S + 2)
+    asyncio.run(
+        control.async_apply(
+            {"battery_soc": 100.0, "solar_power": 1000.0, "house_power": 1000.0}
+        )
+    )
+
+    assert control.power == 1.0
+
+
 def test_power_is_clamped_to_the_lowest_ceiling_that_applies(control) -> None:
     """The app's battery limit is ignored by Modbus control, so it must not cap us."""
     control._data = {"battery_charge_power_limit": 500.0}
@@ -208,6 +250,7 @@ def test_a_mode_cannot_be_selected_without_modbus_control(
 def test_selecting_automatic_returns_control_to_the_device(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The default method alone leaves the device holding the setpoint we wrote."""
     write = allow_writes(control, monkeypatch)
     control._data = {"battery_soc": 50.0}
     asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
@@ -215,7 +258,10 @@ def test_selecting_automatic_returns_control_to_the_device(
     asyncio.run(control.async_select_feature(Feature.AUTOMATIC))
 
     assert control.status is Status.AUTOMATIC
-    assert commands(write)[-1] == (const.CONTROL_COMMAND_REGISTER, [0x0000, 0x0000])
+    assert commands(write)[-2:] == [
+        (const.REGISTERS_BY_KEY["battery_power_setpoint"].address, [0x0000, 0x0000]),
+        (const.CONTROL_COMMAND_REGISTER, [0x0000, 0x0000]),
+    ]
 
 
 def test_the_control_word_refuses_off_grid_and_shutdown_bits(

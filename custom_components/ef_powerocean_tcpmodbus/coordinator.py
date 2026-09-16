@@ -286,7 +286,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 )
                 data["battery_count"] = configured_battery_count
 
-            await self.control.async_poll(data)
             return data
         except ModbusException as err:
             _LOGGER.debug(f"{err.string}. Connection closing...")
@@ -327,6 +326,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             result = self._energy_processor.clamp_calculated(
                 result, self._last_checked_data, is_daily_reset=is_daily_reset
             )
+
+            # The poll needs to happen after the derived values are calculated so that
+            # the control sees the correct solar power, in case the user has configured
+            # them to be calculated.
+            await self.control.async_poll(result)
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()

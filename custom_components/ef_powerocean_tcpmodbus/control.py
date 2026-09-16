@@ -37,6 +37,7 @@ from .const import (
 )
 from .modbus import ModbusClient, ModbusRejected
 from .models import (
+    BATTERY_FULL_SOC,
     ControlFeature,
     ControlMode,
     ControlStatus,
@@ -411,6 +412,26 @@ class ControlManager:
             return ControlStatus.RESERVE_REACHED
         return None
 
+    def _hold(
+        self, data: dict[str, Any], blocked: ControlStatus | None
+    ) -> tuple[ControlFeature, float, ControlStatus | None]:
+        """Pin the battery, unless pinning it could only cost solar.
+
+        A full battery cannot charge, so a battery limit set against a surplus
+        forbids nothing the inverter could do anyway and leaves curtailing the
+        array as its only way to balance. Stepping aside is safe because the
+        deadband counts anything short of a clear surplus as a draw, so the hold
+        is back before the house can reach the battery.
+        """
+        soc = data.get("battery_soc")
+        if (
+            soc is not None
+            and float(soc) >= BATTERY_FULL_SOC
+            and self._measured_direction(data) > 0
+        ):
+            return ControlFeature.AUTOMATIC, 0.0, blocked
+        return ControlFeature.HOLD_BATTERY, HOLD_SETPOINT_W, blocked
+
     def _desired_command(
         self, data: dict[str, Any]
     ) -> tuple[ControlFeature, float, ControlStatus | None]:
@@ -425,12 +446,12 @@ class ControlManager:
             else definition.direction
         )
         if (blocked := self._guard_blocks(direction)) is not None:
-            return ControlFeature.HOLD_BATTERY, HOLD_SETPOINT_W, blocked
+            return self._hold(data, blocked)
 
         if self._feature is ControlFeature.AUTOMATIC:
             return ControlFeature.AUTOMATIC, 0.0, None
         if not definition.has_power:
-            return self._feature, HOLD_SETPOINT_W, None
+            return self._hold(data, None)
         return (
             self._feature,
             self._clamp_power(self.feature_power(self._feature), self._feature),
@@ -558,6 +579,8 @@ class ControlManager:
         if CONTROL_FEATURES[feature].commands_power:
             await self._async_require_control_authority()
             await self._async_write_setpoint(feature, power)
+        else:
+            await self._async_clear_setpoint(self._commanded_feature)
 
         await self._async_write_control_word(self._compose_control_command(feature))
         self._note_control_written()
@@ -582,6 +605,17 @@ class ControlManager:
         self._note_control_written()
         self._on_update()
         await self._on_refresh()
+
+    async def _async_clear_setpoint(self, feature: ControlFeature) -> None:
+        """Release the limit feature left in its register.
+
+        Selecting the default method does not undo a setpoint the inverter still
+        holds, and zero is the value that means no limit to it.
+        """
+        if not CONTROL_FEATURES[feature].commands_power:
+            return
+        await self._async_require_control_authority()
+        await self._async_write_setpoint(feature, 0.0)
 
     async def _async_write_setpoint(
         self, feature: ControlFeature, watts: float
