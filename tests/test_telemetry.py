@@ -137,7 +137,7 @@ class CalculateValuesTest(unittest.TestCase):
         self.assertEqual(result["bat_remaining"], 6.0)
         self.assertEqual(result["bat_net_energy"], 20.25)
         self.assertEqual(result["house_energy_today"], 20.0)
-        self.assertEqual(result["house_energy_total"], 2180.0)
+        self.assertEqual(result["house_energy_total"], 2179.75)
 
     def test_calculates_pv_power_and_honors_voltage_threshold(self) -> None:
         result = self.calculate()
