@@ -293,7 +293,7 @@ To enable debug logging without editing `configuration.yaml`:
 - **Float encoding:** 32-bit IEEE 754
 - **Read strategy:** 3 block reads per poll cycle, grouped automatically from the
   register addresses, plus one device-information read when the connection opens
-- **Tested firmware:** 3.0.19.19
+- **Tested firmware:** 3.0.19.19 + 3.0.20.54(PO+)
 - **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 
 The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. For address numbering, word order, decoding and known gaps, see [EcoFlow_PowerOcean_Modbus.md](EcoFlow_PowerOcean_Modbus.md).
