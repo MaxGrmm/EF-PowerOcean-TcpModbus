@@ -60,7 +60,7 @@ Keep changes within the layer that owns the behavior and place tests alongside t
 - Use module loggers (`logging.getLogger(__name__)`) and include actionable context. Do not log secrets or full device identifiers.
 - Add or update focused tests for every behavior change and bug fix.
 - Avoid unrelated refactoring in the same pull request.
-- Do not add a dependency when the standard library or an existing dependency is sufficient. Any new runtime dependency must also be declared in `manifest.json`.
+- Do not add a dependency when the standard library or an existing dependency is sufficient. Any new runtime dependency must also be declared in [manifest.json](custom_components/ef_powerocean_tcpmodbus/manifest.json).
 
 ### Registers and Telemetry
 
@@ -70,6 +70,25 @@ Register changes need stronger evidence than a field name or a successful read:
 - Add decoding and block-planning tests where the change affects either behavior.
 - Treat missing or invalid telemetry as unavailable. Do not replace it with zero, especially for `total_increasing` energy sensors, because that can corrupt Home Assistant long-term statistics.
 - Use synthetic values and placeholder identifiers in tests and fixtures.
+
+### Register Scan
+
+[scripts/register_scan.py](scripts/register_scan.py) compares a live inverter against the register map in [const.py](custom_components/ef_powerocean_tcpmodbus/const.py) and prints a report to attach to an issue. It is read-only: it never writes a register and never takes Modbus control away from the EcoFlow app. The map, the decoding and the block planning are imported from the integration, so the report cannot drift from the code.
+
+When requesting support for a new inverter model, this is the script that should be run to compare the registers.
+
+To run it:
+
+```shell
+uv pip install -r requirements-development.txt
+uv run python scripts/register_scan.py <inverter_ip>
+```
+
+Reading the result:
+
+- Every register reading zero usually means Modbus TCP is switched off in the EcoFlow app, not that the map differs.
+- A refused register that is readable elsewhere means the address moved on that model. Add an `address_overrides` entry to its `RegisterDef` rather than changing the shared address.
+- A `maybe ...` in the `looks like` column is only a guess from the value's magnitude. It's an educated guess, but can be wrong. Use it as a reference together with the [protocol notes](EcoFlow_PowerOcean_Modbus.md).
 
 ### Writable Registers and Battery Control
 
@@ -82,9 +101,9 @@ Keep Modbus control opt-in and fail-safe. New control paths must respect control
 When adding or changing an entity:
 
 - Update the entity definition and its platform implementation as needed.
-- Keep `strings.json`, `translations/en.json`, and `translations/de.json` in sync.
+- Keep [strings.json](custom_components/ef_powerocean_tcpmodbus/strings.json), [translations/en.json](custom_components/ef_powerocean_tcpmodbus/translations/en.json), and [translations/de.json](custom_components/ef_powerocean_tcpmodbus/translations/de.json) in sync.
 - Add state translations for enum entities.
-- Update the entity tables or behavior documentation in `README.md`.
+- Update the entity tables or behavior documentation in [README.md](README.md).
 - Preserve entity keys and unique IDs unless a migration is included. Changing them can orphan existing entities and dashboard references.
 
 ## Pull Requests
@@ -95,8 +114,8 @@ Push your branch to your fork and open a pull request against this repository's 
 - Explain the problem, the chosen solution, and how you verified it.
 - Link the related issue.
 - Include tests for changed behavior.
-- Update `CHANGELOG.md` under the appropriate category.
-- Update `README.md` when setup, entities, or user-visible behavior changes.
+- Update [CHANGELOG.md](CHANGELOG.md) under the appropriate category.
+- Update [README.md](README.md) when setup, entities, or user-visible behavior changes.
 - Ensure all required GitHub Actions checks pass, including tests, pre-commit,
   HACS validation, and hassfest.
 

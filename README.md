@@ -39,6 +39,8 @@
 | EcoFlow PowerOcean DC Fit  | ❓ Untested – feedback welcome |
 | EcoFlow Ocean2             | ❓ Untested – feedback welcome |
 
+Running an untested model? [scripts/register_scan.py](scripts/register_scan.py) produces a read-only report comparing your inverter against the register map this integration expects. Attaching its output to an issue is what makes a device supportable — see [Register Scan](CONTRIBUTING.md#register-scan).
+
 ---
 
 ## Prerequisites
