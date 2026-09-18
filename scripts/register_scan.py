@@ -575,8 +575,6 @@ def report_summary(
             address = render_address(register.address)
             print(f"    {register.key} at {address}: {value} ({note})")
 
-    # Every device carries settings we do not read, so unmapped ground is a lead
-    # rather than a finding, and only worth pointing at once something is wrong.
     if candidates and (missing or suspect):
         print(f"  {len(candidates)} address(es) outside the map hold a non-zero value.")
         print("    A map that has moved still reports the same quantity, just at")
