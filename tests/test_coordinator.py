@@ -52,6 +52,7 @@ def coordinator():
         limits=instance.limits,
         inverter_model=instance.inverter_model,
         enabled=False,
+        scan_interval_s=const.DEFAULT_SCAN_INTERVAL_S,
         on_update=Mock(),
         on_refresh=AsyncMock(),
     )

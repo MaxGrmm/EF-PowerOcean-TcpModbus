@@ -74,9 +74,10 @@ HEARTBEAT_VALUE: Final = 1
 HEARTBEAT_LAPSE_S: Final = 60
 # A beat this recent holds the window open for a command without rewriting it.
 HEARTBEAT_FRESH_S: Final = 10
-# Attempts within one beat. The total is a fraction of the window, so a busy
-# inverter costs a retry rather than control.
-HEARTBEAT_RETRY_DELAYS_S: Final = (0.0, 0.5, 1.5, 3.0)
+# How long one beat may spend retrying. A fraction of the window, so a busy
+# inverter costs a retry rather than control, and short enough that a burst is
+# always over before the next beat is due.
+HEARTBEAT_RETRY_BUDGET_S: Final = 15
 # How long a register the firmware called invalid is left alone before retesting.
 HEARTBEAT_REPROBE_S: Final = 900
 HEARTBEAT_JITTER_S: Final = 2
