@@ -35,7 +35,7 @@
 | -------------------------- | ------------ | ------------ |
 | EcoFlow PowerOcean Plus    | ✅ Confirmed | ✅ Confirmed |
 | EcoFlow PowerOcean 3-phase | ✅ Confirmed | ✅ Confirmed |
-| EcoFlow PowerOcean 1-phase | ❓ Untested  | ❓ Untested  |
+| EcoFlow PowerOcean 1-phase | ✅ Confirmed | ❓ Untested  |
 | EcoFlow PowerOcean DC Fit  | ❓ Untested  | ❓ Untested  |
 | EcoFlow Ocean 2 3-phase    | ❓ Untested  | ❓ Untested  |
 | EcoFlow Ocean 2 1-phase    | ❓ Untested  | ❓ Untested  |
