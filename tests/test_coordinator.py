@@ -647,7 +647,6 @@ def test_gets_and_decodes_raw_data(
     decode_register = Mock(side_effect=(2.0, 42.0))
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     coordinator._modbus_client.connected = True
-    coordinator.control.async_send_heartbeat = AsyncMock(return_value=True)
     coordinator._modbus_client.async_read = AsyncMock(return_value=[2, 42])
     coordinator.limits[const.CONF_BATTERY_COUNT] = 2
 
@@ -676,7 +675,6 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
     )
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     coordinator._modbus_client.connected = True
-    coordinator.control.async_send_heartbeat = AsyncMock(return_value=True)
     coordinator._modbus_client.async_read = AsyncMock(return_value=[0, 0, 0])
     coordinator.limits[const.CONF_BATTERY_COUNT] = 2
     coordinator.serial_number = "R123456789"

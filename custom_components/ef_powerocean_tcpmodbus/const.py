@@ -65,13 +65,21 @@ MAX_FAULT_EVENTS: Final = 20
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 
 # The device stores writes but acts on none of them unless this register is written
-# at least once a minute. Sent well inside that window so a missed poll is harmless.
+# at least once a minute. Sent well inside that window so a missed beat is harmless.
 HEARTBEAT_REGISTER: Final = 40608
 HEARTBEAT_INTERVAL_S: Final = 20
 HEARTBEAT_VALUE: Final = 1
 # The device's own window. A gap longer than this means it has dropped Modbus
 # control and re-inherited the app settings, so the control word is sent again.
 HEARTBEAT_LAPSE_S: Final = 60
+# A beat this recent holds the window open for a command without rewriting it.
+HEARTBEAT_FRESH_S: Final = 10
+# Attempts within one beat. The total is a fraction of the window, so a busy
+# inverter costs a retry rather than control.
+HEARTBEAT_RETRY_DELAYS_S: Final = (0.0, 0.5, 1.5, 3.0)
+# How long a register the firmware called invalid is left alone before retesting.
+HEARTBEAT_REPROBE_S: Final = 900
+HEARTBEAT_JITTER_S: Final = 2
 
 # 0x0215, write-only. Bit 0 forces the system off-grid and bit 1 shuts it down, so a
 # command touching either is refused before it reaches the wire. Bit 3 is the
