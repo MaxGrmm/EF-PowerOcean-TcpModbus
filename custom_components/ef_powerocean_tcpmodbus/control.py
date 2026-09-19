@@ -422,9 +422,7 @@ class ControlManager:
 
     def _sustained(self, key: str, holds: bool) -> bool:
         """Return whether *holds* has been true for enough polls to act on."""
-        self._guard_evidence[key] = (
-            self._guard_evidence.get(key, 0) + 1 if holds else 0
-        )
+        self._guard_evidence[key] = self._guard_evidence.get(key, 0) + 1 if holds else 0
         return self._guard_evidence[key] >= GUARD_EVIDENCE_POLLS
 
     def _charging_now(self, data: dict[str, Any]) -> bool:
