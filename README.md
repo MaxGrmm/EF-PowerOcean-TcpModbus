@@ -31,15 +31,16 @@
 
 ## Supported Devices
 
-| Device                     | Status                         |
-| -------------------------- | ------------------------------ |
-| EcoFlow PowerOcean Plus    | ✅ Confirmed                   |
-| EcoFlow PowerOcean 3-phase | ✅ Confirmed                   |
-| EcoFlow PowerOcean 1-phase | ❓ Untested – feedback welcome |
-| EcoFlow PowerOcean DC Fit  | ❓ Untested – feedback welcome |
-| EcoFlow Ocean2             | ❓ Untested – feedback welcome |
+| Device                     | Read         | Control      |
+| -------------------------- | ------------ | ------------ |
+| EcoFlow PowerOcean Plus    | ✅ Confirmed | ✅ Confirmed |
+| EcoFlow PowerOcean 3-phase | ✅ Confirmed | ✅ Confirmed |
+| EcoFlow PowerOcean 1-phase | ❓ Untested  | ❓ Untested  |
+| EcoFlow PowerOcean DC Fit  | ❓ Untested  | ❓ Untested  |
+| EcoFlow Ocean 2 3-phase    | ❓ Untested  | ❓ Untested  |
+| EcoFlow Ocean 2 1-phase    | ❓ Untested  | ❓ Untested  |
 
-Running an untested model? [scripts/register_scan.py](scripts/register_scan.py) produces a read-only report comparing your inverter against the register map this integration expects. Attaching its output to an issue is what makes a device supportable — see [Register Scan](CONTRIBUTING.md#register-scan).
+Running an untested model? [scripts/register_scan.py](scripts/register_scan.py) produces a read-only report comparing your inverter against the register map this integration expects. Attaching its output to an issue is what makes a device supportable, see [Register Scan](CONTRIBUTING.md#register-scan).
 
 ---
 
@@ -191,7 +192,7 @@ set up before it is needed. Only the selected mode's value is ever sent.
 | Min SOC Limit                     | %    | Backup reserve configured in the EcoFlow app                     |
 
 > ⚠️ _Available Battery Charge/Discharge Power_ reflect limits configured in the
-> EcoFlow app, but **battery control over Modbus ignores those limits** — as it does
+> EcoFlow app, but **battery control over Modbus ignores those limits**, as it does
 > _Min SOC Limit_. For example, a 500 W app limit will not stop a Modbus charge command
 > from running at the configured battery-control ceiling.
 
