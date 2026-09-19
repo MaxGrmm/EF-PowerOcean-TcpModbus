@@ -64,14 +64,26 @@ MAX_FAULT_EVENTS: Final = 20
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 
-# The device stores writes but acts on none of them unless this register is written
-# at least once a minute. Sent well inside that window so a missed poll is harmless.
+# The inverter runs on its app settings and merely stores the commands it is sent,
+# until this register is written; each write buys it a minute of obeying them. Every
+# constant below is seconds measured against that one deadline.
 HEARTBEAT_REGISTER: Final = 40608
-HEARTBEAT_INTERVAL_S: Final = 20
 HEARTBEAT_VALUE: Final = 1
-# The device's own window. A gap longer than this means it has dropped Modbus
-# control and re-inherited the app settings, so the control word is sent again.
-HEARTBEAT_LAPSE_S: Final = 60
+# The inverter's deadline: it stops obeying once the last accepted write is older.
+HEARTBEAT_WINDOW_S: Final = 60
+# How often to write, so a missed write still leaves two more before the deadline.
+HEARTBEAT_INTERVAL_S: Final = 20
+# Offsets the write from the poll tick, so the two rarely land on the same second.
+HEARTBEAT_JITTER_S: Final = 2
+# A write this recent still holds the deadline off, so a command rides on it rather
+# than sending one of its own.
+HEARTBEAT_REUSE_S: Final = 10
+# How long one write may spend being retried, all attempts together. Below
+# HEARTBEAT_INTERVAL_S, so the retries are over before the next write is due.
+HEARTBEAT_RETRY_TOTAL_S: Final = 15
+# How long to leave the register alone once the inverter has called the request
+# invalid rather than ill-timed, which is what firmware without it answers.
+HEARTBEAT_UNSUPPORTED_RETRY_S: Final = 900
 
 # 0x0215, write-only. Bit 0 forces the system off-grid and bit 1 shuts it down, so a
 # command touching either is refused before it reaches the wire. Bit 3 is the
