@@ -646,9 +646,9 @@ DEFAULT_BATTERY_RESERVE_SOC: Final = 0.0
 
 GUARD_SOC_HYSTERESIS: Final = 5.0
 GUARD_POWER_DEADBAND_W: Final = 200.0
-# A direct measurement, so it needs less room than the surplus proxy above.
+# Threshold when to consider the battery (dis)charging to limit noise.
 GUARD_BATTERY_DETECT_W: Final = 50.0
-# Releasing a hold is the risky edge, so it waits for a repeated answer.
+# Require multiple polls to operate a guard, to avoid noise interfering.
 GUARD_EVIDENCE_POLLS: Final = 3
 MIN_CONTROL_DWELL_S: Final = 60.0
 CONTROL_STATUS_DAMPING_POLLS: Final = 3
