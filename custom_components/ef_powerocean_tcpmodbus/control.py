@@ -439,14 +439,7 @@ class ControlManager:
         return -sign * float(grid) > GUARD_POWER_DEADBAND_W
 
     def _automatic_guard(self, data: dict[str, Any]) -> ControlStatus | None:
-        """Return the guard that must take over while the inverter runs itself.
-
-        Holding the battery erases the surplus that solar against house load was
-        measuring, so one threshold cannot serve as both edges without the hold
-        removing its own reason to exist. Each edge therefore reads a signal the
-        command in force leaves intact: the battery's own power while it is free,
-        and the grid's while it is pinned.
-        """
+        """Return the guard that must take over while the inverter runs itself."""
         for latched, status, sign in (
             (self._charge_guard, ControlStatus.CHARGE_LIMIT_REACHED, 1),
             (self._reserve_guard, ControlStatus.RESERVE_REACHED, -1),
@@ -472,11 +465,11 @@ class ControlManager:
     def _hold(
         self, data: dict[str, Any], blocked: ControlStatus | None
     ) -> tuple[ControlFeature, float, ControlStatus | None]:
-        """Pin the battery, unless pinning it could only cost solar.
+        """Hold the battery, unless holding it could only limit solar.
 
         A full battery cannot charge, so a battery limit set against a surplus
-        forbids nothing the inverter could do anyway and leaves curtailing the
-        array as its only way to balance. Stepping aside is safe because the
+        forbids nothing the inverter could do anyway and leaves limiting the
+        solar as its only way to balance. Stepping aside is safe because the
         deadband counts anything short of a clear surplus as a draw, so the hold
         is back before the house can reach the battery.
         """
