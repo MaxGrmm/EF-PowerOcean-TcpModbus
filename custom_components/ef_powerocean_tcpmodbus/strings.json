@@ -346,6 +346,7 @@
           "automatic": "Automatic",
           "charge_limit_reached": "Charge limit reached",
           "reserve_reached": "Battery reserve reached",
+          "hold_not_needed": "Battery full, hold not needed",
           "active": "Active",
           "ramping": "Ramping",
           "unreachable_battery_full": "Battery full, target unreachable",

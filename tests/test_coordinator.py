@@ -220,6 +220,42 @@ def test_accepted_update_publishes_successful_coordinator_status(
     assert "coordinator_status" not in coordinator._last_checked_data
 
 
+def test_control_sees_the_derived_solar_power_not_the_raw_register(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The register reads 0 W on some inverters, which would read as a sunless day."""
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    coordinator.async_get_raw_data = AsyncMock(
+        return_value={"solar_power": 0.0, "house_power": 900.0}
+    )
+    coordinator._energy_processor.validate_totals = Mock(
+        side_effect=lambda data, *_: dict(data)
+    )
+    coordinator._energy_processor.raw_daily_values = Mock(return_value={})
+    coordinator._energy_processor.derive_daily = Mock(
+        side_effect=lambda data: (data, False)
+    )
+    coordinator._energy_processor.clamp_calculated = Mock(
+        side_effect=lambda data, _prev, **_: data
+    )
+    coordinator._ena_calc_solar_power = True
+    coordinator.control.async_poll = AsyncMock()
+    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+    monkeypatch.setattr(
+        coordinator_module.TelemetryData, "from_mapping", Mock(return_value=object())
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "calculate_derived_values",
+        Mock(return_value={"solar_power": 4200.0}),
+    )
+
+    asyncio.run(coordinator._async_update_data())
+
+    coordinator.control.async_poll.assert_awaited_once()
+    assert coordinator.control.async_poll.await_args.args[0]["solar_power"] == 4200.0
+
+
 def test_read_failure_raises_to_show_gap(coordinator) -> None:
     coordinator._last_checked_data = {"grid_import_total": 10.0}
     coordinator.async_get_raw_data = AsyncMock(return_value=None)

@@ -146,6 +146,7 @@ class ControlStatus(StrEnum):
     AUTOMATIC = "automatic"
     CHARGE_LIMIT_REACHED = "charge_limit_reached"
     RESERVE_REACHED = "reserve_reached"
+    HOLD_NOT_NEEDED = "hold_not_needed"
     ACTIVE = "active"
     RAMPING = "ramping"
     UNREACHABLE_BATTERY_FULL = "unreachable_battery_full"
