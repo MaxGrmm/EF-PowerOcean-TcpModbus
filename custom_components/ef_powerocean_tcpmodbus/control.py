@@ -26,6 +26,8 @@ from .const import (
     CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
+    GUARD_BATTERY_DETECT_W,
+    GUARD_EVIDENCE_POLLS,
     GUARD_POWER_DEADBAND_W,
     GUARD_SOC_HYSTERESIS,
     HEARTBEAT_INTERVAL_S,
@@ -92,6 +94,8 @@ class ControlManager:
         self._reserve_guard = False
         # Which guard, if any, is forcing the current command.
         self._blocking_guard: ControlStatus | None = None
+        # How many polls in a row have argued for releasing each guard.
+        self._guard_evidence: dict[str, int] = {}
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
@@ -319,13 +323,19 @@ class ControlManager:
     async def async_set_charge_limit_soc(self, soc: float) -> None:
         """Set the state of charge above which the battery must not be charged."""
         self._charge_limit_soc = max(0.0, min(100.0, soc))
-        self._charge_guard = False
+        # Clearing the latch lets the new limit decide from scratch, but only where
+        # async_apply can re-derive it below. _update_guards leaves the latch alone
+        # when the frame has no state of charge, and an unknown one must not read as
+        # permission to charge.
+        if self._data.get("battery_soc") is not None:
+            self._charge_guard = False
         await self.async_apply(force=True)
 
     async def async_set_battery_reserve_soc(self, soc: float) -> None:
         """Set the state of charge below which the battery must not be drained."""
         self._battery_reserve_soc = max(0.0, min(100.0, soc))
-        self._reserve_guard = False
+        if self._data.get("battery_soc") is not None:
+            self._reserve_guard = False
         await self.async_apply(force=True)
 
     async def async_set_battery_saver(self, enabled: bool) -> None:
@@ -410,6 +420,74 @@ class ControlManager:
             return -1
         return 0
 
+    def _sustained(self, key: str, holds: bool) -> bool:
+        """Return whether *holds* has been true for enough polls to act on."""
+        self._guard_evidence[key] = (
+            self._guard_evidence.get(key, 0) + 1 if holds else 0
+        )
+        return self._guard_evidence[key] >= GUARD_EVIDENCE_POLLS
+
+    def _charging_now(self, data: dict[str, Any]) -> bool:
+        """Return whether the battery is taking power, while it is free to move."""
+        battery = data.get("battery_power")
+        if battery is None:
+            # A frame without the battery falls back to the surplus proxy; a missing
+            # signal must never read as permission to charge.
+            return self._measured_direction(data) > 0
+        return float(battery) > GUARD_BATTERY_DETECT_W
+
+    def _draining_now(self, data: dict[str, Any]) -> bool:
+        """Return whether the battery is giving up power, while it is free to move."""
+        battery = data.get("battery_power")
+        if battery is None:
+            return self._measured_direction(data) < 0
+        return float(battery) < -GUARD_BATTERY_DETECT_W
+
+    def _house_is_short(self, data: dict[str, Any]) -> bool:
+        """Return whether the house is drawing power a pinned battery could supply."""
+        grid = data.get("grid_power")
+        if grid is None:
+            return self._measured_direction(data) < 0
+        return float(grid) > GUARD_POWER_DEADBAND_W
+
+    def _surplus_to_spare(self, data: dict[str, Any]) -> bool:
+        """Return whether power is leaving for the grid that a pinned battery could take."""
+        grid = data.get("grid_power")
+        if grid is None:
+            return self._measured_direction(data) > 0
+        return float(grid) < -GUARD_POWER_DEADBAND_W
+
+    def _automatic_guard(self, data: dict[str, Any]) -> ControlStatus | None:
+        """Return the guard that must take over while the inverter runs itself.
+
+        Holding the battery erases the surplus that asking solar against house load
+        was measuring, so one threshold cannot serve as both edges: the hold removes
+        its own reason to exist and hands the battery straight back. Each edge is
+        therefore judged by a signal the command in force does not erase. While the
+        battery is free its own power says whether it is charging; while it is pinned
+        the grid says which way the house is leaning. Engaging and releasing never
+        answer the same question, so neither can trigger the other back.
+        """
+        if self._charge_guard:
+            if self._blocking_guard is ControlStatus.CHARGE_LIMIT_REACHED:
+                if not self._sustained("release_charge", self._house_is_short(data)):
+                    return ControlStatus.CHARGE_LIMIT_REACHED
+            elif self._charging_now(data):
+                return ControlStatus.CHARGE_LIMIT_REACHED
+        else:
+            self._guard_evidence.pop("release_charge", None)
+
+        if self._reserve_guard:
+            if self._blocking_guard is ControlStatus.RESERVE_REACHED:
+                if not self._sustained("release_reserve", self._surplus_to_spare(data)):
+                    return ControlStatus.RESERVE_REACHED
+            elif self._draining_now(data):
+                return ControlStatus.RESERVE_REACHED
+        else:
+            self._guard_evidence.pop("release_reserve", None)
+
+        return None
+
     def _guard_blocks(self, direction: int) -> ControlStatus | None:
         """Return the guard forbidding movement in *direction*, if one does."""
         if direction > 0 and self._charge_guard:
@@ -446,12 +524,14 @@ class ControlManager:
             return ControlFeature.AUTOMATIC, 0.0, None
 
         definition = CONTROL_FEATURES[self._feature]
-        direction = (
-            self._measured_direction(data)
+        # A mode that declares a direction needs no measurement; only the inverter
+        # running itself has to be read from the frame.
+        blocked = (
+            self._automatic_guard(data)
             if self._feature is ControlFeature.AUTOMATIC
-            else definition.direction
+            else self._guard_blocks(definition.direction)
         )
-        if (blocked := self._guard_blocks(direction)) is not None:
+        if blocked is not None:
             return self._hold(data, blocked)
 
         if self._feature is ControlFeature.AUTOMATIC:

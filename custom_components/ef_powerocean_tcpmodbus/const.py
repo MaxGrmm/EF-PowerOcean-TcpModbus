@@ -646,6 +646,10 @@ DEFAULT_BATTERY_RESERVE_SOC: Final = 0.0
 
 GUARD_SOC_HYSTERESIS: Final = 5.0
 GUARD_POWER_DEADBAND_W: Final = 200.0
+# Use a low battery power threshold to reduce noise
+GUARD_BATTERY_DETECT_W: Final = 50.0
+# Releasing a hold is the risky edge, so it waits for the same answer twice over.
+GUARD_EVIDENCE_POLLS: Final = 3
 MIN_CONTROL_DWELL_S: Final = 60.0
 CONTROL_STATUS_DAMPING_POLLS: Final = 3
 # 0 means "no limit" to the inverter and not "hold at zero", so we therefore set the lowest power to hold.
