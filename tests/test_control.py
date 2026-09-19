@@ -327,6 +327,184 @@ def test_a_guard_blocks_only_the_direction_it_protects(
     assert control.power == (0.0 if expected is Status.AUTOMATIC else 1.0)
 
 
+def test_a_charge_guard_holds_a_battery_charging_inside_the_surplus_deadband(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Solar against house load cannot see a trickle narrower than its deadband, so
+    the battery charged past its limit for as long as the weather stayed dull."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_charge_limit_soc(80))
+
+    asyncio.run(
+        control.async_apply(
+            {
+                "battery_soc": 80.0,
+                # Only 150 W apart, so the surplus proxy reads this as balanced.
+                "solar_power": 550.0,
+                "house_power": 400.0,
+                "grid_power": 0.0,
+                "battery_power": 150.0,
+            }
+        )
+    )
+
+    assert control.status is Status.CHARGE_LIMIT_REACHED
+    assert control.power == 1.0
+
+
+def test_a_charge_guard_leaves_the_battery_free_to_serve_the_house(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A charge limit says nothing about discharging, and holding is symmetric, so a
+    guard that fired on anything but charging would cost the house its own power."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_charge_limit_soc(80))
+
+    asyncio.run(
+        control.async_apply(
+            {
+                "battery_soc": 80.0,
+                "solar_power": 250.0,
+                "house_power": 400.0,
+                "grid_power": 0.0,
+                "battery_power": -150.0,
+            }
+        )
+    )
+
+    assert control.status is Status.AUTOMATIC
+    assert control.power == 0.0
+
+
+def test_a_held_charge_guard_ignores_the_surplus_its_own_hold_removed(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pinning the battery takes away the sink, the array is curtailed to what the
+    house and the export ceiling can absorb, and the surplus the guard was watching
+    disappears. Reading that as permission would hand the battery straight back."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_charge_limit_soc(80))
+    charging = {
+        "battery_soc": 80.0,
+        "solar_power": 2000.0,
+        "house_power": 400.0,
+        "grid_power": -1600.0,
+        "battery_power": 1600.0,
+    }
+    asyncio.run(control.async_apply(charging))
+    assert control.status is Status.CHARGE_LIMIT_REACHED
+
+    # The array is now curtailed, so solar and house sit on top of each other.
+    curtailed = {
+        "battery_soc": 80.0,
+        "solar_power": 400.0,
+        "house_power": 400.0,
+        "grid_power": 0.0,
+        "battery_power": 0.0,
+    }
+    for poll in range(1, 11):
+        advance(control, monkeypatch, poll * (const.MIN_CONTROL_DWELL_S + 1))
+        asyncio.run(control.async_apply(curtailed))
+        assert control.status is Status.CHARGE_LIMIT_REACHED
+
+
+def test_a_held_charge_guard_releases_once_the_house_draws_from_the_grid(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The grid still says which way the house leans while the battery is pinned, and
+    a draw it could cover is the one thing that should free it."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_charge_limit_soc(80))
+    asyncio.run(
+        control.async_apply(
+            {
+                "battery_soc": 80.0,
+                "solar_power": 2000.0,
+                "house_power": 400.0,
+                "grid_power": -1600.0,
+                "battery_power": 1600.0,
+            }
+        )
+    )
+    assert control.status is Status.CHARGE_LIMIT_REACHED
+
+    importing = {
+        "battery_soc": 80.0,
+        "solar_power": 100.0,
+        "house_power": 400.0,
+        "grid_power": 300.0,
+        "battery_power": 0.0,
+    }
+    # One reading could be a passing cloud, so the hold waits to be sure.
+    for poll in range(1, const.GUARD_EVIDENCE_POLLS):
+        advance(control, monkeypatch, poll * (const.MIN_CONTROL_DWELL_S + 1))
+        asyncio.run(control.async_apply(importing))
+        assert control.status is Status.CHARGE_LIMIT_REACHED
+
+    advance(
+        control,
+        monkeypatch,
+        const.GUARD_EVIDENCE_POLLS * (const.MIN_CONTROL_DWELL_S + 1),
+    )
+    asyncio.run(control.async_apply(importing))
+    assert control.status is Status.AUTOMATIC
+
+
+def test_a_held_guard_keeps_holding_when_the_frame_loses_the_battery_and_grid(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A partial read must not read as permission to charge."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_charge_limit_soc(80))
+    asyncio.run(
+        control.async_apply(
+            {
+                "battery_soc": 80.0,
+                "solar_power": 2000.0,
+                "house_power": 400.0,
+                "grid_power": -1600.0,
+                "battery_power": 1600.0,
+            }
+        )
+    )
+    assert control.status is Status.CHARGE_LIMIT_REACHED
+
+    for poll in range(1, 6):
+        advance(control, monkeypatch, poll * (const.MIN_CONTROL_DWELL_S + 1))
+        asyncio.run(control.async_apply({"battery_soc": 80.0}))
+        assert control.status is Status.CHARGE_LIMIT_REACHED
+
+
+def test_setting_a_limit_keeps_the_latch_when_the_state_of_charge_is_unknown(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Setting a limit clears the latch so the new one starts its hysteresis afresh,
+    but only where the frame can work it out again."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_charge_limit_soc(80))
+    asyncio.run(
+        control.async_apply(
+            {
+                "battery_soc": 80.0,
+                "solar_power": 2000.0,
+                "house_power": 400.0,
+                "grid_power": -1600.0,
+                "battery_power": 1600.0,
+            }
+        )
+    )
+    assert control.status is Status.CHARGE_LIMIT_REACHED
+
+    # A read that failed part way through leaves the state of charge behind.
+    advance(control, monkeypatch, const.MIN_CONTROL_DWELL_S + 1)
+    asyncio.run(control.async_apply({"solar_power": 2000.0, "house_power": 400.0}))
+
+    asyncio.run(control.async_set_charge_limit_soc(70))
+
+    assert control._charge_guard is True
+    assert control.status is Status.CHARGE_LIMIT_REACHED
+
+
 def test_a_guard_releases_only_past_the_hysteresis_band(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:

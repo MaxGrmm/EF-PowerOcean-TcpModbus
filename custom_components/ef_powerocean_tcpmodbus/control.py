@@ -26,6 +26,8 @@ from .const import (
     CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
+    GUARD_BATTERY_DETECT_W,
+    GUARD_EVIDENCE_POLLS,
     GUARD_POWER_DEADBAND_W,
     GUARD_SOC_HYSTERESIS,
     HEARTBEAT_INTERVAL_S,
@@ -92,6 +94,7 @@ class ControlManager:
         self._reserve_guard = False
         # Which guard, if any, is forcing the current command.
         self._blocking_guard: ControlStatus | None = None
+        self._guard_evidence: dict[ControlStatus, int] = {}
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
@@ -319,13 +322,17 @@ class ControlManager:
     async def async_set_charge_limit_soc(self, soc: float) -> None:
         """Set the state of charge above which the battery must not be charged."""
         self._charge_limit_soc = max(0.0, min(100.0, soc))
-        self._charge_guard = False
+        # Clear the latch so the new limit starts its hysteresis afresh, but only
+        # where async_apply can work it out again below.
+        if self._data.get("battery_soc") is not None:
+            self._charge_guard = False
         await self.async_apply(force=True)
 
     async def async_set_battery_reserve_soc(self, soc: float) -> None:
         """Set the state of charge below which the battery must not be drained."""
         self._battery_reserve_soc = max(0.0, min(100.0, soc))
-        self._reserve_guard = False
+        if self._data.get("battery_soc") is not None:
+            self._reserve_guard = False
         await self.async_apply(force=True)
 
     async def async_set_battery_saver(self, enabled: bool) -> None:
@@ -410,6 +417,43 @@ class ControlManager:
             return -1
         return 0
 
+    def _sustained(self, status: ControlStatus, holds: bool) -> bool:
+        """Return whether *holds* has been true for enough polls to act on."""
+        seen = self._guard_evidence.get(status, 0) + 1 if holds else 0
+        self._guard_evidence[status] = seen
+        return seen >= GUARD_EVIDENCE_POLLS
+
+    def _battery_moving(self, data: dict[str, Any], sign: int) -> bool:
+        """Return whether the battery is taking (1) or giving (-1) power."""
+        battery = data.get("battery_power")
+        if battery is None:
+            # Falling back to the proxy keeps a partial frame from reading as consent.
+            return self._measured_direction(data) == sign
+        return sign * float(battery) > GUARD_BATTERY_DETECT_W
+
+    def _grid_leaning(self, data: dict[str, Any], sign: int) -> bool:
+        """Return whether the grid shows a surplus (1) or a draw (-1) to be met."""
+        grid = data.get("grid_power")
+        if grid is None:
+            return self._measured_direction(data) == sign
+        return -sign * float(grid) > GUARD_POWER_DEADBAND_W
+
+    def _automatic_guard(self, data: dict[str, Any]) -> ControlStatus | None:
+        """Return the guard that must take over while the inverter runs itself."""
+        for latched, status, sign in (
+            (self._charge_guard, ControlStatus.CHARGE_LIMIT_REACHED, 1),
+            (self._reserve_guard, ControlStatus.RESERVE_REACHED, -1),
+        ):
+            if not latched:
+                self._guard_evidence.pop(status, None)
+            elif self._blocking_guard is status:
+                if not self._sustained(status, self._grid_leaning(data, -sign)):
+                    return status
+            elif self._battery_moving(data, sign):
+                return status
+
+        return None
+
     def _guard_blocks(self, direction: int) -> ControlStatus | None:
         """Return the guard forbidding movement in *direction*, if one does."""
         if direction > 0 and self._charge_guard:
@@ -421,11 +465,11 @@ class ControlManager:
     def _hold(
         self, data: dict[str, Any], blocked: ControlStatus | None
     ) -> tuple[ControlFeature, float, ControlStatus | None]:
-        """Pin the battery, unless pinning it could only cost solar.
+        """Hold the battery, unless holding it could only limit solar.
 
         A full battery cannot charge, so a battery limit set against a surplus
-        forbids nothing the inverter could do anyway and leaves curtailing the
-        array as its only way to balance. Stepping aside is safe because the
+        forbids nothing the inverter could do anyway and leaves limiting the
+        solar as its only way to balance. Stepping aside is safe because the
         deadband counts anything short of a clear surplus as a draw, so the hold
         is back before the house can reach the battery.
         """
@@ -446,12 +490,12 @@ class ControlManager:
             return ControlFeature.AUTOMATIC, 0.0, None
 
         definition = CONTROL_FEATURES[self._feature]
-        direction = (
-            self._measured_direction(data)
+        blocked = (
+            self._automatic_guard(data)
             if self._feature is ControlFeature.AUTOMATIC
-            else definition.direction
+            else self._guard_blocks(definition.direction)
         )
-        if (blocked := self._guard_blocks(direction)) is not None:
+        if blocked is not None:
             return self._hold(data, blocked)
 
         if self._feature is ControlFeature.AUTOMATIC:
