@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from ef_powerocean_tcpmodbus import const, models
 from ef_powerocean_tcpmodbus import control as control_module
+from ef_powerocean_tcpmodbus import heartbeat as heartbeat_module
 from ef_powerocean_tcpmodbus.modbus import ModbusRejected
 
 HEARTBEAT_START = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
@@ -48,8 +49,8 @@ def allow_writes(control, monkeypatch: pytest.MonkeyPatch, *, rejected=False):
         side_effect=ModbusRejected("rejected") if rejected else None
     )
     # The device has answered a heartbeat, so it is following us.
-    control._heartbeat_supported = True
-    control._last_heartbeat_time = HEARTBEAT_START
+    control._heartbeat._supported = True
+    control._heartbeat._last_success = HEARTBEAT_START
     return control._modbus_client.async_write
 
 
@@ -70,55 +71,74 @@ def advance(control, monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
     """Move the clock as polling would, keeping control authority alive."""
     now = HEARTBEAT_START + timedelta(seconds=seconds)
     monkeypatch.setattr(control_module.dt, "now", lambda: now)
-    control._last_heartbeat_time = now
+    control._heartbeat._last_success = now
 
 
-def send_heartbeat(
-    control, now: datetime, monkeypatch: pytest.MonkeyPatch, *, force: bool = False
-) -> bool:
+def beat(control, now: datetime, monkeypatch: pytest.MonkeyPatch) -> bool:
     monkeypatch.setattr(control_module.dt, "now", lambda: now)
-    return asyncio.run(control.async_send_heartbeat(force=force))
+    # asyncio.run() builds a fresh loop per call, and a lock binds to the first one.
+    control._heartbeat._lock = asyncio.Lock()
+    return asyncio.run(control._heartbeat.async_ensure_fresh())
 
 
-def test_the_heartbeat_is_throttled_unless_a_command_forces_it(
+def test_a_recent_beat_is_reused_and_a_stale_one_is_rewritten(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A user action must get a fresh answer rather than trust the last beat."""
-    write = control._modbus_client.async_write
+    """A command needs the window held open, not another frame to answer."""
+    write = allow_writes(control, monkeypatch)
 
-    assert send_heartbeat(control, HEARTBEAT_START, monkeypatch) is True
-    assert control.heartbeat_supported is True
+    fresh = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_FRESH_S - 1)
+    assert beat(control, fresh, monkeypatch) is True
+    assert write.await_count == 0
 
-    too_soon = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_INTERVAL_S - 1)
-    assert send_heartbeat(control, too_soon, monkeypatch) is True
-    assert write.await_count == 1
-
-    assert send_heartbeat(control, too_soon, monkeypatch, force=True) is True
-    assert write.await_count == 2
+    stale = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_FRESH_S + 1)
+    assert beat(control, stale, monkeypatch) is True
     assert write.await_args.args == (const.HEARTBEAT_REGISTER, [const.HEARTBEAT_VALUE])
 
 
-def test_a_rejected_heartbeat_latches_off_but_a_transport_failure_retries(
+def test_a_busy_inverter_is_retried_but_an_invalid_request_latches_off(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A refusal is the model saying it cannot; a dropped frame says nothing."""
-    write = allow_writes(control, monkeypatch, rejected=True)
-    control._heartbeat_supported = None
-    control._last_heartbeat_time = None
+    """Device busy faults the moment; an illegal address faults the request."""
+    monkeypatch.setattr(heartbeat_module, "HEARTBEAT_RETRY_DELAYS_S", (0.0, 0.0))
+    allow_writes(control, monkeypatch)
+    control._heartbeat._supported = None
+    control._heartbeat._last_success = None
 
-    assert send_heartbeat(control, HEARTBEAT_START, monkeypatch) is False
+    control._modbus_client.async_write = AsyncMock(
+        side_effect=(ModbusRejected("busy", exception_code=0x06), None)
+    )
+    assert beat(control, HEARTBEAT_START, monkeypatch) is True
+    assert control.heartbeat_supported is True
+
+    control._heartbeat._last_success = None
+    write = AsyncMock(side_effect=ModbusRejected("illegal", exception_code=0x02))
+    control._modbus_client.async_write = write
+
+    assert beat(control, HEARTBEAT_START, monkeypatch) is False
     assert control.heartbeat_supported is False
-    later = HEARTBEAT_START + timedelta(minutes=5)
-    assert send_heartbeat(control, later, monkeypatch) is False
     assert write.await_count == 1
 
-    control._heartbeat_supported = None
+    control._heartbeat._supported = None
     control._modbus_client.async_write = AsyncMock(
         side_effect=control_module.HomeAssistantError("connection reset")
     )
 
-    assert send_heartbeat(control, later, monkeypatch) is False
+    assert beat(control, HEARTBEAT_START, monkeypatch) is False
     assert control.heartbeat_supported is None
+
+
+def test_a_reconnect_retests_a_register_the_device_refused(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new socket can mean a different device state, so the verdict goes with it."""
+    allow_writes(control, monkeypatch)
+    control._heartbeat._supported = False
+
+    control.mark_stale()
+
+    assert control.heartbeat_supported is None
+    assert control.in_control is False
 
 
 def test_a_mode_writes_its_setpoint_then_its_method_word(
@@ -681,8 +701,8 @@ def test_the_status_reports_no_control_until_the_device_answers(
 ) -> None:
     """Modbus control being configured is not the same as the device following us."""
     allow_writes(control, monkeypatch)
-    control._heartbeat_supported = None
-    control._last_heartbeat_time = None
+    control._heartbeat._supported = None
+    control._heartbeat._last_success = None
 
     assert control.status is Status.NO_MODBUS_CONTROL
 

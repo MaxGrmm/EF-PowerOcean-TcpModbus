@@ -30,14 +30,12 @@ from .const import (
     GUARD_EVIDENCE_POLLS,
     GUARD_POWER_DEADBAND_W,
     GUARD_SOC_HYSTERESIS,
-    HEARTBEAT_INTERVAL_S,
-    HEARTBEAT_LAPSE_S,
     HEARTBEAT_REGISTER,
-    HEARTBEAT_VALUE,
     HOLD_SETPOINT_W,
     MIN_CONTROL_DWELL_S,
 )
-from .modbus import ModbusClient, ModbusRejected
+from .heartbeat import Heartbeat
+from .modbus import ModbusClient
 from .models import (
     BATTERY_FULL_SOC,
     ControlFeature,
@@ -75,9 +73,7 @@ class ControlManager:
         self._on_refresh = on_refresh
 
         self._enabled = enabled
-        self._last_heartbeat_time: datetime | None = None
-        # None until the inverter has answered once, so an unsupported model is logged once.
-        self._heartbeat_supported: bool | None = None
+        self._heartbeat = Heartbeat(modbus_client)
 
         # A restart stops the heartbeat, so the inverter has already handed control
         # back to the app by the time we get here: automatic is the truth, not a
@@ -119,22 +115,16 @@ class ControlManager:
     @property
     def heartbeat_supported(self) -> bool | None:
         """Return whether the inverter accepts the heartbeat, or None if untested."""
-        return self._heartbeat_supported
+        return self._heartbeat.supported
 
     @property
     def last_heartbeat_time(self) -> datetime | None:
-        return self._last_heartbeat_time
+        return self._heartbeat.last_success
 
     @property
     def in_control(self) -> bool:
         """Return whether the inverter is currently accepting our commands."""
-        if not self._enabled or self._heartbeat_supported is not True:
-            return False
-        if self._last_heartbeat_time is None:
-            return False
-        return (
-            dt.now() - self._last_heartbeat_time
-        ).total_seconds() <= HEARTBEAT_LAPSE_S
+        return self._enabled and self._heartbeat.in_control
 
     @property
     def selected_feature(self) -> ControlFeature:
@@ -220,58 +210,13 @@ class ControlManager:
         if (saver := stored.get("battery_saver")) is not None:
             self._battery_saver = bool(saver)
 
-    async def async_send_heartbeat(self, *, force: bool = False) -> bool:
-        """Refresh Modbus control authority. Never raises; a miss only costs authority.
+    def start(self) -> None:
+        """Begin holding control authority, if the user switched control on."""
+        if self._enabled:
+            self._heartbeat.start()
 
-        With force the register is written even if a previous attempt was rejected,
-        so a user action always gets a fresh response from the inverter.
-        """
-        if not self._enabled:
-            return False
-        if self._heartbeat_supported is False and not force:
-            return False
-
-        now = dt.now()
-        if self._last_heartbeat_time is not None:
-            since_last = (now - self._last_heartbeat_time).total_seconds()
-            if not force and since_last < HEARTBEAT_INTERVAL_S:
-                return True
-            if since_last > HEARTBEAT_LAPSE_S:
-                _LOGGER.debug(
-                    "Heartbeat gap of %.0fs exceeded the inverter window; the control "
-                    "word will be re-sent",
-                    since_last,
-                )
-                self._control_stale = True
-
-        try:
-            await self._modbus_client.async_write(
-                HEARTBEAT_REGISTER, [HEARTBEAT_VALUE], what="heartbeat"
-            )
-        except ModbusRejected as err:
-            if self._heartbeat_supported is not False:
-                _LOGGER.warning(
-                    "Heartbeat register %s rejected by the inverter (%s). Writes will "
-                    "be acknowledged but may never take effect on this model.",
-                    HEARTBEAT_REGISTER,
-                    err,
-                )
-            self._heartbeat_supported = False
-            return False
-        except HomeAssistantError as err:
-            _LOGGER.debug(f"Heartbeat write failed: {err!r}")
-            return False
-
-        if self._heartbeat_supported is not True:
-            _LOGGER.info(
-                "Heartbeat register %s accepted; Modbus control authority is being "
-                "refreshed every %ss.",
-                HEARTBEAT_REGISTER,
-                HEARTBEAT_INTERVAL_S,
-            )
-        self._heartbeat_supported = True
-        self._last_heartbeat_time = now
-        return True
+    async def async_stop(self) -> None:
+        await self._heartbeat.async_stop()
 
     def mark_stale(self) -> None:
         """Note that the inverter may have stopped following us.
@@ -279,7 +224,7 @@ class ControlManager:
         A connection outage can outlast the inverter's 60 s window, so the command is
         re-sent rather than assumed to have survived.
         """
-        self._last_heartbeat_time = None
+        self._heartbeat.mark_stale()
         self._control_stale = True
 
     def _require_modbus_control(self) -> None:
@@ -298,7 +243,7 @@ class ControlManager:
         """
         self._require_modbus_control()
 
-        if not await self.async_send_heartbeat(force=True):
+        if not await self._heartbeat.async_ensure_fresh():
             raise HomeAssistantError(
                 f"Heartbeat write to register {HEARTBEAT_REGISTER} failed or was "
                 "rejected, so the inverter would ignore the command. Nothing written."
@@ -575,6 +520,11 @@ class ControlManager:
             self._data = data
         data = self._data
         self._update_guards(data)
+
+        # A lapsed window hands the inverter back to its app settings, so the command
+        # is sent again rather than assumed to have survived.
+        if not self.in_control:
+            self._control_stale = True
 
         feature, power, blocked = self._desired_command(data)
         changed = (feature, round(power)) != (

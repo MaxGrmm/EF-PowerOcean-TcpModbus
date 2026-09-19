@@ -190,11 +190,16 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         _LOGGER.info("PowerOcean Shutdown. Closing Connection!")
         if self._store is not None:
             await self._store.async_save(self._persisted_state())
+        await self.control.async_stop()
         await self._modbus_client.async_close()
         await super().async_shutdown()
 
     async def async_connect_client(self) -> None:
         """First Client-Connect"""
+        # Started before the connect can fail: the heartbeat skips beats while the
+        # client is down and is beating again the moment a reconnect succeeds.
+        self.control.start()
+
         if not await self._modbus_client.async_connect():
             _LOGGER.error(f"Modbus TCP not connected to {self.host}:{self.port}")
             return
@@ -253,8 +258,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         # ── Check Connection, if not -> start reconnection ──
         if not self._modbus_client.connected and not await self.async_reconnect():
             raise UpdateFailed("Reconnect failed!")
-
-        await self.control.async_send_heartbeat()
 
         try:
             for register_block in self._register_blocks:

@@ -23,8 +23,21 @@ class ModbusRejected(HomeAssistantError):
     """The device answered a write with a Modbus exception response.
 
     Worth telling apart from a transport failure: the device was reached and said
-    no, so repeating the same write will fail the same way.
+    no. Whether repeating the write is worth it depends on the exception code.
     """
+
+    # Illegal function, data address and data value fault the request itself, so it
+    # will be refused again. Everything else — device busy above all — faults the
+    # moment, and a device that was busy is the same device a second later.
+    PERMANENT_CODES: Final = frozenset({0x01, 0x02, 0x03})
+
+    def __init__(self, message: str, *, exception_code: int | None = None) -> None:
+        super().__init__(message)
+        self.exception_code = exception_code
+
+    @property
+    def transient(self) -> bool:
+        return self.exception_code not in self.PERMANENT_CODES
 
 
 class ModbusClient:
@@ -134,5 +147,6 @@ class ModbusClient:
 
         if response.isError():
             raise ModbusRejected(
-                f"Modbus rejected {what} to register {address}: {response}"
+                f"Modbus rejected {what} to register {address}: {response}",
+                exception_code=getattr(response, "exception_code", None),
             )
