@@ -25,7 +25,7 @@ from .const import (
     HEARTBEAT_LAPSE_S,
     HEARTBEAT_REGISTER,
     HEARTBEAT_REPROBE_S,
-    HEARTBEAT_RETRY_DELAYS_S,
+    HEARTBEAT_RETRY_BUDGET_S,
     HEARTBEAT_VALUE,
 )
 from .modbus import ModbusClient, ModbusRejected
@@ -33,11 +33,22 @@ from .modbus import ModbusClient, ModbusRejected
 _LOGGER = logging.getLogger(__name__)
 
 
+def retry_delays(scan_interval_s: float) -> tuple[float, ...]:
+    """Return the waits between the attempts of one beat, the first immediate.
+
+    A busy answer is usually the poll's own read still in the inverter, so a retry
+    waits a whole poll cycle rather than asking again inside the one that caused it.
+    """
+    delay = max(1.0, min(float(scan_interval_s), HEARTBEAT_RETRY_BUDGET_S))
+    return (0.0, *(delay,) * int(HEARTBEAT_RETRY_BUDGET_S // delay))
+
+
 class Heartbeat:
     """Writes the heartbeat register on a timer and reports whether it holds."""
 
-    def __init__(self, modbus_client: ModbusClient) -> None:
+    def __init__(self, modbus_client: ModbusClient, *, scan_interval_s: float) -> None:
         self._modbus_client = modbus_client
+        self._retry_delays = retry_delays(scan_interval_s)
         self._lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
         self._last_success: datetime | None = None
@@ -118,7 +129,7 @@ class Heartbeat:
             if self._age() <= HEARTBEAT_FRESH_S:
                 return True
 
-            for delay in HEARTBEAT_RETRY_DELAYS_S:
+            for delay in self._retry_delays:
                 if delay:
                     await asyncio.sleep(delay)
                 if not self._modbus_client.connected:

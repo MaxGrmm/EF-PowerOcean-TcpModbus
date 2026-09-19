@@ -62,6 +62,7 @@ class ControlManager:
         limits: dict[str, Any],
         inverter_model: InverterModel,
         enabled: bool,
+        scan_interval_s: float,
         on_update: Callable[[], None],
         on_refresh: Callable[[], Awaitable[None]],
     ) -> None:
@@ -73,7 +74,7 @@ class ControlManager:
         self._on_refresh = on_refresh
 
         self._enabled = enabled
-        self._heartbeat = Heartbeat(modbus_client)
+        self._heartbeat = Heartbeat(modbus_client, scan_interval_s=scan_interval_s)
 
         # A restart stops the heartbeat, so the inverter has already handed control
         # back to the app by the time we get here: automatic is the truth, not a

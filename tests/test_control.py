@@ -32,6 +32,7 @@ def control():
         },
         inverter_model=const.DEFAULT_INVERTER_MODEL,
         enabled=True,
+        scan_interval_s=const.DEFAULT_SCAN_INTERVAL_S,
         on_update=Mock(),
         on_refresh=AsyncMock(),
     )
@@ -100,8 +101,8 @@ def test_a_busy_inverter_is_retried_but_an_invalid_request_latches_off(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Device busy faults the moment; an illegal address faults the request."""
-    monkeypatch.setattr(heartbeat_module, "HEARTBEAT_RETRY_DELAYS_S", (0.0, 0.0))
     allow_writes(control, monkeypatch)
+    control._heartbeat._retry_delays = (0.0, 0.0)
     control._heartbeat._supported = None
     control._heartbeat._last_success = None
 
@@ -126,6 +127,19 @@ def test_a_busy_inverter_is_retried_but_an_invalid_request_latches_off(
 
     assert beat(control, HEARTBEAT_START, monkeypatch) is False
     assert control.heartbeat_supported is None
+
+
+@pytest.mark.parametrize(
+    ("scan_interval", "expected"),
+    (
+        (2, (0.0, *(2.0,) * 7)),
+        (5, (0.0, 5.0, 5.0, 5.0)),
+        (30, (0.0, 15.0)),
+    ),
+)
+def test_a_retry_waits_a_whole_poll_cycle(scan_interval, expected) -> None:
+    """Retrying inside the cycle that caused the busy answer only asks too early."""
+    assert heartbeat_module.retry_delays(scan_interval) == expected
 
 
 def test_a_reconnect_retests_a_register_the_device_refused(

@@ -133,6 +133,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             limits=self.limits,
             inverter_model=self.inverter_model,
             enabled=config_entry.data.get(CONF_MODBUS_CONTROL, False),
+            scan_interval_s=self.scan_interval,
             on_update=self.async_update_listeners,
             on_refresh=self.async_refresh,
         )
