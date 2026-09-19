@@ -145,6 +145,9 @@ class RegisterReader:
     def __init__(self, client: ModbusTcpClient, slave: int) -> None:
         self._client = client
         self._slave = slave
+        # Set once the model is known, because the three-phase Ocean 2 publishes
+        # 32-bit values high word first and every other model the other way round.
+        self.high_word_first = False
         self.reads = 0
 
     def read(self, start: int, count: int) -> tuple[list[int] | None, str]:
@@ -163,6 +166,29 @@ class RegisterReader:
                 return None, str(response)
             return None, f"exception code {code}, {EXCEPTION_MEANINGS.get(code, '?')}"
         return response.registers, ""
+
+    def read_value(self, register: models.RegisterDef) -> tuple[float | None, str]:
+        """Read one register on its own and decode it. The reason is empty when
+        the read worked, so a value of None then means it did not decode."""
+        words, reason = self.read(register.address, register.size)
+        if words is None:
+            return None, reason
+        return self.decode(words, register), ""
+
+    def read_mapped(self, block: models.RegisterBlock) -> dict[str, float | None]:
+        """Read a whole block and decode every register it carries."""
+        words, _ = self.read(block.start, block.count)
+        if words is None:
+            return {}
+        return {
+            register.key: self.decode(block.registers_for(words, register), register)
+            for register in block.registers
+        }
+
+    def decode(self, words: list[int], register: models.RegisterDef) -> float | None:
+        return telemetry.decode_register(
+            words, register.data_type, self.high_word_first
+        )
 
 
 def report_device(
@@ -184,13 +210,17 @@ def report_device(
     number = words_for(const.PRODUCT_NUMBER)[0]
     category = words_for(const.PRODUCT_CATEGORY)[0]
     detected = models.InverterModel.from_product_info(number, category)
-    firmware = telemetry.decode_firmware_version(words_for(const.FIRMWARE_VERSION))
+    firmware = telemetry.decode_firmware_version(
+        words_for(const.FIRMWARE_VERSION),
+        detected.traits.high_word_first if detected else False,
+    )
 
     print(f"  serial number     {serial if show_serial else serial[:4] + '****'}")
     print(f"  firmware          {firmware}")
     print(f"  product number    {number}")
     print(f"  product category  {category}")
-    print(f"  detected model    {detected.display_name if detected else 'UNKNOWN'}")
+    name = detected.traits.display_name if detected else "UNKNOWN"
+    print(f"  detected model    {name}")
     if detected is None:
         print("    -> no model matches these product registers, so the default map")
         print("       is used. Quote the two numbers above in the issue: they are")
@@ -227,13 +257,12 @@ def report_mapped_registers(
             f"  {register.key:<30} {render_address(register.address):>16} "
             f"{register.data_type:<8}"
         )
-        words, reason = reader.read(register.address, register.size)
-        if words is None:
+        value, reason = reader.read_value(register)
+        if reason:
             print(f"{row} {'-':>14}  UNREADABLE ({reason})")
             missing.append(register)
             continue
 
-        value = telemetry.decode_register(words, register.data_type)
         values[register.key] = value
         note = plausibility_note(register.key, value)
         if note in ("out of range", "undecodable"):
@@ -252,7 +281,7 @@ def report_derived_values(
     derived = telemetry.calculate_derived_values(
         telemetry.TelemetryData.from_mapping(values),
         calculate_solar_power=False,
-        startup_voltage=model.startup_voltage,
+        startup_voltage=model.traits.startup_voltage,
     )
     for key, value in derived.items():
         text = f"{value:.2f}" if isinstance(value, float) else str(value)
@@ -314,21 +343,27 @@ def guess_quantity(real: float | None) -> str:
     return f"maybe {', '.join(names[:2])}" if names else ""
 
 
-def believable_float(low: int, high: int) -> float | None:
+def believable_float(low: int, high: int, high_word_first: bool) -> float | None:
     """The word pair as a float, when that could be a real reading."""
-    real = telemetry.decode_register([low, high], models.RegisterType.FLOAT32)
+    real = telemetry.decode_register(
+        [low, high], models.RegisterType.FLOAT32, high_word_first
+    )
     if real is None or not 0.001 <= abs(real) <= FLOAT_CEILING:
         return None
     return real
 
 
-def render_all_readings(low: int, high: int) -> tuple[str, float | None]:
+def render_all_readings(
+    low: int, high: int, high_word_first: bool
+) -> tuple[str, float | None]:
     """Format a word pair as every reading the integration knows, blanking any
     that cannot plausibly be real, and return the float when there is one."""
     pair = [low, high]
-    unsigned = telemetry.decode_register(pair, models.RegisterType.UINT32)
-    signed = telemetry.decode_register(pair, models.RegisterType.INT32)
-    real = believable_float(low, high)
+    unsigned = telemetry.decode_register(
+        pair, models.RegisterType.UINT32, high_word_first
+    )
+    signed = telemetry.decode_register(pair, models.RegisterType.INT32, high_word_first)
+    real = believable_float(low, high, high_word_first)
 
     wide = f"{unsigned:.0f}" if unsigned <= INTEGER_CEILING else ""
     negative = (
@@ -358,13 +393,7 @@ def read_mapped_values(
     requests rather than eighty."""
     values: dict[str, float | None] = {}
     for block in blocks:
-        words, _ = reader.read(block.start, block.count)
-        if words is None:
-            continue
-        for register in block.registers:
-            values[register.key] = telemetry.decode_register(
-                block.registers_for(words, register), register.data_type
-            )
+        values.update(reader.read_mapped(block))
     return values
 
 
@@ -379,7 +408,7 @@ def read_addresses(reader: RegisterReader, addresses: list[int]) -> dict[int, in
 
 
 def sampled_readings(
-    words: dict[int, int], address: int
+    words: dict[int, int], address: int, high_word_first: bool
 ) -> tuple[float, tuple[float, ...]] | None:
     """The value to show for this address, and every value it could be carrying.
 
@@ -392,9 +421,11 @@ def sampled_readings(
 
     low, high = words[address], words.get(address + 1, 0)
     pair = [low, high]
-    unsigned = telemetry.decode_register(pair, models.RegisterType.UINT32)
-    signed = telemetry.decode_register(pair, models.RegisterType.INT32)
-    real = believable_float(low, high)
+    unsigned = telemetry.decode_register(
+        pair, models.RegisterType.UINT32, high_word_first
+    )
+    signed = telemetry.decode_register(pair, models.RegisterType.INT32, high_word_first)
+    real = believable_float(low, high, high_word_first)
 
     readings = [float(low)]
     if unsigned <= INTEGER_CEILING:
@@ -456,7 +487,10 @@ def report_behaviour(
 
     behaviour: dict[int, tuple[bool, str]] = {}
     for address in candidates:
-        readings = [sampled_readings(sampled, address) for _, sampled in taken]
+        readings = [
+            sampled_readings(sampled, address, reader.high_word_first)
+            for _, sampled in taken
+        ]
         if any(reading is None for reading in readings):
             continue
 
@@ -492,6 +526,7 @@ def report_unmapped_addresses(
     refused: dict[int, str],
     known: set[int],
     behaviour: dict[int, tuple[bool, str]],
+    high_word_first: bool,
 ) -> None:
     """Show what sits at the addresses the integration does not map."""
     addresses = sorted(
@@ -524,7 +559,9 @@ def report_unmapped_addresses(
             continue
 
         address = group[0]
-        columns, real = render_all_readings(words[address], words.get(address + 1, 0))
+        columns, real = render_all_readings(
+            words[address], words.get(address + 1, 0), high_word_first
+        )
         moved, observed = behaviour.get(address, (False, ""))
         if address in NOT_POLLED:
             note = NOT_POLLED[address]
@@ -662,8 +699,9 @@ def main() -> int:
             if arguments.model
             else detected or const.DEFAULT_INVERTER_MODEL
         )
-        print(f"Comparing against the {model.display_name} address map.\n")
+        print(f"Comparing against the {model.traits.display_name} address map.\n")
 
+        reader.high_word_first = model.traits.high_word_first
         blocks = const.register_blocks_for(model)
         registers = sorted(
             (register for block in blocks for register in block.registers),
@@ -685,13 +723,20 @@ def main() -> int:
         )
         behaviour, latest = (
             report_behaviour(
-                reader, blocks, words, candidates, arguments.samples, arguments.gap
+                reader,
+                blocks,
+                words,
+                candidates,
+                arguments.samples,
+                arguments.gap,
             )
             if candidates
             else ({}, {})
         )
         words.update(latest)
-        report_unmapped_addresses(words, refused, known, behaviour)
+        report_unmapped_addresses(
+            words, refused, known, behaviour, reader.high_word_first
+        )
         report_summary(missing, suspect, values, candidates)
 
         print(f"{reader.reads} reads issued. Nothing was written.")

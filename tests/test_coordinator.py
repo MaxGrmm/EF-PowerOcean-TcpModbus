@@ -34,6 +34,7 @@ def coordinator():
     instance._consecutive_modbus_disabled_reads = 0
     instance._ena_calc_solar_power = False
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
+    instance.detected_model = None
     instance._register_blocks = const.register_blocks_for(instance.inverter_model)
     instance._registers_by_key = {
         register.key: register
@@ -830,6 +831,21 @@ def test_reads_device_info_in_a_single_request(coordinator) -> None:
     coordinator._modbus_client.async_read.assert_awaited_once_with(40002, 12)
 
 
+def test_reads_device_info_of_a_three_phase_ocean_2(coordinator) -> None:
+    """It reports product number 4 and sends 32-bit values high word first."""
+    registers = _device_info_registers(product_number=4, product_category=1)
+    firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
+    registers[firmware_index], registers[firmware_index + 1] = 0x0100, 0x034F
+    coordinator.firmware_version = None
+    coordinator.detected_model = None
+    coordinator._modbus_client.async_read = AsyncMock(return_value=registers)
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.detected_model == models.InverterModel.OCEAN_2_THREE_PHASE
+    assert coordinator.firmware_version == "1.0.3.79"
+
+
 def test_device_info_read_failure_closes_connection(coordinator) -> None:
     coordinator.firmware_version = None
     coordinator.detected_model = None
@@ -855,7 +871,7 @@ def test_read_plan_is_not_split_more_than_necessary(
         merged = following.start + following.count - block.start
 
         assert (
-            gap > models.MAX_REGISTER_GAP
+            gap > inverter_model.traits.max_register_gap
             or merged > models.MAX_REGISTERS_PER_READ
             or end <= const.HEARTBEAT_REGISTER < following.start
         ), (
@@ -876,6 +892,23 @@ def test_the_heartbeat_register_is_never_read_by_a_poll(
         ), f"the block at {block.start} reads {const.HEARTBEAT_REGISTER}"
 
 
+@pytest.mark.parametrize("inverter_model", models.InverterModel)
+def test_read_plan_never_reaches_further_than_the_model_allows(
+    inverter_model: models.InverterModel,
+) -> None:
+    """A read must not reach over more unmapped addresses than the device tolerates."""
+    for block in const.register_blocks_for(inverter_model):
+        end = block.start
+        for register in block.registers:
+            gap = register.address - end
+
+            assert gap <= inverter_model.traits.max_register_gap, (
+                f"the read at {block.start} reaches over {gap} unmapped words to "
+                f"{register.key} at {register.address}, which {inverter_model} refuses"
+            )
+            end = max(end, register.end)
+
+
 def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
     with pytest.raises(ValueError, match="more than the 125"):
         models.RegisterBlock(
@@ -891,8 +924,11 @@ def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
     (
         (1, 1, models.InverterModel.POWEROCEAN_THREE_PHASE),
         (1, 2, models.InverterModel.POWEROCEAN_SINGLE_PHASE),
+        # The single-phase Ocean 2 reports the same 2 as the PowerOcean single phase.
         (2, 2, models.InverterModel.POWEROCEAN_SINGLE_PHASE),
         (3, 1, models.InverterModel.POWEROCEAN_PLUS),
+        (4, 1, models.InverterModel.OCEAN_2_THREE_PHASE),
+        (4, 2, models.InverterModel.OCEAN_2_SINGLE_PHASE),
         (0, 1, None),
         (None, None, None),
     ),

@@ -154,6 +154,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         return self._status
 
     @property
+    def device_model(self) -> InverterModel:
+        """The model the device reports, falling back to the configured one.
+
+        What the device reports decides how its words are ordered, so a wrong
+        pick in the options cannot corrupt every reading.
+        """
+        return self.detected_model or self.inverter_model
+
+    @property
     def is_modbus_disabled(self) -> bool:
         """Return whether the last telemetry read indicates Modbus is disabled."""
         return self._consecutive_modbus_disabled_reads >= MODBUS_DISABLED_READ_THRESHOLD
@@ -232,18 +241,22 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             decode_serial_number(registers_for(SERIAL_NUMBER)) or "unknown"
         )
 
-        if firmware := decode_firmware_version(registers_for(FIRMWARE_VERSION)):
-            self.firmware_version = firmware
-
         self.detected_model = InverterModel.from_product_info(
             registers_for(PRODUCT_NUMBER)[0], registers_for(PRODUCT_CATEGORY)[0]
         )
+
+        if firmware := decode_firmware_version(
+            registers_for(FIRMWARE_VERSION), self.device_model.traits.high_word_first
+        ):
+            self.firmware_version = firmware
+
         if self.detected_model and self.detected_model != self.inverter_model:
             _LOGGER.warning(
                 "Inverter reports %s but %s is configured. Update the integration "
-                "options if this is wrong; the model affects PV startup voltage.",
-                self.detected_model.display_name,
-                self.inverter_model.display_name,
+                "options if this is wrong; the model affects how registers are "
+                "read and the PV startup voltage.",
+                self.detected_model.traits.display_name,
+                self.inverter_model.traits.display_name,
             )
 
     async def async_reconnect(self) -> bool:
@@ -269,6 +282,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     data[register.key] = decode_register(
                         register_block.registers_for(raw, register),
                         register.data_type,
+                        self.device_model.traits.high_word_first,
                     )
 
             if is_modbus_disabled(
@@ -324,7 +338,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             calculated_results = calculate_derived_values(
                 TelemetryData.from_mapping(result),
                 calculate_solar_power=self._ena_calc_solar_power,
-                startup_voltage=self.inverter_model.startup_voltage,
+                startup_voltage=self.inverter_model.traits.startup_voltage,
             )
             result.update(calculated_results)
             result = self._energy_processor.clamp_calculated(
@@ -383,7 +397,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 f"Could not verify write to register {register_address}: {err}"
             ) from err
 
-        readback_value = decode_register(readback_words, entity_def.data_type)
+        readback_value = decode_register(
+            readback_words,
+            entity_def.data_type,
+            self.device_model.traits.high_word_first,
+        )
         # A 32-bit register echoes the words just written and only swaps them into
         # read order a few seconds later, so either form means the write landed.
         if readback_words != words and (

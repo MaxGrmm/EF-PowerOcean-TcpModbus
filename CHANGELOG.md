@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Three-phase Ocean 2 support. The model is now recognised from its product number, its 32-bit registers are read high word first, and its reads stop at every address it does not implement instead of being refused as a whole.
+
+### Added
+
+- Ocean 2 Single Phase as a selectable model, detected as product number 4 with the single-phase category. Nobody has scanned one yet, so it is assumed to read like its three-phase sibling.
+
 ## [2.5.0] - 2026-09-16
 
 ### Added

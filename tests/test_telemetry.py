@@ -9,6 +9,7 @@ from ef_powerocean_tcpmodbus.models import RegisterType
 from ef_powerocean_tcpmodbus.telemetry import (
     TelemetryData,
     calculate_derived_values,
+    decode_firmware_version,
     decode_register,
     is_modbus_disabled,
 )
@@ -64,6 +65,32 @@ def test_decodes_register_values(
     expected: float,
 ) -> None:
     assert decode_register(registers, data_type) == expected
+
+
+# The words below are what a three-phase Ocean 2 answered with in the register scan
+# of issue #86, where every 32-bit value arrives high word first.
+@pytest.mark.parametrize(
+    ("registers", "data_type", "expected"),
+    (
+        ([0x0000, 0x2710], RegisterType.UINT32, 10000.0),
+        ([0x435C, 0xC51F], RegisterType.FLOAT32, 220.77),
+        ([0xFFFF, 0xF448], RegisterType.INT32, -3000.0),
+        # A single word has no order to get wrong.
+        ([96], RegisterType.UINT16, 96.0),
+    ),
+    ids=("uint32", "float32", "int32-negative", "single-register"),
+)
+def test_decodes_register_values_sent_high_word_first(
+    registers: list[int],
+    data_type: RegisterType,
+    expected: float,
+) -> None:
+    assert decode_register(registers, data_type, high_word_first=True) == expected
+
+
+def test_decodes_firmware_version_sent_high_word_first() -> None:
+    assert decode_firmware_version([0x0100, 0x034F], high_word_first=True) == "1.0.3.79"
+    assert decode_firmware_version([0x034F, 0x0100]) == "1.0.3.79"
 
 
 @pytest.mark.parametrize(
