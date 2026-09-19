@@ -88,11 +88,11 @@ def test_a_recent_beat_is_reused_and_a_stale_one_is_rewritten(
     """A command needs the window held open, not another frame to answer."""
     write = allow_writes(control, monkeypatch)
 
-    fresh = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_FRESH_S - 1)
+    fresh = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_REUSE_S - 1)
     assert beat(control, fresh, monkeypatch) is True
     assert write.await_count == 0
 
-    stale = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_FRESH_S + 1)
+    stale = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_REUSE_S + 1)
     assert beat(control, stale, monkeypatch) is True
     assert write.await_args.args == (const.HEARTBEAT_REGISTER, [const.HEARTBEAT_VALUE])
 
