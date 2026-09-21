@@ -21,6 +21,7 @@ def coordinator():
     )
     instance._last_checked_data = {}
     instance._last_checked_time = None
+    instance._grid_feed_restore = None
     instance.data = None
     instance._modbus_client = SimpleNamespace(
         connected=True,
@@ -187,6 +188,90 @@ def test_control_state_is_persisted_with_the_coordinators(coordinator) -> None:
     asyncio.run(coordinator.async_load_persisted_state())
 
     assert coordinator.control.battery_saver_commanded is True
+
+
+def test_a_zero_cap_never_replaces_what_the_switch_would_restore(coordinator) -> None:
+    """Zero is the switch's own doing, so adopting it would erase the way back."""
+    coordinator._track_grid_feed_restore(
+        {"grid_feed_mode": 1.0, "feed_in_power_max": 9000.0}
+    )
+    coordinator._track_grid_feed_restore(
+        {"grid_feed_mode": 0.0, "feed_in_power_max": 0.0}
+    )
+
+    assert coordinator.grid_feed_restore == {"mode": 1, "power": 9000}
+
+    stored = coordinator._persisted_state()
+    coordinator._grid_feed_restore = None
+    coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
+    asyncio.run(coordinator.async_load_persisted_state())
+
+    assert coordinator.grid_feed_restore == {"mode": 1, "power": 9000}
+
+
+def test_an_export_limit_raised_on_the_device_is_adopted(coordinator) -> None:
+    """An installer lifting the limit should not need the entry to be set up again."""
+    coordinator._track_grid_feed_restore(
+        {"grid_feed_mode": 0.0, "feed_in_power_max": 9000.0}
+    )
+    coordinator._track_grid_feed_restore(
+        {"grid_feed_mode": 1.0, "feed_in_power_max": 15000.0}
+    )
+
+    assert coordinator.grid_feed_restore == {"mode": 1, "power": 15000}
+
+
+def test_a_poll_without_the_feed_registers_keeps_nothing(coordinator) -> None:
+    coordinator._track_grid_feed_restore({"feed_in_power_max": 9000.0})
+
+    assert coordinator.grid_feed_restore is None
+    assert coordinator.grid_feed_switchable is False
+    with pytest.raises(coordinator_module.HomeAssistantError):
+        asyncio.run(coordinator.async_set_grid_feed(False))
+
+
+@pytest.mark.parametrize("allow", [True, False])
+def test_an_export_the_inverter_never_allowed_leaves_the_switch_unusable(
+    coordinator, allow: bool
+) -> None:
+    """Without a cap above zero there is nothing to restore, so the switch must not act."""
+    coordinator._track_grid_feed_restore(
+        {"grid_feed_mode": 0.0, "feed_in_power_max": 0.0}
+    )
+    coordinator._async_write_register = AsyncMock()
+
+    assert coordinator.grid_feed_switchable is False
+    with pytest.raises(coordinator_module.HomeAssistantError):
+        asyncio.run(coordinator.async_set_grid_feed(allow))
+    coordinator._async_write_register.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("allow", "expected"),
+    [
+        # Limited first: zeroing the cap while still unlimited would do nothing.
+        (False, [("grid_feed_mode", 0), ("feed_in_power_max", 0)]),
+        # Cap first: the mode write must never find a zero cap behind it.
+        (True, [("feed_in_power_max", 9000), ("grid_feed_mode", 1)]),
+    ],
+)
+def test_the_grid_feed_switch_writes_both_registers_in_a_safe_order(
+    coordinator, allow: bool, expected: list[tuple[str, int]]
+) -> None:
+    coordinator._grid_feed_restore = {"mode": 1, "power": 9000}
+    writes: list[tuple[str, int]] = []
+    coordinator._async_write_register = AsyncMock(
+        side_effect=lambda register, value: writes.append((register.key, value))
+    )
+    coordinator.async_set_updated_data = Mock()
+
+    asyncio.run(coordinator.async_set_grid_feed(allow))
+
+    assert writes == expected
+    published = coordinator.async_set_updated_data.call_args[0][0]
+    assert published["grid_feed_mode"] == (
+        models.GridFeedMode.UNLIMITED if allow else models.GridFeedMode.LIMITED
+    )
 
 
 def test_accepted_update_publishes_successful_coordinator_status(

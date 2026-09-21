@@ -339,6 +339,13 @@
           "islanded": "Islanded"
         }
       },
+      "grid_feed_mode": {
+        "name": "Grid Feed-in Mode",
+        "state": {
+          "limited": "Limited",
+          "unlimited": "Unlimited"
+        }
+      },
       "control_status": {
         "name": "Control Status",
         "state": {
@@ -409,6 +416,9 @@
     "switch": {
       "battery_saver_mode_control": {
         "name": "Battery Saver Mode"
+      },
+      "grid_feed": {
+        "name": "Grid Feed-in"
       }
     }
   }
