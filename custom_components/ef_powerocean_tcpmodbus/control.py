@@ -372,7 +372,7 @@ class ControlManager:
     def _guarded_command(
         self, data: dict[str, Any], blocked: ControlStatus
     ) -> tuple[ControlFeature, float, ControlStatus | None]:
-        """Command the inverter's own balance, minus the direction the guard forbids.
+        """Command the inverter to either charge or discharge.
 
         The battery setpoint is a target and zero means no limit, so no single value
         says "do not charge, but discharge freely". We therefore clamp the natural
