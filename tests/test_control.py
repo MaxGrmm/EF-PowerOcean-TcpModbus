@@ -185,7 +185,8 @@ def test_discharge_sends_the_magnitude_as_a_negative_setpoint(
     asyncio.run(control.async_set_feature_power(Feature.DISCHARGE_BATTERY, 1500))
 
     assert control.power == 1500.0
-    assert commands(write)[-2] == (
+    # The method is already selected, so the new setpoint is the last thing sent.
+    assert commands(write)[-1] == (
         const.REGISTERS_BY_KEY["battery_power_setpoint"].address,
         [0xFFFF, 0xFA24],
     )
@@ -314,7 +315,7 @@ def test_the_control_word_refuses_off_grid_and_shutdown_bits(
 
 
 @pytest.mark.parametrize(
-    ("setter", "limit", "soc", "solar", "house", "expected"),
+    ("setter", "limit", "soc", "solar", "house", "expected", "feature", "power"),
     (
         (
             "async_set_battery_reserve_soc",
@@ -323,8 +324,19 @@ def test_the_control_word_refuses_off_grid_and_shutdown_bits(
             100.0,
             900.0,
             Status.RESERVE_REACHED,
+            Feature.HOLD_BATTERY,
+            1.0,
         ),
-        ("async_set_battery_reserve_soc", 20, 20.0, 2000.0, 500.0, Status.AUTOMATIC),
+        (
+            "async_set_battery_reserve_soc",
+            20,
+            20.0,
+            2000.0,
+            500.0,
+            Status.RESERVE_REACHED,
+            Feature.CHARGE_BATTERY,
+            1500.0,
+        ),
         (
             "async_set_charge_limit_soc",
             80,
@@ -332,11 +344,22 @@ def test_the_control_word_refuses_off_grid_and_shutdown_bits(
             2000.0,
             500.0,
             Status.CHARGE_LIMIT_REACHED,
+            Feature.HOLD_BATTERY,
+            1.0,
         ),
-        ("async_set_charge_limit_soc", 80, 80.0, 100.0, 900.0, Status.AUTOMATIC),
+        (
+            "async_set_charge_limit_soc",
+            80,
+            80.0,
+            100.0,
+            900.0,
+            Status.CHARGE_LIMIT_REACHED,
+            Feature.DISCHARGE_BATTERY,
+            800.0,
+        ),
     ),
 )
-def test_a_guard_blocks_only_the_direction_it_protects(
+def test_a_guard_runs_self_consumption_minus_the_direction_it_protects(
     control,
     monkeypatch: pytest.MonkeyPatch,
     setter: str,
@@ -345,9 +368,13 @@ def test_a_guard_blocks_only_the_direction_it_protects(
     solar: float,
     house: float,
     expected,
+    feature,
+    power: float,
 ) -> None:
-    """Guards apply while the inverter runs itself, but clamping both ways would
-    strand the battery at the floor for good."""
+    """A latched guard keeps the inverter for as long as it is latched, and commands
+    the balance the inverter would have struck anyway, clamped to the allowed side.
+    Handing it back whenever the guard does not bind is what made the status chatter,
+    because the inverter resumed the forbidden direction within a poll."""
     allow_writes(control, monkeypatch)
     asyncio.run(getattr(control, setter)(limit))
 
@@ -358,14 +385,42 @@ def test_a_guard_blocks_only_the_direction_it_protects(
     )
 
     assert control.status is expected
-    assert control.power == (0.0 if expected is Status.AUTOMATIC else 1.0)
+    assert control._commanded_feature is feature
+    assert control.power == power
 
 
-def test_a_charge_guard_holds_a_battery_charging_inside_the_surplus_deadband(
+def test_a_guard_holds_a_chosen_mode_rather_than_turning_it_around(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Solar against house load cannot see a trickle narrower than its deadband, so
-    the battery charged past its limit for as long as the weather stayed dull."""
+    """Tracking the house is only right for the inverter's own mode. Asked to charge,
+    the most a guard may do is refuse; draining the battery was never requested."""
+    allow_writes(control, monkeypatch)
+    control._data = {"battery_soc": 80.0}
+    asyncio.run(control.async_set_charge_limit_soc(80))
+    asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
+
+    asyncio.run(
+        control.async_apply(
+            {
+                "battery_soc": 80.0,
+                "solar_power": 100.0,
+                "house_power": 900.0,
+                "grid_power": 800.0,
+                "battery_power": 0.0,
+            }
+        )
+    )
+
+    assert control.status is Status.CHARGE_LIMIT_REACHED
+    assert control._commanded_feature is Feature.HOLD_BATTERY
+    assert control.power == 1.0
+
+
+def test_a_charge_guard_blocks_a_trickle_too_small_to_read_as_a_surplus(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The battery charges from any surplus at all, so a guard that only acted on a
+    clear one let the battery charge past its limit while the weather stayed dull."""
     allow_writes(control, monkeypatch)
     asyncio.run(control.async_set_charge_limit_soc(80))
 
@@ -373,7 +428,6 @@ def test_a_charge_guard_holds_a_battery_charging_inside_the_surplus_deadband(
         control.async_apply(
             {
                 "battery_soc": 80.0,
-                # Only 150 W apart, so the surplus proxy reads this as balanced.
                 "solar_power": 550.0,
                 "house_power": 400.0,
                 "grid_power": 0.0,
@@ -389,8 +443,8 @@ def test_a_charge_guard_holds_a_battery_charging_inside_the_surplus_deadband(
 def test_a_charge_guard_leaves_the_battery_free_to_serve_the_house(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A charge limit says nothing about discharging, and holding is symmetric, so a
-    guard that fired on anything but charging would cost the house its own power."""
+    """A charge limit says nothing about discharging, and the hold that blocks
+    charging blocks that too, so the draw has to be commanded back explicitly."""
     allow_writes(control, monkeypatch)
     asyncio.run(control.async_set_charge_limit_soc(80))
 
@@ -400,14 +454,15 @@ def test_a_charge_guard_leaves_the_battery_free_to_serve_the_house(
                 "battery_soc": 80.0,
                 "solar_power": 250.0,
                 "house_power": 400.0,
-                "grid_power": 0.0,
-                "battery_power": -150.0,
+                "grid_power": 150.0,
+                "battery_power": 0.0,
             }
         )
     )
 
-    assert control.status is Status.AUTOMATIC
-    assert control.power == 0.0
+    assert control.status is Status.CHARGE_LIMIT_REACHED
+    assert control.selected_feature is Feature.AUTOMATIC
+    assert control.power == 100.0
 
 
 def test_a_held_charge_guard_ignores_the_surplus_its_own_hold_removed(
@@ -442,12 +497,12 @@ def test_a_held_charge_guard_ignores_the_surplus_its_own_hold_removed(
         assert control.status is Status.CHARGE_LIMIT_REACHED
 
 
-def test_a_held_charge_guard_releases_once_the_house_draws_from_the_grid(
+def test_a_held_charge_guard_covers_the_house_without_changing_method(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The grid still says which way the house leans while the battery is pinned, and
-    a draw it could cover is the one thing that should free it."""
-    allow_writes(control, monkeypatch)
+    """The draw the hold created is met from the battery rather than by handing the
+    inverter back, which would let it charge again and start the whole cycle over."""
+    write = allow_writes(control, monkeypatch)
     asyncio.run(control.async_set_charge_limit_soc(80))
     asyncio.run(
         control.async_apply(
@@ -461,6 +516,7 @@ def test_a_held_charge_guard_releases_once_the_house_draws_from_the_grid(
         )
     )
     assert control.status is Status.CHARGE_LIMIT_REACHED
+    write.reset_mock()
 
     importing = {
         "battery_soc": 80.0,
@@ -469,19 +525,17 @@ def test_a_held_charge_guard_releases_once_the_house_draws_from_the_grid(
         "grid_power": 300.0,
         "battery_power": 0.0,
     }
-    # One reading could be a passing cloud, so the hold waits to be sure.
-    for poll in range(1, const.GUARD_EVIDENCE_POLLS):
+    for poll in range(1, 6):
         advance(control, monkeypatch, poll * (const.MIN_CONTROL_DWELL_S + 1))
         asyncio.run(control.async_apply(importing))
         assert control.status is Status.CHARGE_LIMIT_REACHED
 
-    advance(
-        control,
-        monkeypatch,
-        const.GUARD_EVIDENCE_POLLS * (const.MIN_CONTROL_DWELL_S + 1),
-    )
-    asyncio.run(control.async_apply(importing))
-    assert control.status is Status.AUTOMATIC
+    assert control.power == 300.0
+    # One retune and nothing else: the method is already the battery limits, and the
+    # inverter acts on the setpoint register without being told again.
+    assert commands(write) == [
+        (const.REGISTERS_BY_KEY["battery_power_setpoint"].address, [0xFFFF, 0xFED4]),
+    ]
 
 
 def test_a_held_guard_keeps_holding_when_the_frame_loses_the_battery_and_grid(

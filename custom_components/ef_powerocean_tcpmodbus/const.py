@@ -658,10 +658,9 @@ DEFAULT_BATTERY_RESERVE_SOC: Final = 0.0
 
 GUARD_SOC_HYSTERESIS: Final = 5.0
 GUARD_POWER_DEADBAND_W: Final = 200.0
-# Threshold when to consider the battery (dis)charging to limit noise.
-GUARD_BATTERY_DETECT_W: Final = 50.0
-# Require multiple polls to operate a guard, to avoid noise interfering.
-GUARD_EVIDENCE_POLLS: Final = 3
+# Resolution of a guard's tracked setpoint, so an ordinary load does not rewrite it
+# every poll. Always rounded towards zero, which leaves the remainder to the grid.
+GUARD_TRACKING_STEP_W: Final = 100.0
 MIN_CONTROL_DWELL_S: Final = 60.0
 CONTROL_STATUS_DAMPING_POLLS: Final = 3
 # 0 means "no limit" to the inverter and not "hold at zero", so we therefore set the lowest power to hold.

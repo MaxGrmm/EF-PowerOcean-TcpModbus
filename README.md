@@ -120,6 +120,14 @@ Two guards apply in every mode, including Automatic, and only ever restrict:
 - **Charge Limit** – state of charge above which the battery is not charged (100 = off)
 - **Battery Reserve** – state of charge below which it is not drained (0 = off)
 
+The inverter has no charge ceiling of its own, and its battery setpoint is a target
+rather than a cap, so while a guard is latched the integration keeps the inverter and
+runs self-consumption itself: it commands the balance the inverter would have struck
+anyway, clamped to the side the guard allows. A charge limit therefore still lets the
+battery cover the house, and a reserve still lets it recharge from surplus solar. It
+does not hand the inverter back until the state of charge leaves the guard's band,
+because the inverter resumes the forbidden direction within a poll of getting it back.
+
 Both guards default to off. Separately, **Modbus Control** defaults to off, so an
 untouched install never takes control away from the app.
 **Control Status** reports what the selected mode is achieving, including when a guard
