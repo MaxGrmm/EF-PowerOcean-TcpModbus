@@ -26,10 +26,9 @@ from .const import (
     CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
-    GUARD_BATTERY_DETECT_W,
-    GUARD_EVIDENCE_POLLS,
     GUARD_POWER_DEADBAND_W,
     GUARD_SOC_HYSTERESIS,
+    GUARD_TRACKING_STEP_W,
     HEARTBEAT_REGISTER,
     HOLD_SETPOINT_W,
     MIN_CONTROL_DWELL_S,
@@ -91,10 +90,11 @@ class ControlManager:
         self._reserve_guard = False
         # Which guard, if any, is forcing the current command.
         self._blocking_guard: ControlStatus | None = None
-        self._guard_evidence: dict[ControlStatus, int] = {}
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
+        # The control word the inverter is known to hold, so it is not re-selected.
+        self._commanded_word: int | None = None
         self._battery_saver = False
         self._last_control_write_time: datetime | None = None
         # A restart within the inverter's control window leaves it still following the
@@ -347,66 +347,66 @@ class ControlManager:
         elif soc >= self._battery_reserve_soc + GUARD_SOC_HYSTERESIS:
             self._reserve_guard = False
 
-    def _measured_direction(self, data: dict[str, Any]) -> int:
-        """Return which way the battery would move if left alone.
+    def _natural_battery_power(self, data: dict[str, Any]) -> float | None:
+        """Return what the battery would do if the inverter were left to itself.
 
-        Only used while the inverter is running itself, where no mode declares a
-        direction. Solar against house load says it without depending on the
-        battery, so guarding cannot feed back into its own input.
+        The house balances as solar + grid = house + battery, so the power a battery
+        would need to hold the grid at zero reads the same whether the inverter is
+        following us or running its own self-consumption. Measuring it on the grid
+        side is preferred because it carries the conversion losses the panels do not.
         """
+        battery, grid = data.get("battery_power"), data.get("grid_power")
+        if battery is not None and grid is not None:
+            return float(battery) - float(grid)
         solar, house = data.get("solar_power"), data.get("house_power")
-        if solar is None or house is None:
-            return 0
-        if float(solar) > float(house) + GUARD_POWER_DEADBAND_W:
-            return 1
-        if float(house) > float(solar) + GUARD_POWER_DEADBAND_W:
-            return -1
-        return 0
-
-    def _sustained(self, status: ControlStatus, holds: bool) -> bool:
-        """Return whether *holds* has been true for enough polls to act on."""
-        seen = self._guard_evidence.get(status, 0) + 1 if holds else 0
-        self._guard_evidence[status] = seen
-        return seen >= GUARD_EVIDENCE_POLLS
-
-    def _battery_moving(self, data: dict[str, Any], sign: int) -> bool:
-        """Return whether the battery is taking (1) or giving (-1) power."""
-        battery = data.get("battery_power")
-        if battery is None:
-            # Falling back to the proxy keeps a partial frame from reading as consent.
-            return self._measured_direction(data) == sign
-        return sign * float(battery) > GUARD_BATTERY_DETECT_W
-
-    def _grid_leaning(self, data: dict[str, Any], sign: int) -> bool:
-        """Return whether the grid shows a surplus (1) or a draw (-1) to be met."""
-        grid = data.get("grid_power")
-        if grid is None:
-            return self._measured_direction(data) == sign
-        return -sign * float(grid) > GUARD_POWER_DEADBAND_W
-
-    def _automatic_guard(self, data: dict[str, Any]) -> ControlStatus | None:
-        """Return the guard that must take over while the inverter runs itself."""
-        for latched, status, sign in (
-            (self._charge_guard, ControlStatus.CHARGE_LIMIT_REACHED, 1),
-            (self._reserve_guard, ControlStatus.RESERVE_REACHED, -1),
-        ):
-            if not latched:
-                self._guard_evidence.pop(status, None)
-            elif self._blocking_guard is status:
-                if not self._sustained(status, self._grid_leaning(data, -sign)):
-                    return status
-            elif self._battery_moving(data, sign):
-                return status
-
+        if solar is not None and house is not None:
+            return float(solar) - float(house)
         return None
 
     def _guard_blocks(self, direction: int) -> ControlStatus | None:
-        """Return the guard forbidding movement in *direction*, if one does."""
-        if direction > 0 and self._charge_guard:
+        """Return the guard forbidding movement in *direction*, if one does.
+
+        A direction of zero is the inverter choosing for itself, which a latched
+        guard has to take over from: handing it back, even briefly, lets it move the
+        forbidden way again at once.
+        """
+        if direction >= 0 and self._charge_guard:
             return ControlStatus.CHARGE_LIMIT_REACHED
-        if direction < 0 and self._reserve_guard:
+        if direction <= 0 and self._reserve_guard:
             return ControlStatus.RESERVE_REACHED
         return None
+
+    def _guarded_command(
+        self, data: dict[str, Any], blocked: ControlStatus
+    ) -> tuple[ControlFeature, float, ControlStatus | None]:
+        """Run the inverter's own self-consumption for it, minus the forbidden way.
+
+        The inverter's battery setpoint is a target rather than a ceiling and zero
+        means no limit, so no single value forbids one direction while leaving the
+        other free. Commanding the balance the inverter would have struck anyway,
+        clamped to the side the guard allows, is that same rule kept from here.
+        Alternating between a hold and the inverter's own mode cannot work: the
+        hold removes the very reading that would end it.
+        """
+        natural = self._natural_battery_power(data)
+        if natural is None:
+            return self._hold(data, blocked)
+
+        if self._charge_guard:
+            natural = min(natural, 0.0)
+        if self._reserve_guard:
+            natural = max(natural, 0.0)
+
+        watts = abs(natural) // GUARD_TRACKING_STEP_W * GUARD_TRACKING_STEP_W
+        if watts <= 0.0:
+            return self._hold(data, blocked)
+
+        feature = (
+            ControlFeature.CHARGE_BATTERY
+            if natural > 0
+            else ControlFeature.DISCHARGE_BATTERY
+        )
+        return feature, self._clamp_power(watts, feature), blocked
 
     def _hold(
         self, data: dict[str, Any], blocked: ControlStatus | None
@@ -415,15 +415,16 @@ class ControlManager:
 
         A full battery cannot charge, so a battery limit set against a surplus
         forbids nothing the inverter could do anyway and leaves limiting the
-        solar as its only way to balance. Stepping aside is safe because the
-        deadband counts anything short of a clear surplus as a draw, so the hold
-        is back before the house can reach the battery.
+        solar as its only way to balance. Stepping aside is safe because anything
+        short of a clear surplus counts as a draw, so the hold is back before the
+        house can reach the battery.
         """
         soc = data.get("battery_soc")
+        surplus = self._natural_battery_power(data) or 0.0
         if (
             soc is not None
             and float(soc) >= BATTERY_FULL_SOC
-            and self._measured_direction(data) > 0
+            and surplus > GUARD_POWER_DEADBAND_W
         ):
             return ControlFeature.AUTOMATIC, 0.0, blocked
         return ControlFeature.HOLD_BATTERY, HOLD_SETPOINT_W, blocked
@@ -436,13 +437,20 @@ class ControlManager:
             return ControlFeature.AUTOMATIC, 0.0, None
 
         definition = CONTROL_FEATURES[self._feature]
+        # Holding moves the battery neither way, so no guard has anything to say.
         blocked = (
-            self._automatic_guard(data)
-            if self._feature is ControlFeature.AUTOMATIC
+            None
+            if self._feature is ControlFeature.HOLD_BATTERY
             else self._guard_blocks(definition.direction)
         )
         if blocked is not None:
-            return self._hold(data, blocked)
+            # Only the inverter's own mode is reproduced. A mode the user chose is
+            # restricted to nothing in the forbidden direction, never turned around.
+            return (
+                self._guarded_command(data, blocked)
+                if self._feature is ControlFeature.AUTOMATIC
+                else self._hold(data, blocked)
+            )
 
         if self._feature is ControlFeature.AUTOMATIC:
             return ControlFeature.AUTOMATIC, 0.0, None
@@ -573,7 +581,12 @@ class ControlManager:
         return word
 
     async def _async_send_control(self, feature: ControlFeature, power: float) -> None:
-        """Write the setpoint and then the control word that selects its method."""
+        """Write the setpoint, and the method word only where it is not already set.
+
+        The inverter acts on the setpoint register continuously, so re-selecting a
+        method it already holds achieves nothing and only risks a transient. An
+        authority lapse is the one case that has to assume it was forgotten.
+        """
         if not self._modbus_client.connected:
             raise HomeAssistantError("Modbus client is not connected")
 
@@ -583,7 +596,10 @@ class ControlManager:
         else:
             await self._async_clear_setpoint(self._commanded_feature)
 
-        await self._async_write_control_word(self._compose_control_command(feature))
+        word = self._compose_control_command(feature)
+        if word != self._commanded_word or self._control_stale:
+            await self._async_write_control_word(word)
+            self._commanded_word = word
         self._note_control_written()
 
     async def _async_apply_control_command(self) -> None:
@@ -603,6 +619,7 @@ class ControlManager:
             await self._async_require_control_authority()
 
         await self._async_write_control_word(value)
+        self._commanded_word = value
         self._note_control_written()
         self._on_update()
         await self._on_refresh()
