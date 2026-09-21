@@ -5,7 +5,7 @@ The values that fill these in live in const.py; this module must not import it.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Final
@@ -339,20 +339,25 @@ class RegisterBlock:
         return list(raw[index : index + register.size])
 
 
-def plan_blocks(registers: Iterable[RegisterDef]) -> tuple[RegisterBlock, ...]:
+def plan_blocks(
+    registers: Iterable[RegisterDef], *, avoid: Collection[int] = ()
+) -> tuple[RegisterBlock, ...]:
     """Group registers into the fewest Modbus reads.
 
     A new read starts when the next register is too far away to be worth reading
-    through, or when the block would outgrow a single Modbus response.
+    through, when the block would outgrow a single Modbus response, or when reading
+    through would take in an address in avoid.
     """
     blocks: list[RegisterBlock] = []
     current: list[RegisterDef] = []
 
     for register in sorted(registers, key=lambda register: register.address):
         if current:
-            gap = register.address - max(mapped.end for mapped in current)
+            reach = max(mapped.end for mapped in current)
+            gap = register.address - reach
             span = register.end - current[0].address
-            if gap > MAX_REGISTER_GAP or span > MAX_REGISTERS_PER_READ:
+            crosses = any(reach <= address < register.address for address in avoid)
+            if gap > MAX_REGISTER_GAP or span > MAX_REGISTERS_PER_READ or crosses:
                 blocks.append(RegisterBlock(tuple(current)))
                 current = []
         current.append(register)
@@ -363,10 +368,15 @@ def plan_blocks(registers: Iterable[RegisterDef]) -> tuple[RegisterBlock, ...]:
 
 
 def plan_blocks_for_model(
-    registers: Iterable[RegisterDef], inverter_model: InverterModel
+    registers: Iterable[RegisterDef],
+    inverter_model: InverterModel,
+    *,
+    avoid: Collection[int] = (),
 ) -> tuple[RegisterBlock, ...]:
     """Resolve model-specific addresses and group them into Modbus reads."""
-    return plan_blocks(register.for_model(inverter_model) for register in registers)
+    return plan_blocks(
+        (register.for_model(inverter_model) for register in registers), avoid=avoid
+    )
 
 
 @dataclass(frozen=True)

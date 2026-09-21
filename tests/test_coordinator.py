@@ -850,15 +850,30 @@ def test_read_plan_is_not_split_more_than_necessary(
     """Neighbouring blocks must be unmergeable, so no poll wastes a round trip."""
     blocks = const.register_blocks_for(inverter_model)
     for block, following in zip(blocks, blocks[1:]):
-        gap = following.start - (block.start + block.count)
+        end = block.start + block.count
+        gap = following.start - end
         merged = following.start + following.count - block.start
 
         assert (
-            gap > models.MAX_REGISTER_GAP or merged > models.MAX_REGISTERS_PER_READ
+            gap > models.MAX_REGISTER_GAP
+            or merged > models.MAX_REGISTERS_PER_READ
+            or end <= const.HEARTBEAT_REGISTER < following.start
         ), (
             f"blocks at {block.start} and {following.start} are only {gap} words "
             f"apart and would merge into {merged} words, so they should be one read"
         )
+
+
+@pytest.mark.parametrize("inverter_model", models.InverterModel)
+def test_the_heartbeat_register_is_never_read_by_a_poll(
+    inverter_model: models.InverterModel,
+) -> None:
+    """Every model but the Plus maps feed_in_power_max one register past it, and the
+    inverter answers a write to a register it is serving a read for with "busy"."""
+    for block in const.register_blocks_for(inverter_model):
+        assert not (
+            block.start <= const.HEARTBEAT_REGISTER < block.start + block.count
+        ), f"the block at {block.start} reads {const.HEARTBEAT_REGISTER}"
 
 
 def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
