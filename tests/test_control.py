@@ -142,17 +142,46 @@ def test_a_retry_waits_a_whole_poll_cycle(scan_interval, expected) -> None:
     assert heartbeat_module.retry_delays(scan_interval) == expected
 
 
-def test_a_reconnect_retests_a_register_the_device_refused(
+def test_a_reconnect_keeps_control_unless_the_window_lapsed(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A new socket can mean a different device state, so the verdict goes with it."""
+    """The inverter counts its own deadline and knows nothing of our socket, so a
+    blip must not report control lost nor rewrite a command it never dropped."""
     allow_writes(control, monkeypatch)
     control._heartbeat._supported = False
 
     control.mark_stale()
 
+    # A new socket can mean a different device state, so the refusal goes with it.
     assert control.heartbeat_supported is None
+    assert control.in_control is True
+    assert control._control_stale is False
+
+    lapsed = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_WINDOW_S + 1)
+    monkeypatch.setattr(control_module.dt, "now", lambda: lapsed)
+    control.mark_stale()
+
     assert control.in_control is False
+    assert control._control_stale is True
+
+
+def test_a_failed_beat_is_retried_before_the_deadline_not_after_it(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retries come out of the interval: spending them and then waiting a whole one
+    on top leaves the deadline to pass, and the inverter reverts to the app."""
+    allow_writes(control, monkeypatch)
+    heartbeat = control._heartbeat
+
+    assert heartbeat._delay_before_next_write() == const.HEARTBEAT_INTERVAL_S
+
+    for age, expected in ((12, 8), (const.HEARTBEAT_RETRY_TOTAL_S, 5), (40, 5)):
+        now = HEARTBEAT_START + timedelta(seconds=age)
+        monkeypatch.setattr(control_module.dt, "now", lambda now=now: now)
+        assert heartbeat._delay_before_next_write() == expected
+
+    heartbeat._supported = False
+    assert heartbeat._delay_before_next_write() == const.HEARTBEAT_UNSUPPORTED_RETRY_S
 
 
 def test_a_mode_writes_its_setpoint_then_its_method_word(

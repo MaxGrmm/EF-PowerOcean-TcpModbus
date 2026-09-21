@@ -81,6 +81,9 @@ HEARTBEAT_REUSE_S: Final = 10
 # How long one write may spend being retried, all attempts together. Below
 # HEARTBEAT_INTERVAL_S, so the retries are over before the next write is due.
 HEARTBEAT_RETRY_TOTAL_S: Final = 15
+# The shortest gap between two writes. Only reached after a failed one, where the
+# deadline has kept running and waiting a full interval would risk passing it.
+HEARTBEAT_MIN_GAP_S: Final = 5
 # How long to leave the register alone once the inverter has called the request
 # invalid rather than ill-timed, which is what firmware without it answers.
 HEARTBEAT_UNSUPPORTED_RETRY_S: Final = 900
@@ -193,8 +196,16 @@ REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTE
 
 
 def register_blocks_for(inverter_model: InverterModel) -> tuple[RegisterBlock, ...]:
-    """Return register blocks resolved for an inverter model."""
-    return plan_blocks_for_model(MODBUS_REGISTERS, inverter_model)
+    """Return register blocks resolved for an inverter model.
+
+    The heartbeat register is kept out of them, at the cost of one more read on the
+    models that map feed_in_power_max next to it. The inverter answers a write to a
+    register it is serving a read for with "device busy", and losing the heartbeat
+    that way costs a minute of control.
+    """
+    return plan_blocks_for_model(
+        MODBUS_REGISTERS, inverter_model, avoid=(HEARTBEAT_REGISTER,)
+    )
 
 
 SENSOR_MAP: list[SensorDef] = [

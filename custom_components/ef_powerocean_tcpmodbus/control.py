@@ -218,13 +218,16 @@ class ControlManager:
         await self._heartbeat.async_stop()
 
     def mark_stale(self) -> None:
-        """Note that the inverter may have stopped following us.
+        """Take stock of the inverter after a connection outage.
 
-        A connection outage can outlast the inverter's 60 s window, so the command is
-        re-sent rather than assumed to have survived.
+        Only an outage that outlasted the inverter's 60 s window handed it back to
+        the app; a shorter one left it following the command it already has. The
+        verdict is reached here, before the reconnected heartbeat refreshes the
+        window, because afterwards the two are indistinguishable.
         """
-        self._heartbeat.mark_stale()
-        self._control_stale = True
+        if not self._heartbeat.in_control:
+            self._control_stale = True
+        self._heartbeat.note_reconnect()
 
     def _require_modbus_control(self) -> None:
         """Refuse a command the inverter would store and ignore."""

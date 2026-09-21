@@ -21,6 +21,7 @@ from homeassistant.util import dt
 from .const import (
     HEARTBEAT_INTERVAL_S,
     HEARTBEAT_JITTER_S,
+    HEARTBEAT_MIN_GAP_S,
     HEARTBEAT_REGISTER,
     HEARTBEAT_RETRY_TOTAL_S,
     HEARTBEAT_REUSE_S,
@@ -88,13 +89,13 @@ class Heartbeat:
             await self._task
         self._task = None
 
-    def mark_stale(self) -> None:
-        """Give up on the inverter obeying us, after a connection outage.
+    def note_reconnect(self) -> None:
+        """Retest the register on what may no longer be the same device state.
 
-        What it last said about the register is dropped too: a new socket can mean a
-        different device state, so an earlier refusal is not held against it.
+        The deadline is left alone. The inverter counts it from the last write it
+        accepted and knows nothing of our socket, so a reconnect inside the window
+        has interrupted nothing, and one that took longer has already aged out.
         """
-        self._last_success = None
         self._supported = None
 
     async def async_ensure_fresh(self) -> bool:
@@ -120,13 +121,24 @@ class Heartbeat:
                 raise
             except Exception:  # noqa: BLE001 - one failed write must not stop the timer
                 _LOGGER.exception("Unexpected error in the heartbeat loop")
-            delay = (
-                HEARTBEAT_UNSUPPORTED_RETRY_S
-                if self._supported is False
-                else HEARTBEAT_INTERVAL_S
-            )
             # The jitter stops the write settling onto the same second as the poll.
-            await asyncio.sleep(delay + random.uniform(0.0, HEARTBEAT_JITTER_S))
+            delay = self._delay_before_next_write() + random.uniform(
+                0.0, HEARTBEAT_JITTER_S
+            )
+            await asyncio.sleep(delay)
+
+    def _delay_before_next_write(self) -> float:
+        """Return how long to wait before writing again.
+
+        Timed from the last write the inverter accepted, not from the attempt that
+        just ended, so the retries of a failing write come out of the interval
+        instead of being added on top of it. Waiting a full interval after a write
+        that spent its whole retry budget failing is how the deadline gets passed
+        unattended, which hands the inverter back to the app for a minute at a time.
+        """
+        if self._supported is False:
+            return HEARTBEAT_UNSUPPORTED_RETRY_S
+        return max(HEARTBEAT_MIN_GAP_S, HEARTBEAT_INTERVAL_S - self._age())
 
     async def _async_write_heartbeat(self) -> bool:
         async with self._lock:
