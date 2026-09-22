@@ -128,6 +128,12 @@ battery cover the house, and a reserve still lets it recharge from surplus solar
 does not hand the inverter back until the state of charge leaves the guard's band,
 because the inverter resumes the forbidden direction within a poll of getting it back.
 
+While the battery is held near zero it will wander a few hundred watts either way as
+clouds come and go. This is due to the inverter itself balancing and unfortunately
+EcoFlow doesn't expose the robust power limit that the app's Schedule feature uses.
+Read more about that in
+[Battery power limits](EcoFlow_PowerOcean_Modbus.md#battery-power-limits).
+
 Both guards default to off. Separately, **Modbus Control** defaults to off, so an
 untouched install never takes control away from the app.
 **Control Status** reports what the selected mode is achieving, including when a guard
