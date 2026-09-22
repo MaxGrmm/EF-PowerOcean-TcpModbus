@@ -8,6 +8,7 @@ and nothing reaches the wire unless the inverter is currently following us.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
@@ -390,15 +391,26 @@ class ControlManager:
         if self._reserve_guard:
             natural = max(natural, 0.0)
 
-        watts = abs(natural) // GUARD_TRACKING_STEP_W * GUARD_TRACKING_STEP_W
-        if watts <= 0.0:
+        if natural == 0.0:
             return self._hold(data, blocked)
 
-        feature = (
-            ControlFeature.CHARGE_BATTERY
-            if natural > 0
-            else ControlFeature.DISCHARGE_BATTERY
-        )
+        # Ensures that we never import from the grid if the battery can cover the demand.
+        if natural > 0:
+            feature = ControlFeature.CHARGE_BATTERY
+            watts = float(math.floor(natural))
+        else:
+            feature = ControlFeature.DISCHARGE_BATTERY
+            watts = float(math.ceil(-natural))
+
+        # Rewrite only once the load has moved a step, and never while the standing
+        # setpoint has drifted to the importing side.
+        held = self._commanded_power
+        slack = watts - held if natural > 0 else held - watts
+        if self._commanded_feature is feature and 0.0 <= slack < GUARD_TRACKING_STEP_W:
+            watts = held
+
+        if watts <= 0.0:
+            return self._hold(data, blocked)
         return feature, self._clamp_power(watts, feature), blocked
 
     def _hold(

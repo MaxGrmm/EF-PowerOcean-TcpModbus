@@ -491,7 +491,8 @@ def test_a_charge_guard_leaves_the_battery_free_to_serve_the_house(
 
     assert control.status is Status.CHARGE_LIMIT_REACHED
     assert control.selected_feature is Feature.AUTOMATIC
-    assert control.power == 100.0
+    # The whole draw, so the grid is not left carrying the remainder.
+    assert control.power == 150.0
 
 
 def test_a_held_charge_guard_ignores_the_surplus_its_own_hold_removed(

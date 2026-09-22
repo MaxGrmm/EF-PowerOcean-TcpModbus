@@ -44,6 +44,7 @@ class FakeInverter:
     method: int = 0
     setpoint: int = 0
     method_writes: int = 0
+    setpoint_writes: int = 0
     connected: bool = True
     reachable: bool = True
 
@@ -61,6 +62,7 @@ class FakeInverter:
                 value >> const.CONTROL_COMMAND_METHOD_SHIFT
             ) & const.CONTROL_COMMAND_METHOD_MASK
         elif address == SETPOINT_REGISTER:
+            self.setpoint_writes += 1
             self.setpoint = value - (1 << 32) if value >> 31 else value
 
     def settle(self) -> None:
@@ -206,11 +208,56 @@ def test_a_charge_limit_still_lets_the_house_use_the_battery(
     run = sim.run(polls=60, solar=0, house=1280)
 
     assert max(run.battery) <= const.HOLD_SETPOINT_W
-    assert max(run.grid) <= const.GUARD_TRACKING_STEP_W
-    # Rounding the setpoint has to land on the grid, never on the battery, so the
-    # house is left slightly short rather than the battery slightly overdrawn.
-    assert min(run.grid) >= 0
+    assert max(run.grid) <= 0
     assert run.soc[-1] < run.soc[0]
+
+
+def test_a_guard_never_imports_what_the_battery_could_have_covered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tracked setpoint is what the house draws through, so anything it leaves
+    behind is bought from the grid every poll it stays behind. Erring the other way
+    spills the remainder into the grid instead, which costs nothing to buy."""
+    for solar, house in (
+        # A fractional draw, as the float registers report one, so which way the odd
+        # watt is rounded shows up in the grid rather than cancelling out.
+        (147.0, 1280.4),
+        # And a draw smaller than the rewrite step, which still has to be covered
+        # rather than rounded away in the grid's favour.
+        (460.0, 500.0),
+    ):
+        sim = Simulation(monkeypatch, soc=60.0, charge_limit=1.0)
+        run = sim.run(polls=60, solar=solar, house=house)
+
+        assert max(run.grid) <= 0
+        # Spilling is the lesser evil, not a licence to empty the battery to the grid.
+        assert min(run.grid) >= -const.GUARD_TRACKING_STEP_W
+        # A steady house is worth one setpoint, not one per poll.
+        assert sim.inverter.setpoint_writes == 1
+
+
+def test_a_guard_only_falls_behind_the_poll_an_unexpected_load_arrives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A load nothing could have seen coming is carried by the grid for the one poll
+    it takes to measure it. What must not happen is that shortfall settling in and
+    being bought again on every poll after the setpoint has caught up."""
+    for house, late_polls in (
+        # A 2 kW appliance: one poll behind on each of the six times it switches on.
+        ([500.0] * 20 + [2500.0] * 20, 6),
+        # A step smaller than the rewrite deadband, which is caught once and then
+        # covered for good, the setpoint spilling into the grid on the low half.
+        ([500.0] * 20 + [560.0] * 20, 1),
+    ):
+        sim = Simulation(monkeypatch, soc=60.0, charge_limit=1.0)
+        run = sim.run(polls=240, solar=147, house=house)
+
+        assert max(run.battery) <= const.HOLD_SETPOINT_W
+        assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
+        late = [step for step, watts in enumerate(run.grid) if watts > 0]
+        # Never two polls running: a catch-up, not a standing shortfall.
+        assert len(late) == late_polls
+        assert all(later - earlier > 1 for earlier, later in zip(late, late[1:]))
 
 
 def test_a_reserve_lets_the_battery_refill_once_the_sun_returns(
@@ -224,9 +271,12 @@ def test_a_reserve_lets_the_battery_refill_once_the_sun_returns(
     assert min(evening.battery) >= 0
     assert max(evening.grid) >= 900
 
-    morning = sim.run(polls=240, solar=3000, house=800)
+    morning = sim.run(polls=240, solar=3000.6, house=800.0)
 
     assert morning.soc[-1] > 20
+    # Charging takes less than the surplus, so the remainder leaves rather than
+    # being topped up from the grid.
+    assert max(morning.grid) <= 0
 
 
 def test_an_untouched_install_never_touches_the_inverter(
