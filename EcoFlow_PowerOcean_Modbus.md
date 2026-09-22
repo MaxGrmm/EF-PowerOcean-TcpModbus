@@ -18,6 +18,7 @@ this integration's register handling.
 - [Reverse-engineered regions](#reverse-engineered-regions)
 - [Values only available in the Cloud API](#values-only-available-in-the-cloud-api)
 - [Writing registers](#writing-registers)
+- [Battery power limits](#battery-power-limits)
 - [Disclaimer](#disclaimer)
 
 ## Sources
@@ -39,13 +40,19 @@ Modbus stays off until the inverter is switched into Modbus control mode:
 
 ## Connection
 
-| Parameter    | Value                                                     |
-| ------------ | --------------------------------------------------------- |
-| Protocol     | Modbus TCP                                                |
-| Port         | 502                                                       |
-| Unit / slave | 1 (the device answers on effectively any unit ID)         |
-| Functions    | `0x03` read holding registers, `0x06` / `0x10` for writes |
-| Addressing   | Direct 4xxxx addresses                                    |
+| Parameter      | Value                                                     |
+| -------------- | --------------------------------------------------------- |
+| Protocol       | Modbus TCP                                                |
+| Port           | 502                                                       |
+| Unit / slave   | 1 (the device answers on effectively any unit ID)         |
+| Functions      | `0x03` read holding registers, `0x06` / `0x10` for writes |
+| Addressing     | Direct 4xxxx addresses                                    |
+| Address window | 40001–44096, and nothing outside it                       |
+
+The window was measured by probing 0–60000 and bisecting the edges. `0x04` read
+input registers answers over exactly the same range, and `0x01` / `0x02` answer
+nothing at all, so there is no second address space to search: anything reachable
+is reachable through `0x03`.
 
 Best practice is to configure a static IP in your router's admin interface. Otherwise there is a risk that the integration stops working if the inverter gets a new IP.
 
@@ -114,11 +121,8 @@ The main blocks are the following:
 
 The configuration region below 40574 holds more registers than the integration
 reads. Several are settings rather than measurements, so they are left alone by
-default.
-
-Some of them are **signed** 32-bit values. `RegisterType` has no `INT32` member and
-`decode_register` has no signed path, so adding both is a prerequisite for reading
-them correctly.
+default. Some of them are **signed** 32-bit values, which `RegisterType.INT32` and
+`decode_register` both handle.
 
 ## Reverse-engineered regions
 
@@ -164,19 +168,37 @@ confirmation of delivery, and nothing more.
 
 Two registers cannot be verified by reading at all on a PowerOcean Plus:
 
-- `0x0215` System Control Command is write-only by design and accepts any value,
+- `40534` System Control Command is write-only by design and accepts any value,
   including bit patterns the doc reserves. It is not validated.
-- `0x0213` System State 2 reads `0x00000000` even while `0x0211` reports the system
-  running, although its low seven bits are documented to mirror `0x0211`. The
-  register is not implemented, so the `control_mode` sensor derived from it always
-  says "default". Do not use it to decide whether a command was accepted.
+- `40532` System State 2 reads zero even while `40530` reports the system running,
+  although its low seven bits are documented to mirror `40530`. The register is not
+  implemented, so the `control_mode` sensor derived from it always says "default".
+  Do not use it to decide whether a command was accepted.
 
 The only trustworthy confirmation is behavioural: grid, battery or solar power
 moving, the LED changing, or the EcoFlow Pro app reporting that Modbus has control.
-`scripts/probe_control_word.py` tests exactly that against a real device.
 
 Writing to a live inverter can interfere with its internal scheduling. Treat every
 writable register as potentially disruptive, and change them one at a time.
+
+## Battery power limits
+
+Unfortunately, we have not found a stable way to set the battery power limits similar
+to what the EcoFlow app schedules do. `battery_charge_power_limit` (40556) and
+`battery_discharge_power_limit` (40554) are readings, not controls. Every write
+to 40556 is refused with `exception code 2` in both word orders, with and without
+Modbus control authority.
+
+`battery_charge_power_limit` reports two different quantities depending on what the app is doing:
+
+| App charge schedule | What 40556 holds                           |
+| ------------------- | ------------------------------------------ |
+| Off                 | BMS instantaneous capability, drifting     |
+| Set                 | The configured cap, exactly and unchanging |
+
+There is thus seemingly no modbus register exposed that can control the power the same way
+that the app does. Due to this, the integration replicates this behaviour using the `battery_power_setpoint` (40571) and a live monitoring of the situation to balance. It's not perfect,
+but it works.
 
 ## Disclaimer
 
