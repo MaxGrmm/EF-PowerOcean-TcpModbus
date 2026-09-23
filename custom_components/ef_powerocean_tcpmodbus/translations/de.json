@@ -342,6 +342,13 @@
           "islanded": "Inselbetrieb"
         }
       },
+      "grid_feed_mode": {
+        "name": "Einspeisemodus",
+        "state": {
+          "limited": "Begrenzt",
+          "unlimited": "Unbegrenzt"
+        }
+      },
       "control_status": {
         "name": "Steuerungsstatus",
         "state": {
@@ -420,6 +427,9 @@
     "switch": {
       "battery_saver_mode_control": {
         "name": "Batteriesparmodus"
+      },
+      "grid_feed": {
+        "name": "Netzeinspeisung"
       }
     }
   }

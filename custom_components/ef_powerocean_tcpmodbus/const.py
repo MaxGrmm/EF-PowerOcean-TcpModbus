@@ -23,6 +23,7 @@ from .models import (
     ControlStatus,
     CoordinatorStatus,
     EnergySensorDef,
+    GridFeedMode,
     GridMode,
     InverterModel,
     NumberWritableDef,
@@ -137,6 +138,7 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("inverter_rated_power", 40528, RegisterType.UINT32),
     RegisterDef("system_modes", 40530, RegisterType.UINT32),
     RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
+    RegisterDef("grid_feed_mode", 40537, RegisterType.UINT16),
     RegisterDef(
         "feed_in_power_max",
         40609,
@@ -414,6 +416,13 @@ SENSOR_MAP: list[SensorDef] = [
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
+        key="grid_feed_mode",
+        device_class="enum",
+        options=tuple(GridFeedMode),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:transmission-tower-export",
+    ),
+    SensorDef(
         key="inverter_rated_power",
         unit=UnitOfPower.WATT,
         device_class="power",
@@ -609,6 +618,15 @@ BATTERY_SAVER_SWITCH: Final = SwitchDef(
     key="battery_saver_mode_control",
     entity_category=EntityCategory.CONFIG,
     icon="mdi:leaf",
+)
+
+# Turning this off writes the feed mode and its power cap directly, which the
+# inverter applies without Modbus control authority, so the EcoFlow app keeps
+# control of everything else.
+GRID_FEED_SWITCH: Final = SwitchDef(
+    key="grid_feed",
+    entity_category=EntityCategory.CONFIG,
+    icon="mdi:transmission-tower-export",
 )
 
 CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {

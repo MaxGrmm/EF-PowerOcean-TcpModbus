@@ -155,6 +155,16 @@ class CalculateValuesTest(unittest.TestCase):
         self.assertFalse(result["self_use_mode_ena"])
         self.assertTrue(result["intelligent_mode_ena"])
 
+    def test_replaces_the_grid_feed_mode_register_with_its_enum(self) -> None:
+        self.data["grid_feed_mode"] = 1.0
+        self.assertEqual(self.calculate()["grid_feed_mode"], "unlimited")
+
+        self.data["grid_feed_mode"] = 0.0
+        self.assertEqual(self.calculate()["grid_feed_mode"], "limited")
+
+        del self.data["grid_feed_mode"]
+        self.assertIsNone(self.calculate()["grid_feed_mode"])
+
     def test_omits_optional_values_when_their_inputs_are_disabled_or_absent(
         self,
     ) -> None:
