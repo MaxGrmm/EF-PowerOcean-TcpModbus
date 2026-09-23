@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import pytest
-from ef_powerocean_tcpmodbus import const
-from ef_powerocean_tcpmodbus.models import (
+
+from custom_components.ef_powerocean_tcpmodbus import const
+from custom_components.ef_powerocean_tcpmodbus.models import (
     BATTERY_FULL_SOC,
     ControlFeature,
     ControlMode,
     ControlStatus,
     deviation_state,
 )
-from ef_powerocean_tcpmodbus.telemetry import TelemetryData, calculate_derived_values
+from custom_components.ef_powerocean_tcpmodbus.telemetry import (
+    TelemetryData,
+    calculate_derived_values,
+)
 
 
 def derived_keys() -> set[str]:

@@ -5,8 +5,9 @@ from __future__ import annotations
 import unittest
 
 import pytest
-from ef_powerocean_tcpmodbus.models import RegisterType
-from ef_powerocean_tcpmodbus.telemetry import (
+
+from custom_components.ef_powerocean_tcpmodbus.models import RegisterType
+from custom_components.ef_powerocean_tcpmodbus.telemetry import (
     TelemetryData,
     calculate_derived_values,
     decode_firmware_version,

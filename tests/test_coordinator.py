@@ -8,10 +8,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from ef_powerocean_tcpmodbus import const, models
-from ef_powerocean_tcpmodbus import coordinator as coordinator_module
-from ef_powerocean_tcpmodbus.control import ControlManager
-from ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.ef_powerocean_tcpmodbus import const, models
+from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
+from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
+from custom_components.ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
 
 
 @pytest.fixture
@@ -89,22 +92,20 @@ def run_update(
     ("entry_data", "expected"),
     [({}, False), ({const.CONF_MODBUS_CONTROL: True}, True)],
 )
-def test_modbus_control_enablement_comes_from_config_entry(
-    monkeypatch: pytest.MonkeyPatch, entry_data: dict, expected: bool
+async def test_modbus_control_enablement_comes_from_config_entry(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    entry_data: dict,
+    expected: bool,
 ) -> None:
-    monkeypatch.setattr(
-        coordinator_module.DataUpdateCoordinator,
-        "__init__",
-        lambda self, *args, **kwargs: setattr(self, "data", None),
-    )
     monkeypatch.setattr(
         coordinator_module,
         "ModbusClient",
         lambda *args, **kwargs: Mock(connected=False),
     )
-    config_entry = SimpleNamespace(data=entry_data, entry_id="test")
+    config_entry = MockConfigEntry(domain=const.DOMAIN, data=entry_data)
 
-    instance = coordinator_module.EcoflowCoordinator(Mock(), config_entry)
+    instance = coordinator_module.EcoflowCoordinator(hass, config_entry)
 
     assert instance.control.enabled is expected
 

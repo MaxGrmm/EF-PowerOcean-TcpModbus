@@ -14,8 +14,9 @@ from typing import Final
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from ef_powerocean_tcpmodbus import const, models
-from ef_powerocean_tcpmodbus import control as control_module
+
+from custom_components.ef_powerocean_tcpmodbus import const, models
+from custom_components.ef_powerocean_tcpmodbus import control as control_module
 
 POLL_S: Final = 5.0
 START: Final = datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc)

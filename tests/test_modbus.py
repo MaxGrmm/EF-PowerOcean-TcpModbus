@@ -7,8 +7,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from ef_powerocean_tcpmodbus import const
-from ef_powerocean_tcpmodbus import modbus as modbus_module
+
+from custom_components.ef_powerocean_tcpmodbus import const
+from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
 
 
 @pytest.fixture

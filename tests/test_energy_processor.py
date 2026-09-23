@@ -5,9 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from ef_powerocean_tcpmodbus import const
-from ef_powerocean_tcpmodbus import energy_processor as energy_processor_module
-from ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
+
+from custom_components.ef_powerocean_tcpmodbus import const
+from custom_components.ef_powerocean_tcpmodbus import (
+    energy_processor as energy_processor_module,
+)
+from custom_components.ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
 
 LIMITS = {
     const.CONF_MAX_GRID_POWER: 15_000,
