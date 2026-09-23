@@ -25,7 +25,7 @@ jobs:
           token: ${{ secrets.PRE_COMMIT_TOKEN || github.token }}
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Install test dependencies
         run: python -m pip install -r requirements-development.txt
       - name: Apply pre-commit fixes
@@ -41,15 +41,26 @@ jobs:
         run: pre-commit run --all-files --show-diff-on-failure
 
   unit-tests:
-    name: Unit tests
+    name: Unit tests (Home Assistant ${{ matrix.ha }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ha: tested
+            python: "3.14"
+            requirement: "-r requirements-test.txt"
+          # The oldest release hacs.json allows; below this, our tests fail
+          - ha: "2025.12.0"
+            python: "3.13"
+            requirement: "pytest-homeassistant-custom-component==0.13.298 'pymodbus>=3.9,<4' 'pycares<5'"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python }}
       - name: Install test dependencies
-        run: python -m pip install -r requirements-development.txt
+        run: python -m pip install ${{ matrix.requirement }}
       - name: Run unit tests
         run: python -m pytest
 

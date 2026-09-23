@@ -1,3 +1,2 @@
+-r requirements-test.txt
 pre-commit==4.3.0
-pytest==8.4.2
-pymodbus>=3.9,<4

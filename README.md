@@ -44,6 +44,12 @@ Running an untested model? [scripts/register_scan.py](scripts/register_scan.py) 
 
 ---
 
+## Supported Home Assistant Versions
+
+Home Assistant **2025.12.0** is the earliest supported version. HACS blocks installing it on older releases, and CI tests every change against both 2025.12.0 and a recent release.
+
+---
+
 ## Prerequisites
 
 The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled by default!

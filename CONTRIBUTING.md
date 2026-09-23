@@ -13,19 +13,19 @@ Thank you for helping improve this Home Assistant custom integration. Bug report
 
 If you do not have write access, fork the repository on GitHub and clone you fork locally.
 
-The project and CI use Python 3.13. You may install Python using any method you prefer. [`uv`](https://docs.astral.sh/uv/getting-started/installation/) is recommended for creating the development environment and running project commands:
+The project and CI use Python 3.14, which Home Assistant requires. You may install Python using any method you prefer. [`uv`](https://docs.astral.sh/uv/getting-started/installation/) is recommended for creating the development environment and running project commands:
 
 ```shell
 git clone https://github.com/YOUR-USERNAME/EF-PowerOcean-TcpModbus.git
 cd EF-PowerOcean-TcpModbus
-uv venv --python 3.13
+uv venv --python 3.14
 uv pip install -r requirements-development.txt
 uv run pre-commit install
 ```
 
 Create a branch from the latest `main` and keep it focused on one fix or feature.
 
-The unit tests provide lightweight stubs for Home Assistant and pymodbus, so a full Home Assistant development checkout is not required. For manual end-to-end testing, link or copy `custom_components/ef_powerocean_tcpmodbus` into the `custom_components` directory in Home Assistant.
+The tests run against a real Home Assistant installed by [pytest-homeassistant-custom-component](https://github.com/MatthewFlamm/pytest-homeassistant-custom-component), which provides the `hass` fixture and `MockConfigEntry`. CI runs them against the version pinned in [requirements-test.txt](requirements-test.txt) and against the oldest Home Assistant release allowed by [hacs.json](hacs.json). When raising that minimum, update both `hacs.json` and the matching `pytest-homeassistant-custom-component` pin in the workflow. For manual end-to-end testing, link or copy `custom_components/ef_powerocean_tcpmodbus` into the `custom_components` directory in Home Assistant.
 
 ## Run the Checks
 

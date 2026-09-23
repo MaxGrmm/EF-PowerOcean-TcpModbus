@@ -1,0 +1,2 @@
+pytest-homeassistant-custom-component==0.13.366
+pymodbus>=3.9,<4

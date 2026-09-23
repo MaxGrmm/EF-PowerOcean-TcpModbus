@@ -8,10 +8,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from ef_powerocean_tcpmodbus import const, models
-from ef_powerocean_tcpmodbus import control as control_module
-from ef_powerocean_tcpmodbus import heartbeat as heartbeat_module
-from ef_powerocean_tcpmodbus.modbus import ModbusRejected
+
+from custom_components.ef_powerocean_tcpmodbus import const, models
+from custom_components.ef_powerocean_tcpmodbus import control as control_module
+from custom_components.ef_powerocean_tcpmodbus import heartbeat as heartbeat_module
+from custom_components.ef_powerocean_tcpmodbus.modbus import ModbusRejected
 
 HEARTBEAT_START = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
 
