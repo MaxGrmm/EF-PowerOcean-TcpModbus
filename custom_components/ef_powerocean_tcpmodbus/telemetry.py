@@ -10,6 +10,13 @@ from dataclasses import dataclass
 from .models import REGISTER_SIZES, GridMode, OperatingMode, RegisterType
 
 
+def _order_words(registers: list[int], high_word_first: bool) -> tuple[int, int]:
+    """Return the words as (low, high), whichever order the device sends them in."""
+    if high_word_first:
+        return registers[1], registers[0]
+    return registers[0], registers[1]
+
+
 def decode_serial_number(registers: list[int] | None) -> str | None:
     """Decode a serial number from Modbus registers."""
     if not registers:
@@ -25,12 +32,15 @@ def decode_serial_number(registers: list[int] | None) -> str | None:
     return serial_number or None
 
 
-def decode_firmware_version(registers: list[int] | None) -> str | None:
-    """Decode the UINT32 firmware version, low word first, as a dotted string."""
+def decode_firmware_version(
+    registers: list[int] | None, high_word_first: bool = False
+) -> str | None:
+    """Decode the UINT32 firmware version as a dotted string."""
     if not registers or len(registers) < 2:
         return None
 
-    firmware = (registers[1] << 16) | registers[0]
+    low, high = _order_words(registers, high_word_first)
+    firmware = (high << 16) | low
     if not firmware:
         return None
 
@@ -137,15 +147,17 @@ def _calculate_house_energy(
     )
 
 
-def decode_register(registers: list[int], data_type: RegisterType) -> float | None:
-    """Decode a register's words, which are stored low word first."""
+def decode_register(
+    registers: list[int], data_type: RegisterType, high_word_first: bool = False
+) -> float | None:
+    """Decode a register's words, which are stored low word first by default."""
     if len(registers) < REGISTER_SIZES[data_type]:
         return None
     if data_type is RegisterType.UINT16:
         return round(float(registers[0]), 2)
 
     try:
-        raw = struct.pack("<HH", registers[0], registers[1])
+        raw = struct.pack("<HH", *_order_words(registers, high_word_first))
     except (struct.error, TypeError):
         return None
 

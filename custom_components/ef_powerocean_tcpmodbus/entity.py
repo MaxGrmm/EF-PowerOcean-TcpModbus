@@ -44,7 +44,7 @@ class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
             "identifiers": {(DOMAIN, self._entry_id)},
             "name": "EcoFlow PowerOcean",
             "manufacturer": "EcoFlow",
-            "model": self.coordinator.inverter_model.display_name,
+            "model": self.coordinator.inverter_model.traits.display_name,
             "serial_number": self.coordinator.serial_number,
             "entry_type": DeviceEntryType.SERVICE,
         }

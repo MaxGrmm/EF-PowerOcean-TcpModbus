@@ -95,7 +95,8 @@
         "powerocean_three_phase": "PowerOcean 3-phasig",
         "powerocean_plus": "PowerOcean Plus",
         "powerocean_dc_fit": "PowerOcean DC Fit",
-        "ocean_2": "Ocean 2"
+        "ocean_2": "Ocean 2 3-phasig",
+        "ocean_2_single_phase": "Ocean 2 1-phasig"
       }
     }
   },

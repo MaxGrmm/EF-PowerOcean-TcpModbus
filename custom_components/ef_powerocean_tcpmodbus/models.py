@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from enum import StrEnum
-from typing import Final
+from enum import IntEnum, StrEnum
+from typing import Final, NamedTuple
 
 from homeassistant.const import EntityCategory, UnitOfEnergy
 
@@ -27,40 +27,66 @@ BATTERY_FULL_SOC: Final = 99.0
 BATTERY_EMPTY_MARGIN_SOC: Final = 1.0
 
 
+class ProductCategory(IntEnum):
+    """The phase count the device reports."""
+
+    THREE_PHASE = 1
+    SINGLE_PHASE = 2
+
+
+class ProductId(NamedTuple):
+    """What a model answers in the product registers.
+
+    A category of None matches whatever the device reports, which is how the
+    models that need no tiebreak are listed.
+    """
+
+    number: int
+    category: ProductCategory | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModelTraits:
+    """What sets one model apart from the rest of the family.
+
+    The defaults describe every PowerOcean; the three-phase Ocean 2 is so far the
+    only model that speaks Modbus differently.
+    """
+
+    display_name: str
+    # Filters out phantom string power when the PV input is not producing yet.
+    startup_voltage: int
+    product_ids: tuple[ProductId, ...] = ()
+    # Whether the device publishes 32-bit values high word first. Reading them the
+    # wrong way round leaves the low word empty, which turns a 10 kW rating into
+    # 655360000 and voltages into denormals that round to zero.
+    high_word_first: bool = False
+    # How far apart two registers may be and still share one read.
+    max_register_gap: int = MAX_REGISTER_GAP
+
+    def identifies(
+        self, product_number: int | None, product_category: int | None
+    ) -> bool:
+        return any(
+            product.number == product_number
+            and product.category in (None, product_category)
+            for product in self.product_ids
+        )
+
+
 class InverterModel(StrEnum):
     POWEROCEAN_SINGLE_PHASE = "powerocean_single_phase"
     POWEROCEAN_THREE_PHASE = "powerocean_three_phase"
     POWEROCEAN_PLUS = "powerocean_plus"
     POWEROCEAN_DC_FIT = "powerocean_dc_fit"
-    OCEAN_2 = "ocean_2"
+    # The three-phase Ocean 2 shipped as plain "ocean_2", which config entries
+    # already store, so its value stays as it is.
+    OCEAN_2_THREE_PHASE = "ocean_2"
+    OCEAN_2_SINGLE_PHASE = "ocean_2_single_phase"
 
     @property
-    def startup_voltage(self) -> int:
-        return {
-            # The startup voltage is used to filter out phantom string power when the PV input is not actually producing power.
-            # The values are based on the datasheets of each model. However, the single phase does not have a dedicated startup voltage specification
-            # so this value is deducted from the MPPT operating range.
-            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/content/2024-03-27-1485da5d-eae4-4a38-830a-4e340517d968.pdf
-            self.POWEROCEAN_SINGLE_PHASE: 90,
-            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1772090325968/EcoFlow%20PowerOcean%20(Three-phase)_Datasheet_EN.pdf
-            self.POWEROCEAN_THREE_PHASE: 160,
-            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1754035729875/PowerOcean%20Plus%20(three-phase)_Brochure_20241223_EN.pdf
-            self.POWEROCEAN_PLUS: 160,
-            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1735192805714/EcoFlow%20PowerOcean%20DC%20Fit_Datasheet_EN_20241225.pdf
-            self.POWEROCEAN_DC_FIT: 90,
-            # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1779447439219/OCEAN%202%20Three-Phase_Datasheet_EN_260522.pdf
-            self.OCEAN_2: 120,
-        }[self]
-
-    @property
-    def display_name(self) -> str:
-        return {
-            self.POWEROCEAN_SINGLE_PHASE: "PowerOcean Single Phase",
-            self.POWEROCEAN_THREE_PHASE: "PowerOcean Three Phase",
-            self.POWEROCEAN_PLUS: "PowerOcean Plus",
-            self.POWEROCEAN_DC_FIT: "PowerOcean DC Fit",
-            self.OCEAN_2: "Ocean 2",
-        }[self]
+    def traits(self) -> ModelTraits:
+        return MODEL_TRAITS[self]
 
     @classmethod
     def from_product_info(
@@ -68,20 +94,74 @@ class InverterModel(StrEnum):
     ) -> InverterModel | None:
         """Map the device's product registers to a model, or None if unknown.
 
-        We are not sure of the product number for the remaining models. Feel free
-        to contribute this if you own such a model.
+        The first match wins, so a model that needs the category to be told apart
+        is listed before the one that takes the product number on its own.
         """
-        if product_number == 1:
-            return (
-                cls.POWEROCEAN_SINGLE_PHASE
-                if product_category == 2
-                else cls.POWEROCEAN_THREE_PHASE
-            )
-        if product_number == 2:
-            return cls.POWEROCEAN_SINGLE_PHASE
-        if product_number == 3:
-            return cls.POWEROCEAN_PLUS
-        return None
+        return next(
+            (
+                model
+                for model, traits in MODEL_TRAITS.items()
+                if traits.identifies(product_number, product_category)
+            ),
+            None,
+        )
+
+
+# Startup voltages come from the datasheet linked above each model. The single
+# phase has no such specification, so its value is deduced from the MPPT range.
+# The DC Fit has no product id because nobody has reported one yet, so it is only
+# picked by hand.
+MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/content/2024-03-27-1485da5d-eae4-4a38-830a-4e340517d968.pdf
+    InverterModel.POWEROCEAN_SINGLE_PHASE: ModelTraits(
+        "PowerOcean Single Phase",
+        startup_voltage=90,
+        product_ids=(
+            ProductId(1, ProductCategory.SINGLE_PHASE),
+            ProductId(2),
+        ),
+    ),
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1772090325968/EcoFlow%20PowerOcean%20(Three-phase)_Datasheet_EN.pdf
+    InverterModel.POWEROCEAN_THREE_PHASE: ModelTraits(
+        "PowerOcean Three Phase",
+        startup_voltage=160,
+        product_ids=(ProductId(1, ProductCategory.THREE_PHASE),),
+    ),
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1754035729875/PowerOcean%20Plus%20(three-phase)_Brochure_20241223_EN.pdf
+    InverterModel.POWEROCEAN_PLUS: ModelTraits(
+        "PowerOcean Plus",
+        startup_voltage=160,
+        product_ids=(ProductId(3),),
+    ),
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1735192805714/EcoFlow%20PowerOcean%20DC%20Fit_Datasheet_EN_20241225.pdf
+    InverterModel.POWEROCEAN_DC_FIT: ModelTraits(
+        "PowerOcean DC Fit",
+        startup_voltage=90,
+    ),
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1779447439219/OCEAN%202%20Three-Phase_Datasheet_EN_260522.pdf
+    InverterModel.OCEAN_2_THREE_PHASE: ModelTraits(
+        "Ocean 2 Three Phase",
+        startup_voltage=120,
+        product_ids=(ProductId(4, ProductCategory.THREE_PHASE),),
+        high_word_first=True,
+        # It rejects the whole request when it reaches over an address it does not
+        # implement, so only neighbouring registers can share a read.
+        max_register_gap=0,
+    ),
+    # Nobody has scanned one yet, so this entry follows the three-phase Ocean 2:
+    # same product number, same Modbus dialect, phase told apart by the category.
+    # A single-phase Ocean 2 on older firmware has been seen reporting number 2
+    # instead, which is the PowerOcean single phase above and reads like it.
+    InverterModel.OCEAN_2_SINGLE_PHASE: ModelTraits(
+        "Ocean 2 Single Phase",
+        # No startup voltage is published; the PowerOcean single phase figure
+        # stands in until someone with the device reports a better one.
+        startup_voltage=90,
+        product_ids=(ProductId(4, ProductCategory.SINGLE_PHASE),),
+        high_word_first=True,
+        max_register_gap=0,
+    ),
+}
 
 
 class CoordinatorStatus(StrEnum):
@@ -340,7 +420,10 @@ class RegisterBlock:
 
 
 def plan_blocks(
-    registers: Iterable[RegisterDef], *, avoid: Collection[int] = ()
+    registers: Iterable[RegisterDef],
+    *,
+    avoid: Collection[int] = (),
+    max_gap: int = MAX_REGISTER_GAP,
 ) -> tuple[RegisterBlock, ...]:
     """Group registers into the fewest Modbus reads.
 
@@ -357,7 +440,7 @@ def plan_blocks(
             gap = register.address - reach
             span = register.end - current[0].address
             crosses = any(reach <= address < register.address for address in avoid)
-            if gap > MAX_REGISTER_GAP or span > MAX_REGISTERS_PER_READ or crosses:
+            if gap > max_gap or span > MAX_REGISTERS_PER_READ or crosses:
                 blocks.append(RegisterBlock(tuple(current)))
                 current = []
         current.append(register)
@@ -375,7 +458,9 @@ def plan_blocks_for_model(
 ) -> tuple[RegisterBlock, ...]:
     """Resolve model-specific addresses and group them into Modbus reads."""
     return plan_blocks(
-        (register.for_model(inverter_model) for register in registers), avoid=avoid
+        (register.for_model(inverter_model) for register in registers),
+        avoid=avoid,
+        max_gap=inverter_model.traits.max_register_gap,
     )
 
 
