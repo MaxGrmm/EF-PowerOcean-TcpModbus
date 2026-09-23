@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.5.1] - 2026-09-21
+
+### Added
+
+- Control Status now reports when a full battery does not need to be held.
+
+### Fixed
+
+- House Consumption Total retains its full precision with 2 decimals, instead of being rounded to whole kWh.
+- Modbus control heartbeat now runs independently of polling and retries temporary busy responses, preventing avoidable handover back to the EcoFlow app.
+- Hold Battery no longer curtails solar production when the battery is full, and selecting Automatic now clears the previous power setpoint.
+- Charge Limit and Battery Reserve guards now remain stable in Automatic mode, including on systems where solar power must be calculated.
+- Lots of improvement to the robustness of the modbus controls.
+
 ## [2.5.0] - 2026-09-16
 
 ### Added
