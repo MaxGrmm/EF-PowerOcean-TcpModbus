@@ -650,7 +650,6 @@ def test_gets_and_decodes_raw_data(
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     coordinator._modbus_client.connected = True
     coordinator._modbus_client.async_read = AsyncMock(return_value=[2, 42])
-    coordinator.limits[const.CONF_BATTERY_COUNT] = 2
 
     result = asyncio.run(coordinator.async_get_raw_data())
 
@@ -678,7 +677,6 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     coordinator._modbus_client.connected = True
     coordinator._modbus_client.async_read = AsyncMock(return_value=[0, 0, 0])
-    coordinator.limits[const.CONF_BATTERY_COUNT] = 2
     coordinator.serial_number = "R123456789"
 
     for _ in range(const.MODBUS_DISABLED_READ_THRESHOLD - 1):
@@ -686,7 +684,7 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
         assert coordinator.is_modbus_disabled is False
 
     assert asyncio.run(coordinator.async_get_raw_data()) == {
-        "battery_count": 2,
+        "battery_count": 0.0,
         "inverter_rated_power": 0.0,
         "limit_inv_max": 0.0,
     }

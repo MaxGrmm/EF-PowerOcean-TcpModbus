@@ -294,16 +294,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             else:
                 self._consecutive_modbus_disabled_reads = 0
 
-            configured_battery_count = self.limits[CONF_BATTERY_COUNT]
-            if data["battery_count"] != configured_battery_count:
-                _LOGGER.debug(
-                    "Inverter reported battery count %s, but %s is configured; "
-                    "using the configured count for this update",
-                    data["battery_count"],
-                    configured_battery_count,
-                )
-                data["battery_count"] = configured_battery_count
-
             return data
         except ModbusException as err:
             _LOGGER.debug(f"{err.string}. Connection closing...")

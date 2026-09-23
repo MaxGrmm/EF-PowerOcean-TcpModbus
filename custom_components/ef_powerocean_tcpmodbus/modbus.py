@@ -43,12 +43,19 @@ class ModbusRejected(HomeAssistantError):
 class ModbusClient:
     """The modbus client talking to the inverter."""
 
-    def __init__(self, host: str, port: int, *, slave_id: int = DEFAULT_SLAVE) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        *,
+        slave_id: int = DEFAULT_SLAVE,
+        timeout: float = 20,
+    ) -> None:
         self.host = host
         self.port = port
         self.slave_id = slave_id
         self._pymodbus = AsyncModbusTcpClient(
-            host=host, port=port, timeout=20, reconnect_delay=0, retries=0
+            host=host, port=port, timeout=timeout, reconnect_delay=0, retries=0
         )
         self._lock = asyncio.Lock()
 
