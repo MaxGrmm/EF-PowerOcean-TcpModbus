@@ -250,15 +250,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         ):
             self.firmware_version = firmware
 
-        if self.detected_model and self.detected_model != self.inverter_model:
-            _LOGGER.warning(
-                "Inverter reports %s but %s is configured. Update the integration "
-                "options if this is wrong; the model affects how registers are "
-                "read and the PV startup voltage.",
-                self.detected_model.traits.display_name,
-                self.inverter_model.traits.display_name,
-            )
-
     async def async_reconnect(self) -> bool:
         """Reconnect, and assume the device stopped following us while we were away."""
         if not await self._modbus_client.async_reconnect():
@@ -293,16 +284,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._consecutive_modbus_disabled_reads += 1
             else:
                 self._consecutive_modbus_disabled_reads = 0
-
-            configured_battery_count = self.limits[CONF_BATTERY_COUNT]
-            if data["battery_count"] != configured_battery_count:
-                _LOGGER.debug(
-                    "Inverter reported battery count %s, but %s is configured; "
-                    "using the configured count for this update",
-                    data["battery_count"],
-                    configured_battery_count,
-                )
-                data["battery_count"] = configured_battery_count
 
             return data
         except ModbusException as err:
