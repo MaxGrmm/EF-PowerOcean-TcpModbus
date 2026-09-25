@@ -361,11 +361,11 @@ def test_the_control_word_refuses_off_grid_and_shutdown_bits(
             "async_set_battery_reserve_soc",
             20,
             20.0,
-            2000.0,
+            650.0,
             500.0,
             Status.RESERVE_REACHED,
             Feature.CHARGE_BATTERY,
-            1500.0,
+            150.0,
         ),
         (
             "async_set_charge_limit_soc",
@@ -381,11 +381,23 @@ def test_the_control_word_refuses_off_grid_and_shutdown_bits(
             "async_set_charge_limit_soc",
             80,
             80.0,
-            100.0,
+            750.0,
             900.0,
             Status.CHARGE_LIMIT_REACHED,
             Feature.DISCHARGE_BATTERY,
-            800.0,
+            150.0,
+        ),
+        # A clear draw under a charge limit is one self-consumption can only meet by
+        # discharging, so the inverter keeps running it.
+        (
+            "async_set_charge_limit_soc",
+            80,
+            80.0,
+            100.0,
+            900.0,
+            Status.CHARGE_LIMIT_REACHED,
+            Feature.AUTOMATIC,
+            0.0,
         ),
     ),
 )
@@ -401,10 +413,10 @@ def test_a_guard_runs_self_consumption_minus_the_direction_it_protects(
     feature,
     power: float,
 ) -> None:
-    """A latched guard keeps the inverter for as long as it is latched, and commands
-    the balance the inverter would have struck anyway, clamped to the allowed side.
-    Handing it back whenever the guard does not bind is what made the status chatter,
-    because the inverter resumed the forbidden direction within a poll."""
+    """A latched guard commands the balance the inverter would have struck anyway,
+    clamped to the allowed side. Handing it back whenever the guard does not bind is
+    what made the status chatter, because the inverter resumed the forbidden direction
+    within a poll; only a balance clearly pointing the allowed way is left to it."""
     allow_writes(control, monkeypatch)
     asyncio.run(getattr(control, setter)(limit))
 
@@ -567,6 +579,47 @@ def test_a_held_charge_guard_covers_the_house_without_changing_method(
     assert commands(write) == [
         (const.REGISTERS_BY_KEY["battery_power_setpoint"].address, [0xFFFF, 0xFED4]),
     ]
+
+
+def test_a_guard_the_inverter_does_not_follow_reports_the_miss(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #107: the guard commanded the house's whole draw on every poll while the
+    battery gave barely half of it, and all the status said was the guard's name.
+    Each retune also reset the record of the miss, so it could never have latched."""
+    write = allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_charge_limit_soc(60))
+    asyncio.run(
+        control.async_apply(
+            {
+                "battery_soc": 67.0,
+                "solar_power": 2000.0,
+                "house_power": 400.0,
+                "grid_power": -1600.0,
+                "battery_power": 0.0,
+            }
+        )
+    )
+    write.reset_mock()
+
+    for poll, house in enumerate((3000.0, 3600.0, 4200.0, 4800.0), start=1):
+        advance(control, monkeypatch, poll * const.DEFAULT_SCAN_INTERVAL_S)
+        asyncio.run(
+            control.async_apply(
+                {
+                    "battery_soc": 67.0,
+                    "solar_power": 1400.0,
+                    "house_power": house,
+                    "grid_power": house - 1400.0 - 1200.0,
+                    "battery_power": -1200.0,
+                }
+            )
+        )
+
+    # A retune on every poll, and the miss survived each of them.
+    assert len(commands(write)) == 4
+    assert control.status is Status.RAMPING
+    assert control.guard is Status.CHARGE_LIMIT_REACHED
 
 
 def test_a_held_guard_keeps_holding_when_the_frame_loses_the_battery_and_grid(

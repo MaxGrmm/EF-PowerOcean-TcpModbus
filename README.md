@@ -135,6 +135,15 @@ battery cover the house, and a reserve still lets it recharge from surplus solar
 does not hand the inverter back until the state of charge leaves the guard's band,
 because the inverter resumes the forbidden direction within a poll of getting it back.
 
+The one exception is a balance that can only go the allowed way: a house drawing
+clearly more than the solar under a Charge Limit, or a clear surplus above a Battery
+Reserve. Once that has lasted a minute, the inverter runs self-consumption itself
+again, because it follows the meter directly while the integration is always a poll
+behind. The integration takes over again as soon as the balance turns, and for the rest
+of the guard if the inverter is ever seen moving the battery the forbidden way.
+Small corrections to a tracked setpoint are sent at most every 30 seconds, since every
+write briefly sets the battery back on some models.
+
 While the battery is held near zero it will wander a few hundred watts either way as
 clouds come and go. This is due to the inverter itself balancing and unfortunately
 EcoFlow doesn't expose the robust power limit that the app's Schedule feature uses.
@@ -144,14 +153,16 @@ Read more about that in
 Both guards default to off. Separately, **Modbus Control** defaults to off, so an
 untouched install never takes control away from the app.
 **Control Status** reports what the selected mode is achieving, including when a guard
-is holding it or when the battery has no headroom left to reach the target.
+is holding it or when the battery has no headroom left to reach the target. While a
+guard is in charge, a target the inverter is not meeting is reported as such and the
+guard is named in the status's `guard` attribute.
 
 | Control Status             | Meaning                                                        |
 | -------------------------- | -------------------------------------------------------------- |
 | No Modbus control          | Modbus Control is disabled or control authority was lost       |
 | Automatic                  | The inverter is running its normal self-consumption mode       |
 | Active                     | The selected target is being maintained                        |
-| Ramping                    | The inverter is moving toward the selected target              |
+| Ramping                    | The inverter has not reached the target for several polls      |
 | Charge limit reached       | The Charge Limit guard is preventing further charging          |
 | Reserve reached            | The Battery Reserve guard is preventing further discharge      |
 | Unreachable: battery full  | The target requires the battery to absorb power, but it cannot |

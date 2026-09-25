@@ -672,6 +672,12 @@ GUARD_POWER_DEADBAND_W: Final = 200.0
 # Resolution of a guard's tracked setpoint, so an ordinary load does not rewrite it
 # every poll. Always rounded towards zero, which leaves the remainder to the grid.
 GUARD_TRACKING_STEP_W: Final = 100.0
+# Wait this long between guard writes, to prevent flip flopping.
+GUARD_RETUNE_S: Final = 30.0
+# A guard leaves self-consumption to the inverter once the balance has pointed the
+# allowed way by this much for this long, and takes it back below the deadband.
+GUARD_HANDBACK_W: Final = 500.0
+GUARD_HANDBACK_S: Final = 60.0
 MIN_CONTROL_DWELL_S: Final = 60.0
 CONTROL_STATUS_DAMPING_POLLS: Final = 3
 # 0 means "no limit" to the inverter and not "hold at zero", so we therefore set the lowest power to hold.

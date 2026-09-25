@@ -27,7 +27,10 @@ from .const import (
     CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
+    GUARD_HANDBACK_S,
+    GUARD_HANDBACK_W,
     GUARD_POWER_DEADBAND_W,
+    GUARD_RETUNE_S,
     GUARD_SOC_HYSTERESIS,
     GUARD_TRACKING_STEP_W,
     HEARTBEAT_REGISTER,
@@ -38,6 +41,7 @@ from .heartbeat import Heartbeat
 from .modbus import ModbusClient
 from .models import (
     BATTERY_FULL_SOC,
+    POWER_TOLERANCE_W,
     ControlFeature,
     ControlMode,
     ControlStatus,
@@ -91,6 +95,10 @@ class ControlManager:
         self._reserve_guard = False
         # Which guard, if any, is forcing the current command.
         self._blocking_guard: ControlStatus | None = None
+        # Since when the balance has pointed clearly the way a latched guard allows.
+        self._handback_since: datetime | None = None
+        # A hand-back caught moving the battery the forbidden way is not repeated.
+        self._handback_vetoed = False
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
@@ -159,6 +167,11 @@ class ControlManager:
         """Return whether battery saver mode is being commanded."""
         return self._battery_saver
 
+    @property
+    def guard(self) -> ControlStatus | None:
+        """Return the guard shaping the command, even while the status shows a miss."""
+        return self._blocking_guard if self.in_control else None
+
     def feature_power(self, feature: ControlFeature) -> float:
         """Return the configured power, or zero for a mode that has none."""
         return self._feature_power.get(feature, 0.0)
@@ -172,6 +185,8 @@ class ControlManager:
         if not self.in_control:
             return ControlStatus.NO_MODBUS_CONTROL
         if self._blocking_guard is not None:
+            if self._deviation is not ControlStatus.ACTIVE:
+                return self._deviation
             return self._blocking_guard
         # Only a hold the battery cannot need leaves a selected mode uncommanded.
         if (
@@ -258,6 +273,7 @@ class ControlManager:
             self._require_modbus_control()
 
         self._feature = feature
+        self._handback_since = None
         await self.async_apply(force=True)
 
     async def async_set_feature_power(
@@ -384,7 +400,11 @@ class ControlManager:
         """
         natural = self._natural_battery_power(data)
         if natural is None:
+            self._handback_since = None
             return self._hold(data, blocked)
+
+        if self._leave_to_inverter(data, natural):
+            return ControlFeature.AUTOMATIC, 0.0, blocked
 
         if self._charge_guard:
             natural = min(natural, 0.0)
@@ -402,16 +422,62 @@ class ControlManager:
             feature = ControlFeature.DISCHARGE_BATTERY
             watts = float(math.ceil(-natural))
 
-        # Rewrite only once the load has moved a step, and never while the standing
-        # setpoint has drifted to the importing side.
+        # Rewrite only once the load has moved a step. A drift to the importing side
+        # is retuned too, but one within tolerance waits out the previous write.
         held = self._commanded_power
         slack = watts - held if natural > 0 else held - watts
-        if self._commanded_feature is feature and 0.0 <= slack < GUARD_TRACKING_STEP_W:
+        if self._commanded_feature is feature and (
+            0.0 <= slack < GUARD_TRACKING_STEP_W
+            or (abs(slack) < POWER_TOLERANCE_W and self._written_within(GUARD_RETUNE_S))
+        ):
             watts = held
 
         if watts <= 0.0:
             return self._hold(data, blocked)
         return feature, self._clamp_power(watts, feature), blocked
+
+    def _leave_to_inverter(self, data: dict[str, Any], natural: float) -> bool:
+        """Return whether a latched guard can leave self-consumption to the inverter.
+
+        A clear draw under a charge limit, or a clear surplus above a reserve, is one
+        the inverter's own loop can only meet in the allowed direction, and it meets it
+        on the meter rather than a poll behind. Leaving waits for the balance to stay
+        clear; taking over again is immediate.
+        """
+        if self._charge_guard is self._reserve_guard:
+            # Both latched pin the battery, which the inverter would not do.
+            self._handback_since = None
+            return False
+        allowed = -1.0 if self._charge_guard else 1.0
+        margin = natural * allowed
+        left = self._commanded_feature is ControlFeature.AUTOMATIC
+
+        battery = data.get("battery_power")
+        if (
+            left
+            and margin > 0.0
+            and battery is not None
+            and float(battery) * allowed < -GUARD_POWER_DEADBAND_W
+        ):
+            # Self-consumption never moves against the balance; an app schedule does.
+            _LOGGER.debug(
+                f"Battery at {battery} W against a balance of {natural:.0f} W while "
+                "left to the inverter; keeping control until the guard releases"
+            )
+            self._handback_vetoed = True
+        if self._handback_vetoed:
+            self._handback_since = None
+            return False
+
+        if left:
+            return margin >= GUARD_POWER_DEADBAND_W
+        if margin <= GUARD_HANDBACK_W:
+            self._handback_since = None
+            return False
+        now = dt.now()
+        if self._handback_since is None:
+            self._handback_since = now
+        return (now - self._handback_since).total_seconds() >= GUARD_HANDBACK_S
 
     def _hold(
         self, data: dict[str, Any], blocked: ControlStatus | None
@@ -467,12 +533,12 @@ class ControlManager:
             None,
         )
 
-    def _was_last_command_recent(self) -> bool:
-        """Return whether the last command is too recent to be worth replacing."""
+    def _written_within(self, seconds: float) -> bool:
+        """Return whether the last command went out less than *seconds* ago."""
         if self._last_control_write_time is None:
             return False
         age = (dt.now() - self._last_control_write_time).total_seconds()
-        return age < MIN_CONTROL_DWELL_S
+        return age < seconds
 
     def _reset_deviation(self) -> None:
         """Forget how the last command was going; a new one starts from nothing."""
@@ -534,6 +600,9 @@ class ControlManager:
             self._data = data
         data = self._data
         self._update_guards(data)
+        if not (self._charge_guard or self._reserve_guard):
+            self._handback_since = None
+            self._handback_vetoed = False
 
         # A lapsed window hands the inverter back to its app settings, so the command
         # is sent again rather than assumed to have survived.
@@ -551,7 +620,7 @@ class ControlManager:
             and not force
             and blocked is None
             and not self._control_stale
-            and self._was_last_command_recent()
+            and self._written_within(MIN_CONTROL_DWELL_S)
         ):
             if notify:
                 self._on_update()
@@ -562,10 +631,13 @@ class ControlManager:
                 await self._async_send_control(feature, power)
             # Committed only once the inverter has been told: recording a command the
             # write never delivered would look settled and never be retried.
+            retargeted = feature is not self._commanded_feature
             self._commanded_feature = feature
             self._commanded_power = power
             self._blocking_guard = blocked
-            if changed:
+            # A retune of the same mode keeps its record, or a guard tracking the
+            # house would never hold a miss long enough to report it.
+            if retargeted:
                 self._reset_deviation()
             self._update_deviation(data)
         finally:

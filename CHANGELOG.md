@@ -5,6 +5,8 @@
 ### Fixed
 
 - Three-phase Ocean 2 support. The model is now recognised from its product number, its 32-bit registers are read high word first, and its reads stop at every address it does not implement instead of being refused as a whole.
+- Grid import under a Charge Limit while the house draws more than the solar. A lasting draw is now left to the inverter's own self-consumption, and small corrections to a tracked setpoint wait 30 seconds
+- Control Status no longer shows only the guard's name while the inverter misses what the guard commands, the miss is explicit as `ramping`.
 
 ### Added
 
