@@ -387,8 +387,7 @@ def test_the_control_word_refuses_off_grid_and_shutdown_bits(
             Feature.DISCHARGE_BATTERY,
             150.0,
         ),
-        # A clear draw under a charge limit is one self-consumption can only meet by
-        # discharging, so the inverter keeps running it.
+        # A clear draw can only be met by discharging, so the inverter keeps control.
         (
             "async_set_charge_limit_soc",
             80,
@@ -584,9 +583,9 @@ def test_a_held_charge_guard_covers_the_house_without_changing_method(
 def test_a_guard_the_inverter_does_not_follow_reports_the_miss(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Issue #107: the guard commanded the house's whole draw on every poll while the
-    battery gave barely half of it, and all the status said was the guard's name.
-    Each retune also reset the record of the miss, so it could never have latched."""
+    """Issue #107: the guard asked for the house's whole draw while the battery gave
+    only about half of it, and the status only said "charge limit reached". The miss
+    must show, and changing the power every poll must not reset it."""
     write = allow_writes(control, monkeypatch)
     asyncio.run(control.async_set_charge_limit_soc(60))
     asyncio.run(
@@ -616,10 +615,10 @@ def test_a_guard_the_inverter_does_not_follow_reports_the_miss(
             )
         )
 
-    # A retune on every poll, and the miss survived each of them.
+    # One setpoint write per poll.
     assert len(commands(write)) == 4
     assert control.status is Status.RAMPING
-    assert control.guard is Status.CHARGE_LIMIT_REACHED
+    assert control.active_guard is Status.CHARGE_LIMIT_REACHED
 
 
 def test_a_held_guard_keeps_holding_when_the_frame_loses_the_battery_and_grid(

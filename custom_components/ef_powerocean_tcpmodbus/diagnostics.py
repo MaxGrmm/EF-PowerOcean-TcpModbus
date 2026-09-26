@@ -39,7 +39,7 @@ async def async_get_config_entry_diagnostics(
             "in_control": coordinator.control.in_control,
             "selected_feature": str(coordinator.control.selected_feature),
             "control_status": str(coordinator.control.status),
-            "control_guard": coordinator.control.guard,
+            "control_guard": coordinator.control.active_guard,
             "feature_power": {
                 str(feature): coordinator.control.feature_power(feature)
                 for feature in CONTROL_FEATURES

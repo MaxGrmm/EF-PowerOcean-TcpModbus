@@ -48,11 +48,15 @@ class FakeInverter:
     setpoint_writes: int = 0
     connected: bool = True
     reachable: bool = True
-    # Polls the battery stays put after a setpoint write, as the Ocean 2's does.
+    # Polls the battery stays put after each new setpoint.
     setback_polls: int = 0
     setback: int = 0
-    # What an app schedule charges at while the inverter runs itself, if one is set.
-    app_charge: float | None = None
+    # New setpoints sent before the battery reached the previous one.
+    interruptions: int = 0
+    # Battery power an app rule sets while the inverter runs itself, e.g. 0 for a hold.
+    app_battery: float | None = None
+    # Most the battery power can change per poll, if limited.
+    ramp_w: float | None = None
 
     async def async_write(
         self, address: int, words: list[int], *, what: str = ""
@@ -70,6 +74,7 @@ class FakeInverter:
         elif address == SETPOINT_REGISTER:
             self.setpoint_writes += 1
             self.setpoint = value - (1 << 32) if value >> 31 else value
+            self.interruptions += self.setback > 0
             self.setback = self.setback_polls
 
     def settle(self) -> None:
@@ -80,10 +85,13 @@ class FakeInverter:
             target = self.battery
         elif commanded:
             target = float(self.setpoint)
-        elif self.app_charge is not None:
-            target = self.app_charge
+        elif self.app_battery is not None:
+            target = self.app_battery
         else:
             target = self.solar - self.house
+        if self.ramp_w is not None:
+            step = max(-self.ramp_w, min(self.ramp_w, target - self.battery))
+            target = self.battery + step
         ceiling = self.charge_max if self.soc < 100.0 else 0.0
         floor = -self.discharge_max if self.soc > 0.0 else 0.0
         self.battery = max(floor, min(ceiling, target))
@@ -214,68 +222,133 @@ def test_a_charge_limit_holds_through_a_cycling_load(
 def test_a_long_draw_is_left_to_the_inverter_until_the_sun_returns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Issue #107: a charge limit only forbids charging, which self-consumption never
-    does under a draw, and the inverter meets that draw on the meter rather than a
-    poll behind. So a draw that stays clear is handed back, and the guard takes over
-    again on the poll the balance turns."""
+    """A charge limit only forbids charging, and the inverter never charges while the
+    house uses more than the solar. So once such a draw has lasted a while, the
+    inverter is left to cover it by itself, and we take over again as soon as the sun
+    comes back."""
     sim = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
 
     held = sim.run(polls=12, solar=2000, house=400)
-    # One run, so each change arrives between polls rather than before a warm-up.
+    # One run, since a new run's first poll sees the load before the inverter reacts.
     run = sim.run(
-        polls=120,
-        solar=[1400] * 60 + [3000] * 30 + [1400] * 30,
-        # A heavy draw, a lighter one, the sun, and the heavy draw again.
-        house=[3600] * 40 + [1800] * 20 + [400] * 30 + [3600] * 30,
+        polls=180,
+        solar=[1400] * 60 + [3000] * 30 + [1400] * 30 + [3000] * 30 + [1400] * 30,
+        # A heavy draw, a lighter one, the sun, and the heavy draw and sun again.
+        house=[3600] * 40 + [1800] * 20 + ([400] * 30 + [3600] * 30) * 2,
     )
 
     assert max(held.battery) <= const.HOLD_SETPOINT_W
-    # Only the poll the second draw arrives on is behind; the warm-up saw the first.
-    assert [step for step, watts in enumerate(run.grid) if watts > 0] == [90]
-    # The sun outruns the poll once: a few Wh against a band of several percent.
+    # The grid imports only on the first poll of each later draw.
+    assert [step for step, watts in enumerate(run.grid) if watts > 0] == [90, 150]
+    # The battery charges for one poll each time the sun returns.
     charging = [
         step for step, watts in enumerate(run.battery) if watts > const.HOLD_SETPOINT_W
     ]
-    assert charging == [60]
+    assert charging == [60, 120]
     assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
-    # Taken, left for the draw and through the lighter one, taken for the sun, and
-    # left again: each switch waits for a lasting change.
-    assert sim.inverter.method_writes == 4
+    # Take control, then hand back and take back three times.
+    assert sim.inverter.method_writes == 6
 
 
-def test_a_hand_back_caught_charging_is_not_repeated(
+def test_a_cycling_load_settles_into_one_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Left to itself the inverter follows the app, and an app schedule charging from
-    the grid is exactly what a charge limit forbids. Seen once, the guard keeps the
-    inverter until it releases rather than handing it back every minute."""
-    sim = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
-    sim.inverter.app_charge = 1500.0
-
+    """An oven switching its heater on for 90 s and off for 60 s would otherwise make
+    us let go and take over on every cycle. Each time it is taken back that soon, the
+    wait doubles, so it soon stays in one mode."""
+    # High enough that the hour's draw never releases the guard.
+    sim = Simulation(monkeypatch, soc=80.0, charge_limit=60.0)
     sim.run(polls=12, solar=2000, house=400)
-    run = sim.run(polls=120, solar=1400, house=3600)
 
-    assert sum(watts > const.HOLD_SETPOINT_W for watts in run.battery) == 1
+    run = sim.run(polls=720, solar=1000, house=[3500] * 18 + [300] * 12)
+
+    assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
+    # Take control, hand back once, take back, then no more switching.
     assert sim.inverter.method_writes == 3
+    assert sum(watts > const.HOLD_SETPOINT_W for watts in run.battery) <= 1
 
 
-def test_a_guard_gives_a_slow_inverter_time_to_follow(
+def test_an_inverter_charging_on_its_own_is_taken_back(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Issue #107 again: the Ocean 2 sets its battery back after every setpoint write,
-    and a guard retuning on every wobble of the house kept it there, importing most
-    of what it asked for. A retune within tolerance now waits out the last one."""
+    """On its own the inverter follows the app, and an app schedule that charges from
+    the grid is exactly what a charge limit forbids. We take over at once each time,
+    and after the second time we stop letting go until the guard turns off."""
+    sim = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
+    sim.inverter.app_battery = 1500.0
+
+    sim.run(polls=12, solar=2000, house=400)
+    run = sim.run(polls=240, solar=1400, house=3600)
+
+    assert sum(watts > const.HOLD_SETPOINT_W for watts in run.battery) == 2
+    assert sim.inverter.method_writes == 5
+
+
+def test_an_inverter_leaving_the_house_on_the_grid_is_taken_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On its own the inverter also follows the Min SOC or a time-of-use hold set in
+    the app, which we cannot always change over Modbus. If it lets the grid cover the
+    house when the battery could, we take over and cover it ourselves."""
+    sim = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
+    sim.inverter.app_battery = 0.0
+
+    sim.run(polls=12, solar=2000, house=400)
+    run = sim.run(polls=240, solar=1400, house=3600)
+
+    imported = [step for step, watts in enumerate(run.grid) if watts > 0]
+    # About half a minute of import on each of two hand-backs.
+    assert len(imported) <= 2 * (const.GUARD_SETTLE_S / POLL_S + 1)
+    assert max(imported) < 120
+    assert sim.inverter.method_writes == 5
+
+
+def test_a_battery_at_its_limit_is_not_held_against_the_inverter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the house uses more than the battery can give, the grid covers the rest
+    whoever is in control, so the inverter is left alone. The same goes for the few
+    seconds a slower inverter needs to follow a bigger draw."""
     sim = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
     sim.run(polls=12, solar=2000, house=400)
-    sim.inverter.setback_polls = 2
+    too_much = sim.run(polls=120, solar=0, house=7000)
 
-    run = sim.run(polls=120, solar=0, house=[300, 450, 320, 470, 310, 440])
+    slow = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
+    slow.inverter.ramp_w = 400.0
+    slow.run(polls=12, solar=2000, house=400)
+    slow.run(polls=240, solar=0, house=[1000] * 60 + [3000] * 60)
 
-    imported = sum(max(watts, 0.0) for watts in run.grid) / len(run.grid)
+    assert min(too_much.battery) == -sim.inverter.discharge_max
+    # Take control in the sun, then hand back for the whole draw.
+    assert sim.inverter.method_writes == 2
+    assert slow.inverter.method_writes == 2
+
+
+def test_a_guard_retunes_as_fast_as_the_inverter_can_follow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Some inverters start over on every new setpoint, so correcting on every small
+    change of the house kept the battery from ever getting there (issue #107). Small
+    corrections now wait until the battery has reached the last setpoint, which an
+    inverter that reacts within a poll always has by the next one."""
+    noisy = [300, 450, 320, 470, 310, 440]
+
+    fast = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
+    fast.run(polls=12, solar=2000, house=400)
+    quick = fast.run(polls=120, solar=0, house=noisy)
+
+    slow = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
+    slow.run(polls=12, solar=2000, house=400)
+    slow.inverter.setback_polls = 2
+    patient = slow.run(polls=120, solar=0, house=noisy)
+
+    # The grid never imports two polls in a row.
+    late = [step for step, watts in enumerate(quick.grid) if watts > 0]
+    assert all(later - earlier > 1 for earlier, later in zip(late, late[1:]))
+
+    imported = sum(max(watts, 0.0) for watts in patient.grid) / len(patient.grid)
     assert imported < 100
-    assert sim.inverter.setpoint_writes <= 1 + len(run.grid) * POLL_S / (
-        const.GUARD_RETUNE_S
-    )
+    assert slow.inverter.interruptions == 0
 
 
 def test_a_guard_never_imports_what_the_battery_could_have_covered(
@@ -286,8 +359,7 @@ def test_a_guard_never_imports_what_the_battery_could_have_covered(
     spills the remainder into the grid instead, which costs nothing to buy."""
     for solar, house in (
         # A fractional draw, as the float registers report one, so which way the odd
-        # watt is rounded shows up in the grid rather than cancelling out. Small
-        # enough to stay tracked rather than left to the inverter.
+        # watt is rounded shows up in the grid rather than cancelling out.
         (147.0, 280.4),
         # And a draw smaller than the rewrite step, which still has to be covered
         # rather than rounded away in the grid's favour.
@@ -310,8 +382,7 @@ def test_a_guard_only_falls_behind_the_poll_an_unexpected_load_arrives(
     it takes to measure it. What must not happen is that shortfall settling in and
     being bought again on every poll after the setpoint has caught up."""
     for house, late_polls in (
-        # A 2 kW appliance: one poll behind on each of the six times it switches on,
-        # and left to the inverter once it has run for a minute.
+        # A 2 kW appliance switching on six times, each one poll late.
         ([500.0] * 20 + [2500.0] * 20, 6),
         # A step smaller than the rewrite deadband, which is caught once and then
         # covered for good, the setpoint spilling into the grid on the low half.
@@ -379,8 +450,7 @@ def test_a_charge_limit_survives_an_hour_of_broken_weather(
 
     assert max(run.battery) <= const.HOLD_SETPOINT_W
     assert run.soc[-1] <= run.soc[0]
-    # Every one of those crossings is a setpoint, and none of them a method: no draw
-    # here lasts the minute it takes to be worth handing back.
+    # No draw lasts long enough to hand back, so the method is written only once.
     assert sim.inverter.method_writes == 1
 
 

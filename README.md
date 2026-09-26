@@ -122,27 +122,32 @@ rather than a cap in both directions, and as long as the battery has room the in
 reaches it without limiting solar, with whatever is left over going to the battery or is
 exported.
 
-Two guards apply in every mode, including Automatic, and only ever restrict:
+Two guards apply in every mode, including Automatic. They can only stop the battery:
 
-- **Charge Limit** – state of charge above which the battery is not charged (100 = off)
-- **Battery Reserve** – state of charge below which it is not drained (0 = off)
+- **Charge Limit** – the battery is not charged above this state of charge (100 = off)
+- **Battery Reserve** – the battery is not discharged below this state of charge (0 = off)
 
-The inverter has no charge ceiling of its own, and its battery setpoint is a target
-rather than a cap, so while a guard is latched the integration keeps the inverter and
-runs self-consumption itself: it commands the balance the inverter would have struck
-anyway, clamped to the side the guard allows. A charge limit therefore still lets the
-battery cover the house, and a reserve still lets it recharge from surplus solar. It
-does not hand the inverter back until the state of charge leaves the guard's band,
-because the inverter resumes the forbidden direction within a poll of getting it back.
+The inverter has no setting for a charge limit, so while a guard is on the integration
+runs self-consumption itself. It tells the inverter what it would have done anyway,
+except in the direction the guard forbids. With the Charge Limit on, the battery can
+still power the house. With the Battery Reserve on, it can still charge from solar. The
+guard stays on until the state of charge has moved 5% back, because the inverter would
+start charging (or discharging) again within seconds if it got control back earlier.
 
-The one exception is a balance that can only go the allowed way: a house drawing
-clearly more than the solar under a Charge Limit, or a clear surplus above a Battery
-Reserve. Once that has lasted a minute, the inverter runs self-consumption itself
-again, because it follows the meter directly while the integration is always a poll
-behind. The integration takes over again as soon as the balance turns, and for the rest
-of the guard if the inverter is ever seen moving the battery the forbidden way.
-Small corrections to a tracked setpoint are sent at most every 30 seconds, since every
-write briefly sets the battery back on some models.
+There is one exception. If the house clearly uses more than the solar for a minute
+while the Charge Limit is on, the only thing the battery can do is discharge, which the
+limit allows. The inverter does that faster and more smoothly by itself, so the
+integration lets it. The same goes for a clear solar surplus while the Battery Reserve
+is on. The integration takes over again as soon as the power flow turns. It also takes
+over if the inverter, on its own, does something the guard would not allow, or lets the
+grid power the house while the battery could. That can happen because of a Min SOC or
+a schedule set in the EcoFlow app, which the inverter follows when it runs by itself.
+After the second time, the integration keeps control until the guard turns off.
+
+If a load keeps switching on and off, like an oven heating in bursts, the integration
+waits longer each time before letting go, so it settles instead of switching back and
+forth. Small power corrections wait until the battery has reached the last one, because
+some inverters start over on every new setting.
 
 While the battery is held near zero it will wander a few hundred watts either way as
 clouds come and go. This is due to the inverter itself balancing and unfortunately
@@ -152,17 +157,16 @@ Read more about that in
 
 Both guards default to off. Separately, **Modbus Control** defaults to off, so an
 untouched install never takes control away from the app.
-**Control Status** reports what the selected mode is achieving, including when a guard
-is holding it or when the battery has no headroom left to reach the target. While a
-guard is in charge, a target the inverter is not meeting is reported as such and the
-guard is named in the status's `guard` attribute.
+**Control Status** shows what the selected mode is achieving, including which guard is
+on and whether a full or empty battery blocks the target. If the inverter misses the
+target a guard sets, the status shows Ramping or Unreachable instead of the guard. The guard is still available as a `guard` attribute on the object, for automations to read and act on.
 
 | Control Status             | Meaning                                                        |
 | -------------------------- | -------------------------------------------------------------- |
 | No Modbus control          | Modbus Control is disabled or control authority was lost       |
 | Automatic                  | The inverter is running its normal self-consumption mode       |
 | Active                     | The selected target is being maintained                        |
-| Ramping                    | The inverter has not reached the target for several polls      |
+| Ramping                    | The inverter has not reached the target for a few polls        |
 | Charge limit reached       | The Charge Limit guard is preventing further charging          |
 | Reserve reached            | The Battery Reserve guard is preventing further discharge      |
 | Unreachable: battery full  | The target requires the battery to absorb power, but it cannot |
