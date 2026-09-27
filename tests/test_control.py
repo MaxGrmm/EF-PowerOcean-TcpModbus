@@ -361,11 +361,11 @@ def test_the_control_word_refuses_off_grid_and_shutdown_bits(
             "async_set_battery_reserve_soc",
             20,
             20.0,
-            650.0,
+            2000.0,
             500.0,
             Status.RESERVE_REACHED,
             Feature.CHARGE_BATTERY,
-            150.0,
+            1500.0,
         ),
         (
             "async_set_charge_limit_soc",
@@ -381,22 +381,11 @@ def test_the_control_word_refuses_off_grid_and_shutdown_bits(
             "async_set_charge_limit_soc",
             80,
             80.0,
-            750.0,
-            900.0,
-            Status.CHARGE_LIMIT_REACHED,
-            Feature.DISCHARGE_BATTERY,
-            150.0,
-        ),
-        # A clear draw can only be met by discharging, so the inverter keeps control.
-        (
-            "async_set_charge_limit_soc",
-            80,
-            80.0,
             100.0,
             900.0,
             Status.CHARGE_LIMIT_REACHED,
-            Feature.AUTOMATIC,
-            0.0,
+            Feature.DISCHARGE_BATTERY,
+            800.0,
         ),
     ),
 )
@@ -413,9 +402,8 @@ def test_a_guard_runs_self_consumption_minus_the_direction_it_protects(
     power: float,
 ) -> None:
     """A latched guard commands the balance the inverter would have struck anyway,
-    clamped to the allowed side. Handing it back whenever the guard does not bind is
-    what made the status chatter, because the inverter resumed the forbidden direction
-    within a poll; only a balance clearly pointing the allowed way is left to it."""
+    clamped to the allowed side, even when that balance points the allowed way: only
+    one that lasts is handed back, never the poll the guard latches on."""
     allow_writes(control, monkeypatch)
     asyncio.run(getattr(control, setter)(limit))
 
@@ -619,6 +607,23 @@ def test_a_guard_the_inverter_does_not_follow_reports_the_miss(
     assert len(commands(write)) == 4
     assert control.status is Status.RAMPING
     assert control.active_guard is Status.CHARGE_LIMIT_REACHED
+
+
+def test_a_new_power_for_a_chosen_mode_is_judged_afresh(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Polls spent missing the old setpoint say nothing about the new one."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_feature_power(Feature.CHARGE_BATTERY, 1000.0))
+    asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
+    frame = {"battery_soc": 50.0, "battery_power": 0.0}
+
+    for poll in range(1, const.CONTROL_STATUS_DAMPING_POLLS):
+        advance(control, monkeypatch, poll * const.DEFAULT_SCAN_INTERVAL_S)
+        asyncio.run(control.async_apply(frame))
+    asyncio.run(control.async_set_feature_power(Feature.CHARGE_BATTERY, 3000.0))
+
+    assert control.status is Status.ACTIVE
 
 
 def test_a_held_guard_keeps_holding_when_the_frame_loses_the_battery_and_grid(

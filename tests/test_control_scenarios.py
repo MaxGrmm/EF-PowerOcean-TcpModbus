@@ -53,8 +53,6 @@ class FakeInverter:
     setback: int = 0
     # New setpoints sent before the battery reached the previous one.
     interruptions: int = 0
-    # Battery power an app rule sets while the inverter runs itself, e.g. 0 for a hold.
-    app_battery: float | None = None
     # Most the battery power can change per poll, if limited.
     ramp_w: float | None = None
 
@@ -85,8 +83,6 @@ class FakeInverter:
             target = self.battery
         elif commanded:
             target = float(self.setpoint)
-        elif self.app_battery is not None:
-            target = self.app_battery
         else:
             target = self.solar - self.house
         if self.ramp_w is not None:
@@ -268,41 +264,6 @@ def test_a_cycling_load_settles_into_one_mode(
     assert sum(watts > const.HOLD_SETPOINT_W for watts in run.battery) <= 1
 
 
-def test_an_inverter_charging_on_its_own_is_taken_back(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """On its own the inverter follows the app, and an app schedule that charges from
-    the grid is exactly what a charge limit forbids. We take over at once each time,
-    and after the second time we stop letting go until the guard turns off."""
-    sim = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
-    sim.inverter.app_battery = 1500.0
-
-    sim.run(polls=12, solar=2000, house=400)
-    run = sim.run(polls=240, solar=1400, house=3600)
-
-    assert sum(watts > const.HOLD_SETPOINT_W for watts in run.battery) == 2
-    assert sim.inverter.method_writes == 5
-
-
-def test_an_inverter_leaving_the_house_on_the_grid_is_taken_back(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """On its own the inverter also follows the Min SOC or a time-of-use hold set in
-    the app, which we cannot always change over Modbus. If it lets the grid cover the
-    house when the battery could, we take over and cover it ourselves."""
-    sim = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
-    sim.inverter.app_battery = 0.0
-
-    sim.run(polls=12, solar=2000, house=400)
-    run = sim.run(polls=240, solar=1400, house=3600)
-
-    imported = [step for step, watts in enumerate(run.grid) if watts > 0]
-    # About half a minute of import on each of two hand-backs.
-    assert len(imported) <= 2 * (const.GUARD_SETTLE_S / POLL_S + 1)
-    assert max(imported) < 120
-    assert sim.inverter.method_writes == 5
-
-
 def test_a_battery_at_its_limit_is_not_held_against_the_inverter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -375,6 +336,20 @@ def test_a_guard_never_imports_what_the_battery_could_have_covered(
         assert sim.inverter.setpoint_writes == 1
 
 
+def test_a_guard_never_imports_across_a_hand_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A draw large enough to hand back must be covered while it is tracked, while
+    the hand-back is pending and once the inverter runs itself."""
+    sim = Simulation(monkeypatch, soc=60.0, charge_limit=1.0)
+
+    run = sim.run(polls=60, solar=147.0, house=1280.4)
+
+    assert sim.control._handback.phase is control_module.HandbackPhase.HANDED_BACK
+    assert max(run.grid) <= 0
+    assert min(run.grid) >= -const.GUARD_TRACKING_STEP_W
+
+
 def test_a_guard_only_falls_behind_the_poll_an_unexpected_load_arrives(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -416,6 +391,23 @@ def test_a_reserve_lets_the_battery_refill_once_the_sun_returns(
     # Charging takes less than the surplus, so the remainder leaves rather than
     # being topped up from the grid.
     assert max(morning.grid) <= 0
+
+
+def test_a_reserve_leaves_a_lasting_surplus_to_the_inverter_until_dusk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The mirror of a charge limit: a surplus can only charge, which the reserve
+    allows, and the house must not reach the battery once the sun is gone."""
+    sim = Simulation(monkeypatch, soc=18.0, reserve=20.0)
+
+    day = sim.run(polls=60, solar=3000, house=800)
+    assert sim.control._handback.phase is control_module.HandbackPhase.HANDED_BACK
+
+    dusk = sim.run(polls=60, solar=0, house=1000)
+
+    assert max(day.grid) <= 0
+    assert min(dusk.battery) >= 0
+    assert sim.control._handback.phase is control_module.HandbackPhase.TRACKING
 
 
 def test_an_untouched_install_never_touches_the_inverter(

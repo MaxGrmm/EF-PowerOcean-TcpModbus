@@ -109,9 +109,7 @@ class EcoFlowControlStatusSensor(EcoFlowBaseEntity, SensorEntity):
         control = self.coordinator.control
         return {
             "mode": str(control.selected_feature),
-            "guard": None
-            if control.active_guard is None
-            else str(control.active_guard),
+            "guard": str(guard) if (guard := control.active_guard) else None,
             "commanded_power": control.power,
             "control_method": str(control.method),
             "in_control": control.in_control,

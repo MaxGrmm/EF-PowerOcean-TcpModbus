@@ -5,8 +5,11 @@
 ### Fixed
 
 - Three-phase Ocean 2 support. The model is now recognised from its product number, its 32-bit registers are read high word first, and its reads stop at every address it does not implement instead of being refused as a whole.
-- The grid no longer powers the house while the Charge Limit is on and the battery could. When the house uses more than the solar for a while, the inverter now runs by itself, and the integration takes over again if the inverter lets the grid do the work. Small power corrections also wait until the battery has reached the last one.
-- Control Status now shows when the inverter is not doing what a guard asks for, instead of only saying that the guard is on. The guard is shown in a new `guard` attribute.
+- The grid no longer powers the house while the Charge Limit is on and the battery could. When the house uses more than the solar for a while, the inverter now runs by itself until the power flow turns. Small power corrections also wait until the battery has reached the last one.
+
+### Changed
+
+- **Breaking:** Control Status now shows Ramping or Unreachable when the inverter is not doing what a guard asks for, instead of always showing Charge limit reached or Reserve reached. Automations that check for those states should read the new `guard` attribute instead.
 
 ### Added
 

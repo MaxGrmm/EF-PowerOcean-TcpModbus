@@ -680,8 +680,6 @@ GUARD_HANDBACK_W: Final = 500.0
 GUARD_HANDBACK_S: Final = 60.0
 # Longest hand-back wait; the wait doubles each time a hand-back ends early.
 GUARD_HANDBACK_MAX_S: Final = 900.0
-# Failed hand-backs after which a guard keeps control until it turns off.
-GUARD_MAX_FAILED_HANDBACKS: Final = 2
 MIN_CONTROL_DWELL_S: Final = 60.0
 CONTROL_STATUS_DAMPING_POLLS: Final = 3
 # 0 means "no limit" to the inverter and not "hold at zero", so we therefore set the lowest power to hold.

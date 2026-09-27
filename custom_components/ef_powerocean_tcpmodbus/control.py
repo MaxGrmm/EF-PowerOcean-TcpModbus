@@ -10,7 +10,9 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum, auto
 from typing import Any
 
 from homeassistant.exceptions import HomeAssistantError
@@ -30,7 +32,6 @@ from .const import (
     GUARD_HANDBACK_MAX_S,
     GUARD_HANDBACK_S,
     GUARD_HANDBACK_W,
-    GUARD_MAX_FAILED_HANDBACKS,
     GUARD_POWER_DEADBAND_W,
     GUARD_SETTLE_S,
     GUARD_SOC_HYSTERESIS,
@@ -56,6 +57,40 @@ from .models import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class HandbackPhase(Enum):
+    """Who runs self-consumption while a guard is on."""
+
+    TRACKING = auto()
+    PENDING = auto()
+    HANDED_BACK = auto()
+
+
+@dataclass
+class GuardHandback:
+    """Progress of handing self-consumption back to the inverter under a guard."""
+
+    phase: HandbackPhase = HandbackPhase.TRACKING
+    since: datetime | None = None
+    wait_s: float = GUARD_HANDBACK_S
+
+    def elapsed_s(self, now: datetime) -> float:
+        return 0.0 if self.since is None else (now - self.since).total_seconds()
+
+    def enter(self, phase: HandbackPhase, now: datetime) -> None:
+        self.phase = phase
+        self.since = now
+
+    def take_back(self, now: datetime) -> None:
+        """Resume tracking, waiting longer next time if the hand-back was brief."""
+        if self.phase is HandbackPhase.HANDED_BACK:
+            self.wait_s = (
+                min(2 * self.wait_s, GUARD_HANDBACK_MAX_S)
+                if self.elapsed_s(now) < self.wait_s
+                else GUARD_HANDBACK_S
+            )
+        self.enter(HandbackPhase.TRACKING, now)
 
 
 class ControlManager:
@@ -98,14 +133,7 @@ class ControlManager:
         self._reserve_guard = False
         # Which guard, if any, is forcing the current command.
         self._blocking_guard: ControlStatus | None = None
-        # Start of the current stretch in which control could be handed back.
-        self._handback_since: datetime | None = None
-        # How long that stretch must last before control is handed back.
-        self._handback_wait_s = GUARD_HANDBACK_S
-        # Hand-backs ended because the inverter did not do plain self-consumption.
-        self._failed_handbacks = 0
-        # When the grid started covering power the battery could have given.
-        self._shortfall_since: datetime | None = None
+        self._handback = GuardHandback()
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
@@ -282,7 +310,7 @@ class ControlManager:
             self._require_modbus_control()
 
         self._feature = feature
-        self._handback_since = None
+        self._handback = GuardHandback()
         await self.async_apply(force=True)
 
     async def async_set_feature_power(
@@ -299,6 +327,7 @@ class ControlManager:
         # where async_apply can work it out again below.
         if self._data.get("battery_soc") is not None:
             self._charge_guard = False
+        self._handback = GuardHandback()
         await self.async_apply(force=True)
 
     async def async_set_battery_reserve_soc(self, soc: float) -> None:
@@ -306,6 +335,7 @@ class ControlManager:
         self._battery_reserve_soc = max(0.0, min(100.0, soc))
         if self._data.get("battery_soc") is not None:
             self._reserve_guard = False
+        self._handback = GuardHandback()
         await self.async_apply(force=True)
 
     async def async_set_battery_saver(self, enabled: bool) -> None:
@@ -409,10 +439,10 @@ class ControlManager:
         """
         natural = self._natural_battery_power(data)
         if natural is None:
-            self._handback_since = None
+            self._handback.take_back(dt.now())
             return self._hold(data, blocked)
 
-        if self._should_hand_back(data, natural):
+        if self._advance_handback(natural):
             return ControlFeature.AUTOMATIC, 0.0, blocked
 
         if self._charge_guard:
@@ -473,101 +503,41 @@ class ControlManager:
                 return True
         return not self._control_written_within(GUARD_SETTLE_S)
 
-    def _should_hand_back(self, data: dict[str, Any], natural: float) -> bool:
-        """Return whether to hand control back to the inverter's own self-consumption.
+    def _advance_handback(self, natural: float) -> bool:
+        """Move the hand-back on by one poll and return whether the inverter runs itself.
 
         Under a charge limit, a house that clearly uses more than the solar can only
         be served by discharging, which the limit allows. The inverter does that by
         itself and faster than we can, so after a while we let it. The same goes for
-        a clear surplus above the battery reserve. We take over again as soon as the
-        power flow turns, or when the inverter does something we did not expect.
+        a clear surplus above the battery reserve.
         """
-        if self._charge_guard is self._reserve_guard:
-            # With both guards on, the battery may not move either way.
-            self._handback_since = None
+        handback = self._handback
+        now = dt.now()
+        if self._charge_guard and self._reserve_guard:
+            handback.take_back(now)
             return False
 
-        # 1 if the battery may only charge, -1 if it may only discharge.
         allowed = -1.0 if self._charge_guard else 1.0
-        # Positive when the power flow needs the battery to move the allowed way.
         wanted = natural * allowed
 
-        if self._commanded_feature is ControlFeature.AUTOMATIC:
-            return self._should_stay_handed_back(data, wanted, allowed)
-
-        self._shortfall_since = None
-        if (
-            self._failed_handbacks >= GUARD_MAX_FAILED_HANDBACKS
-            or wanted <= GUARD_HANDBACK_W
-        ):
-            self._handback_since = None
-            return False
-        now = dt.now()
-        if self._handback_since is None:
-            self._handback_since = now
-        return (now - self._handback_since).total_seconds() >= self._handback_wait_s
-
-    def _should_stay_handed_back(
-        self, data: dict[str, Any], wanted: float, allowed: float
-    ) -> bool:
-        """Return whether control, once handed back, can stay with the inverter."""
-        if wanted < GUARD_POWER_DEADBAND_W:
-            # The house no longer needs the allowed direction, so take control back.
-            if self._handback_since is not None:
-                # Double the wait after a brief hand-back, else reset it.
-                lasted = (dt.now() - self._handback_since).total_seconds()
-                self._handback_wait_s = (
-                    min(2 * self._handback_wait_s, GUARD_HANDBACK_MAX_S)
-                    if lasted < 2 * self._handback_wait_s
-                    else GUARD_HANDBACK_S
-                )
-            self._handback_since = None
-            self._shortfall_since = None
-            return False
-
-        battery, grid = data.get("battery_power"), data.get("grid_power")
-        if battery is None or grid is None:
-            return True
-        # Battery power in the allowed direction.
-        moved = float(battery) * allowed
-        # Grid power the battery could have covered instead.
-        left_to_grid = -float(grid) * allowed
-
-        if moved < -GUARD_POWER_DEADBAND_W:
-            # Only an app rule, never self-consumption, moves the battery this way.
-            self._record_failed_handback(f"the battery moved {battery} W the wrong way")
-            return False
-
-        feature = (
-            ControlFeature.DISCHARGE_BATTERY
-            if self._charge_guard
-            else ControlFeature.CHARGE_BATTERY
-        )
-        battery_max = self._control_power_ceiling(feature)
-        if (
-            left_to_grid > GUARD_POWER_DEADBAND_W
-            and moved < battery_max - GUARD_POWER_DEADBAND_W
-        ):
-            # Likely an app rule such as Min SOC holding the battery back.
-            now = dt.now()
-            if self._shortfall_since is None:
-                self._shortfall_since = now
-            if (now - self._shortfall_since).total_seconds() >= GUARD_SETTLE_S:
-                self._record_failed_handback(f"the grid covered {left_to_grid:.0f} W")
+        match handback.phase:
+            case HandbackPhase.TRACKING:
+                if wanted > GUARD_HANDBACK_W:
+                    handback.enter(HandbackPhase.PENDING, now)
                 return False
-        else:
-            self._shortfall_since = None
-        return True
-
-    def _record_failed_handback(self, reason: str) -> None:
-        """Count a hand-back that ended because the inverter misbehaved."""
-        self._failed_handbacks += 1
-        self._handback_since = None
-        self._shortfall_since = None
-        _LOGGER.debug(
-            f"Taking control back from the inverter ({self._failed_handbacks} of "
-            f"{GUARD_MAX_FAILED_HANDBACKS}): {reason}"
-        )
+            case HandbackPhase.PENDING:
+                if wanted <= GUARD_HANDBACK_W:
+                    handback.enter(HandbackPhase.TRACKING, now)
+                    return False
+                if handback.elapsed_s(now) < handback.wait_s:
+                    return False
+                handback.enter(HandbackPhase.HANDED_BACK, now)
+                return True
+            case HandbackPhase.HANDED_BACK:
+                if wanted < GUARD_POWER_DEADBAND_W:
+                    handback.take_back(now)
+                    return False
+                return True
 
     def _hold(
         self, data: dict[str, Any], blocked: ControlStatus | None
@@ -691,10 +661,7 @@ class ControlManager:
         data = self._data
         self._update_guards(data)
         if not (self._charge_guard or self._reserve_guard):
-            self._handback_since = None
-            self._handback_wait_s = GUARD_HANDBACK_S
-            self._failed_handbacks = 0
-            self._shortfall_since = None
+            self._handback = GuardHandback()
 
         # A lapsed window hands the inverter back to its app settings, so the command
         # is sent again rather than assumed to have survived.
@@ -729,8 +696,9 @@ class ControlManager:
             self._commanded_feature = feature
             self._commanded_power = power
             self._blocking_guard = blocked
-            # Only a mode change resets the miss; guards change the power every poll.
-            if retargeted:
+            # A guard changes its power nearly every poll, and judging each new value
+            # from scratch would hide a battery that never catches up.
+            if retargeted or (changed and blocked is None):
                 self._reset_deviation()
             self._update_deviation(data)
         finally:

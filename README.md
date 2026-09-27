@@ -138,16 +138,17 @@ There is one exception. If the house clearly uses more than the solar for a minu
 while the Charge Limit is on, the only thing the battery can do is discharge, which the
 limit allows. The inverter does that faster and more smoothly by itself, so the
 integration lets it. The same goes for a clear solar surplus while the Battery Reserve
-is on. The integration takes over again as soon as the power flow turns. It also takes
-over if the inverter, on its own, does something the guard would not allow, or lets the
-grid power the house while the battery could. That can happen because of a Min SOC or
-a schedule set in the EcoFlow app, which the inverter follows when it runs by itself.
-After the second time, the integration keeps control until the guard turns off.
+is on. The integration takes over again as soon as the power flow turns. Leave Min SOC
+and schedules in the EcoFlow app off, since the inverter follows them when it runs by
+itself.
 
 If a load keeps switching on and off, like an oven heating in bursts, the integration
 waits longer each time before letting go, so it settles instead of switching back and
 forth. Small power corrections wait until the battery has reached the last one, because
 some inverters start over on every new setting.
+
+The guards are soft limits: the battery can move the wrong way for a few seconds before
+the integration catches it, which is harmless for battery wear or a backup reserve.
 
 While the battery is held near zero it will wander a few hundred watts either way as
 clouds come and go. This is due to the inverter itself balancing and unfortunately
@@ -159,7 +160,8 @@ Both guards default to off. Separately, **Modbus Control** defaults to off, so a
 untouched install never takes control away from the app.
 **Control Status** shows what the selected mode is achieving, including which guard is
 on and whether a full or empty battery blocks the target. If the inverter misses the
-target a guard sets, the status shows Ramping or Unreachable instead of the guard. The guard is still available as a `guard` attribute on the object, for automations to read and act on.
+target a guard sets, the status shows Ramping or Unreachable instead of the guard. The guard is still available as a `guard` attribute on the Control Status sensor,
+for automations to read and act on.
 
 | Control Status             | Meaning                                                        |
 | -------------------------- | -------------------------------------------------------------- |
