@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Grid Feed-in switch that stops the export to the grid.
+
 ## [2.5.2] - 2026-09-28
 
 ### Fixed

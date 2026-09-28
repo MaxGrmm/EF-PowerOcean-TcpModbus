@@ -14,7 +14,7 @@
 - **Local polling** – no EcoFlow cloud account needed
 - **Configurable poll interval** (2–30 seconds, default 5 s)
 - Real-time power flow: house consumption, grid import/export, solar generation, battery
-- Optional **Battery Controls**: charge, discharge, export or hold, with state-of-charge guards
+- Optional **Battery Controls**: charge, discharge, export or hold, with state-of-charge guards and a grid feed-in switch
 - Full battery monitoring: SOC, voltage, current, power, temperature, remaining energy
 - Per-module state of charge for up to 12 battery modules
 - Per-string PV power, current and voltage (1–3 strings)
