@@ -198,6 +198,22 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
 
 REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTERS}
 
+# Counters reported in kWh by every model except those whose traits say Wh.
+ENERGY_REGISTER_KEYS: Final = frozenset(
+    {
+        "grid_import_total",
+        "grid_import_today",
+        "grid_export_total",
+        "grid_export_today",
+        "bat_charged_total",
+        "bat_charged_today",
+        "bat_discharged_total",
+        "bat_discharged_today",
+        "solar_total",
+        "solar_today",
+    }
+)
+
 
 def register_blocks_for(inverter_model: InverterModel) -> tuple[RegisterBlock, ...]:
     """Return register blocks resolved for an inverter model.
