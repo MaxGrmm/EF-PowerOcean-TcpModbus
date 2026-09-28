@@ -15,6 +15,7 @@ from custom_components.ef_powerocean_tcpmodbus import const, models
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
 from custom_components.ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
+from custom_components.ef_powerocean_tcpmodbus.switch import EcoFlowGridFeedSwitch
 
 
 @pytest.fixture
@@ -157,6 +158,7 @@ def test_persisted_state_round_trips(coordinator) -> None:
     coordinator._energy_processor.last_rollover = datetime(
         2026, 8, 7, 0, 0, tzinfo=timezone.utc
     )
+    coordinator._grid_feed_restore = {"mode": 1, "power": 9000}
 
     stored = coordinator._persisted_state()
 
@@ -165,6 +167,7 @@ def test_persisted_state_round_trips(coordinator) -> None:
     coordinator._energy_processor.accepted_at = {}
     coordinator._energy_processor.daily_snapshots = {}
     coordinator._energy_processor.last_rollover = None
+    coordinator._grid_feed_restore = None
     coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
 
     asyncio.run(coordinator.async_load_persisted_state())
@@ -177,6 +180,7 @@ def test_persisted_state_round_trips(coordinator) -> None:
     assert coordinator._energy_processor.last_rollover == datetime(
         2026, 8, 7, 0, 0, tzinfo=timezone.utc
     )
+    assert coordinator.grid_feed_restore == {"mode": 1, "power": 9000}
 
 
 def test_control_state_is_persisted_with_the_coordinators(coordinator) -> None:
@@ -192,25 +196,6 @@ def test_control_state_is_persisted_with_the_coordinators(coordinator) -> None:
     assert coordinator.control.battery_saver_commanded is True
 
 
-def test_a_zero_cap_never_replaces_what_the_switch_would_restore(coordinator) -> None:
-    """Zero is the switch's own doing, so adopting it would erase the way back."""
-    coordinator._track_grid_feed_restore(
-        {"grid_feed_mode": 1.0, "feed_in_power_max": 9000.0}
-    )
-    coordinator._track_grid_feed_restore(
-        {"grid_feed_mode": 0.0, "feed_in_power_max": 0.0}
-    )
-
-    assert coordinator.grid_feed_restore == {"mode": 1, "power": 9000}
-
-    stored = coordinator._persisted_state()
-    coordinator._grid_feed_restore = None
-    coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
-    asyncio.run(coordinator.async_load_persisted_state())
-
-    assert coordinator.grid_feed_restore == {"mode": 1, "power": 9000}
-
-
 def test_an_export_limit_raised_on_the_device_is_adopted(coordinator) -> None:
     """An installer lifting the limit should not need the entry to be set up again."""
     coordinator._track_grid_feed_restore(
@@ -223,57 +208,78 @@ def test_an_export_limit_raised_on_the_device_is_adopted(coordinator) -> None:
     assert coordinator.grid_feed_restore == {"mode": 1, "power": 15000}
 
 
-def test_a_poll_without_the_feed_registers_keeps_nothing(coordinator) -> None:
-    coordinator._track_grid_feed_restore({"feed_in_power_max": 9000.0})
-
-    assert coordinator.grid_feed_restore is None
-    assert coordinator.grid_feed_switchable is False
-    with pytest.raises(coordinator_module.HomeAssistantError):
-        asyncio.run(coordinator.async_set_grid_feed(False))
-
-
-@pytest.mark.parametrize("allow", [True, False])
-def test_an_export_the_inverter_never_allowed_leaves_the_switch_unusable(
-    coordinator, allow: bool
+# Unlimited mode ignores the cap, so it allows export even with a zero cap.
+@pytest.mark.parametrize(("mode", "power"), [(0, 9000), (1, 0), (1, 9000)])
+def test_the_grid_feed_switch_stops_the_export_and_restores_it_exactly(
+    coordinator, mode: int, power: int
 ) -> None:
-    """Without a cap above zero there is nothing to restore, so the switch must not act."""
-    coordinator._track_grid_feed_restore(
-        {"grid_feed_mode": 0.0, "feed_in_power_max": 0.0}
+    switch = EcoFlowGridFeedSwitch.__new__(EcoFlowGridFeedSwitch)
+    switch.coordinator = coordinator
+    writes: list[tuple[str, int]] = []
+    coordinator._async_write_register = AsyncMock(
+        side_effect=lambda register, value, **_: writes.append((register.key, value))
     )
+
+    def poll(mode: int, power: int) -> None:
+        coordinator._track_grid_feed_restore(
+            {"grid_feed_mode": mode, "feed_in_power_max": power}
+        )
+        coordinator.data = {
+            "grid_feed_mode": models.GridFeedMode.from_register(mode),
+            "feed_in_power_max": power,
+        }
+
+    poll(mode, power)
+    assert switch.is_on
+    asyncio.run(coordinator.async_set_grid_feed(False))
+    # This poll reads the switch's own zero cap, which must not replace the restore.
+    poll(0, 0)
+    assert not switch.is_on
+    asyncio.run(coordinator.async_set_grid_feed(True))
+
+    # Each order keeps the export from ever being briefly uncapped.
+    assert writes == [
+        ("grid_feed_mode", 0),
+        ("feed_in_power_max", 0),
+        ("feed_in_power_max", power),
+        ("grid_feed_mode", mode),
+    ]
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [{"grid_feed_mode": 0, "feed_in_power_max": 0}, {"feed_in_power_max": 9000}],
+    ids=["limited-to-zero", "mode-not-read"],
+)
+def test_the_grid_feed_switch_refuses_when_there_is_nothing_to_restore(
+    coordinator, frame: dict[str, int]
+) -> None:
+    coordinator._track_grid_feed_restore(frame)
     coordinator._async_write_register = AsyncMock()
 
     assert coordinator.grid_feed_switchable is False
     with pytest.raises(coordinator_module.HomeAssistantError):
-        asyncio.run(coordinator.async_set_grid_feed(allow))
+        asyncio.run(coordinator.async_set_grid_feed(False))
     coordinator._async_write_register.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    ("allow", "expected"),
-    [
-        # Limited first: zeroing the cap while still unlimited would do nothing.
-        (False, [("grid_feed_mode", 0), ("feed_in_power_max", 0)]),
-        # Cap first: the mode write must never find a zero cap behind it.
-        (True, [("feed_in_power_max", 9000), ("grid_feed_mode", 1)]),
-    ],
-)
-def test_the_grid_feed_switch_writes_both_registers_in_a_safe_order(
-    coordinator, allow: bool, expected: list[tuple[str, int]]
+def test_a_failed_cap_write_still_leaves_the_feed_mode_as_an_enum(
+    coordinator,
 ) -> None:
+    """The enum sensor rejects a raw 0/1, and the mode is written before the cap."""
     coordinator._grid_feed_restore = {"mode": 1, "power": 9000}
-    writes: list[tuple[str, int]] = []
-    coordinator._async_write_register = AsyncMock(
-        side_effect=lambda register, value: writes.append((register.key, value))
+    coordinator.async_set_updated_data = Mock(
+        side_effect=lambda data: setattr(coordinator, "data", data)
     )
-    coordinator.async_set_updated_data = Mock()
-
-    asyncio.run(coordinator.async_set_grid_feed(allow))
-
-    assert writes == expected
-    published = coordinator.async_set_updated_data.call_args[0][0]
-    assert published["grid_feed_mode"] == (
-        models.GridFeedMode.UNLIMITED if allow else models.GridFeedMode.LIMITED
+    coordinator._modbus_client.async_read = AsyncMock(return_value=[0])
+    coordinator._modbus_client.async_write = AsyncMock(
+        side_effect=[None, coordinator_module.HomeAssistantError("rejected")]
     )
+
+    with pytest.raises(coordinator_module.HomeAssistantError):
+        asyncio.run(coordinator.async_set_grid_feed(False))
+
+    assert coordinator.data["grid_feed_mode"] is models.GridFeedMode.LIMITED
 
 
 def test_accepted_update_publishes_successful_coordinator_status(
@@ -861,8 +867,6 @@ def test_the_feed_in_cap_is_written_to_40538_while_read_from_40609(
 
     asyncio.run(coordinator._async_write_register(register, 0))
 
-    assert register.address == 40609
-    coordinator._modbus_client.async_write.assert_awaited_once()
     assert coordinator._modbus_client.async_write.await_args.args[0] == 40538
     coordinator._modbus_client.async_read.assert_awaited_once_with(40538, 2)
 

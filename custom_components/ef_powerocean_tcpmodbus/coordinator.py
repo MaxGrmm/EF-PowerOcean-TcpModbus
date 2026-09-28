@@ -71,6 +71,11 @@ from .util import parse_datetime
 _LOGGER = logging.getLogger(__name__)
 
 
+def _allows_export(mode: float, power: float) -> bool:
+    """Return whether these feed settings let the inverter export at all."""
+    return GridFeedMode.from_register(mode) is GridFeedMode.UNLIMITED or int(power) > 0
+
+
 class EcoflowCoordinator(DataUpdateCoordinator):
     """Fetches data from EcoFlow PowerOcean Plus via Modbus TCP."""
 
@@ -184,11 +189,13 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def grid_feed_switchable(self) -> bool:
         """Return whether stopping the export could be undone again.
 
-        With nothing but a zero cap to restore the switch would be a one-way door:
-        it could only ever turn the export off.
+        With nothing but a limited mode and a zero cap to restore the switch would
+        be a one-way door: it could only ever turn the export off.
         """
         original = self._grid_feed_restore
-        return original is not None and original["power"] > 0
+        return original is not None and _allows_export(
+            original["mode"], original["power"]
+        )
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
@@ -372,15 +379,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def _track_grid_feed_restore(self, raw_data: dict[str, Any]) -> None:
         """Remember the export settings to put back, while there are any to keep.
 
-        A zero cap is the one thing never adopted: it is what the switch itself
-        writes, so adopting it would overwrite the only value that can undo it. Any
-        other reading is the inverter's own setting, so raising the cap in the
-        EcoFlow app - an installer lifting an export limit, say - is picked up on
-        the next poll rather than needing the entry to be set up again.
+        A limited mode with a zero cap is the one thing never adopted: it is what the
+        switch itself writes, so adopting it would overwrite the only value that can
+        undo it. Any other reading is the inverter's own setting, so raising the cap
+        in the EcoFlow app - an installer lifting an export limit, say - is picked
+        up on the next poll rather than needing the entry to be set up again.
         """
         mode = raw_data.get("grid_feed_mode")
         power = raw_data.get("feed_in_power_max")
-        if mode is None or power is None or int(power) <= 0:
+        if mode is None or power is None or not _allows_export(mode, power):
             return
 
         updated = {"mode": int(mode), "power": int(power)}
@@ -404,21 +411,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         mode = self._registers_by_key["grid_feed_mode"]
         power = self._registers_by_key["feed_in_power_max"]
         mode_value = restore["mode"] if allow else GridFeedMode.LIMITED.register_value
+        # Readers expect the enum a poll derives, never the register's raw 0/1.
+        mode_state = GridFeedMode.from_register(mode_value)
         if allow:
             await self._async_write_register(power, restore["power"])
-            await self._async_write_register(mode, mode_value)
+            await self._async_write_register(mode, mode_value, publish_as=mode_state)
         else:
-            await self._async_write_register(mode, mode_value)
+            await self._async_write_register(mode, mode_value, publish_as=mode_state)
             await self._async_write_register(power, 0)
-
-        # The write leaves the register's raw 0/1 behind, while every reader expects
-        # the enum a poll would have derived from it.
-        self.async_set_updated_data(
-            {
-                **(self.data or {}),
-                "grid_feed_mode": GridFeedMode.from_register(mode_value),
-            }
-        )
 
     async def async_write_modbus_register(
         self, entity_def: NumberWritableDef, value: int
@@ -429,7 +429,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             value,
         )
 
-    async def _async_write_register(self, register: RegisterDef, value: int) -> None:
+    async def _async_write_register(
+        self, register: RegisterDef, value: int, *, publish_as: Any = None
+    ) -> None:
         """Write a device setting and verify it by reading it back.
 
         Settings apply without Modbus control authority, unlike the control word and
@@ -483,5 +485,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             target_value,
         )
 
-        updated_data = {**(self.data or {}), key: target_value}
+        published = target_value if publish_as is None else publish_as
+        updated_data = {**(self.data or {}), key: published}
         self.async_set_updated_data(updated_data)
