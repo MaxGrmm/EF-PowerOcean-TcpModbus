@@ -10,7 +10,9 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum, auto
 from typing import Any
 
 from homeassistant.exceptions import HomeAssistantError
@@ -27,7 +29,11 @@ from .const import (
     CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
+    GUARD_HANDBACK_MAX_S,
+    GUARD_HANDBACK_S,
+    GUARD_HANDBACK_W,
     GUARD_POWER_DEADBAND_W,
+    GUARD_SETTLE_S,
     GUARD_SOC_HYSTERESIS,
     GUARD_TRACKING_STEP_W,
     HEARTBEAT_REGISTER,
@@ -38,6 +44,8 @@ from .heartbeat import Heartbeat
 from .modbus import ModbusClient
 from .models import (
     BATTERY_FULL_SOC,
+    POWER_TOLERANCE_FRACTION,
+    POWER_TOLERANCE_W,
     ControlFeature,
     ControlMode,
     ControlStatus,
@@ -49,6 +57,40 @@ from .models import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class HandbackPhase(Enum):
+    """Who runs self-consumption while a guard is on."""
+
+    TRACKING = auto()
+    PENDING = auto()
+    HANDED_BACK = auto()
+
+
+@dataclass
+class GuardHandback:
+    """Progress of handing self-consumption back to the inverter under a guard."""
+
+    phase: HandbackPhase = HandbackPhase.TRACKING
+    since: datetime | None = None
+    wait_s: float = GUARD_HANDBACK_S
+
+    def elapsed_s(self, now: datetime) -> float:
+        return 0.0 if self.since is None else (now - self.since).total_seconds()
+
+    def enter(self, phase: HandbackPhase, now: datetime) -> None:
+        self.phase = phase
+        self.since = now
+
+    def take_back(self, now: datetime) -> None:
+        """Resume tracking, waiting longer next time if the hand-back was brief."""
+        if self.phase is HandbackPhase.HANDED_BACK:
+            self.wait_s = (
+                min(2 * self.wait_s, GUARD_HANDBACK_MAX_S)
+                if self.elapsed_s(now) < self.wait_s
+                else GUARD_HANDBACK_S
+            )
+        self.enter(HandbackPhase.TRACKING, now)
 
 
 class ControlManager:
@@ -91,9 +133,12 @@ class ControlManager:
         self._reserve_guard = False
         # Which guard, if any, is forcing the current command.
         self._blocking_guard: ControlStatus | None = None
+        self._handback = GuardHandback()
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
+        # The setpoint that the latest small correction replaced.
+        self._retuned_from: float | None = None
         self._battery_saver = False
         self._last_control_write_time: datetime | None = None
         # A restart within the inverter's control window leaves it still following the
@@ -159,6 +204,11 @@ class ControlManager:
         """Return whether battery saver mode is being commanded."""
         return self._battery_saver
 
+    @property
+    def active_guard(self) -> ControlStatus | None:
+        """Return the guard that is on, even while the status shows a problem."""
+        return self._blocking_guard if self.in_control else None
+
     def feature_power(self, feature: ControlFeature) -> float:
         """Return the configured power, or zero for a mode that has none."""
         return self._feature_power.get(feature, 0.0)
@@ -172,6 +222,8 @@ class ControlManager:
         if not self.in_control:
             return ControlStatus.NO_MODBUS_CONTROL
         if self._blocking_guard is not None:
+            if self._deviation is not ControlStatus.ACTIVE:
+                return self._deviation
             return self._blocking_guard
         # Only a hold the battery cannot need leaves a selected mode uncommanded.
         if (
@@ -258,6 +310,7 @@ class ControlManager:
             self._require_modbus_control()
 
         self._feature = feature
+        self._handback = GuardHandback()
         await self.async_apply(force=True)
 
     async def async_set_feature_power(
@@ -274,6 +327,7 @@ class ControlManager:
         # where async_apply can work it out again below.
         if self._data.get("battery_soc") is not None:
             self._charge_guard = False
+        self._handback = GuardHandback()
         await self.async_apply(force=True)
 
     async def async_set_battery_reserve_soc(self, soc: float) -> None:
@@ -281,6 +335,7 @@ class ControlManager:
         self._battery_reserve_soc = max(0.0, min(100.0, soc))
         if self._data.get("battery_soc") is not None:
             self._reserve_guard = False
+        self._handback = GuardHandback()
         await self.async_apply(force=True)
 
     async def async_set_battery_saver(self, enabled: bool) -> None:
@@ -384,7 +439,11 @@ class ControlManager:
         """
         natural = self._natural_battery_power(data)
         if natural is None:
+            self._handback.take_back(dt.now())
             return self._hold(data, blocked)
+
+        if self._advance_handback(natural):
+            return ControlFeature.AUTOMATIC, 0.0, blocked
 
         if self._charge_guard:
             natural = min(natural, 0.0)
@@ -402,16 +461,83 @@ class ControlManager:
             feature = ControlFeature.DISCHARGE_BATTERY
             watts = float(math.ceil(-natural))
 
-        # Rewrite only once the load has moved a step, and never while the standing
-        # setpoint has drifted to the importing side.
+        # Small changes wait for the battery to settle, and tiny ones that only
+        # export a little are skipped.
         held = self._commanded_power
         slack = watts - held if natural > 0 else held - watts
-        if self._commanded_feature is feature and 0.0 <= slack < GUARD_TRACKING_STEP_W:
+        if self._commanded_feature is feature and (
+            0.0 <= slack < GUARD_TRACKING_STEP_W
+            or (abs(slack) < POWER_TOLERANCE_W and not self._battery_settled(data))
+        ):
             watts = held
 
         if watts <= 0.0:
             return self._hold(data, blocked)
         return feature, self._clamp_power(watts, feature), blocked
+
+    def _battery_settled(self, data: dict[str, Any]) -> bool:
+        """Return whether the battery has reached the current setpoint.
+
+        Some inverters start over on every new setpoint, so correcting before the
+        battery gets there can keep it from ever arriving. After GUARD_SETTLE_S we
+        correct anyway.
+        """
+        definition = CONTROL_FEATURES[self._commanded_feature]
+        measured = data.get(definition.measure_key) if definition.measure_key else None
+        if measured is not None:
+            target = self._commanded_power * definition.sign
+            off_by = abs(float(measured) - target)
+            close_enough = max(
+                GUARD_TRACKING_STEP_W, abs(target) * POWER_TOLERANCE_FRACTION
+            )
+            # A battery that has not moved yet can already look close to a slightly
+            # changed setpoint.
+            off_from_previous = (
+                abs(float(measured) - self._retuned_from * definition.sign)
+                if self._retuned_from is not None
+                else None
+            )
+            if off_by <= close_enough and (
+                off_from_previous is None or off_by < off_from_previous
+            ):
+                return True
+        return not self._control_written_within(GUARD_SETTLE_S)
+
+    def _advance_handback(self, natural: float) -> bool:
+        """Move the hand-back on by one poll and return whether the inverter runs itself.
+
+        Under a charge limit, a house that clearly uses more than the solar can only
+        be served by discharging, which the limit allows. The inverter does that by
+        itself and faster than we can, so after a while we let it. The same goes for
+        a clear surplus above the battery reserve.
+        """
+        handback = self._handback
+        now = dt.now()
+        if self._charge_guard and self._reserve_guard:
+            handback.take_back(now)
+            return False
+
+        allowed = -1.0 if self._charge_guard else 1.0
+        wanted = natural * allowed
+
+        match handback.phase:
+            case HandbackPhase.TRACKING:
+                if wanted > GUARD_HANDBACK_W:
+                    handback.enter(HandbackPhase.PENDING, now)
+                return False
+            case HandbackPhase.PENDING:
+                if wanted <= GUARD_HANDBACK_W:
+                    handback.enter(HandbackPhase.TRACKING, now)
+                    return False
+                if handback.elapsed_s(now) < handback.wait_s:
+                    return False
+                handback.enter(HandbackPhase.HANDED_BACK, now)
+                return True
+            case HandbackPhase.HANDED_BACK:
+                if wanted < GUARD_POWER_DEADBAND_W:
+                    handback.take_back(now)
+                    return False
+                return True
 
     def _hold(
         self, data: dict[str, Any], blocked: ControlStatus | None
@@ -467,12 +593,12 @@ class ControlManager:
             None,
         )
 
-    def _was_last_command_recent(self) -> bool:
-        """Return whether the last command is too recent to be worth replacing."""
+    def _control_written_within(self, seconds: float) -> bool:
+        """Return whether the last command went out less than *seconds* ago."""
         if self._last_control_write_time is None:
             return False
         age = (dt.now() - self._last_control_write_time).total_seconds()
-        return age < MIN_CONTROL_DWELL_S
+        return age < seconds
 
     def _reset_deviation(self) -> None:
         """Forget how the last command was going; a new one starts from nothing."""
@@ -534,6 +660,8 @@ class ControlManager:
             self._data = data
         data = self._data
         self._update_guards(data)
+        if not (self._charge_guard or self._reserve_guard):
+            self._handback = GuardHandback()
 
         # A lapsed window hands the inverter back to its app settings, so the command
         # is sent again rather than assumed to have survived.
@@ -551,7 +679,7 @@ class ControlManager:
             and not force
             and blocked is None
             and not self._control_stale
-            and self._was_last_command_recent()
+            and self._control_written_within(MIN_CONTROL_DWELL_S)
         ):
             if notify:
                 self._on_update()
@@ -562,10 +690,15 @@ class ControlManager:
                 await self._async_send_control(feature, power)
             # Committed only once the inverter has been told: recording a command the
             # write never delivered would look settled and never be retried.
+            retargeted = feature is not self._commanded_feature
+            if changed:
+                self._retuned_from = None if retargeted else self._commanded_power
             self._commanded_feature = feature
             self._commanded_power = power
             self._blocking_guard = blocked
-            if changed:
+            # A guard changes its power nearly every poll, and judging each new value
+            # from scratch would hide a battery that never catches up.
+            if retargeted or (changed and blocked is None):
                 self._reset_deviation()
             self._update_deviation(data)
         finally:

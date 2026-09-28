@@ -48,6 +48,13 @@ class FakeInverter:
     setpoint_writes: int = 0
     connected: bool = True
     reachable: bool = True
+    # Polls the battery stays put after each new setpoint.
+    setback_polls: int = 0
+    setback: int = 0
+    # New setpoints sent before the battery reached the previous one.
+    interruptions: int = 0
+    # Most the battery power can change per poll, if limited.
+    ramp_w: float | None = None
 
     async def async_write(
         self, address: int, words: list[int], *, what: str = ""
@@ -65,11 +72,22 @@ class FakeInverter:
         elif address == SETPOINT_REGISTER:
             self.setpoint_writes += 1
             self.setpoint = value - (1 << 32) if value >> 31 else value
+            self.interruptions += self.setback > 0
+            self.setback = self.setback_polls
 
     def settle(self) -> None:
         """Obey the standing command, or run self-consumption where there is none."""
         commanded = self.method == BATTERY_LIMITS and self.setpoint != 0
-        target = float(self.setpoint) if commanded else self.solar - self.house
+        if commanded and self.setback:
+            self.setback -= 1
+            target = self.battery
+        elif commanded:
+            target = float(self.setpoint)
+        else:
+            target = self.solar - self.house
+        if self.ramp_w is not None:
+            step = max(-self.ramp_w, min(self.ramp_w, target - self.battery))
+            target = self.battery + step
         ceiling = self.charge_max if self.soc < 100.0 else 0.0
         floor = -self.discharge_max if self.soc > 0.0 else 0.0
         self.battery = max(floor, min(ceiling, target))
@@ -197,20 +215,101 @@ def test_a_charge_limit_holds_through_a_cycling_load(
     assert sim.inverter.method_writes == 1
 
 
-def test_a_charge_limit_still_lets_the_house_use_the_battery(
+def test_a_long_draw_is_left_to_the_inverter_until_the_sun_returns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The hold that blocks charging blocks discharging too, so an evening draw has
-    to be commanded back explicitly or the grid would carry the whole house."""
-    sim = Simulation(monkeypatch, soc=46.0, charge_limit=1.0)
+    """A charge limit only forbids charging, and the inverter never charges while the
+    house uses more than the solar. So once such a draw has lasted a while, the
+    inverter is left to cover it by itself, and we take over again as soon as the sun
+    comes back."""
+    sim = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
 
-    # A draw that does not land on a rounding step, so the direction of the rounding
-    # shows up in the grid rather than cancelling out.
-    run = sim.run(polls=60, solar=0, house=1280)
+    held = sim.run(polls=12, solar=2000, house=400)
+    # One run, since a new run's first poll sees the load before the inverter reacts.
+    run = sim.run(
+        polls=180,
+        solar=[1400] * 60 + [3000] * 30 + [1400] * 30 + [3000] * 30 + [1400] * 30,
+        # A heavy draw, a lighter one, the sun, and the heavy draw and sun again.
+        house=[3600] * 40 + [1800] * 20 + ([400] * 30 + [3600] * 30) * 2,
+    )
 
-    assert max(run.battery) <= const.HOLD_SETPOINT_W
-    assert max(run.grid) <= 0
-    assert run.soc[-1] < run.soc[0]
+    assert max(held.battery) <= const.HOLD_SETPOINT_W
+    # The grid imports only on the first poll of each later draw.
+    assert [step for step, watts in enumerate(run.grid) if watts > 0] == [90, 150]
+    # The battery charges for one poll each time the sun returns.
+    charging = [
+        step for step, watts in enumerate(run.battery) if watts > const.HOLD_SETPOINT_W
+    ]
+    assert charging == [60, 120]
+    assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
+    # Take control, then hand back and take back three times.
+    assert sim.inverter.method_writes == 6
+
+
+def test_a_cycling_load_settles_into_one_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An oven switching its heater on for 90 s and off for 60 s would otherwise make
+    us let go and take over on every cycle. Each time it is taken back that soon, the
+    wait doubles, so it soon stays in one mode."""
+    # High enough that the hour's draw never releases the guard.
+    sim = Simulation(monkeypatch, soc=80.0, charge_limit=60.0)
+    sim.run(polls=12, solar=2000, house=400)
+
+    run = sim.run(polls=720, solar=1000, house=[3500] * 18 + [300] * 12)
+
+    assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
+    # Take control, hand back once, take back, then no more switching.
+    assert sim.inverter.method_writes == 3
+    assert sum(watts > const.HOLD_SETPOINT_W for watts in run.battery) <= 1
+
+
+def test_a_battery_at_its_limit_is_not_held_against_the_inverter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the house uses more than the battery can give, the grid covers the rest
+    whoever is in control, so the inverter is left alone. The same goes for the few
+    seconds a slower inverter needs to follow a bigger draw."""
+    sim = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
+    sim.run(polls=12, solar=2000, house=400)
+    too_much = sim.run(polls=120, solar=0, house=7000)
+
+    slow = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
+    slow.inverter.ramp_w = 400.0
+    slow.run(polls=12, solar=2000, house=400)
+    slow.run(polls=240, solar=0, house=[1000] * 60 + [3000] * 60)
+
+    assert min(too_much.battery) == -sim.inverter.discharge_max
+    # Take control in the sun, then hand back for the whole draw.
+    assert sim.inverter.method_writes == 2
+    assert slow.inverter.method_writes == 2
+
+
+def test_a_guard_retunes_as_fast_as_the_inverter_can_follow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Some inverters start over on every new setpoint, so correcting on every small
+    change of the house kept the battery from ever getting there (issue #107). Small
+    corrections now wait until the battery has reached the last setpoint, which an
+    inverter that reacts within a poll always has by the next one."""
+    noisy = [300, 450, 320, 470, 310, 440]
+
+    fast = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
+    fast.run(polls=12, solar=2000, house=400)
+    quick = fast.run(polls=120, solar=0, house=noisy)
+
+    slow = Simulation(monkeypatch, soc=67.0, charge_limit=60.0)
+    slow.run(polls=12, solar=2000, house=400)
+    slow.inverter.setback_polls = 2
+    patient = slow.run(polls=120, solar=0, house=noisy)
+
+    # The grid never imports two polls in a row.
+    late = [step for step, watts in enumerate(quick.grid) if watts > 0]
+    assert all(later - earlier > 1 for earlier, later in zip(late, late[1:]))
+
+    imported = sum(max(watts, 0.0) for watts in patient.grid) / len(patient.grid)
+    assert imported < 100
+    assert slow.inverter.interruptions == 0
 
 
 def test_a_guard_never_imports_what_the_battery_could_have_covered(
@@ -222,7 +321,7 @@ def test_a_guard_never_imports_what_the_battery_could_have_covered(
     for solar, house in (
         # A fractional draw, as the float registers report one, so which way the odd
         # watt is rounded shows up in the grid rather than cancelling out.
-        (147.0, 1280.4),
+        (147.0, 280.4),
         # And a draw smaller than the rewrite step, which still has to be covered
         # rather than rounded away in the grid's favour.
         (460.0, 500.0),
@@ -237,6 +336,20 @@ def test_a_guard_never_imports_what_the_battery_could_have_covered(
         assert sim.inverter.setpoint_writes == 1
 
 
+def test_a_guard_never_imports_across_a_hand_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A draw large enough to hand back must be covered while it is tracked, while
+    the hand-back is pending and once the inverter runs itself."""
+    sim = Simulation(monkeypatch, soc=60.0, charge_limit=1.0)
+
+    run = sim.run(polls=60, solar=147.0, house=1280.4)
+
+    assert sim.control._handback.phase is control_module.HandbackPhase.HANDED_BACK
+    assert max(run.grid) <= 0
+    assert min(run.grid) >= -const.GUARD_TRACKING_STEP_W
+
+
 def test_a_guard_only_falls_behind_the_poll_an_unexpected_load_arrives(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -244,14 +357,14 @@ def test_a_guard_only_falls_behind_the_poll_an_unexpected_load_arrives(
     it takes to measure it. What must not happen is that shortfall settling in and
     being bought again on every poll after the setpoint has caught up."""
     for house, late_polls in (
-        # A 2 kW appliance: one poll behind on each of the six times it switches on.
+        # A 2 kW appliance switching on six times, each one poll late.
         ([500.0] * 20 + [2500.0] * 20, 6),
         # A step smaller than the rewrite deadband, which is caught once and then
         # covered for good, the setpoint spilling into the grid on the low half.
         ([500.0] * 20 + [560.0] * 20, 1),
     ):
         sim = Simulation(monkeypatch, soc=60.0, charge_limit=1.0)
-        run = sim.run(polls=240, solar=147, house=house)
+        run = sim.run(polls=240, solar=400, house=house)
 
         assert max(run.battery) <= const.HOLD_SETPOINT_W
         assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
@@ -280,6 +393,23 @@ def test_a_reserve_lets_the_battery_refill_once_the_sun_returns(
     assert max(morning.grid) <= 0
 
 
+def test_a_reserve_leaves_a_lasting_surplus_to_the_inverter_until_dusk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The mirror of a charge limit: a surplus can only charge, which the reserve
+    allows, and the house must not reach the battery once the sun is gone."""
+    sim = Simulation(monkeypatch, soc=18.0, reserve=20.0)
+
+    day = sim.run(polls=60, solar=3000, house=800)
+    assert sim.control._handback.phase is control_module.HandbackPhase.HANDED_BACK
+
+    dusk = sim.run(polls=60, solar=0, house=1000)
+
+    assert max(day.grid) <= 0
+    assert min(dusk.battery) >= 0
+    assert sim.control._handback.phase is control_module.HandbackPhase.TRACKING
+
+
 def test_an_untouched_install_never_touches_the_inverter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -302,6 +432,7 @@ def test_a_charge_limit_survives_an_hour_of_broken_weather(
     """Solar and load crossing each other at different periods put the balance either
     side of zero hundreds of times, and none of it may reach the battery."""
     sim = Simulation(monkeypatch, soc=60.0, charge_limit=1.0)
+    sim.run(polls=12, solar=2000, house=400)
 
     run = sim.run(
         polls=720,
@@ -311,7 +442,7 @@ def test_a_charge_limit_survives_an_hour_of_broken_weather(
 
     assert max(run.battery) <= const.HOLD_SETPOINT_W
     assert run.soc[-1] <= run.soc[0]
-    # Every one of those crossings is a setpoint, and none of them a method.
+    # No draw lasts long enough to hand back, so the method is written only once.
     assert sim.inverter.method_writes == 1
 
 

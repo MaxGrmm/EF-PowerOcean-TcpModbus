@@ -672,6 +672,14 @@ GUARD_POWER_DEADBAND_W: Final = 200.0
 # Resolution of a guard's tracked setpoint, so an ordinary load does not rewrite it
 # every poll. Always rounded towards zero, which leaves the remainder to the grid.
 GUARD_TRACKING_STEP_W: Final = 100.0
+# Seconds to wait for the battery to reach a new setpoint before correcting it again.
+GUARD_SETTLE_S: Final = 30.0
+# Minimum power in the direction a guard allows before it hands control back.
+GUARD_HANDBACK_W: Final = 500.0
+# How long that power must last before a guard hands control back.
+GUARD_HANDBACK_S: Final = 60.0
+# Longest hand-back wait; the wait doubles each time a hand-back ends early.
+GUARD_HANDBACK_MAX_S: Final = 900.0
 MIN_CONTROL_DWELL_S: Final = 60.0
 CONTROL_STATUS_DAMPING_POLLS: Final = 3
 # 0 means "no limit" to the inverter and not "hold at zero", so we therefore set the lowest power to hold.
