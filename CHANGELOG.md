@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Three-phase Ocean 2 energy counters are no longer a thousand times too high. The Ocean 2 reports its lifetime and daily counters in Wh where the PowerOcean models use kWh, so a solar today of 11.84 kWh was read as 11840 kWh. The counters are now converted for this model; every other model is read as before.
+
 ### Added
 
 - Grid Feed-in switch that stops the export to the grid.

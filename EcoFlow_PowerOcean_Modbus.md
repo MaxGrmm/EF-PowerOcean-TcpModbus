@@ -89,6 +89,12 @@ low word first and a few seconds later the register reads `32768000` (= 500 << 1
 because the device re-publishes its internal value in read order. Write it high
 word first and the register reads `500`, and the inverter follows the setpoint.
 
+The three-phase Ocean 2 differs on the read side: it publishes 32-bit values
+**high word first**, so a PV string voltage of 486.9 V arrives as `0x43F3`,
+`0x7333` and decodes to a denormal close to zero when read low word first. The
+model traits in `models.py` (`high_word_first`) carry this per model. How the
+Ocean 2 orders words on writes has not been measured.
+
 Four layouts occur, modelled as `RegisterType` in `models.py`:
 
 | `RegisterType` | Words | Notes                                                        |
@@ -115,7 +121,12 @@ The main blocks are the following:
 | Device info | 40002 | 12    | Product type, serial number, firmware  |
 | Live        | 40519 | 89    | Power, limits, voltages, currents, PV  |
 | Faults      | 42049 | 45    | Fault count and codes, per-battery SOC |
-| Energy      | 42161 | 100   | Lifetime and daily energy counters     |
+| Energy      | 42161 | 100   | Lifetime and daily energy counters\*   |
+
+\* In kWh, except on the three-phase Ocean 2, which reports them in Wh
+(`energy_in_watt_hours` in the model traits). Over 22 minutes its solar-today
+counter rose by 189 while the solar power register averaged 517 W, which
+integrates to 190 Wh.
 
 ## Not yet mapped
 

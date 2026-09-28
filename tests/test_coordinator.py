@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import struct
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -677,6 +678,56 @@ def test_gets_and_decodes_raw_data(
 
     assert result == {"battery_count": 2.0, "grid_power": 42.0}
     coordinator._modbus_client.async_read.assert_awaited_once_with(100, 2)
+
+
+def _float_words(value: float, high_word_first: bool) -> list[int]:
+    high, low = struct.unpack(">HH", struct.pack(">f", value))
+    return [high, low] if high_word_first else [low, high]
+
+
+def _read_energy_and_power(coordinator, model: models.InverterModel, energy, power):
+    coordinator.detected_model = model
+    coordinator._register_blocks = (
+        models.RegisterBlock(
+            (
+                models.RegisterDef("solar_today", 100),
+                models.RegisterDef("grid_power", 102),
+            )
+        ),
+    )
+    high_word_first = model.traits.high_word_first
+    coordinator._modbus_client.connected = True
+    coordinator._modbus_client.async_read = AsyncMock(
+        return_value=[
+            *_float_words(energy, high_word_first),
+            *_float_words(power, high_word_first),
+        ]
+    )
+    return asyncio.run(coordinator.async_get_raw_data())
+
+
+def test_reads_ocean_2_energy_counters_as_kilowatt_hours(coordinator) -> None:
+    """The three-phase Ocean 2 reports its energy counters in Wh."""
+    result = _read_energy_and_power(
+        coordinator, models.InverterModel.OCEAN_2_THREE_PHASE, 11840.0, 517.0
+    )
+
+    assert result == {"solar_today": 11.84, "grid_power": 517.0}
+
+
+def test_other_models_report_energy_counters_in_kilowatt_hours(coordinator) -> None:
+    result = _read_energy_and_power(
+        coordinator, models.InverterModel.POWEROCEAN_PLUS, 11.84, 517.0
+    )
+
+    assert result == {"solar_today": 11.84, "grid_power": 517.0}
+
+
+def test_every_device_energy_counter_is_read_from_a_register() -> None:
+    """The Wh conversion applies to what the coordinator reads, so each counter
+    the device reports has to be a register."""
+    assert const.DEVICE_ENERGY_KEYS
+    assert const.DEVICE_ENERGY_KEYS <= const.REGISTERS_BY_KEY.keys()
 
 
 def test_modbus_disabled_recovers_when_telemetry_returns(

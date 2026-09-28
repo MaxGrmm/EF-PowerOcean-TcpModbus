@@ -63,6 +63,8 @@ class ModelTraits:
     high_word_first: bool = False
     # How far apart two registers may be and still share one read.
     max_register_gap: int = MAX_REGISTER_GAP
+    # Whether the lifetime and daily energy counters arrive in Wh rather than kWh.
+    energy_in_watt_hours: bool = False
 
     def identifies(
         self, product_number: int | None, product_category: int | None
@@ -147,6 +149,7 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         # It rejects the whole request when it reaches over an address it does not
         # implement, so only neighbouring registers can share a read.
         max_register_gap=0,
+        energy_in_watt_hours=True,
     ),
     # Nobody has scanned one yet, so this entry follows the three-phase Ocean 2:
     # same product number, same Modbus dialect, phase told apart by the category.

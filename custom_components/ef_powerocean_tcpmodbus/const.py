@@ -578,6 +578,14 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
     ),
 ]
 
+# The counters the device reports, as opposed to the calculated ones. They arrive in
+# kWh, or in Wh on a model whose traits say energy_in_watt_hours.
+DEVICE_ENERGY_KEYS: Final = frozenset(
+    energy_sensor.key
+    for energy_sensor in ENERGY_SENSOR_MAP
+    if not energy_sensor.is_calculated
+)
+
 
 # The daily sensors have been shown to not reliably reset at midnight. They are
 # therefore calculated using the respective total sensor, but we still expose the

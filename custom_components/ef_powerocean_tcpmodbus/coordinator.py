@@ -34,6 +34,7 @@ from .const import (
     DEFAULT_MAX_SOLAR_POWER,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL_S,
+    DEVICE_ENERGY_KEYS,
     DEVICE_INFO_BLOCK,
     DOMAIN,
     FIRMWARE_VERSION,
@@ -267,16 +268,24 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Reconnect failed!")
 
         try:
+            traits = self.device_model.traits
             for register_block in self._register_blocks:
                 raw = await self._modbus_client.async_read(
                     register_block.start, register_block.count
                 )
                 for register in register_block.registers:
-                    data[register.key] = decode_register(
+                    value = decode_register(
                         register_block.registers_for(raw, register),
                         register.data_type,
-                        self.device_model.traits.high_word_first,
+                        traits.high_word_first,
                     )
+                    if (
+                        value is not None
+                        and traits.energy_in_watt_hours
+                        and register.key in DEVICE_ENERGY_KEYS
+                    ):
+                        value = round(value / 1000, 3)
+                    data[register.key] = value
 
             if is_modbus_disabled(
                 self.serial_number,
