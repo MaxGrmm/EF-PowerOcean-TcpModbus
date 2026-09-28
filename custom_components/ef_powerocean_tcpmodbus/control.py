@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum, auto
 from typing import Any, Protocol
 
@@ -36,6 +36,7 @@ from .const import (
     GUARD_SOC_HYSTERESIS,
     GUARD_TRACKING_STEP_W,
     HEARTBEAT_REGISTER,
+    HEARTBEAT_WINDOW_S,
     HOLD_SETPOINT_W,
     MIN_CONTROL_DWELL_S,
 )
@@ -189,7 +190,7 @@ class ControlManager:
 
     @property
     def enabled(self) -> bool:
-        """Return whether the user has switched Modbus control on in the config."""
+        """Return whether the user has switched Modbus control on."""
         return self._enabled
 
     @property
@@ -205,6 +206,19 @@ class ControlManager:
     def in_control(self) -> bool:
         """Return whether the inverter is currently accepting our commands."""
         return self._enabled and self._heartbeat.in_control
+
+    @property
+    def handing_back(self) -> bool:
+        """Return whether the inverter still obeys us after control was turned off."""
+        return not self._enabled and self._heartbeat.in_control
+
+    @property
+    def hands_back_at(self) -> datetime | None:
+        """Return when the inverter returns to the app, while it is handing back."""
+        last_beat = self._heartbeat.last_success
+        if not self.handing_back or last_beat is None:
+            return None
+        return last_beat + timedelta(seconds=HEARTBEAT_WINDOW_S)
 
     @property
     def selected_feature(self) -> ControlFeature:
@@ -245,6 +259,23 @@ class ControlManager:
         return self._grid_feed_restore
 
     @property
+    def grid_feed_restore_attributes(self) -> dict[str, Any]:
+        """Return the settings to restore, with the mode as its enum."""
+        restore = self._grid_feed_restore or {}
+        return {
+            "restores_feed_mode": GridFeedMode.from_register(restore.get("mode")),
+            "restores_feed_in_power_max": restore.get("power"),
+        }
+
+    @staticmethod
+    def grid_feed_allowed(data: dict[str, Any] | None) -> bool:
+        """Return whether a frame shows the inverter allowed to export."""
+        data = data or {}
+        return _allows_export(
+            data.get("grid_feed_mode"), data.get("feed_in_power_max") or 0
+        )
+
+    @property
     def grid_feed_switchable(self) -> bool:
         """Return whether stopping the export could be undone again.
 
@@ -272,6 +303,8 @@ class ControlManager:
     def status(self) -> ControlStatus:
         """Explain, in one word, what the selected mode is achieving."""
         if not self.in_control:
+            if self.handing_back:
+                return ControlStatus.HANDING_BACK
             return ControlStatus.NO_MODBUS_CONTROL
         if self._blocking_guard is not None:
             if self._deviation is not ControlStatus.ACTIVE:
@@ -290,6 +323,7 @@ class ControlManager:
     def dump_state(self) -> dict[str, Any]:
         """Return what must survive a restart, in a JSON-serializable form."""
         return {
+            "modbus_control": self._enabled,
             "feature_power": {
                 str(feature): power for feature, power in self._feature_power.items()
             },
@@ -302,6 +336,9 @@ class ControlManager:
 
     def load_state(self, stored: dict[str, Any]) -> None:
         """Restore what each mode would command, but never which one was selected."""
+        if (enabled := stored.get("modbus_control")) is not None:
+            self._enabled = bool(enabled)
+            self._control_stale = self._enabled
         for feature in self._feature_power:
             if (
                 power := (stored.get("feature_power") or {}).get(str(feature))
@@ -326,6 +363,32 @@ class ControlManager:
     async def async_stop(self) -> None:
         await self._heartbeat.async_stop()
 
+    async def async_set_enabled(self, enabled: bool) -> None:
+        """Take control from the app, or hand it back.
+
+        Nothing is written when handing back: stopping the heartbeat is enough, and
+        the inverter returns to its app settings once its 60 s window runs out.
+        """
+        if enabled == self._enabled:
+            return
+        self._enabled = enabled
+        if enabled:
+            # We cannot know what the inverter follows now, so the next poll re-sends.
+            self._control_stale = True
+            self._heartbeat.start()
+        else:
+            await self._heartbeat.async_stop()
+            # Start over as if freshly loaded, so no mode comes back by itself.
+            self._feature = ControlFeature.AUTOMATIC
+            self._commanded_feature = ControlFeature.AUTOMATIC
+            self._commanded_power = 0.0
+            self._retuned_from = None
+            self._blocking_guard = None
+            self._handback = GuardHandback()
+            self._control_stale = False
+            self._reset_deviation()
+        self._on_update()
+
     def mark_stale(self) -> None:
         """Take stock of the inverter after a connection outage.
 
@@ -342,8 +405,8 @@ class ControlManager:
         """Refuse a command the inverter would store and ignore."""
         if not self._enabled:
             raise HomeAssistantError(
-                "Modbus control is off. Enable Modbus Control in the integration "
-                "configuration to command the inverter; nothing was written."
+                "Modbus control is off. Turn on the Modbus Control switch to "
+                "command the inverter; nothing was written."
             )
 
     async def _async_require_control_authority(self) -> None:

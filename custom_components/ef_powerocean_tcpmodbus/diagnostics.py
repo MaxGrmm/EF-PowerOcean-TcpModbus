@@ -35,6 +35,7 @@ async def async_get_config_entry_diagnostics(
             "detected_model": coordinator.detected_model,
             "pymodbus": coordinator.get_pymodbus_version(),
             "heartbeat_supported": coordinator.control.heartbeat_supported,
+            "modbus_control_enabled": coordinator.control.enabled,
             "last_heartbeat_time": coordinator.control.last_heartbeat_time,
             "in_control": coordinator.control.in_control,
             "selected_feature": str(coordinator.control.selected_feature),

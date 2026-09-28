@@ -93,7 +93,6 @@ To add it manually instead:
 | Maximum solar power        | 12 kW                  | Installed solar power (1–60 kW)                                                                                                                                  |
 | Maximum grid power         | 15 kW                  | Expected maximum grid power used to reject implausible readings (1–60 kW)                                                                                        |
 | Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
-| Modbus Control             | false                  | Allow this integration to command the battery. See [Battery Control](#battery-control).                                                                          |
 | Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
 
 To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**
@@ -102,9 +101,11 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 
 ## Battery Control
 
-Off by default. Turning **Modbus Control** on makes the integration hold control
-authority over the inverter, which **locks the EcoFlow app out control** for
-as long as the integration is running and Modbus Control is turned on.
+Off by default. Turning on the **Modbus Control** switch (in the device's
+Configuration section) makes the integration hold control authority over the
+inverter, which **locks the EcoFlow app out control** for as long as the
+integration is running and the switch is on. Turning it off hands control back to
+the app after about 60 seconds.
 
 The **Battery Mode** select is the primary control:
 
@@ -163,24 +164,25 @@ on and whether a full or empty battery blocks the target. If the inverter misses
 target a guard sets, the status shows Ramping or Unreachable instead of the guard. The guard is still available as a `guard` attribute on the Control Status sensor,
 for automations to read and act on.
 
-| Control Status             | Meaning                                                        |
-| -------------------------- | -------------------------------------------------------------- |
-| No Modbus control          | Modbus Control is disabled or control authority was lost       |
-| Automatic                  | The inverter is running its normal self-consumption mode       |
-| Active                     | The selected target is being maintained                        |
-| Ramping                    | The inverter has not reached the target for a few polls        |
-| Charge limit reached       | The Charge Limit guard is preventing further charging          |
-| Reserve reached            | The Battery Reserve guard is preventing further discharge      |
-| Unreachable: battery full  | The target requires the battery to absorb power, but it cannot |
-| Unreachable: battery empty | The target requires the battery to supply power, but it cannot |
+| Control Status             | Meaning                                                         |
+| -------------------------- | --------------------------------------------------------------- |
+| No Modbus control          | Modbus Control is disabled or control authority was lost        |
+| Handing back to the app    | Modbus Control was switched off; the app takes over within 60 s |
+| Automatic                  | The inverter is running its normal self-consumption mode        |
+| Active                     | The selected target is being maintained                         |
+| Ramping                    | The inverter has not reached the target for a few polls         |
+| Charge limit reached       | The Charge Limit guard is preventing further charging           |
+| Reserve reached            | The Battery Reserve guard is preventing further discharge       |
+| Unreachable: battery full  | The target requires the battery to absorb power, but it cannot  |
+| Unreachable: battery empty | The target requires the battery to supply power, but it cannot  |
 
 On the device page the two are deliberately kept apart:
 
-| Section           | Entities                                                                        | Meaning                                                          |
-| ----------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **Controls**      | Battery Mode, Charge/Discharge/Export Power                                     | What you are asking the inverter to do right now                 |
-| **Configuration** | Charge Limit, Battery Reserve, LED Brightness, Battery Saver Mode, Grid Feed-in | Standing settings; the two guards bind whatever mode is selected |
-| **Sensors**       | Control Status                                                                  | What the inverter is actually doing about it                     |
+| Section           | Entities                                                                                        | Meaning                                                          |
+| ----------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **Controls**      | Battery Mode, Charge/Discharge/Export Power                                                     | What you are asking the inverter to do right now                 |
+| **Configuration** | Modbus Control, Charge Limit, Battery Reserve, LED Brightness, Battery Saver Mode, Grid Feed-in | Standing settings; the two guards bind whatever mode is selected |
+| **Sensors**       | Control Status                                                                                  | What the inverter is actually doing about it                     |
 
 Each mode's power stays editable while another mode is selected, so a command can be
 set up before it is needed. Only the selected mode's value is ever sent.

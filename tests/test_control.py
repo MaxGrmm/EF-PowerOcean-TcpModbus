@@ -13,7 +13,10 @@ from custom_components.ef_powerocean_tcpmodbus import const, models
 from custom_components.ef_powerocean_tcpmodbus import control as control_module
 from custom_components.ef_powerocean_tcpmodbus import heartbeat as heartbeat_module
 from custom_components.ef_powerocean_tcpmodbus.modbus import ModbusRejected
-from custom_components.ef_powerocean_tcpmodbus.switch import EcoFlowGridFeedSwitch
+from custom_components.ef_powerocean_tcpmodbus.switch import (
+    GRID_FEED_SWITCH,
+    EcoFlowSwitch,
+)
 
 HEARTBEAT_START = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
 
@@ -753,6 +756,42 @@ def test_polls_write_nothing_while_modbus_control_is_off(control) -> None:
     control._modbus_client.async_write.assert_not_awaited()
 
 
+def test_switching_modbus_control_off_hands_back_and_on_takes_control_again(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Letting the heartbeat lapse is the hand-back, so nothing is written for it."""
+    write = allow_writes(control, monkeypatch)
+    control._data = {"battery_soc": 50.0}
+    asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
+    write.reset_mock()
+
+    asyncio.run(control.async_set_enabled(False))
+    asyncio.run(control.async_poll({"battery_soc": 50.0}))
+
+    write.assert_not_awaited()
+    assert control.status is Status.HANDING_BACK
+    assert control.hands_back_at == HEARTBEAT_START + timedelta(
+        seconds=const.HEARTBEAT_WINDOW_S
+    )
+    assert control.selected_feature is Feature.AUTOMATIC
+
+    lapsed = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_WINDOW_S + 1)
+    monkeypatch.setattr(control_module.dt, "now", lambda: lapsed)
+    assert control.status is Status.NO_MODBUS_CONTROL
+    assert control.hands_back_at is None
+
+    control._heartbeat.start = Mock()
+    asyncio.run(control.async_set_enabled(True))
+    # The restarted heartbeat has landed.
+    advance(control, monkeypatch, const.HEARTBEAT_WINDOW_S + 2)
+    asyncio.run(control.async_poll({"battery_soc": 50.0}))
+
+    control._heartbeat.start.assert_called_once()
+    # The inverter may still follow the old command, so the default is re-sent.
+    assert commands(write) == [(const.CONTROL_COMMAND_REGISTER, [0x0000, 0x0000])]
+    assert control.status is Status.AUTOMATIC
+
+
 def test_a_reserve_of_zero_disables_the_guard(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -888,6 +927,7 @@ def test_the_parameters_survive_a_restart_but_the_selected_mode_does_not(
     control._feature = Feature.CHARGE_BATTERY
 
     stored = control.dump_state()
+    control._enabled = False
     control._feature_power[Feature.CHARGE_BATTERY] = 0.0
     control._battery_saver = False
     control._grid_feed_restore = None
@@ -895,6 +935,7 @@ def test_the_parameters_survive_a_restart_but_the_selected_mode_does_not(
     control._feature = Feature.AUTOMATIC
     control.load_state(stored)
 
+    assert control.enabled is True
     assert control.feature_power(Feature.CHARGE_BATTERY) == 4000.0
     assert control.charge_limit_soc == 80.0
     assert control.battery_saver_commanded is True
@@ -912,7 +953,8 @@ def test_the_grid_feed_switch_stops_the_export_and_restores_it_exactly(
     control, monkeypatch: pytest.MonkeyPatch, mode: models.GridFeedMode, power: int
 ) -> None:
     allow_writes(control, monkeypatch)
-    switch = EcoFlowGridFeedSwitch.__new__(EcoFlowGridFeedSwitch)
+    switch = EcoFlowSwitch.__new__(EcoFlowSwitch)
+    switch._definition = GRID_FEED_SWITCH
     switch.coordinator = SimpleNamespace(control=control, data={})
     writes: list[tuple[str, int]] = []
     control._write_setting = AsyncMock(

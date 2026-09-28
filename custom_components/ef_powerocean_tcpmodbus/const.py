@@ -32,7 +32,6 @@ from .models import (
     RegisterDef,
     RegisterType,
     SensorDef,
-    SwitchDef,
     plan_blocks_for_model,
     requires_modbus_control,
 )
@@ -622,19 +621,6 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
 MODBUS_CONTROL_BINARY_SENSOR: Final = BinarySensorDef(
     key="modbus_control",
     device_class="running",
-)
-
-BATTERY_SAVER_SWITCH: Final = SwitchDef(
-    key="battery_saver_mode_control",
-    entity_category=EntityCategory.CONFIG,
-    icon="mdi:leaf",
-)
-
-GRID_FEED_SWITCH: Final = SwitchDef(
-    key="grid_feed",
-    entity_category=EntityCategory.CONFIG,
-    icon="mdi:transmission-tower-export",
-    availability=requires_modbus_control,
 )
 
 CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
