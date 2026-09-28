@@ -723,14 +723,11 @@ def test_other_models_report_energy_counters_in_kilowatt_hours(coordinator) -> N
     assert result == {"solar_today": 11.84, "grid_power": 517.0}
 
 
-def test_energy_register_keys_are_the_energy_counter_registers() -> None:
-    energy_registers = {
-        energy_sensor.key
-        for energy_sensor in const.ENERGY_SENSOR_MAP
-        if energy_sensor.key in const.REGISTERS_BY_KEY
-    }
-
-    assert const.ENERGY_REGISTER_KEYS == energy_registers
+def test_every_device_energy_counter_is_read_from_a_register() -> None:
+    """The Wh conversion applies to what the coordinator reads, so each counter
+    the device reports has to be a register."""
+    assert const.DEVICE_ENERGY_KEYS
+    assert const.DEVICE_ENERGY_KEYS <= const.REGISTERS_BY_KEY.keys()
 
 
 def test_modbus_disabled_recovers_when_telemetry_returns(

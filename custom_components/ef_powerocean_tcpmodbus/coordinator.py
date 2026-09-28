@@ -34,9 +34,9 @@ from .const import (
     DEFAULT_MAX_SOLAR_POWER,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL_S,
+    DEVICE_ENERGY_KEYS,
     DEVICE_INFO_BLOCK,
     DOMAIN,
-    ENERGY_REGISTER_KEYS,
     FIRMWARE_VERSION,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
@@ -282,7 +282,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     if (
                         value is not None
                         and traits.energy_in_watt_hours
-                        and register.key in ENERGY_REGISTER_KEYS
+                        and register.key in DEVICE_ENERGY_KEYS
                     ):
                         value = round(value / 1000, 3)
                     data[register.key] = value
