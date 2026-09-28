@@ -52,7 +52,6 @@ from .energy_processor import EnergyProcessor
 from .modbus import ModbusClient
 from .models import (
     CoordinatorStatus,
-    GridFeedMode,
     InverterModel,
     NumberWritableDef,
     RegisterDef,
@@ -69,11 +68,6 @@ from .telemetry import (
 from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _allows_export(mode: float, power: float) -> bool:
-    """Return whether these feed settings let the inverter export at all."""
-    return GridFeedMode.from_register(mode) is GridFeedMode.UNLIMITED or int(power) > 0
 
 
 class EcoflowCoordinator(DataUpdateCoordinator):
@@ -133,9 +127,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._modbus_client = ModbusClient(self.host, self.port)
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
-        # The export settings to put back, taken from the device itself whenever it
-        # allows an export at all.
-        self._grid_feed_restore: dict[str, int] | None = None
 
         self.control = ControlManager(
             self._modbus_client,
@@ -146,6 +137,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             scan_interval_s=self.scan_interval,
             on_update=self.async_update_listeners,
             on_refresh=self.async_refresh,
+            write_setting=self._async_write_register,
         )
         self._energy_processor = EnergyProcessor(self.limits)
         self._status: CoordinatorStatus | None = None
@@ -180,23 +172,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
 
-    @property
-    def grid_feed_restore(self) -> dict[str, int] | None:
-        """Return the settings to restore, or None while the export is not allowed."""
-        return self._grid_feed_restore
-
-    @property
-    def grid_feed_switchable(self) -> bool:
-        """Return whether stopping the export could be undone again.
-
-        With nothing but a limited mode and a zero cap to restore the switch would
-        be a one-way door: it could only ever turn the export off.
-        """
-        original = self._grid_feed_restore
-        return original is not None and _allows_export(
-            original["mode"], original["power"]
-        )
-
     # ── Persistence ───────────────────────────────────────────────────────────
 
     def _persisted_state(self) -> dict[str, Any]:
@@ -206,7 +181,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             "last_checked_time": self._last_checked_time.isoformat()
             if self._last_checked_time is not None
             else None,
-            "grid_feed_restore": self._grid_feed_restore,
             **self.control.dump_state(),
             **self._energy_processor.dump_state(),
         }
@@ -218,7 +192,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         self._last_checked_data = stored.get("last_checked_data") or {}
         self._last_checked_time = parse_datetime(stored.get("last_checked_time"))
-        self._grid_feed_restore = stored.get("grid_feed_restore") or None
         self.control.load_state(stored)
         self._energy_processor.load_state(stored)
 
@@ -339,8 +312,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 "Read failed; entities stay unavailable until the next successful read."
             )
 
-        self._track_grid_feed_restore(raw_data)
-
         try:
             result = self._energy_processor.validate_totals(
                 raw_data, self._last_checked_data, self._last_checked_time
@@ -375,50 +346,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             return None
 
     # ── Parameter and setpoint writes ─────────────────────────────────────────
-
-    def _track_grid_feed_restore(self, raw_data: dict[str, Any]) -> None:
-        """Remember the export settings to put back, while there are any to keep.
-
-        A limited mode with a zero cap is the one thing never adopted: it is what the
-        switch itself writes, so adopting it would overwrite the only value that can
-        undo it. Any other reading is the inverter's own setting, so raising the cap
-        in the EcoFlow app - an installer lifting an export limit, say - is picked
-        up on the next poll rather than needing the entry to be set up again.
-        """
-        mode = raw_data.get("grid_feed_mode")
-        power = raw_data.get("feed_in_power_max")
-        if mode is None or power is None or not _allows_export(mode, power):
-            return
-
-        updated = {"mode": int(mode), "power": int(power)}
-        if updated != self._grid_feed_restore:
-            _LOGGER.debug("Grid feed settings to restore are now %s", updated)
-        self._grid_feed_restore = updated
-
-    async def async_set_grid_feed(self, allow: bool) -> None:
-        """Stop the export, or put back the settings found when the entry was set up.
-
-        The power cap only applies in limited mode, so the two registers are written
-        in the order that never leaves the export briefly uncapped.
-        """
-        restore = self._grid_feed_restore
-        if not self.grid_feed_switchable:
-            raise HomeAssistantError(
-                "The grid feed cannot be switched: the inverter has not reported an "
-                "export it would allow, so there is nothing to restore."
-            )
-
-        mode = self._registers_by_key["grid_feed_mode"]
-        power = self._registers_by_key["feed_in_power_max"]
-        mode_value = restore["mode"] if allow else GridFeedMode.LIMITED.register_value
-        # Readers expect the enum a poll derives, never the register's raw 0/1.
-        mode_state = GridFeedMode.from_register(mode_value)
-        if allow:
-            await self._async_write_register(power, restore["power"])
-            await self._async_write_register(mode, mode_value, publish_as=mode_state)
-        else:
-            await self._async_write_register(mode, mode_value, publish_as=mode_state)
-            await self._async_write_register(power, 0)
 
     async def async_write_modbus_register(
         self, entity_def: NumberWritableDef, value: int

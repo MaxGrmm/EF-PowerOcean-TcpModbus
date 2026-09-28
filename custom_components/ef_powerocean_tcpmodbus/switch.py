@@ -89,7 +89,7 @@ class EcoFlowGridFeedSwitch(EcoFlowSwitch):
 
     @property
     def available(self) -> bool:
-        return super().available and self.coordinator.grid_feed_switchable
+        return super().available and self.coordinator.control.grid_feed_switchable
 
     @property
     def is_on(self) -> bool:
@@ -100,14 +100,14 @@ class EcoFlowGridFeedSwitch(EcoFlowSwitch):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        restore = self.coordinator.grid_feed_restore or {}
+        restore = self.coordinator.control.grid_feed_restore or {}
         return {
             "restores_feed_mode": GridFeedMode.from_register(restore.get("mode")),
             "restores_feed_in_power_max": restore.get("power"),
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_grid_feed(True)
+        await self.coordinator.control.async_set_grid_feed(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_grid_feed(False)
+        await self.coordinator.control.async_set_grid_feed(False)

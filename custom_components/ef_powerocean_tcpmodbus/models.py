@@ -527,6 +527,7 @@ class SwitchDef:
     device_class: str | None = None
     entity_category: EntityCategory | None = None
     icon: str | None = None
+    availability: Callable[[ControlStatus], bool] | None = None
 
 
 @dataclass(frozen=True)

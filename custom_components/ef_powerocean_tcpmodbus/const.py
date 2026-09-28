@@ -622,13 +622,11 @@ BATTERY_SAVER_SWITCH: Final = SwitchDef(
     icon="mdi:leaf",
 )
 
-# Turning this off writes the feed mode and its power cap directly, which the
-# inverter applies without Modbus control authority, so the EcoFlow app keeps
-# control of everything else.
 GRID_FEED_SWITCH: Final = SwitchDef(
     key="grid_feed",
     entity_category=EntityCategory.CONFIG,
     icon="mdi:transmission-tower-export",
+    availability=requires_modbus_control,
 )
 
 CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
