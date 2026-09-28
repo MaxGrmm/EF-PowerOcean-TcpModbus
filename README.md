@@ -93,7 +93,6 @@ To add it manually instead:
 | Maximum solar power        | 12 kW                  | Installed solar power (1–60 kW)                                                                                                                                  |
 | Maximum grid power         | 15 kW                  | Expected maximum grid power used to reject implausible readings (1–60 kW)                                                                                        |
 | Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
-| Modbus Control             | false                  | Allow this integration to command the battery. See [Battery Control](#battery-control).                                                                          |
 | Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
 
 To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**
@@ -102,9 +101,11 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 
 ## Battery Control
 
-Off by default. Turning **Modbus Control** on makes the integration hold control
-authority over the inverter, which **locks the EcoFlow app out control** for
-as long as the integration is running and Modbus Control is turned on.
+Off by default. Turning on the **Modbus Control** switch (in the device's
+Configuration section) makes the integration hold control authority over the
+inverter, which **locks the EcoFlow app out control** for as long as the
+integration is running and the switch is on. Turning it off hands control back to
+the app after about 60 seconds.
 
 The **Battery Mode** select is the primary control:
 
@@ -176,11 +177,11 @@ for automations to read and act on.
 
 On the device page the two are deliberately kept apart:
 
-| Section           | Entities                                                                        | Meaning                                                          |
-| ----------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **Controls**      | Battery Mode, Charge/Discharge/Export Power                                     | What you are asking the inverter to do right now                 |
-| **Configuration** | Charge Limit, Battery Reserve, LED Brightness, Battery Saver Mode, Grid Feed-in | Standing settings; the two guards bind whatever mode is selected |
-| **Sensors**       | Control Status                                                                  | What the inverter is actually doing about it                     |
+| Section           | Entities                                                                                        | Meaning                                                          |
+| ----------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **Controls**      | Battery Mode, Charge/Discharge/Export Power                                                     | What you are asking the inverter to do right now                 |
+| **Configuration** | Modbus Control, Charge Limit, Battery Reserve, LED Brightness, Battery Saver Mode, Grid Feed-in | Standing settings; the two guards bind whatever mode is selected |
+| **Sensors**       | Control Status                                                                                  | What the inverter is actually doing about it                     |
 
 Each mode's power stays editable while another mode is selected, so a command can be
 set up before it is needed. Only the selected mode's value is ever sent.

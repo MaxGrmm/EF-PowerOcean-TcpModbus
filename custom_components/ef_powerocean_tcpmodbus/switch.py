@@ -10,7 +10,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import BATTERY_SAVER_SWITCH, DOMAIN, GRID_FEED_SWITCH
+from .const import (
+    BATTERY_SAVER_SWITCH,
+    DOMAIN,
+    GRID_FEED_SWITCH,
+    MODBUS_CONTROL_SWITCH,
+)
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .models import GridFeedMode, SwitchDef
@@ -28,6 +33,7 @@ async def async_setup_entry(
 
     async_add_entities(
         [
+            EcoFlowModbusControlSwitch(coordinator, entry, MODBUS_CONTROL_SWITCH),
             EcoFlowBatterySaverSwitch(coordinator, entry, BATTERY_SAVER_SWITCH),
             EcoFlowGridFeedSwitch(coordinator, entry, GRID_FEED_SWITCH),
         ]
@@ -48,6 +54,24 @@ class EcoFlowSwitch(EcoFlowBaseEntity, SwitchEntity):
         self._attr_entity_category = definition.entity_category
         if definition.icon:
             self._attr_icon = definition.icon
+
+
+class EcoFlowModbusControlSwitch(EcoFlowSwitch):
+    """Whether the integration holds control of the inverter.
+
+    While on, the EcoFlow app cannot control the system. Turning it off hands
+    control back to the app after about 60 seconds.
+    """
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.control.enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.control.async_set_enabled(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.control.async_set_enabled(False)
 
 
 class EcoFlowBatterySaverSwitch(EcoFlowSwitch):

@@ -753,6 +753,32 @@ def test_polls_write_nothing_while_modbus_control_is_off(control) -> None:
     control._modbus_client.async_write.assert_not_awaited()
 
 
+def test_switching_modbus_control_off_hands_back_and_on_takes_control_again(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Letting the heartbeat lapse is the hand-back, so nothing is written for it."""
+    write = allow_writes(control, monkeypatch)
+    control._data = {"battery_soc": 50.0}
+    asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
+    write.reset_mock()
+
+    asyncio.run(control.async_set_enabled(False))
+    asyncio.run(control.async_poll({"battery_soc": 50.0}))
+
+    write.assert_not_awaited()
+    assert control.status is Status.NO_MODBUS_CONTROL
+    assert control.selected_feature is Feature.AUTOMATIC
+
+    control._heartbeat.start = Mock()
+    asyncio.run(control.async_set_enabled(True))
+    asyncio.run(control.async_poll({"battery_soc": 50.0}))
+
+    control._heartbeat.start.assert_called_once()
+    # The inverter may still follow the old command, so the default is re-sent.
+    assert commands(write) == [(const.CONTROL_COMMAND_REGISTER, [0x0000, 0x0000])]
+    assert control.status is Status.AUTOMATIC
+
+
 def test_a_reserve_of_zero_disables_the_guard(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -888,6 +914,7 @@ def test_the_parameters_survive_a_restart_but_the_selected_mode_does_not(
     control._feature = Feature.CHARGE_BATTERY
 
     stored = control.dump_state()
+    control._enabled = False
     control._feature_power[Feature.CHARGE_BATTERY] = 0.0
     control._battery_saver = False
     control._grid_feed_restore = None
@@ -895,6 +922,7 @@ def test_the_parameters_survive_a_restart_but_the_selected_mode_does_not(
     control._feature = Feature.AUTOMATIC
     control.load_state(stored)
 
+    assert control.enabled is True
     assert control.feature_power(Feature.CHARGE_BATTERY) == 4000.0
     assert control.charge_limit_soc == 80.0
     assert control.battery_saver_commanded is True

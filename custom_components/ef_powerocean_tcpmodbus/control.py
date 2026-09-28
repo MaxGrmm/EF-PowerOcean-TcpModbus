@@ -189,7 +189,7 @@ class ControlManager:
 
     @property
     def enabled(self) -> bool:
-        """Return whether the user has switched Modbus control on in the config."""
+        """Return whether the user has switched Modbus control on."""
         return self._enabled
 
     @property
@@ -290,6 +290,7 @@ class ControlManager:
     def dump_state(self) -> dict[str, Any]:
         """Return what must survive a restart, in a JSON-serializable form."""
         return {
+            "modbus_control": self._enabled,
             "feature_power": {
                 str(feature): power for feature, power in self._feature_power.items()
             },
@@ -302,6 +303,9 @@ class ControlManager:
 
     def load_state(self, stored: dict[str, Any]) -> None:
         """Restore what each mode would command, but never which one was selected."""
+        if (enabled := stored.get("modbus_control")) is not None:
+            self._enabled = bool(enabled)
+            self._control_stale = self._enabled
         for feature in self._feature_power:
             if (
                 power := (stored.get("feature_power") or {}).get(str(feature))
@@ -326,6 +330,32 @@ class ControlManager:
     async def async_stop(self) -> None:
         await self._heartbeat.async_stop()
 
+    async def async_set_enabled(self, enabled: bool) -> None:
+        """Take control from the app, or hand it back.
+
+        Nothing is written when handing back: stopping the heartbeat is enough, and
+        the inverter returns to its app settings once its 60 s window runs out.
+        """
+        if enabled == self._enabled:
+            return
+        self._enabled = enabled
+        if enabled:
+            # We cannot know what the inverter follows now, so the next poll re-sends.
+            self._control_stale = True
+            self._heartbeat.start()
+        else:
+            await self._heartbeat.async_stop()
+            # Start over as if freshly loaded, so no mode comes back by itself.
+            self._feature = ControlFeature.AUTOMATIC
+            self._commanded_feature = ControlFeature.AUTOMATIC
+            self._commanded_power = 0.0
+            self._retuned_from = None
+            self._blocking_guard = None
+            self._handback = GuardHandback()
+            self._control_stale = False
+            self._reset_deviation()
+        self._on_update()
+
     def mark_stale(self) -> None:
         """Take stock of the inverter after a connection outage.
 
@@ -342,8 +372,8 @@ class ControlManager:
         """Refuse a command the inverter would store and ignore."""
         if not self._enabled:
             raise HomeAssistantError(
-                "Modbus control is off. Enable Modbus Control in the integration "
-                "configuration to command the inverter; nothing was written."
+                "Modbus control is off. Turn on the Modbus Control switch to "
+                "command the inverter; nothing was written."
             )
 
     async def _async_require_control_authority(self) -> None:

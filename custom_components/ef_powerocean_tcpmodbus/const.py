@@ -630,6 +630,12 @@ BATTERY_SAVER_SWITCH: Final = SwitchDef(
     icon="mdi:leaf",
 )
 
+MODBUS_CONTROL_SWITCH: Final = SwitchDef(
+    key="modbus_control",
+    entity_category=EntityCategory.CONFIG,
+    icon="mdi:remote",
+)
+
 GRID_FEED_SWITCH: Final = SwitchDef(
     key="grid_feed",
     entity_category=EntityCategory.CONFIG,

@@ -22,8 +22,7 @@
           "solar_power_max": "Maximale Solar-Leistung [W]",
           "grid_power_max": "Maximale Netz-Leistung [W]",
           "scan_interval": "Abfrageintervall [s]",
-          "calc_solar_power": "Berechnung der Solarleistung",
-          "modbus_control": "Modbus-Steuerung"
+          "calc_solar_power": "Berechnung der Solarleistung"
         },
         "data_description": {
           "inverter_model": "Wählen Sie das Wechselrichtermodell.",
@@ -31,8 +30,7 @@
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "grid_power_max": "Die max. Netz-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
-          "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden.",
-          "modbus_control": "Die Modbus-Steuerung gibt dieser Integration dauerhaft die Kontrolle über den Wechselrichter. Solange sie aktiviert ist, kann die EcoFlow-App das System nicht steuern. Die Modbus-Steuerung kann jederzeit deaktiviert werden und nach etwa 60 Sekunden übernimmt die EcoFlow-App wieder die Kontrolle."
+          "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
         }
       },
       "warning": {
@@ -70,8 +68,7 @@
           "solar_power_max": "Maximale Solar-Leistung [W]",
           "grid_power_max": "Maximale Netz-Leistung [W]",
           "scan_interval": "Abfrageintervall [s]",
-          "calc_solar_power": "Berechnung der Solarleistung",
-          "modbus_control": "Modbus-Steuerung"
+          "calc_solar_power": "Berechnung der Solarleistung"
         },
         "data_description": {
           "inverter_model": "Wählen Sie das Wechselrichtermodell.",
@@ -79,8 +76,7 @@
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "grid_power_max": "Die max. Netz-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
-          "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden.",
-          "modbus_control": "Die Modbus-Steuerung gibt dieser Integration dauerhaft die Kontrolle über den Wechselrichter. Solange sie aktiviert ist, kann die EcoFlow-App das System nicht steuern. Die Modbus-Steuerung kann jederzeit deaktiviert werden und nach etwa 60 Sekunden übernimmt die EcoFlow-App wieder die Kontrolle."
+          "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
         }
       }
     },
@@ -426,6 +422,9 @@
       }
     },
     "switch": {
+      "modbus_control": {
+        "name": "Modbus-Steuerung"
+      },
       "battery_saver_mode_control": {
         "name": "Batteriesparmodus"
       },

@@ -10,6 +10,10 @@
 
 - Grid Feed-in switch that stops the export to the grid.
 
+### Changed
+
+- Modbus Control is now a switch in the device's Configuration section instead of an option in the setup and settings dialog, so it can be turned on and off without reloading the integration. An existing setting carries over.
+
 ## [2.5.2] - 2026-09-28
 
 ### Fixed
