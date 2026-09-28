@@ -149,10 +149,6 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         # It rejects the whole request when it reaches over an address it does not
         # implement, so only neighbouring registers can share a read.
         max_register_gap=0,
-        # Its energy counters are in Wh. Over 22 minutes solar today rose by 189
-        # while the solar power register averaged 517 W, which integrates to
-        # 190 Wh. Lifetime solar read 1109303 on a three-month-old system, which
-        # taken as kWh would be 1.1 GWh.
         energy_in_watt_hours=True,
     ),
     # Nobody has scanned one yet, so this entry follows the three-phase Ocean 2:
