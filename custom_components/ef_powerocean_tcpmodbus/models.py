@@ -5,12 +5,23 @@ The values that fill these in live in const.py; this module must not import it.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Collection,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass, field, replace
 from enum import IntEnum, StrEnum
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from homeassistant.const import EntityCategory, UnitOfEnergy
+
+if TYPE_CHECKING:
+    from .control import ControlManager
+    from .coordinator import EcoflowCoordinator
 
 MAX_REGISTERS_PER_READ: Final = 125
 # Reading a few unused registers is cheaper than a second round trip, so registers
@@ -523,14 +534,15 @@ class BinarySensorDef:
     entity_category: EntityCategory | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SwitchDef:
     key: str
-    name: str | None = None
-    device_class: str | None = None
-    entity_category: EntityCategory | None = None
-    icon: str | None = None
-    availability: Callable[[ControlStatus], bool] | None = None
+    icon: str
+    is_on: Callable[[EcoflowCoordinator], bool]
+    turn: Callable[[ControlManager, bool], Awaitable[None]]
+    attributes: Callable[[EcoflowCoordinator], dict[str, Any]] | None = None
+    available: Callable[[EcoflowCoordinator], bool] | None = None
+    entity_category: EntityCategory | None = EntityCategory.CONFIG
 
 
 @dataclass(frozen=True)

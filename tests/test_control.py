@@ -13,7 +13,10 @@ from custom_components.ef_powerocean_tcpmodbus import const, models
 from custom_components.ef_powerocean_tcpmodbus import control as control_module
 from custom_components.ef_powerocean_tcpmodbus import heartbeat as heartbeat_module
 from custom_components.ef_powerocean_tcpmodbus.modbus import ModbusRejected
-from custom_components.ef_powerocean_tcpmodbus.switch import EcoFlowGridFeedSwitch
+from custom_components.ef_powerocean_tcpmodbus.switch import (
+    GRID_FEED_SWITCH,
+    EcoFlowSwitch,
+)
 
 HEARTBEAT_START = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
 
@@ -940,7 +943,8 @@ def test_the_grid_feed_switch_stops_the_export_and_restores_it_exactly(
     control, monkeypatch: pytest.MonkeyPatch, mode: models.GridFeedMode, power: int
 ) -> None:
     allow_writes(control, monkeypatch)
-    switch = EcoFlowGridFeedSwitch.__new__(EcoFlowGridFeedSwitch)
+    switch = EcoFlowSwitch.__new__(EcoFlowSwitch)
+    switch._definition = GRID_FEED_SWITCH
     switch.coordinator = SimpleNamespace(control=control, data={})
     writes: list[tuple[str, int]] = []
     control._write_setting = AsyncMock(

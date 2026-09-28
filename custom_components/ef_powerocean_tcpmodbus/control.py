@@ -245,6 +245,23 @@ class ControlManager:
         return self._grid_feed_restore
 
     @property
+    def grid_feed_restore_attributes(self) -> dict[str, Any]:
+        """Return the settings to restore, with the mode as its enum."""
+        restore = self._grid_feed_restore or {}
+        return {
+            "restores_feed_mode": GridFeedMode.from_register(restore.get("mode")),
+            "restores_feed_in_power_max": restore.get("power"),
+        }
+
+    @staticmethod
+    def grid_feed_allowed(data: dict[str, Any] | None) -> bool:
+        """Return whether a frame shows the inverter allowed to export."""
+        data = data or {}
+        return _allows_export(
+            data.get("grid_feed_mode"), data.get("feed_in_power_max") or 0
+        )
+
+    @property
     def grid_feed_switchable(self) -> bool:
         """Return whether stopping the export could be undone again.
 
