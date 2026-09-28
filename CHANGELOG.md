@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.5.2] - 2026-09-28
 
 ### Fixed
 
@@ -9,7 +9,9 @@
 
 ### Changed
 
-- **Breaking:** Control Status now shows Ramping or Unreachable when the inverter is not doing what a guard asks for, instead of always showing Charge limit reached or Reserve reached. Automations that check for those states should read the new `guard` attribute instead.
+- Control Status now shows Ramping or Unreachable when the inverter is not doing what a guard asks for, instead of always showing Charge limit reached or Reserve reached. Automations that check for those states should read the new `guard` attribute instead.
+- Instead of using hardcoded defaults when setting up the integration, we query the integration and pre-fill the values for battery count, solar power etc. The user can adjust these manually during and after, but the pre-filled values should be good for the vast majority of users.
+- Rework tests to use [pytest-homeassistant-custom-component](https://github.com/MatthewFlamm/pytest-homeassistant-custom-component) and support all versions back to Home Assistant 2025.12.0
 
 ### Added
 
