@@ -13,6 +13,7 @@ from custom_components.ef_powerocean_tcpmodbus import const, models
 from custom_components.ef_powerocean_tcpmodbus import control as control_module
 from custom_components.ef_powerocean_tcpmodbus import heartbeat as heartbeat_module
 from custom_components.ef_powerocean_tcpmodbus.modbus import ModbusRejected
+from custom_components.ef_powerocean_tcpmodbus.switch import EcoFlowGridFeedSwitch
 
 HEARTBEAT_START = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
 
@@ -36,6 +37,7 @@ def control():
         scan_interval_s=const.DEFAULT_SCAN_INTERVAL_S,
         on_update=Mock(),
         on_refresh=AsyncMock(),
+        write_setting=AsyncMock(),
     )
     # A fresh manager assumes the device may still be following an earlier run; the
     # tests start from a settled state and say so where they mean otherwise.
@@ -58,6 +60,7 @@ def allow_writes(control, monkeypatch: pytest.MonkeyPatch, *, rejected=False):
 
 Feature = models.ControlFeature
 Status = models.ControlStatus
+Feed = models.GridFeedMode
 
 
 def commands(write) -> list[tuple[int, list[int]]]:
@@ -741,6 +744,15 @@ def test_an_untouched_install_never_takes_control(
     write.assert_not_awaited()
 
 
+def test_polls_write_nothing_while_modbus_control_is_off(control) -> None:
+    control._enabled = False
+
+    for _ in range(3):
+        asyncio.run(control.async_poll({"battery_soc": 50.0}))
+
+    control._modbus_client.async_write.assert_not_awaited()
+
+
 def test_a_reserve_of_zero_disables_the_guard(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -871,15 +883,107 @@ def test_the_parameters_survive_a_restart_but_the_selected_mode_does_not(
     control._charge_limit_soc = 80.0
     # A restart does not clear battery saver on the device, so it must not lie.
     control._battery_saver = True
+    control._grid_feed_restore = {"mode": 1, "power": 9000}
+    control._grid_feed_stopped = True
     control._feature = Feature.CHARGE_BATTERY
 
     stored = control.dump_state()
     control._feature_power[Feature.CHARGE_BATTERY] = 0.0
     control._battery_saver = False
+    control._grid_feed_restore = None
+    control._grid_feed_stopped = False
     control._feature = Feature.AUTOMATIC
     control.load_state(stored)
 
     assert control.feature_power(Feature.CHARGE_BATTERY) == 4000.0
     assert control.charge_limit_soc == 80.0
     assert control.battery_saver_commanded is True
+    assert control.grid_feed_restore == {"mode": 1, "power": 9000}
+    assert control._grid_feed_stopped is True
     assert control.selected_feature is Feature.AUTOMATIC
+
+
+# Unlimited mode ignores the cap, so it allows export even with a zero cap.
+@pytest.mark.parametrize(
+    ("mode", "power"),
+    [(Feed.LIMITED, 9000), (Feed.UNLIMITED, 0), (Feed.UNLIMITED, 9000)],
+)
+def test_the_grid_feed_switch_stops_the_export_and_restores_it_exactly(
+    control, monkeypatch: pytest.MonkeyPatch, mode: models.GridFeedMode, power: int
+) -> None:
+    allow_writes(control, monkeypatch)
+    switch = EcoFlowGridFeedSwitch.__new__(EcoFlowGridFeedSwitch)
+    switch.coordinator = SimpleNamespace(control=control, data={})
+    writes: list[tuple[str, int]] = []
+    control._write_setting = AsyncMock(
+        side_effect=lambda register, value, **_: writes.append((register.key, value))
+    )
+
+    def poll(mode: models.GridFeedMode, power: int) -> None:
+        switch.coordinator.data = {"grid_feed_mode": mode, "feed_in_power_max": power}
+        control._track_grid_feed_restore(switch.coordinator.data)
+
+    poll(mode, power)
+    assert switch.is_on
+    asyncio.run(control.async_set_grid_feed(False))
+    poll(Feed.LIMITED, 0)
+    assert not switch.is_on
+    asyncio.run(control.async_set_grid_feed(True))
+
+    # Each order keeps the export from ever being briefly uncapped.
+    assert writes == [
+        ("grid_feed_mode", 0),
+        ("feed_in_power_max", 0),
+        ("feed_in_power_max", power),
+        ("grid_feed_mode", mode.register_value),
+    ]
+
+
+def test_a_stopped_export_keeps_the_mode_to_restore_on_the_powerocean(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its cap at 40609 ignores our write, so a stop reads as a limited export."""
+    allow_writes(control, monkeypatch)
+    control._track_grid_feed_restore(
+        {"grid_feed_mode": Feed.UNLIMITED, "feed_in_power_max": 10000.0}
+    )
+
+    asyncio.run(control.async_set_grid_feed(False))
+    control._track_grid_feed_restore(
+        {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 10000.0}
+    )
+
+    assert control.grid_feed_restore == {"mode": 1, "power": 10000}
+
+
+def test_an_export_limit_raised_on_the_device_is_adopted(control) -> None:
+    """An installer lifting the limit should not need the entry to be set up again."""
+    control._track_grid_feed_restore(
+        {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 9000.0}
+    )
+    control._track_grid_feed_restore(
+        {"grid_feed_mode": Feed.UNLIMITED, "feed_in_power_max": 15000.0}
+    )
+
+    assert control.grid_feed_restore == {"mode": 1, "power": 15000}
+
+
+@pytest.mark.parametrize(
+    ("restore", "enabled"),
+    [
+        ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 0.0}, True),
+        ({"feed_in_power_max": 9000.0}, True),
+        ({"grid_feed_mode": Feed.UNLIMITED, "feed_in_power_max": 0.0}, False),
+    ],
+    ids=["limited-to-zero", "mode-not-read", "modbus-control-off"],
+)
+def test_the_grid_feed_switch_refuses_without_a_restore_or_modbus_control(
+    control, monkeypatch: pytest.MonkeyPatch, restore: dict, enabled: bool
+) -> None:
+    allow_writes(control, monkeypatch)
+    control._enabled = enabled
+    control._track_grid_feed_restore(restore)
+
+    with pytest.raises(control_module.HomeAssistantError):
+        asyncio.run(control.async_set_grid_feed(False))
+    control._write_setting.assert_not_awaited()

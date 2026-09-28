@@ -7,7 +7,7 @@ import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from .models import REGISTER_SIZES, GridMode, OperatingMode, RegisterType
+from .models import REGISTER_SIZES, GridFeedMode, GridMode, OperatingMode, RegisterType
 
 
 def _order_words(registers: list[int], high_word_first: bool) -> tuple[int, int]:
@@ -84,6 +84,7 @@ class TelemetryData:
     pv3_voltage: float | None = None
     system_modes: float | None = None
     battery_capacity: float | None = None
+    grid_feed_mode: float | None = None
     fault_codes: tuple[float | None, ...] = ()
 
     @classmethod
@@ -114,6 +115,7 @@ class TelemetryData:
             pv3_voltage=data.get("pv3_voltage"),
             system_modes=data.get("system_modes"),
             battery_capacity=data.get("battery_capacity"),
+            grid_feed_mode=data.get("grid_feed_mode"),
             fault_codes=tuple(value for _, value in sorted(faults)),
         )
 
@@ -275,5 +277,9 @@ def calculate_derived_values(
         )
 
     calculated["active_faults"] = _format_active_faults(data.fault_codes)
+
+    # Replaces the register's own 0/1 with the enum the sensor and the grid feed
+    # switch both read.
+    calculated["grid_feed_mode"] = GridFeedMode.from_register(data.grid_feed_mode)
 
     return calculated

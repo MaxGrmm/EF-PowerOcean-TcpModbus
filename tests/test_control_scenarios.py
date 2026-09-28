@@ -147,6 +147,7 @@ class Simulation:
             scan_interval_s=POLL_S,
             on_update=Mock(),
             on_refresh=AsyncMock(),
+            write_setting=AsyncMock(),
         )
         self.control._heartbeat._supported = True
         self.control._heartbeat._last_success = self.now

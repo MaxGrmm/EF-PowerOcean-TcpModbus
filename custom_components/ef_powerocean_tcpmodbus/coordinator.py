@@ -54,6 +54,7 @@ from .models import (
     CoordinatorStatus,
     InverterModel,
     NumberWritableDef,
+    RegisterDef,
     encode_register,
 )
 from .telemetry import (
@@ -136,6 +137,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             scan_interval_s=self.scan_interval,
             on_update=self.async_update_listeners,
             on_refresh=self.async_refresh,
+            write_setting=self._async_write_register,
         )
         self._energy_processor = EnergyProcessor(self.limits)
         self._status: CoordinatorStatus | None = None
@@ -348,6 +350,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     async def async_write_modbus_register(
         self, entity_def: NumberWritableDef, value: int
     ) -> None:
+        """Write a device setting from a number entity."""
+        await self._async_write_register(
+            RegisterDef(entity_def.read_key, entity_def.register, entity_def.data_type),
+            value,
+        )
+
+    async def _async_write_register(
+        self, register: RegisterDef, value: int, *, publish_as: Any = None
+    ) -> None:
         """Write a device setting and verify it by reading it back.
 
         Settings apply without Modbus control authority, unlike the control word and
@@ -357,11 +368,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             raise HomeAssistantError("Modbus client is not connected")
 
         target_value = int(value)
-        register_address = entity_def.register
-        key = entity_def.read_key
+        register_address = register.write_address or register.address
+        key = register.key
 
         try:
-            words = encode_register(target_value, entity_def.data_type)
+            words = encode_register(target_value, register.data_type)
         except ValueError as err:
             raise HomeAssistantError(str(err)) from err
 
@@ -380,7 +391,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         readback_value = decode_register(
             readback_words,
-            entity_def.data_type,
+            register.data_type,
             self.device_model.traits.high_word_first,
         )
         # A 32-bit register echoes the words just written and only swaps them into
@@ -401,5 +412,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             target_value,
         )
 
-        updated_data = {**(self.data or {}), key: target_value}
+        published = target_value if publish_as is None else publish_as
+        updated_data = {**(self.data or {}), key: published}
         self.async_set_updated_data(updated_data)

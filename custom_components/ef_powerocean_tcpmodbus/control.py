@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any
+from typing import Any, Protocol
 
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt
@@ -49,6 +48,7 @@ from .models import (
     ControlFeature,
     ControlMode,
     ControlStatus,
+    GridFeedMode,
     InverterModel,
     RegisterDef,
     RegisterType,
@@ -57,6 +57,34 @@ from .models import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class NotifyListeners(Protocol):
+    """Tells the entities to re-read the manager's state."""
+
+    def __call__(self) -> None: ...
+
+
+class RequestRefresh(Protocol):
+    """Polls the device now, so a write shows without waiting for the next poll."""
+
+    async def __call__(self) -> None: ...
+
+
+class WriteSetting(Protocol):
+    """Writes a register, verifies it and publishes the value, like a number does.
+
+    publish_as replaces the written value in the published data.
+    """
+
+    async def __call__(
+        self, register: RegisterDef, value: int, *, publish_as: Any = None
+    ) -> None: ...
+
+
+def _allows_export(mode: GridFeedMode | None, power: float) -> bool:
+    """Return whether these feed settings let the inverter export at all."""
+    return mode is GridFeedMode.UNLIMITED or int(power) > 0
 
 
 class HandbackPhase(Enum):
@@ -105,8 +133,9 @@ class ControlManager:
         inverter_model: InverterModel,
         enabled: bool,
         scan_interval_s: float,
-        on_update: Callable[[], None],
-        on_refresh: Callable[[], Awaitable[None]],
+        on_update: NotifyListeners,
+        on_refresh: RequestRefresh,
+        write_setting: WriteSetting,
     ) -> None:
         self._modbus_client = modbus_client
         self._registers_by_key = registers_by_key
@@ -114,6 +143,7 @@ class ControlManager:
         self._inverter_model = inverter_model
         self._on_update = on_update
         self._on_refresh = on_refresh
+        self._write_setting = write_setting
 
         self._enabled = enabled
         self._heartbeat = Heartbeat(modbus_client, scan_interval_s=scan_interval_s)
@@ -140,6 +170,11 @@ class ControlManager:
         # The setpoint that the latest small correction replaced.
         self._retuned_from: float | None = None
         self._battery_saver = False
+        # The export settings to put back, taken from the device itself whenever it
+        # allows an export at all.
+        self._grid_feed_restore: dict[str, int] | None = None
+        # While the switch holds the export off, readings are ours, not the device's.
+        self._grid_feed_stopped = False
         self._last_control_write_time: datetime | None = None
         # A restart within the inverter's control window leaves it still following the
         # method it was last told, so the first poll re-asserts rather than assuming
@@ -205,6 +240,23 @@ class ControlManager:
         return self._battery_saver
 
     @property
+    def grid_feed_restore(self) -> dict[str, int] | None:
+        """Return the settings to restore, or None while the export is not allowed."""
+        return self._grid_feed_restore
+
+    @property
+    def grid_feed_switchable(self) -> bool:
+        """Return whether stopping the export could be undone again.
+
+        With nothing but a limited mode and a zero cap to restore the switch would
+        be a one-way door: it could only ever turn the export off.
+        """
+        original = self._grid_feed_restore
+        return original is not None and _allows_export(
+            GridFeedMode.from_register(original["mode"]), original["power"]
+        )
+
+    @property
     def active_guard(self) -> ControlStatus | None:
         """Return the guard that is on, even while the status shows a problem."""
         return self._blocking_guard if self.in_control else None
@@ -244,6 +296,8 @@ class ControlManager:
             "charge_limit_soc": self._charge_limit_soc,
             "battery_reserve_soc": self._battery_reserve_soc,
             "battery_saver": self._battery_saver,
+            "grid_feed_restore": self._grid_feed_restore,
+            "grid_feed_stopped": self._grid_feed_stopped,
         }
 
     def load_state(self, stored: dict[str, Any]) -> None:
@@ -261,6 +315,8 @@ class ControlManager:
         # off would be a lie until the user toggled it twice.
         if (saver := stored.get("battery_saver")) is not None:
             self._battery_saver = bool(saver)
+        self._grid_feed_restore = stored.get("grid_feed_restore") or None
+        self._grid_feed_stopped = bool(stored.get("grid_feed_stopped"))
 
     def start(self) -> None:
         """Begin holding control authority, if the user switched control on."""
@@ -347,6 +403,58 @@ class ControlManager:
         except HomeAssistantError:
             self._battery_saver = previous
             raise
+
+    async def async_set_grid_feed(self, allow: bool) -> None:
+        """Stop the export, or put back the inverter's own last export settings.
+
+        The power cap only applies in limited mode, so the two registers are written
+        in the order that never leaves the export briefly uncapped.
+        """
+        restore = self._grid_feed_restore
+        if not self.grid_feed_switchable:
+            raise HomeAssistantError(
+                "The grid feed cannot be switched: the inverter has not reported an "
+                "export it would allow, so there is nothing to restore."
+            )
+        # The PowerOcean stores both registers but only acts on them under control.
+        await self._async_require_control_authority()
+
+        mode = self._registers_by_key["grid_feed_mode"]
+        power = self._registers_by_key["feed_in_power_max"]
+        mode_value = restore["mode"] if allow else GridFeedMode.LIMITED.register_value
+        # Readers expect the enum a poll derives, never the register's raw 0/1.
+        mode_state = GridFeedMode.from_register(mode_value)
+        if allow:
+            await self._write_setting(power, restore["power"])
+            await self._write_setting(mode, mode_value, publish_as=mode_state)
+            self._grid_feed_stopped = False
+        else:
+            # Set before writing, so a half-done stop cannot be adopted either.
+            self._grid_feed_stopped = True
+            await self._write_setting(mode, mode_value, publish_as=mode_state)
+            await self._write_setting(power, 0)
+
+    def _track_grid_feed_restore(self, data: dict[str, Any]) -> None:
+        """Remember the export settings to put back, while there are any to keep.
+
+        Nothing is adopted while the switch holds the export off. What the device
+        reports then is our own write, or on the PowerOcean a mix of our limited mode
+        and its untouched cap at 40609, and adopting either would lose the setting
+        the switch has to put back. Any other reading is the inverter's own, so
+        raising the cap in the EcoFlow app - an installer lifting an export limit,
+        say - is picked up on the next poll.
+        """
+        if self._grid_feed_stopped:
+            return
+        mode = data.get("grid_feed_mode")
+        power = data.get("feed_in_power_max")
+        if mode is None or power is None or not _allows_export(mode, power):
+            return
+
+        updated = {"mode": mode.register_value, "power": int(power)}
+        if updated != self._grid_feed_restore:
+            _LOGGER.debug("Grid feed settings to restore are now %s", updated)
+        self._grid_feed_restore = updated
 
     def _control_power_ceiling(self, feature: ControlFeature) -> float:
         """Return the lowest ceiling that applies to *feature*.
@@ -643,6 +751,7 @@ class ControlManager:
 
     async def async_poll(self, data: dict[str, Any]) -> None:
         """Run from a poll, where a write failure must not stop the read."""
+        self._track_grid_feed_restore(data)
         try:
             await self.async_apply(data, notify=False)
         except HomeAssistantError as err:
@@ -665,7 +774,7 @@ class ControlManager:
 
         # A lapsed window hands the inverter back to its app settings, so the command
         # is sent again rather than assumed to have survived.
-        if not self.in_control:
+        if self._enabled and not self.in_control:
             self._control_stale = True
 
         feature, power, blocked = self._desired_command(data)

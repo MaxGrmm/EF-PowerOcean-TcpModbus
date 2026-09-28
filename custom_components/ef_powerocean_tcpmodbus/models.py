@@ -183,6 +183,24 @@ class GridMode(StrEnum):
     ISLANDED = "islanded"
 
 
+class GridFeedMode(StrEnum):
+    """Whether the export is capped by the maximum feed-in power register."""
+
+    LIMITED = "limited"
+    UNLIMITED = "unlimited"
+
+    @property
+    def register_value(self) -> int:
+        """Return the protocol enumeration value."""
+        return 1 if self is GridFeedMode.UNLIMITED else 0
+
+    @classmethod
+    def from_register(cls, value: float | None) -> GridFeedMode | None:
+        if value is None:
+            return None
+        return cls.UNLIMITED if int(value) else cls.LIMITED
+
+
 class ControlMode(StrEnum):
     """Control method the device follows.
 
@@ -368,6 +386,8 @@ class RegisterDef:
     address: int
     data_type: RegisterType = RegisterType.FLOAT32
     address_overrides: Mapping[InverterModel, int] = field(default_factory=dict)
+    # Where writes go when the register is read from somewhere else.
+    write_address: int | None = None
 
     def for_model(self, inverter_model: InverterModel) -> RegisterDef:
         """Return a concrete register definition for an inverter model."""
@@ -507,6 +527,7 @@ class SwitchDef:
     device_class: str | None = None
     entity_category: EntityCategory | None = None
     icon: str | None = None
+    availability: Callable[[ControlStatus], bool] | None = None
 
 
 @dataclass(frozen=True)

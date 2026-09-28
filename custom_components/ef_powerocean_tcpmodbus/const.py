@@ -23,6 +23,7 @@ from .models import (
     ControlStatus,
     CoordinatorStatus,
     EnergySensorDef,
+    GridFeedMode,
     GridMode,
     InverterModel,
     NumberWritableDef,
@@ -137,11 +138,14 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("inverter_rated_power", 40528, RegisterType.UINT32),
     RegisterDef("system_modes", 40530, RegisterType.UINT32),
     RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
+    RegisterDef("grid_feed_mode", 40537, RegisterType.UINT16),
     RegisterDef(
         "feed_in_power_max",
         40609,
         RegisterType.UINT32,
         address_overrides={InverterModel.POWEROCEAN_PLUS: 40538},
+        # The PowerOcean refuses writes to 40609, so every model writes the cap here.
+        write_address=40538,
     ),
     RegisterDef("device_led_brightness", 40541, RegisterType.UINT16),
     # Setpoints that take effect the moment the matching control method is engaged.
@@ -414,6 +418,13 @@ SENSOR_MAP: list[SensorDef] = [
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
+        key="grid_feed_mode",
+        device_class="enum",
+        options=tuple(GridFeedMode),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:transmission-tower-export",
+    ),
+    SensorDef(
         key="inverter_rated_power",
         unit=UnitOfPower.WATT,
         device_class="power",
@@ -609,6 +620,13 @@ BATTERY_SAVER_SWITCH: Final = SwitchDef(
     key="battery_saver_mode_control",
     entity_category=EntityCategory.CONFIG,
     icon="mdi:leaf",
+)
+
+GRID_FEED_SWITCH: Final = SwitchDef(
+    key="grid_feed",
+    entity_category=EntityCategory.CONFIG,
+    icon="mdi:transmission-tower-export",
+    availability=requires_modbus_control,
 )
 
 CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {

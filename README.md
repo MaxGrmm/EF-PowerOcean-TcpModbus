@@ -14,7 +14,7 @@
 - **Local polling** – no EcoFlow cloud account needed
 - **Configurable poll interval** (2–30 seconds, default 5 s)
 - Real-time power flow: house consumption, grid import/export, solar generation, battery
-- Optional **Battery Controls**: charge, discharge, export or hold, with state-of-charge guards
+- Optional **Battery Controls**: charge, discharge, export or hold, with state-of-charge guards and a grid feed-in switch
 - Full battery monitoring: SOC, voltage, current, power, temperature, remaining energy
 - Per-module state of charge for up to 12 battery modules
 - Per-string PV power, current and voltage (1–3 strings)
@@ -176,11 +176,11 @@ for automations to read and act on.
 
 On the device page the two are deliberately kept apart:
 
-| Section           | Entities                                                          | Meaning                                                          |
-| ----------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **Controls**      | Battery Mode, Charge/Discharge/Export Power                       | What you are asking the inverter to do right now                 |
-| **Configuration** | Charge Limit, Battery Reserve, LED Brightness, Battery Saver Mode | Standing settings; the two guards bind whatever mode is selected |
-| **Sensors**       | Control Status                                                    | What the inverter is actually doing about it                     |
+| Section           | Entities                                                                        | Meaning                                                          |
+| ----------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **Controls**      | Battery Mode, Charge/Discharge/Export Power                                     | What you are asking the inverter to do right now                 |
+| **Configuration** | Charge Limit, Battery Reserve, LED Brightness, Battery Saver Mode, Grid Feed-in | Standing settings; the two guards bind whatever mode is selected |
+| **Sensors**       | Control Status                                                                  | What the inverter is actually doing about it                     |
 
 Each mode's power stays editable while another mode is selected, so a command can be
 set up before it is needed. Only the selected mode's value is ever sent.
@@ -266,6 +266,7 @@ The meaning of the fault codes is not known, so we only publish the raw values.
 | Maximum Inverter Power (DC to AC)  | W    | Nameplate inverter (discharge direction) capacity |
 | Maximum Rectifier Power (AC to DC) | W    | Nameplate rectifier (charge direction) capacity   |
 | Maximum feed-in Power              | W    | Export limit configured in the EcoFlow app        |
+| Grid Feed-in Mode                  | –    | Whether the export is limited or unlimited        |
 | System Modes                       | –    | Raw system status                                 |
 | Coordinator Status                 | –    | Integration polling state                         |
 

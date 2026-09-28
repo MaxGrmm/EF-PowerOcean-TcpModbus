@@ -59,6 +59,7 @@ def coordinator():
         scan_interval_s=const.DEFAULT_SCAN_INTERVAL_S,
         on_update=Mock(),
         on_refresh=AsyncMock(),
+        write_setting=instance._async_write_register,
     )
     instance._energy_processor = coordinator_module.EnergyProcessor(instance.limits)
     return instance
@@ -189,6 +190,26 @@ def test_control_state_is_persisted_with_the_coordinators(coordinator) -> None:
     asyncio.run(coordinator.async_load_persisted_state())
 
     assert coordinator.control.battery_saver_commanded is True
+
+
+def test_a_failed_cap_write_still_leaves_the_feed_mode_as_an_enum(
+    coordinator,
+) -> None:
+    """The enum sensor rejects a raw 0/1, and the mode is written before the cap."""
+    coordinator.control._grid_feed_restore = {"mode": 1, "power": 9000}
+    coordinator.control._async_require_control_authority = AsyncMock()
+    coordinator.async_set_updated_data = Mock(
+        side_effect=lambda data: setattr(coordinator, "data", data)
+    )
+    coordinator._modbus_client.async_read = AsyncMock(return_value=[0])
+    coordinator._modbus_client.async_write = AsyncMock(
+        side_effect=[None, coordinator_module.HomeAssistantError("rejected")]
+    )
+
+    with pytest.raises(coordinator_module.HomeAssistantError):
+        asyncio.run(coordinator.control.async_set_grid_feed(False))
+
+    assert coordinator.data["grid_feed_mode"] is models.GridFeedMode.LIMITED
 
 
 def test_accepted_update_publishes_successful_coordinator_status(
@@ -764,6 +785,20 @@ def test_feed_in_power_max_address_depends_on_inverter_model(
     )
 
     assert register.address == expected_address
+
+
+def test_the_feed_in_cap_is_written_to_40538_while_read_from_40609(
+    coordinator,
+) -> None:
+    """The PowerOcean refuses writes to the address it reports the cap on."""
+    coordinator.async_set_updated_data = Mock()
+    coordinator._modbus_client.async_read = AsyncMock(return_value=[0, 0])
+    register = coordinator._registers_by_key["feed_in_power_max"]
+
+    asyncio.run(coordinator._async_write_register(register, 0))
+
+    assert coordinator._modbus_client.async_write.await_args.args[0] == 40538
+    coordinator._modbus_client.async_read.assert_awaited_once_with(40538, 2)
 
 
 def test_writable_numbers_write_to_the_register_they_read() -> None:
