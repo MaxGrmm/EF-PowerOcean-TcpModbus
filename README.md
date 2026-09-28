@@ -164,16 +164,17 @@ on and whether a full or empty battery blocks the target. If the inverter misses
 target a guard sets, the status shows Ramping or Unreachable instead of the guard. The guard is still available as a `guard` attribute on the Control Status sensor,
 for automations to read and act on.
 
-| Control Status             | Meaning                                                        |
-| -------------------------- | -------------------------------------------------------------- |
-| No Modbus control          | Modbus Control is disabled or control authority was lost       |
-| Automatic                  | The inverter is running its normal self-consumption mode       |
-| Active                     | The selected target is being maintained                        |
-| Ramping                    | The inverter has not reached the target for a few polls        |
-| Charge limit reached       | The Charge Limit guard is preventing further charging          |
-| Reserve reached            | The Battery Reserve guard is preventing further discharge      |
-| Unreachable: battery full  | The target requires the battery to absorb power, but it cannot |
-| Unreachable: battery empty | The target requires the battery to supply power, but it cannot |
+| Control Status             | Meaning                                                         |
+| -------------------------- | --------------------------------------------------------------- |
+| No Modbus control          | Modbus Control is disabled or control authority was lost        |
+| Handing back to the app    | Modbus Control was switched off; the app takes over within 60 s |
+| Automatic                  | The inverter is running its normal self-consumption mode        |
+| Active                     | The selected target is being maintained                         |
+| Ramping                    | The inverter has not reached the target for a few polls         |
+| Charge limit reached       | The Charge Limit guard is preventing further charging           |
+| Reserve reached            | The Battery Reserve guard is preventing further discharge       |
+| Unreachable: battery full  | The target requires the battery to absorb power, but it cannot  |
+| Unreachable: battery empty | The target requires the battery to supply power, but it cannot  |
 
 On the device page the two are deliberately kept apart:
 

@@ -17,9 +17,15 @@ from .models import SwitchDef, requires_modbus_control
 
 MODBUS_CONTROL_SWITCH: Final = SwitchDef(
     key="modbus_control",
-    icon="mdi:remote",
+    # Switching off only takes effect once the inverter's heartbeat window runs out.
+    icon=lambda coordinator: (
+        "mdi:timer-sand" if coordinator.control.handing_back else "mdi:remote"
+    ),
     is_on=lambda coordinator: coordinator.control.enabled,
     turn=ControlManager.async_set_enabled,
+    attributes=lambda coordinator: {
+        "hands_back_at": coordinator.control.hands_back_at,
+    },
 )
 
 BATTERY_SAVER_SWITCH: Final = SwitchDef(
@@ -77,7 +83,11 @@ class EcoFlowSwitch(EcoFlowBaseEntity, SwitchEntity):
     ) -> None:
         super().__init__(coordinator, entry, definition)
         self._attr_entity_category = definition.entity_category
-        self._attr_icon = definition.icon
+
+    @property
+    def icon(self) -> str:
+        icon = self._definition.icon
+        return icon(self.coordinator) if callable(icon) else icon
 
     @property
     def available(self) -> bool:

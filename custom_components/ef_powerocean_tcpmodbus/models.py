@@ -255,6 +255,7 @@ class ControlStatus(StrEnum):
     """What the inverter is doing about the selected mode."""
 
     NO_MODBUS_CONTROL = "no_modbus_control"
+    HANDING_BACK = "handing_back"
     AUTOMATIC = "automatic"
     CHARGE_LIMIT_REACHED = "charge_limit_reached"
     RESERVE_REACHED = "reserve_reached"
@@ -271,7 +272,7 @@ def requires_modbus_control(status: ControlStatus) -> bool:
     Used as an entity availability rule: a control the inverter would store and
     ignore is shown as unavailable rather than pretending to work.
     """
-    return status is not ControlStatus.NO_MODBUS_CONTROL
+    return status not in (ControlStatus.NO_MODBUS_CONTROL, ControlStatus.HANDING_BACK)
 
 
 @dataclass(frozen=True)
@@ -537,7 +538,7 @@ class BinarySensorDef:
 @dataclass(frozen=True, kw_only=True)
 class SwitchDef:
     key: str
-    icon: str
+    icon: str | Callable[[EcoflowCoordinator], str]
     is_on: Callable[[EcoflowCoordinator], bool]
     turn: Callable[[ControlManager, bool], Awaitable[None]]
     attributes: Callable[[EcoflowCoordinator], dict[str, Any]] | None = None

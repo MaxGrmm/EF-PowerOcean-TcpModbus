@@ -350,6 +350,7 @@
         "name": "Steuerungsstatus",
         "state": {
           "no_modbus_control": "Modbus-Steuerung aus",
+          "handing_back": "Übergabe an die App",
           "automatic": "Automatisch",
           "charge_limit_reached": "Ladegrenze erreicht",
           "reserve_reached": "Batteriereserve erreicht",

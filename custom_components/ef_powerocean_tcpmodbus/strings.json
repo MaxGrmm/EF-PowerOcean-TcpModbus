@@ -347,6 +347,7 @@
         "name": "Control Status",
         "state": {
           "no_modbus_control": "Modbus Control off",
+          "handing_back": "Handing back to the app",
           "automatic": "Automatic",
           "charge_limit_reached": "Charge limit reached",
           "reserve_reached": "Battery reserve reached",

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum, auto
 from typing import Any, Protocol
 
@@ -36,6 +36,7 @@ from .const import (
     GUARD_SOC_HYSTERESIS,
     GUARD_TRACKING_STEP_W,
     HEARTBEAT_REGISTER,
+    HEARTBEAT_WINDOW_S,
     HOLD_SETPOINT_W,
     MIN_CONTROL_DWELL_S,
 )
@@ -207,6 +208,19 @@ class ControlManager:
         return self._enabled and self._heartbeat.in_control
 
     @property
+    def handing_back(self) -> bool:
+        """Return whether the inverter still obeys us after control was turned off."""
+        return not self._enabled and self._heartbeat.in_control
+
+    @property
+    def hands_back_at(self) -> datetime | None:
+        """Return when the inverter returns to the app, while it is handing back."""
+        last_beat = self._heartbeat.last_success
+        if not self.handing_back or last_beat is None:
+            return None
+        return last_beat + timedelta(seconds=HEARTBEAT_WINDOW_S)
+
+    @property
     def selected_feature(self) -> ControlFeature:
         """Return the mode the user selected, running or merely waiting."""
         return self._feature
@@ -289,6 +303,8 @@ class ControlManager:
     def status(self) -> ControlStatus:
         """Explain, in one word, what the selected mode is achieving."""
         if not self.in_control:
+            if self.handing_back:
+                return ControlStatus.HANDING_BACK
             return ControlStatus.NO_MODBUS_CONTROL
         if self._blocking_guard is not None:
             if self._deviation is not ControlStatus.ACTIVE:

@@ -769,11 +769,21 @@ def test_switching_modbus_control_off_hands_back_and_on_takes_control_again(
     asyncio.run(control.async_poll({"battery_soc": 50.0}))
 
     write.assert_not_awaited()
-    assert control.status is Status.NO_MODBUS_CONTROL
+    assert control.status is Status.HANDING_BACK
+    assert control.hands_back_at == HEARTBEAT_START + timedelta(
+        seconds=const.HEARTBEAT_WINDOW_S
+    )
     assert control.selected_feature is Feature.AUTOMATIC
+
+    lapsed = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_WINDOW_S + 1)
+    monkeypatch.setattr(control_module.dt, "now", lambda: lapsed)
+    assert control.status is Status.NO_MODBUS_CONTROL
+    assert control.hands_back_at is None
 
     control._heartbeat.start = Mock()
     asyncio.run(control.async_set_enabled(True))
+    # The restarted heartbeat has landed.
+    advance(control, monkeypatch, const.HEARTBEAT_WINDOW_S + 2)
     asyncio.run(control.async_poll({"battery_soc": 50.0}))
 
     control._heartbeat.start.assert_called_once()
