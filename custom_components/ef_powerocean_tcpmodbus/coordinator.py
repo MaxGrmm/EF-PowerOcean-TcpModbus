@@ -439,7 +439,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             raise HomeAssistantError("Modbus client is not connected")
 
         target_value = int(value)
-        register_address = register.address
+        register_address = register.write_address or register.address
         key = register.key
 
         try:

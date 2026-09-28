@@ -851,6 +851,22 @@ def test_feed_in_power_max_address_depends_on_inverter_model(
     assert register.address == expected_address
 
 
+def test_the_feed_in_cap_is_written_to_40538_while_read_from_40609(
+    coordinator,
+) -> None:
+    """The PowerOcean refuses writes to the address it reports the cap on."""
+    coordinator.async_set_updated_data = Mock()
+    coordinator._modbus_client.async_read = AsyncMock(return_value=[0, 0])
+    register = coordinator._registers_by_key["feed_in_power_max"]
+
+    asyncio.run(coordinator._async_write_register(register, 0))
+
+    assert register.address == 40609
+    coordinator._modbus_client.async_write.assert_awaited_once()
+    assert coordinator._modbus_client.async_write.await_args.args[0] == 40538
+    coordinator._modbus_client.async_read.assert_awaited_once_with(40538, 2)
+
+
 def test_writable_numbers_write_to_the_register_they_read() -> None:
     for number in const.WRITABLE_NUMBERS_MAP:
         expected = const.REGISTERS_BY_KEY[number.read_key].address

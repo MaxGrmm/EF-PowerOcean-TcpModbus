@@ -144,6 +144,8 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
         40609,
         RegisterType.UINT32,
         address_overrides={InverterModel.POWEROCEAN_PLUS: 40538},
+        # The PowerOcean refuses writes to 40609, so every model writes the cap here.
+        write_address=40538,
     ),
     RegisterDef("device_led_brightness", 40541, RegisterType.UINT16),
     # Setpoints that take effect the moment the matching control method is engaged.

@@ -386,6 +386,8 @@ class RegisterDef:
     address: int
     data_type: RegisterType = RegisterType.FLOAT32
     address_overrides: Mapping[InverterModel, int] = field(default_factory=dict)
+    # Where writes go when the register is read from somewhere else.
+    write_address: int | None = None
 
     def for_model(self, inverter_model: InverterModel) -> RegisterDef:
         """Return a concrete register definition for an inverter model."""
