@@ -10,8 +10,8 @@
 
 ### Added
 
-- Grid Feed-in switch that stops the export to the grid and puts the inverter's own settings back afterwards. It remembers the configured cap (0x0219), never the effective one (0x0260), which the safety rules can derate, and it is unavailable while the inverter limits the export by percentage.
-- Maximum feed-in Power (Configured) and (Effective), 0x0219 and 0x0260 from V1.0 of the vendor protocol doc read side by side, and Maximum feed-in Power (Percent), 0x023C. Maximum feed-in Power keeps following the effective cap, or the configured one on the PowerOcean Plus.
+- Grid Feed-in switch that stops the export to the grid and puts the inverter's own settings back afterwards. It remembers the configured cap (0x0219), never the effective one (0x0260), which the safety rules can derate, and it is unavailable while the inverter limits the export by percentage. A model that refuses to read 0x0219 has nothing to restore, so the switch stays unavailable there.
+- Maximum feed-in Power (Configured) and (Effective), 0x0219 and 0x0260 from V1.0 of the vendor protocol doc read side by side, and Maximum feed-in Power (Percent), 0x023C. Maximum feed-in Power keeps following the effective cap, or the configured one on the PowerOcean Plus. The PowerOcean Plus gets neither the Effective nor the Percent sensor, since it reads 0 in both.
 - Registers the vendor doc describes but not every model has confirmed can be marked optional. A model that refuses reads over addresses it does not implement, such as the Ocean 2, reads them apart from the others and stops polling any it refuses as invalid, so a missing one cannot break the rest of the poll.
 
 ### Changed

@@ -832,6 +832,19 @@ def test_both_feed_in_caps_are_read_on_every_model(
     assert addresses[const.FEED_IN_POWER_MAX_EFFECTIVE_KEY] == 40609
 
 
+def test_the_plus_gets_no_feed_in_sensor_that_reads_zero_on_it() -> None:
+    plus = models.InverterModel.POWEROCEAN_PLUS
+    hidden = {
+        sensor.key for sensor in const.SENSOR_MAP if plus in sensor.unsupported_models
+    }
+
+    assert {
+        const.FEED_IN_POWER_MAX_EFFECTIVE_KEY,
+        "feed_in_power_max_percent",
+    } <= hidden
+    assert const.FEED_IN_POWER_MAX_SETTING_KEY not in hidden
+
+
 def test_the_feed_in_cap_is_written_to_the_configured_register(coordinator) -> None:
     """The PowerOcean refuses writes to 40609, and 40538 is the one configured."""
     coordinator.async_set_updated_data = Mock()

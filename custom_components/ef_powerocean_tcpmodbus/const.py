@@ -441,18 +441,28 @@ SENSOR_MAP: list[SensorDef] = [
             state_class="measurement",
             entity_category=EntityCategory.DIAGNOSTIC,
         )
-        for key in (
-            FEED_IN_POWER_MAX_KEY,
-            FEED_IN_POWER_MAX_SETTING_KEY,
-            FEED_IN_POWER_MAX_EFFECTIVE_KEY,
-        )
+        for key in (FEED_IN_POWER_MAX_KEY, FEED_IN_POWER_MAX_SETTING_KEY)
     ],
+    SensorDef(
+        key=FEED_IN_POWER_MAX_EFFECTIVE_KEY,
+        unit=UnitOfPower.WATT,
+        device_class="power",
+        state_class="measurement",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        unsupported_models=tuple(
+            model
+            for model in InverterModel
+            if not model.traits.reports_effective_feed_cap
+        ),
+    ),
     SensorDef(
         key="feed_in_power_max_percent",
         unit=UNIT_OF_RATIO,
         state_class="measurement",
         entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:transmission-tower-export",
+        # Accepts and stores any value but acts on none of them (0x023C probe).
+        unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
     ),
     SensorDef(
         key="grid_feed_mode",

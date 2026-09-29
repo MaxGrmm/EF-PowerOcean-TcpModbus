@@ -292,6 +292,7 @@ def report_derived_values(
         telemetry.TelemetryData.from_mapping(values),
         calculate_solar_power=False,
         startup_voltage=model.traits.startup_voltage,
+        reports_effective_feed_cap=model.traits.reports_effective_feed_cap,
     )
     for key, value in derived.items():
         text = f"{value:.2f}" if isinstance(value, float) else str(value)

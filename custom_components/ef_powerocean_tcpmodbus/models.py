@@ -576,6 +576,8 @@ class SensorDef:
     entity_category: EntityCategory | None = None
     icon: str | None = None
     options: tuple[str, ...] | None = None
+    # Models whose register reads a constant 0, so the sensor would only mislead.
+    unsupported_models: tuple[InverterModel, ...] = ()
 
 
 @dataclass(frozen=True)

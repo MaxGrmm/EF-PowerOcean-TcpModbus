@@ -68,7 +68,11 @@ async def async_setup_entry(
     }
 
     for sensor in SENSOR_MAP:
-        if sensor.key in empty_battery_slots or sensor.key in controlled_keys:
+        if (
+            sensor.key in empty_battery_slots
+            or sensor.key in controlled_keys
+            or coordinator.inverter_model in sensor.unsupported_models
+        ):
             continue
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 
