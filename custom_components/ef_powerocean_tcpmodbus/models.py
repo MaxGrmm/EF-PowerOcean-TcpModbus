@@ -265,7 +265,7 @@ _GRID_FEED_MODE_VALUES: Final[Mapping[GridFeedMode, int]] = {
 }
 
 
-# What a status sensor shows for a value the vendor doc does not define.
+# What a status sensor shows for a value with no known meaning.
 UNKNOWN_STATE: Final = "unknown"
 
 

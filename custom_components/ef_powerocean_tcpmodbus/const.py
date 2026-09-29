@@ -254,7 +254,7 @@ def register_blocks_for(
 
 
 # The control method the device reports in bits 7-10 of the System Status (40530),
-# with a value for anything the vendor doc does not define.
+# with a value for any other reading.
 ACTIVE_CONTROL_MODE_OPTIONS: Final = (
     *(str(mode) for mode in ControlMode),
     UNKNOWN_STATE,
