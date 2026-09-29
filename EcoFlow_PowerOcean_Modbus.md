@@ -59,9 +59,8 @@ Best practice is to configure a static IP in your router's admin interface. Othe
 ## Data types and word order
 
 Modbus registers are 16 bits, so anything wider spans consecutive registers.
-**Reads and writes disagree about word order**, and the vendor doc contradicts
-itself on the point. What the hardware actually does, measured on a PowerOcean
-Plus:
+**Reads and writes disagree about word order.** What the hardware actually does,
+measured on a PowerOcean Plus:
 
 | Direction      | Word order          |
 | -------------- | ------------------- |
@@ -180,11 +179,10 @@ confirmation of delivery, and nothing more.
 Two registers cannot be verified by reading at all on a PowerOcean Plus:
 
 - `40534` System Control Command is write-only by design and accepts any value,
-  including bit patterns the doc reserves. It is not validated.
-- `40532` System State 2 reads zero even while `40530` reports the system running,
-  although its low seven bits are documented to mirror `40530`. The register is not
-  implemented, so the `control_mode` sensor derived from it always says "default".
-  Do not use it to decide whether a command was accepted.
+  including bit patterns with no defined meaning. It is not validated.
+- `40532` System State 2 reads zero even while `40530` reports the system running.
+  It holds fault flags, so zero only means no fault; it says nothing about whether
+  a command was accepted.
 
 The only trustworthy confirmation is behavioural: grid, battery or solar power
 moving, the LED changing, or the EcoFlow Pro app reporting that Modbus has control.
