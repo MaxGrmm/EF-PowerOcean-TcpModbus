@@ -36,13 +36,12 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_S,
     DEVICE_ENERGY_KEYS,
     DEVICE_INFO_BLOCK,
+    DEVICE_INFO_EXTRA,
     DOMAIN,
     FIRMWARE_VERSION,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MODBUS_DISABLED_READ_THRESHOLD,
-    PRODUCT_CATEGORY,
-    PRODUCT_NUMBER,
     SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
@@ -50,11 +49,12 @@ from .const import (
 )
 from .control import ControlManager
 from .energy_processor import EnergyProcessor
-from .modbus import ModbusClient
+from .modbus import ModbusClient, ModbusReadRejected
 from .models import (
     CoordinatorStatus,
     InverterModel,
     NumberWritableDef,
+    RegisterBlock,
     RegisterDef,
     encode_register,
 )
@@ -73,6 +73,9 @@ _LOGGER = logging.getLogger(__name__)
 
 class EcoflowCoordinator(DataUpdateCoordinator):
     """Fetches data from EcoFlow PowerOcean Plus via Modbus TCP."""
+
+    # Optional registers the device refused to read, which are no longer polled.
+    _unsupported_keys: frozenset[str] = frozenset()
 
     def __init__(
         self,
@@ -122,7 +125,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         self.serial_number: str | None = None
         self.firmware_version: str | None = None
-        self.detected_model: InverterModel | None = None
+        self.protocol_version: int | None = None
+        self.device_address: int | None = None
         self._last_inverter_temperature: float | None = None
         self._consecutive_modbus_disabled_reads = 0
         self._modbus_client = ModbusClient(self.host, self.port)
@@ -155,15 +159,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     @property
     def status(self) -> CoordinatorStatus | None:
         return self._status
-
-    @property
-    def device_model(self) -> InverterModel:
-        """The model the device reports, falling back to the configured one.
-
-        What the device reports decides how its words are ordered, so a wrong
-        pick in the options cannot corrupt every reading.
-        """
-        return self.detected_model or self.inverter_model
 
     @property
     def is_modbus_disabled(self) -> bool:
@@ -223,16 +218,23 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         )
 
     async def async_read_device_info(self) -> None:
-        """Populate the serial number, firmware and detected model from the device."""
-        self.serial_number = "unknown"
+        """Populate the serial number and firmware version from the device.
+
+        Run on every connect, not only the first, because a firmware update reboots
+        the inverter and drops the connection. A failed read keeps what an earlier
+        one found and leaves the connection open; if it is dead, the poll finds out.
+        The product registers in the same block are left alone: the configured
+        model decides how the device is read.
+        """
+        if self.serial_number is None:
+            self.serial_number = "unknown"
 
         try:
             raw = await self._modbus_client.async_read(
                 DEVICE_INFO_BLOCK.start, DEVICE_INFO_BLOCK.count
             )
         except ModbusException as err:
-            _LOGGER.error(f"Can not read device information. {err.string}.")
-            self._modbus_client.close()
+            _LOGGER.warning(f"Can not read device information. {err.string}.")
             return
 
         if not raw or len(raw) < DEVICE_INFO_BLOCK.count:
@@ -244,20 +246,53 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             decode_serial_number(registers_for(SERIAL_NUMBER)) or "unknown"
         )
 
-        self.detected_model = InverterModel.from_product_info(
-            registers_for(PRODUCT_NUMBER)[0], registers_for(PRODUCT_CATEGORY)[0]
-        )
-
         if firmware := decode_firmware_version(
-            registers_for(FIRMWARE_VERSION), self.device_model.traits.high_word_first
+            registers_for(FIRMWARE_VERSION), self.inverter_model.traits.high_word_first
         ):
             self.firmware_version = firmware
 
+        await self._async_read_device_info_extra()
+
+    async def _async_read_device_info_extra(self) -> None:
+        """Read the protocol version and device address, where the device has them.
+
+        Each on its own read, and a refusal only leaves the value unknown.
+        """
+        values: dict[str, int | None] = {}
+        for register in DEVICE_INFO_EXTRA:
+            try:
+                raw = await self._modbus_client.async_read(
+                    register.address, register.size
+                )
+            except ModbusException as err:
+                _LOGGER.debug(f"Could not read {register.key}: {err.string}")
+                values[register.key] = None
+                continue
+            value = decode_register(
+                raw, register.data_type, self.inverter_model.traits.high_word_first
+            )
+            values[register.key] = int(value) if value is not None else None
+
+        self.protocol_version = values.get("protocol_version")
+        self.device_address = values.get("device_address")
+
+    def _device_info_values(self) -> dict[str, Any]:
+        """Return the values read on connect, in the form the sensors show."""
+        return {
+            "protocol_version": self.protocol_version,
+            "device_address": self.device_address,
+        }
+
     async def async_reconnect(self) -> bool:
-        """Reconnect, and assume the device stopped following us while we were away."""
+        """Reconnect, and assume the device stopped following us while we were away.
+
+        The device info is read again: the outage may have been a firmware update,
+        or the first connect may have failed before it could be read at all.
+        """
         if not await self._modbus_client.async_reconnect():
             return False
         self.control.mark_stale()
+        await self.async_read_device_info()
         return True
 
     async def async_get_raw_data(self) -> dict[str, Any]:
@@ -268,24 +303,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Reconnect failed!")
 
         try:
-            traits = self.device_model.traits
-            for register_block in self._register_blocks:
-                raw = await self._modbus_client.async_read(
-                    register_block.start, register_block.count
-                )
-                for register in register_block.registers:
-                    value = decode_register(
-                        register_block.registers_for(raw, register),
-                        register.data_type,
-                        traits.high_word_first,
-                    )
-                    if (
-                        value is not None
-                        and traits.energy_in_watt_hours
-                        and register.key in DEVICE_ENERGY_KEYS
-                    ):
-                        value = round(value / 1000, 3)
-                    data[register.key] = value
+            # A probe may replan the blocks, so the loop runs over this poll's plan.
+            for register_block in tuple(self._register_blocks):
+                await self._async_read_block(register_block, data)
 
             if is_modbus_disabled(
                 self.serial_number,
@@ -304,6 +324,77 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
             return data
+
+    @property
+    def unsupported_registers(self) -> frozenset[str]:
+        """Return the optional registers the device refused, which are not polled."""
+        return self._unsupported_keys
+
+    async def _async_read_block(
+        self, register_block: RegisterBlock, data: dict[str, Any]
+    ) -> None:
+        """Read one block into data, probing an optional one register by register.
+
+        A required block that fails raises as before. An optional one refused as
+        an invalid request is read again one register at a time, and each register
+        the device refuses on its own is dropped from polling until the integration
+        reloads. A refusal for the moment, such as device busy, only leaves the
+        block unread for this poll.
+        """
+        try:
+            raw = await self._modbus_client.async_read(
+                register_block.start, register_block.count
+            )
+        except ModbusReadRejected as err:
+            if not register_block.optional:
+                raise
+            if not err.permanent:
+                data.update(dict.fromkeys(r.key for r in register_block.registers))
+                return
+            await self._async_probe_optional_block(register_block, data)
+            return
+
+        for register in register_block.registers:
+            data[register.key] = self._decode(
+                register_block.registers_for(raw, register), register
+            )
+
+    async def _async_probe_optional_block(
+        self, register_block: RegisterBlock, data: dict[str, Any]
+    ) -> None:
+        refused: set[str] = set()
+        for register in register_block.registers:
+            try:
+                raw = await self._modbus_client.async_read(
+                    register.address, register.size
+                )
+            except ModbusReadRejected as err:
+                if err.permanent:
+                    refused.add(register.key)
+                data[register.key] = None
+                continue
+            data[register.key] = self._decode(list(raw), register)
+
+        if refused:
+            _LOGGER.info(
+                "The device does not implement %s; they are no longer read.",
+                ", ".join(sorted(refused)),
+            )
+            self._unsupported_keys = self._unsupported_keys | refused
+            self._register_blocks = register_blocks_for(
+                self.inverter_model, exclude=self._unsupported_keys
+            )
+
+    def _decode(self, words: list[int], register: RegisterDef) -> float | None:
+        traits = self.inverter_model.traits
+        value = decode_register(words, register.data_type, traits.high_word_first)
+        if (
+            value is not None
+            and traits.energy_in_watt_hours
+            and register.key in DEVICE_ENERGY_KEYS
+        ):
+            value = round(value / 1000, 3)
+        return value
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
@@ -326,11 +417,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 raw_data, self._last_checked_data, self._last_checked_time
             )
             result.update(self._energy_processor.raw_daily_values(raw_data))
+            result.update(self._device_info_values())
             result, is_daily_reset = self._energy_processor.derive_daily(result)
             calculated_results = calculate_derived_values(
                 TelemetryData.from_mapping(result),
                 calculate_solar_power=self._ena_calc_solar_power,
                 startup_voltage=self.inverter_model.traits.startup_voltage,
+                reports_effective_feed_cap=(
+                    self.inverter_model.traits.reports_effective_feed_cap
+                ),
             )
             result.update(calculated_results)
             result = self._energy_processor.clamp_calculated(
@@ -401,7 +496,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         readback_value = decode_register(
             readback_words,
             register.data_type,
-            self.device_model.traits.high_word_first,
+            self.inverter_model.traits.high_word_first,
         )
         # A 32-bit register echoes the words just written and only swaps them into
         # read order a few seconds later, so either form means the write landed.

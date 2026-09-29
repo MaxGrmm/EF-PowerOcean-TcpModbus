@@ -210,22 +210,74 @@
         "name": "Grid Power"
       },
       "voltage_l1": {
-        "name": "Grid Voltage L1"
+        "name": "Inverter Voltage L1"
       },
       "voltage_l2": {
-        "name": "Grid Voltage L2"
+        "name": "Inverter Voltage L2"
       },
       "voltage_l3": {
-        "name": "Grid Voltage L3"
+        "name": "Inverter Voltage L3"
       },
       "current_l1": {
-        "name": "Grid Current L1"
+        "name": "Inverter Current L1"
       },
       "current_l2": {
-        "name": "Grid Current L2"
+        "name": "Inverter Current L2"
       },
       "current_l3": {
-        "name": "Grid Current L3"
+        "name": "Inverter Current L3"
+      },
+      "breaker_capacity": {
+        "name": "Circuit Breaker Capacity"
+      },
+      "inverter_output_power": {
+        "name": "Inverter AC Power"
+      },
+      "grid_voltage_l1": {
+        "name": "Grid-side Voltage L1"
+      },
+      "grid_voltage_l2": {
+        "name": "Grid-side Voltage L2"
+      },
+      "grid_voltage_l3": {
+        "name": "Grid-side Voltage L3"
+      },
+      "grid_current_l1": {
+        "name": "Grid-side Current L1"
+      },
+      "grid_current_l2": {
+        "name": "Grid-side Current L2"
+      },
+      "grid_current_l3": {
+        "name": "Grid-side Current L3"
+      },
+      "active_control_mode": {
+        "name": "Active Control Method",
+        "state": {
+          "default": "Default",
+          "system_feed": "System feed/draw (meter)",
+          "inverter_feed": "Inverter feed/draw",
+          "battery_limits": "Battery charge/discharge",
+          "unknown": "Unknown"
+        }
+      },
+      "inverter_ac_in_total": {
+        "name": "Inverter AC Input Total"
+      },
+      "inverter_ac_in_today": {
+        "name": "Inverter AC Input Today"
+      },
+      "inverter_ac_in_today_raw": {
+        "name": "Inverter AC Input Today (Device)"
+      },
+      "inverter_ac_out_total": {
+        "name": "Inverter AC Output Total"
+      },
+      "inverter_ac_out_today": {
+        "name": "Inverter AC Output Today"
+      },
+      "inverter_ac_out_today_raw": {
+        "name": "Inverter AC Output Today (Device)"
       },
       "frequency": {
         "name": "Grid Frequency"
@@ -241,6 +293,12 @@
           "reconnect_failed": "Reconnect failed",
           "processing_failed": "Processing failed"
         }
+      },
+      "protocol_version": {
+        "name": "Modbus Protocol Version"
+      },
+      "device_address": {
+        "name": "Modbus Device Address"
       },
       "limit_inv_max": {
         "name": "Maximum Rectifier Power (AC to DC)"
@@ -305,6 +363,15 @@
       "feed_in_power_max": {
         "name": "Maximum feed-in Power"
       },
+      "feed_in_power_max_setting": {
+        "name": "Maximum feed-in Power (Configured)"
+      },
+      "feed_in_power_max_effective": {
+        "name": "Maximum feed-in Power (Effective)"
+      },
+      "feed_in_power_max_percent": {
+        "name": "Maximum feed-in Power (Percent)"
+      },
       "inverter_rated_power": {
         "name": "Inverter Rated Power"
       },
@@ -340,7 +407,8 @@
         "name": "Grid Feed-in Mode",
         "state": {
           "limited": "Limited",
-          "unlimited": "Unlimited"
+          "unlimited": "Unlimited",
+          "limited_percent": "Limited (percent)"
         }
       },
       "control_status": {
@@ -374,6 +442,12 @@
       },
       "system_power_on": {
         "name": "System Powered On"
+      },
+      "device_modbus_control": {
+        "name": "Modbus Control (Device)"
+      },
+      "bms_connected": {
+        "name": "BMS Connected"
       }
     },
     "number": {

@@ -22,7 +22,7 @@
 - Energy counters: daily and lifetime for grid, solar, battery charge/discharge, house consumption
 - Operating mode, grid mode and system status as dedicated entities
 - Fault reporting: active fault count and raw fault codes
-- Firmware and product information read from the device, with model mismatch detection where supported
+- Serial number and firmware version read from the device. The model it reports pre-fills the setup form; the model you select is the one the integration uses
 - Reconfigurable after setup via **Settings → Configure** (no re-install needed)
 - Debug logging toggle directly in the HA UI
 - German and English translations
@@ -262,15 +262,22 @@ The meaning of the fault codes is not known, so we only publish the raw values.
 
 ### Inverter Limits (Diagnostic)
 
-| Sensor                             | Unit | Description                                       |
-| ---------------------------------- | ---- | ------------------------------------------------- |
-| Inverter Rated Power               | W    | Nameplate system power                            |
-| Maximum Inverter Power (DC to AC)  | W    | Nameplate inverter (discharge direction) capacity |
-| Maximum Rectifier Power (AC to DC) | W    | Nameplate rectifier (charge direction) capacity   |
-| Maximum feed-in Power              | W    | Export limit configured in the EcoFlow app        |
-| Grid Feed-in Mode                  | –    | Whether the export is limited or unlimited        |
-| System Modes                       | –    | Raw system status                                 |
-| Coordinator Status                 | –    | Integration polling state                         |
+| Sensor                             | Unit | Description                                                     |
+| ---------------------------------- | ---- | --------------------------------------------------------------- |
+| Inverter Rated Power               | W    | Nameplate system power                                          |
+| Maximum Inverter Power (DC to AC)  | W    | Nameplate inverter (discharge direction) capacity               |
+| Maximum Rectifier Power (AC to DC) | W    | Nameplate rectifier (charge direction) capacity                 |
+| Maximum feed-in Power              | W    | The export cap in force, which bounds Export to Grid            |
+| Maximum feed-in Power (Configured) | W    | Export cap as configured (40538)                                |
+| Maximum feed-in Power (Effective)  | W    | Export cap after the safety rules (40609), not on the PO Plus   |
+| Maximum feed-in Power (Percent)    | %    | Export cap as a share of the rated power, not on the PO Plus    |
+| Grid Feed-in Mode                  | –    | Whether the export is limited in watts, in percent or unlimited |
+| System Modes                       | –    | Raw system status                                               |
+| Coordinator Status                 | –    | Integration polling state                                       |
+
+The inverter keeps its own copy of settings such as the export cap for Modbus
+mode. It takes the app's values the first time Modbus mode is turned on, and
+after that the two copies are no longer kept in step.
 
 ### Energy – Today
 

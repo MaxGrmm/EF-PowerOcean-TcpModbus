@@ -4,15 +4,25 @@
 
 ### Fixed
 
+- Grid Feed-in Mode 2, a limit by percentage of the rated power, was shown as Unlimited. It is now shown as Limited (percent).
+- Discharge Battery and Export to Grid can no longer be set above the inverter's maximum DC-to-AC power (40546). Charging is not limited by the rectifier power, because solar on the DC side charges the battery alongside it.
 - Three-phase Ocean 2 energy counters are no longer a thousand times too high. The Ocean 2 reports its lifetime and daily counters in Wh where the PowerOcean models use kWh, so a solar today of 11.84 kWh was read as 11840 kWh. The counters are now converted for this model; every other model is read as before.
 
 ### Added
 
-- Grid Feed-in switch that stops the export to the grid.
+- Grid Feed-in switch that stops the export to the grid and puts the inverter's own settings back afterwards. It remembers the configured cap (40538), never the effective one (40609), which the safety rules can derate, and it is unavailable while the inverter limits the export by percentage. A model that refuses to read 40538 has nothing to restore, so the switch stays unavailable there.
+- Maximum feed-in Power (Configured) and (Effective), 40538 and 40609 read side by side, and Maximum feed-in Power (Percent), 40573. Maximum feed-in Power keeps following the effective cap, or the configured one on the PowerOcean Plus. The PowerOcean Plus gets neither the Effective nor the Percent sensor, since it reads 0 in both.
+- Registers not every model has confirmed can be marked optional. A model that refuses reads over addresses it does not implement, such as the Ocean 2, reads them apart from the others and stops polling any it refuses as invalid, so a missing one cannot break the rest of the poll.
+- More registers as diagnostic sensors, so they can be checked against each model:
+  - Active Control Method, Modbus Control (Device) and BMS Connected, from bits 7-12 of the System Status. The raw status word is the `system_modes_hex` attribute of Active Control Method.
+  - Grid-side voltage and current per phase, Inverter AC Power and Circuit Breaker Capacity. The existing Grid Voltage and Grid Current sensors are renamed Inverter Voltage and Inverter Current, since those registers measure the inverter's own phases; their entity ids are unchanged.
+  - Inverter AC Input and Output energy counters.
 
 ### Changed
 
 - Modbus Control is now a switch in the device's Configuration section instead of an option in the setup and settings dialog, so it can be turned on and off without reloading the integration. An existing setting carries over.
+- The inverter model selected in the setup and settings dialog now decides how the device is read. The model the device reports only pre-fills the setup form; it no longer overrides the selection for word order and energy units.
+- Serial number and firmware version are read again after every reconnect, not only at startup. A firmware update reboots the inverter, and a failed first connect used to leave them unknown until Home Assistant restarted. New Modbus Protocol Version and Modbus Device Address diagnostic sensors show what the inverter reports for them.
 
 ## [2.5.2] - 2026-09-28
 

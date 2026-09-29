@@ -52,6 +52,8 @@ GRID_FEED_SWITCH: Final = SwitchDef(
         coordinator.control.grid_feed_switchable
         and requires_modbus_control(coordinator.control.status)
     ),
+    # The PowerOcean Plus and Three Phase both accept writes to 40537 and 40538
+    # and act on them while Modbus control is on (issue #89).
 )
 
 SWITCHES: Final = (MODBUS_CONTROL_SWITCH, BATTERY_SAVER_SWITCH, GRID_FEED_SWITCH)

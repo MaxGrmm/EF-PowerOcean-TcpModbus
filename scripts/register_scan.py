@@ -64,6 +64,10 @@ PLAUSIBLE_RANGE: Final[dict[str, tuple[float, float]]] = {
     "voltage": (0, 1000),
 }
 
+PLAUSIBLE_RANGE_BY_KEY: Final[dict[str, tuple[float, float]]] = {
+    "breaker_capacity": (0, 400),
+}
+
 DEVICE_CLASS_BY_KEY: Final[dict[str, str]] = {
     definition.key: definition.device_class
     for definition in (*const.SENSOR_MAP, *const.ENERGY_SENSOR_MAP)
@@ -133,7 +137,9 @@ def plausibility_note(key: str, value: float | None) -> str:
         return "undecodable"
     if value == 0:
         return "zero"
-    bounds = PLAUSIBLE_RANGE.get(DEVICE_CLASS_BY_KEY.get(key, ""))
+    bounds = PLAUSIBLE_RANGE_BY_KEY.get(
+        key, PLAUSIBLE_RANGE.get(DEVICE_CLASS_BY_KEY.get(key, ""))
+    )
     if bounds and not bounds[0] <= value <= bounds[1]:
         return "out of range"
     return "ok"
@@ -214,11 +220,21 @@ def report_device(
         words_for(const.FIRMWARE_VERSION),
         detected.traits.high_word_first if detected else False,
     )
+    protocol, protocol_reason = reader.read_value(const.PROTOCOL_VERSION)
+    address, address_reason = reader.read_value(const.DEVICE_ADDRESS)
 
     print(f"  serial number     {serial if show_serial else serial[:4] + '****'}")
     print(f"  firmware          {firmware}")
+    print(
+        f"  protocol version  {int(protocol) if protocol is not None else 'unknown'}"
+        + (f" [unreadable: {protocol_reason}]" if protocol is None else "")
+    )
     print(f"  product number    {number}")
     print(f"  product category  {category}")
+    print(
+        f"  device address    {int(address) if address is not None else 'unknown'}"
+        + (f" [unreadable: {address_reason}]" if address is None else "")
+    )
     name = detected.traits.display_name if detected else "UNKNOWN"
     print(f"  detected model    {name}")
     if detected is None:
@@ -282,6 +298,7 @@ def report_derived_values(
         telemetry.TelemetryData.from_mapping(values),
         calculate_solar_power=False,
         startup_voltage=model.traits.startup_voltage,
+        reports_effective_feed_cap=model.traits.reports_effective_feed_cap,
     )
     for key, value in derived.items():
         text = f"{value:.2f}" if isinstance(value, float) else str(value)

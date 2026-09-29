@@ -38,7 +38,8 @@ def coordinator():
     instance._consecutive_modbus_disabled_reads = 0
     instance._ena_calc_solar_power = False
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
-    instance.detected_model = None
+    instance.protocol_version = None
+    instance.device_address = None
     instance._register_blocks = const.register_blocks_for(instance.inverter_model)
     instance._registers_by_key = {
         register.key: register
@@ -686,7 +687,7 @@ def _float_words(value: float, high_word_first: bool) -> list[int]:
 
 
 def _read_energy_and_power(coordinator, model: models.InverterModel, energy, power):
-    coordinator.detected_model = model
+    coordinator.inverter_model = model
     coordinator._register_blocks = (
         models.RegisterBlock(
             (
@@ -816,35 +817,39 @@ def test_blocks_cover_every_register_word_they_map(
             )
 
 
-@pytest.mark.parametrize(
-    ("inverter_model", "expected_address"),
-    (
-        (inverter_model, 40538)
-        if inverter_model == models.InverterModel.POWEROCEAN_PLUS
-        else (inverter_model, 40609)
-        for inverter_model in models.InverterModel
-    ),
-)
-def test_feed_in_power_max_address_depends_on_inverter_model(
-    inverter_model: models.InverterModel, expected_address: int
+@pytest.mark.parametrize("inverter_model", models.InverterModel)
+def test_both_feed_in_caps_are_read_on_every_model(
+    inverter_model: models.InverterModel,
 ) -> None:
-    register = next(
-        register
+    """40538 is the configured cap and 40609 the effective one."""
+    addresses = {
+        register.key: register.address
         for block in const.register_blocks_for(inverter_model)
         for register in block.registers
-        if register.key == "feed_in_power_max"
-    )
+    }
 
-    assert register.address == expected_address
+    assert addresses[const.FEED_IN_POWER_MAX_SETTING_KEY] == 40538
+    assert addresses[const.FEED_IN_POWER_MAX_EFFECTIVE_KEY] == 40609
 
 
-def test_the_feed_in_cap_is_written_to_40538_while_read_from_40609(
-    coordinator,
-) -> None:
-    """The PowerOcean refuses writes to the address it reports the cap on."""
+def test_the_plus_gets_no_feed_in_sensor_that_reads_zero_on_it() -> None:
+    plus = models.InverterModel.POWEROCEAN_PLUS
+    hidden = {
+        sensor.key for sensor in const.SENSOR_MAP if plus in sensor.unsupported_models
+    }
+
+    assert {
+        const.FEED_IN_POWER_MAX_EFFECTIVE_KEY,
+        "feed_in_power_max_percent",
+    } <= hidden
+    assert const.FEED_IN_POWER_MAX_SETTING_KEY not in hidden
+
+
+def test_the_feed_in_cap_is_written_to_the_configured_register(coordinator) -> None:
+    """The PowerOcean refuses writes to 40609, and 40538 is the one configured."""
     coordinator.async_set_updated_data = Mock()
     coordinator._modbus_client.async_read = AsyncMock(return_value=[0, 0])
-    register = coordinator._registers_by_key["feed_in_power_max"]
+    register = coordinator._registers_by_key[const.FEED_IN_POWER_MAX_SETTING_KEY]
 
     asyncio.run(coordinator._async_write_register(register, 0))
 
@@ -900,40 +905,63 @@ def _device_info_registers(
     return registers
 
 
-def test_reads_device_info_in_a_single_request(coordinator) -> None:
+def test_reads_the_device_info_block_then_the_extra_registers(coordinator) -> None:
     coordinator.firmware_version = None
-    coordinator.detected_model = None
     coordinator.inverter_model = models.InverterModel.POWEROCEAN_PLUS
     coordinator._modbus_client.async_read = AsyncMock(
-        return_value=_device_info_registers()
+        side_effect=[_device_info_registers(), [0x0001], [1]]
     )
 
     asyncio.run(coordinator.async_read_device_info())
 
     assert coordinator.serial_number == "R371ZD1AZH3X0450"
     assert coordinator.firmware_version == "3.0.19.19"
-    assert coordinator.detected_model == models.InverterModel.POWEROCEAN_PLUS
-    coordinator._modbus_client.async_read.assert_awaited_once_with(40002, 12)
+    assert coordinator.protocol_version == 0x0001
+    assert coordinator.device_address == 1
+    # The block first, then the protocol version and device address on their own.
+    reads = coordinator._modbus_client.async_read.await_args_list
+    assert [call.args for call in reads] == [(40002, 12), (40001, 1), (40014, 1)]
 
 
 def test_reads_device_info_of_a_three_phase_ocean_2(coordinator) -> None:
-    """It reports product number 4 and sends 32-bit values high word first."""
+    """A configured Ocean 2 is read high word first."""
     registers = _device_info_registers(product_number=4, product_category=1)
     firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
     registers[firmware_index], registers[firmware_index + 1] = 0x0100, 0x034F
     coordinator.firmware_version = None
-    coordinator.detected_model = None
+    coordinator.inverter_model = models.InverterModel.OCEAN_2_THREE_PHASE
     coordinator._modbus_client.async_read = AsyncMock(return_value=registers)
 
     asyncio.run(coordinator.async_read_device_info())
 
-    assert coordinator.detected_model == models.InverterModel.OCEAN_2_THREE_PHASE
     assert coordinator.firmware_version == "1.0.3.79"
 
 
-def test_device_info_read_failure_closes_connection(coordinator) -> None:
+def test_the_configured_model_decides_how_the_device_is_read(coordinator) -> None:
+    """What the device reports only pre-fills the config flow.
+
+    A PowerOcean configured by hand stays a PowerOcean even when the product
+    registers say Ocean 2, so its words are still read low word first.
+    """
+    registers = _device_info_registers(product_number=4, product_category=1)
+    firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
+    registers[firmware_index], registers[firmware_index + 1] = 0x034F, 0x0100
     coordinator.firmware_version = None
-    coordinator.detected_model = None
+    coordinator.inverter_model = models.InverterModel.POWEROCEAN_PLUS
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=[registers, [0x0100], [1]]
+    )
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.firmware_version == "1.0.3.79"
+
+
+def test_a_failed_device_info_read_leaves_the_connection_to_the_poll(
+    coordinator,
+) -> None:
+    """It runs on every reconnect, so closing here would fail the poll after it."""
+    coordinator.firmware_version = None
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=coordinator_module.ModbusException("boom")
     )
@@ -941,7 +969,51 @@ def test_device_info_read_failure_closes_connection(coordinator) -> None:
     asyncio.run(coordinator.async_read_device_info())
 
     assert coordinator.serial_number == "unknown"
-    coordinator._modbus_client.close.assert_called_once()
+    coordinator._modbus_client.close.assert_not_called()
+
+
+def test_a_failed_device_info_read_keeps_what_was_known(coordinator) -> None:
+    coordinator.serial_number = "R371ZD1AZH3X0450"
+    coordinator.firmware_version = "3.0.19.19"
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=coordinator_module.ModbusException("timeout")
+    )
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.serial_number == "R371ZD1AZH3X0450"
+    assert coordinator.firmware_version == "3.0.19.19"
+
+
+def test_a_refused_protocol_version_leaves_the_rest_of_the_device_info(
+    coordinator,
+) -> None:
+    coordinator.firmware_version = None
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=[
+            _device_info_registers(),
+            coordinator_module.ModbusException("illegal address"),
+            [1],
+        ]
+    )
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.serial_number == "R371ZD1AZH3X0450"
+    assert coordinator.protocol_version is None
+    assert coordinator._device_info_values() == {
+        "protocol_version": None,
+        "device_address": 1,
+    }
+
+
+def test_a_reconnect_reads_the_device_info_again(coordinator) -> None:
+    """A firmware update reboots the inverter, and the first connect may have failed."""
+    coordinator._modbus_client.async_reconnect = AsyncMock(return_value=True)
+    coordinator.async_read_device_info = AsyncMock()
+
+    assert asyncio.run(coordinator.async_reconnect()) is True
+    coordinator.async_read_device_info.assert_awaited_once()
 
 
 @pytest.mark.parametrize("inverter_model", models.InverterModel)
@@ -955,10 +1027,17 @@ def test_read_plan_is_not_split_more_than_necessary(
         gap = following.start - end
         merged = following.start + following.count - block.start
 
+        # A model that rejects reads over unimplemented addresses keeps optional
+        # registers apart from required ones on purpose.
+        isolated = (
+            inverter_model.traits.rejects_unimplemented
+            and block.optional != following.optional
+        )
         assert (
             gap > inverter_model.traits.max_register_gap
             or merged > models.MAX_REGISTERS_PER_READ
             or end <= const.HEARTBEAT_REGISTER < following.start
+            or isolated
         ), (
             f"blocks at {block.start} and {following.start} are only {gap} words "
             f"apart and would merge into {merged} words, so they should be one read"
@@ -969,8 +1048,8 @@ def test_read_plan_is_not_split_more_than_necessary(
 def test_the_heartbeat_register_is_never_read_by_a_poll(
     inverter_model: models.InverterModel,
 ) -> None:
-    """Every model but the Plus maps feed_in_power_max one register past it, and the
-    inverter answers a write to a register it is serving a read for with "busy"."""
+    """The effective feed-in cap sits one register past it, and the inverter answers
+    a write to a register it is serving a read for with "busy"."""
     for block in const.register_blocks_for(inverter_model):
         assert not (
             block.start <= const.HEARTBEAT_REGISTER < block.start + block.count
@@ -1035,3 +1114,119 @@ def test_raw_data_raises_when_reconnect_fails(coordinator) -> None:
 
     with pytest.raises(coordinator_module.UpdateFailed, match="Reconnect failed"):
         asyncio.run(coordinator.async_get_raw_data())
+
+
+# ── Optional registers ────────────────────────────────────────────────────────
+
+
+def _optional_block_coordinator(coordinator):
+    """A coordinator on an Ocean 2, with one required and one optional block."""
+    coordinator.inverter_model = models.InverterModel.OCEAN_2_THREE_PHASE
+    coordinator._modbus_client.connected = True
+    coordinator._register_blocks = (
+        models.RegisterBlock(
+            (models.RegisterDef("battery_soc", 40527, models.RegisterType.UINT16),)
+        ),
+        models.RegisterBlock(
+            (
+                models.RegisterDef(
+                    "feed_in_power_max_percent",
+                    40573,
+                    models.RegisterType.UINT16,
+                    optional=True,
+                ),
+                models.RegisterDef(
+                    "battery_voltage_probe",
+                    40574,
+                    models.RegisterType.UINT16,
+                    optional=True,
+                ),
+            )
+        ),
+    )
+    return coordinator
+
+
+def test_a_refused_optional_block_is_probed_register_by_register(coordinator) -> None:
+    """One register the firmware lacks must not blank the rest of the poll."""
+    _optional_block_coordinator(coordinator)
+    rejected = coordinator_module.ModbusReadRejected("illegal", exception_code=2)
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=[[55], rejected, rejected, [30]]
+    )
+
+    data = asyncio.run(coordinator.async_get_raw_data())
+
+    assert data == {
+        "battery_soc": 55.0,
+        "feed_in_power_max_percent": None,
+        "battery_voltage_probe": 30.0,
+    }
+    assert coordinator.unsupported_registers == {"feed_in_power_max_percent"}
+    polled = {
+        register.key
+        for block in coordinator._register_blocks
+        for register in block.registers
+    }
+    assert "feed_in_power_max_percent" not in polled
+    coordinator._modbus_client.close.assert_not_called()
+
+
+def test_a_busy_optional_block_is_skipped_for_one_poll_only(coordinator) -> None:
+    """Device busy says nothing about whether the register exists."""
+    _optional_block_coordinator(coordinator)
+    busy = coordinator_module.ModbusReadRejected("busy", exception_code=6)
+    coordinator._modbus_client.async_read = AsyncMock(side_effect=[[55], busy])
+
+    data = asyncio.run(coordinator.async_get_raw_data())
+
+    assert data == {
+        "battery_soc": 55.0,
+        "feed_in_power_max_percent": None,
+        "battery_voltage_probe": None,
+    }
+    assert coordinator.unsupported_registers == frozenset()
+    coordinator._modbus_client.close.assert_not_called()
+
+
+def test_a_refused_required_block_still_fails_the_poll(coordinator) -> None:
+    _optional_block_coordinator(coordinator)
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=coordinator_module.ModbusReadRejected("illegal", exception_code=2)
+    )
+
+    assert asyncio.run(coordinator.async_get_raw_data()) is None
+    coordinator._modbus_client.close.assert_called_once()
+
+
+@pytest.mark.parametrize("inverter_model", models.InverterModel)
+def test_optional_registers_share_no_read_where_the_model_rejects_them(
+    inverter_model: models.InverterModel,
+) -> None:
+    for block in const.register_blocks_for(inverter_model):
+        kinds = {register.optional for register in block.registers}
+        if inverter_model.traits.rejects_unimplemented:
+            assert len(kinds) == 1, f"block at {block.start} mixes optional registers"
+
+
+def test_the_powerocean_reads_optional_registers_without_extra_requests() -> None:
+    """They sit inside the live block, which reads through unmapped addresses."""
+    optional_keys = {
+        register.key for register in const.MODBUS_REGISTERS if register.optional
+    }
+    model = models.InverterModel.POWEROCEAN_PLUS
+
+    assert len(const.register_blocks_for(model)) == len(
+        const.register_blocks_for(model, exclude=optional_keys)
+    )
+
+
+def test_the_powerocean_reads_the_new_diagnostic_registers_in_its_live_block() -> None:
+    """They sit inside reads the PowerOcean already makes."""
+    keys = {
+        register.key
+        for block in const.register_blocks_for(models.InverterModel.POWEROCEAN_PLUS)
+        for register in block.registers
+    }
+
+    assert {"grid_voltage_l1", "inverter_ac_out_total"} <= keys

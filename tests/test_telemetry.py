@@ -240,3 +240,75 @@ class CalculateValuesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize(
+    ("reports_effective", "expected"), ((True, 4000.0), (False, 10000.0))
+)
+def test_the_export_ceiling_follows_the_cap_the_model_reports(
+    reports_effective: bool, expected: float
+) -> None:
+    calculated = calculate_derived_values(
+        TelemetryData(
+            feed_in_power_max_setting=10000.0, feed_in_power_max_effective=4000.0
+        ),
+        calculate_solar_power=False,
+        startup_voltage=0,
+        reports_effective_feed_cap=reports_effective,
+    )
+
+    assert calculated["feed_in_power_max"] == expected
+
+
+def test_the_export_ceiling_falls_back_when_its_register_is_missing() -> None:
+    calculated = calculate_derived_values(
+        TelemetryData(feed_in_power_max_setting=10000.0),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+
+    assert calculated["feed_in_power_max"] == 10000.0
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    ((0, "limited"), (1, "unlimited"), (2, "limited_percent"), (7, None), (None, None)),
+)
+def test_decodes_every_grid_feed_mode(raw, expected) -> None:
+    calculated = calculate_derived_values(
+        TelemetryData(grid_feed_mode=raw),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+
+    assert calculated["grid_feed_mode"] == expected
+
+
+@pytest.mark.parametrize(
+    ("method_bits", "expected"),
+    (
+        (0, "default"),
+        (1, "system_feed"),
+        (2, "inverter_feed"),
+        (3, "battery_limits"),
+        (9, "unknown"),
+    ),
+)
+def test_decodes_the_active_control_method_from_the_system_status(
+    method_bits: int, expected: str
+) -> None:
+    """Bits 7-10 of 40530 carry the control method the device is following."""
+    word = (method_bits << 7) | (1 << 11) | (1 << 12) | 0b10100
+    calculated = calculate_derived_values(
+        TelemetryData(system_modes=float(word)),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+
+    assert calculated["active_control_mode"] == expected
+    assert calculated["device_modbus_control"] is True
+    assert calculated["bms_connected"] is True
+    assert calculated["system_modes_hex"] == f"0x{word:08X}"
+    # The low bits keep decoding as before.
+    assert calculated["operating_mode"] == "self_consumption"
+    assert calculated["system_power_on"] is True
