@@ -15,6 +15,10 @@ TO_REDACT = (CONF_HOST, "title", "unique_id")
 
 # Raw readings worth having in a model report, to compare how each model fills them.
 PROTOCOL_REPORT_KEYS = (
+    "system_modes_hex",
+    "active_control_mode",
+    "manual_mode_active",
+    "bms_connected",
     "grid_feed_mode",
     "feed_in_power_max_setting",
     "feed_in_power_max_effective",
@@ -22,6 +26,7 @@ PROTOCOL_REPORT_KEYS = (
     "limit_inv_power",
     "limit_inv_max",
     "inverter_rated_power",
+    "working_mode",
 )
 
 

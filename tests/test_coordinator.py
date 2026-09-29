@@ -1219,3 +1219,14 @@ def test_the_powerocean_reads_optional_registers_without_extra_requests() -> Non
     assert len(const.register_blocks_for(model)) == len(
         const.register_blocks_for(model, exclude=optional_keys)
     )
+
+
+def test_the_powerocean_reads_the_new_diagnostic_registers_in_its_live_block() -> None:
+    """They sit inside reads the PowerOcean already makes."""
+    keys = {
+        register.key
+        for block in const.register_blocks_for(models.InverterModel.POWEROCEAN_PLUS)
+        for register in block.registers
+    }
+
+    assert {"grid_voltage_l1", "inverter_ac_out_total"} <= keys

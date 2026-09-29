@@ -210,22 +210,88 @@
         "name": "Grid Power"
       },
       "voltage_l1": {
-        "name": "Grid Voltage L1"
+        "name": "Inverter Voltage L1"
       },
       "voltage_l2": {
-        "name": "Grid Voltage L2"
+        "name": "Inverter Voltage L2"
       },
       "voltage_l3": {
-        "name": "Grid Voltage L3"
+        "name": "Inverter Voltage L3"
       },
       "current_l1": {
-        "name": "Grid Current L1"
+        "name": "Inverter Current L1"
       },
       "current_l2": {
-        "name": "Grid Current L2"
+        "name": "Inverter Current L2"
       },
       "current_l3": {
+        "name": "Inverter Current L3"
+      },
+      "breaker_capacity": {
+        "name": "Circuit Breaker Capacity"
+      },
+      "inverter_output_power": {
+        "name": "Inverter AC Power"
+      },
+      "grid_voltage_l1": {
+        "name": "Grid Voltage L1"
+      },
+      "grid_voltage_l2": {
+        "name": "Grid Voltage L2"
+      },
+      "grid_voltage_l3": {
+        "name": "Grid Voltage L3"
+      },
+      "grid_current_l1": {
+        "name": "Grid Current L1"
+      },
+      "grid_current_l2": {
+        "name": "Grid Current L2"
+      },
+      "grid_current_l3": {
         "name": "Grid Current L3"
+      },
+      "working_mode": {
+        "name": "Working Mode",
+        "state": {
+          "self_consumption": "Self-consumption",
+          "ai": "AI",
+          "unknown": "Unknown"
+        }
+      },
+      "active_control_mode": {
+        "name": "Active Control Method",
+        "state": {
+          "default": "Default",
+          "system_feed": "System feed/draw (meter)",
+          "inverter_feed": "Inverter feed/draw",
+          "battery_limits": "Battery charge/discharge",
+          "unknown": "Unknown"
+        }
+      },
+      "inverter_ac_in_total": {
+        "name": "Inverter AC Input Total"
+      },
+      "inverter_ac_in_today": {
+        "name": "Inverter AC Input Today"
+      },
+      "inverter_ac_in_today_raw": {
+        "name": "Inverter AC Input Today (Device)"
+      },
+      "inverter_ac_out_total": {
+        "name": "Inverter AC Output Total"
+      },
+      "inverter_ac_out_today": {
+        "name": "Inverter AC Output Today"
+      },
+      "inverter_ac_out_today_raw": {
+        "name": "Inverter AC Output Today (Device)"
+      },
+      "house_energy_ac_today": {
+        "name": "House Consumption Today (AC Balance)"
+      },
+      "house_energy_ac_total": {
+        "name": "House Consumption Total (AC Balance)"
       },
       "frequency": {
         "name": "Grid Frequency"
@@ -390,6 +456,12 @@
       },
       "system_power_on": {
         "name": "System Powered On"
+      },
+      "manual_mode_active": {
+        "name": "Manual Mode"
+      },
+      "bms_connected": {
+        "name": "BMS Connected"
       }
     },
     "number": {

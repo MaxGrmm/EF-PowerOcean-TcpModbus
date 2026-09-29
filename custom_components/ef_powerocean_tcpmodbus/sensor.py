@@ -135,6 +135,7 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
             self._attr_options = list(options)
         self._restored_value: datetime | float | int | str | None = None
         self._last_written_value: datetime | float | int | str | None = None
+        self._last_written_attributes: dict[str, Any] | None = None
 
         if self._definition.unit in VALUE_PRECISION:
             self._attr_suggested_display_precision = VALUE_PRECISION.get(
@@ -150,8 +151,13 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
         new_value = self.native_value
-        if new_value != self._last_written_value:
+        new_attributes = self.extra_state_attributes
+        if (
+            new_value != self._last_written_value
+            or new_attributes != self._last_written_attributes
+        ):
             self._last_written_value = new_value
+            self._last_written_attributes = new_attributes
             self.async_write_ha_state()
 
     async def async_added_to_hass(self) -> None:
@@ -165,6 +171,15 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
             )
             self._restored_value = last_value.native_value
             self._last_written_value = self._restored_value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Publish the data keys the definition names, such as a raw word."""
+        keys = getattr(self._definition, "attribute_keys", ())
+        if not keys:
+            return None
+        data = self.coordinator.data or {}
+        return {key: data.get(key) for key in keys}
 
     @property
     def available(self) -> bool:
