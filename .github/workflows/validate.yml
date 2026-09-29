@@ -66,6 +66,7 @@ jobs:
 
   validate-hacs:
     name: Validate HACS
+    if: github.repository == 'MaxGrmm/EF-PowerOcean-TcpModbus'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
