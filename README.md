@@ -275,9 +275,9 @@ The meaning of the fault codes is not known, so we only publish the raw values.
 | System Modes                       | –    | Raw system status                                               |
 | Coordinator Status                 | –    | Integration polling state                                       |
 
-The vendor doc says the inverter keeps its own copy of settings such as the export
-cap for Modbus mode. It takes the app's values the first time Modbus mode is turned
-on, and after that the two copies are no longer kept in step.
+The inverter keeps its own copy of settings such as the export cap for Modbus
+mode. It takes the app's values the first time Modbus mode is turned on, and
+after that the two copies are no longer kept in step.
 
 ### Energy – Today
 

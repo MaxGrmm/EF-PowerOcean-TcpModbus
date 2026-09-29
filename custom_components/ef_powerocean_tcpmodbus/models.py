@@ -235,7 +235,7 @@ class GridFeedMode(StrEnum):
 
     @classmethod
     def from_register(cls, value: float | None) -> GridFeedMode | None:
-        """Map the register to a mode, or None for a value the doc does not define."""
+        """Map the register to a mode, or None for a value with no known meaning."""
         if value is None:
             return None
         return next(
@@ -441,8 +441,8 @@ class RegisterDef:
     address_overrides: Mapping[InverterModel, int] = field(default_factory=dict)
     # Where writes go when the register is read from somewhere else.
     write_address: int | None = None
-    # Documented, but not confirmed on every model. On a model that rejects reads
-    # over unimplemented addresses it is read apart from the registers that are.
+    # Not confirmed on every model. On a model that rejects reads over
+    # unimplemented addresses it is read apart from the registers that are.
     optional: bool = False
 
     def for_model(self, inverter_model: InverterModel) -> RegisterDef:

@@ -11,8 +11,8 @@
 ### Added
 
 - Grid Feed-in switch that stops the export to the grid and puts the inverter's own settings back afterwards. It remembers the configured cap (40538), never the effective one (40609), which the safety rules can derate, and it is unavailable while the inverter limits the export by percentage. A model that refuses to read 40538 has nothing to restore, so the switch stays unavailable there.
-- Maximum feed-in Power (Configured) and (Effective), 40538 and 40609 from V1.0 of the vendor protocol doc read side by side, and Maximum feed-in Power (Percent), 40573. Maximum feed-in Power keeps following the effective cap, or the configured one on the PowerOcean Plus. The PowerOcean Plus gets neither the Effective nor the Percent sensor, since it reads 0 in both.
-- Registers the vendor doc describes but not every model has confirmed can be marked optional. A model that refuses reads over addresses it does not implement, such as the Ocean 2, reads them apart from the others and stops polling any it refuses as invalid, so a missing one cannot break the rest of the poll.
+- Maximum feed-in Power (Configured) and (Effective), 40538 and 40609 read side by side, and Maximum feed-in Power (Percent), 40573. Maximum feed-in Power keeps following the effective cap, or the configured one on the PowerOcean Plus. The PowerOcean Plus gets neither the Effective nor the Percent sensor, since it reads 0 in both.
+- Registers not every model has confirmed can be marked optional. A model that refuses reads over addresses it does not implement, such as the Ocean 2, reads them apart from the others and stops polling any it refuses as invalid, so a missing one cannot break the rest of the poll.
 
 ### Changed
 

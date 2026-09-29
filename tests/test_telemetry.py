@@ -274,7 +274,7 @@ def test_the_export_ceiling_falls_back_when_its_register_is_missing() -> None:
     ("raw", "expected"),
     ((0, "limited"), (1, "unlimited"), (2, "limited_percent"), (7, None), (None, None)),
 )
-def test_decodes_every_documented_grid_feed_mode(raw, expected) -> None:
+def test_decodes_every_grid_feed_mode(raw, expected) -> None:
     calculated = calculate_derived_values(
         TelemetryData(grid_feed_mode=raw),
         calculate_solar_power=False,

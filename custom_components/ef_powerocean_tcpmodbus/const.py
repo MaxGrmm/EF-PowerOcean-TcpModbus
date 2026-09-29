@@ -107,7 +107,7 @@ FEED_IN_POWER_MAX_EFFECTIVE_KEY: Final = "feed_in_power_max_effective"
 FEED_IN_POWER_MAX_KEY: Final = "feed_in_power_max"
 
 # 40546 and 40548, the most the inverter converts from DC to AC and from AC to DC.
-# The keys predate the vendor doc and stay as they are to keep the entities' ids.
+# The keys predate these names and stay as they are to keep the entities' ids.
 INVERTER_CAPACITY_KEY: Final = "limit_inv_power"
 RECTIFIER_CAPACITY_KEY: Final = "limit_inv_max"
 
@@ -156,9 +156,9 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("system_modes", 40530, RegisterType.UINT32),
     RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
     RegisterDef("grid_feed_mode", 40537, RegisterType.UINT16),
-    # The two export caps the vendor doc tells apart: 40538 is the one configured,
-    # and the only one that takes a write; 40609 is the one in force after the
-    # internal safety rules. feed_in_power_max is derived from them per model.
+    # The two export caps: 40538 is the one configured, and the only one that takes
+    # a write; 40609 is the one in force after the internal safety rules.
+    # feed_in_power_max is derived from them per model.
     RegisterDef(
         FEED_IN_POWER_MAX_SETTING_KEY, 40538, RegisterType.UINT32, optional=True
     ),
