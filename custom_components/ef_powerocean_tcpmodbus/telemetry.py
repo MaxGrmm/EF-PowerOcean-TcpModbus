@@ -7,7 +7,22 @@ import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from .models import REGISTER_SIZES, GridFeedMode, GridMode, OperatingMode, RegisterType
+from .models import (
+    REGISTER_SIZES,
+    UNKNOWN_STATE,
+    ControlMode,
+    GridFeedMode,
+    GridMode,
+    OperatingMode,
+    RegisterType,
+    WorkingMode,
+)
+
+# Bit layout of the System Status (0x0211) beyond the low flags.
+_CONTROL_MODE_SHIFT = 7
+_CONTROL_MODE_MASK = 0xF
+_MANUAL_MODE_BIT = 11
+_BMS_CONNECTED_BIT = 12
 
 
 def _order_words(registers: list[int], high_word_first: bool) -> tuple[int, int]:
@@ -96,8 +111,14 @@ class TelemetryData:
     battery_capacity: float | None = None
     grid_feed_mode: float | None = None
     fault_codes: tuple[float | None, ...] = ()
+    system_state_2: float | None = None
+    working_mode_setting: float | None = None
     feed_in_power_max_setting: float | None = None
     feed_in_power_max_effective: float | None = None
+    inverter_ac_in_today: float | None = None
+    inverter_ac_in_total: float | None = None
+    inverter_ac_out_today: float | None = None
+    inverter_ac_out_total: float | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, float | None]) -> TelemetryData:
@@ -129,8 +150,14 @@ class TelemetryData:
             battery_capacity=data.get("battery_capacity"),
             grid_feed_mode=data.get("grid_feed_mode"),
             fault_codes=tuple(value for _, value in sorted(faults)),
+            system_state_2=data.get("system_state_2"),
+            working_mode_setting=data.get("working_mode_setting"),
             feed_in_power_max_setting=data.get("feed_in_power_max_setting"),
             feed_in_power_max_effective=data.get("feed_in_power_max_effective"),
+            inverter_ac_in_today=data.get("inverter_ac_in_today"),
+            inverter_ac_in_total=data.get("inverter_ac_in_total"),
+            inverter_ac_out_today=data.get("inverter_ac_out_today"),
+            inverter_ac_out_total=data.get("inverter_ac_out_total"),
         )
 
 
@@ -161,6 +188,48 @@ def _calculate_house_energy(
         solar + grid_import + battery_discharged - grid_export - battery_charged,
         precision,
     )
+
+
+def _calculate_house_energy_ac(
+    *,
+    grid_import: float | None,
+    grid_export: float | None,
+    inverter_ac_out: float | None,
+    inverter_ac_in: float | None,
+    precision: int,
+) -> float | None:
+    """Balance the AC side: what the grid and the inverter put in, minus what left."""
+    values = (grid_import, grid_export, inverter_ac_out, inverter_ac_in)
+    if any(value is None for value in values):
+        return None
+
+    return round(
+        grid_import - grid_export + inverter_ac_out - inverter_ac_in, precision
+    )
+
+
+def decode_system_state_2(
+    value: float | None, bits: tuple[tuple[int, str, bool], ...]
+) -> dict[str, bool | str | None]:
+    """Split System State 2 (0x0213) into one flag per documented bit.
+
+    Also returns the raw word as hex, and the keys of every flag that is set.
+    """
+    if value is None:
+        return {
+            "system_state_2_hex": None,
+            "system_state_2_flags": None,
+            **{key: None for _, key, _ in bits},
+        }
+
+    word = int(value)
+    flags = {key: _is_bit_set(word, bit) for bit, key, _ in bits}
+    active = [key.removeprefix("state2_") for key, is_set in flags.items() if is_set]
+    return {
+        "system_state_2_hex": f"0x{word:08X}",
+        "system_state_2_flags": ", ".join(active) if active else "none",
+        **flags,
+    }
 
 
 def decode_register(
@@ -219,6 +288,7 @@ def calculate_derived_values(
     calculate_solar_power: bool,
     startup_voltage: int,
     reports_effective_feed_cap: bool = True,
+    system_state_2_bits: tuple[tuple[int, str, bool], ...] = (),
 ) -> dict[str, float | bool | str | None]:
     """Calculate values derived from raw PowerOcean telemetry."""
     calculated: dict[str, float | bool | str | None] = {}
@@ -267,6 +337,22 @@ def calculate_derived_values(
         precision=2,
     )
 
+    calculated["house_energy_ac_today"] = _calculate_house_energy_ac(
+        grid_import=data.grid_import_today,
+        grid_export=data.grid_export_today,
+        inverter_ac_out=data.inverter_ac_out_today,
+        inverter_ac_in=data.inverter_ac_in_today,
+        precision=2,
+    )
+
+    calculated["house_energy_ac_total"] = _calculate_house_energy_ac(
+        grid_import=data.grid_import_total,
+        grid_export=data.grid_export_total,
+        inverter_ac_out=data.inverter_ac_out_total,
+        inverter_ac_in=data.inverter_ac_in_total,
+        precision=2,
+    )
+
     for pv_number in range(1, 4):
         current = getattr(data, f"pv{pv_number}_current")
         voltage = getattr(data, f"pv{pv_number}_voltage")
@@ -299,6 +385,23 @@ def calculate_derived_values(
         calculated["operating_mode"] = _OPERATING_MODES.get(
             (system_modes >> 4) & 0b111, OperatingMode.UNKNOWN
         )
+        # What the device says it follows, as opposed to what was commanded.
+        active_mode = ControlMode.from_status(
+            (system_modes >> _CONTROL_MODE_SHIFT) & _CONTROL_MODE_MASK
+        )
+        calculated["active_control_mode"] = (
+            str(active_mode) if active_mode is not None else UNKNOWN_STATE
+        )
+        calculated["manual_mode_active"] = _is_bit_set(system_modes, _MANUAL_MODE_BIT)
+        calculated["bms_connected"] = _is_bit_set(system_modes, _BMS_CONNECTED_BIT)
+        calculated["system_modes_hex"] = f"0x{system_modes:08X}"
+
+    if system_state_2_bits:
+        calculated.update(
+            decode_system_state_2(data.system_state_2, system_state_2_bits)
+        )
+
+    calculated["working_mode"] = WorkingMode.from_register(data.working_mode_setting)
 
     calculated["active_faults"] = _format_active_faults(data.fault_codes)
 

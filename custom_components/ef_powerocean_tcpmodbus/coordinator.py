@@ -45,6 +45,7 @@ from .const import (
     SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
+    SYSTEM_STATE_2_BITS,
     register_blocks_for,
 )
 from .control import ControlManager
@@ -436,6 +437,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 reports_effective_feed_cap=(
                     self.inverter_model.traits.reports_effective_feed_cap
                 ),
+                system_state_2_bits=SYSTEM_STATE_2_BITS,
             )
             result.update(calculated_results)
             result = self._energy_processor.clamp_calculated(

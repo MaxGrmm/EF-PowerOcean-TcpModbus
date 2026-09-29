@@ -210,22 +210,91 @@
         "name": "Netzleistung"
       },
       "voltage_l1": {
-        "name": "Netz Phase L1 Spannung"
+        "name": "Wechselrichter Phase L1 Spannung"
       },
       "voltage_l2": {
-        "name": "Netz Phase L2 Spannung"
+        "name": "Wechselrichter Phase L2 Spannung"
       },
       "voltage_l3": {
-        "name": "Netz Phase L3 Spannung"
+        "name": "Wechselrichter Phase L3 Spannung"
       },
       "current_l1": {
-        "name": "Netz Phase L1 Strom"
+        "name": "Wechselrichter Phase L1 Strom"
       },
       "current_l2": {
-        "name": "Netz Phase L2 Strom"
+        "name": "Wechselrichter Phase L2 Strom"
       },
       "current_l3": {
+        "name": "Wechselrichter Phase L3 Strom"
+      },
+      "breaker_capacity": {
+        "name": "Hauptsicherung Nennstrom"
+      },
+      "inverter_output_power": {
+        "name": "Wechselrichter AC-Leistung"
+      },
+      "grid_voltage_l1": {
+        "name": "Netz Phase L1 Spannung"
+      },
+      "grid_voltage_l2": {
+        "name": "Netz Phase L2 Spannung"
+      },
+      "grid_voltage_l3": {
+        "name": "Netz Phase L3 Spannung"
+      },
+      "grid_current_l1": {
+        "name": "Netz Phase L1 Strom"
+      },
+      "grid_current_l2": {
+        "name": "Netz Phase L2 Strom"
+      },
+      "grid_current_l3": {
         "name": "Netz Phase L3 Strom"
+      },
+      "working_mode": {
+        "name": "Arbeitsmodus",
+        "state": {
+          "self_consumption": "Eigenverbrauch",
+          "ai": "KI",
+          "unknown": "Unbekannt"
+        }
+      },
+      "active_control_mode": {
+        "name": "Aktive Steuerungsart",
+        "state": {
+          "default": "Standard",
+          "system_feed": "System Einspeisung/Bezug (Zähler)",
+          "inverter_feed": "Wechselrichter Einspeisung/Bezug",
+          "battery_limits": "Batterie Laden/Entladen",
+          "unknown": "Unbekannt"
+        }
+      },
+      "system_state_2_flags": {
+        "name": "Systemstatus 2"
+      },
+      "inverter_ac_in_total": {
+        "name": "Wechselrichter AC-Eingang Gesamt"
+      },
+      "inverter_ac_in_today": {
+        "name": "Wechselrichter AC-Eingang Heute"
+      },
+      "inverter_ac_in_today_raw": {
+        "name": "Wechselrichter AC-Eingang Heute (Gerät)"
+      },
+      "inverter_ac_out_total": {
+        "name": "Wechselrichter AC-Ausgang Gesamt"
+      },
+      "inverter_ac_out_today": {
+        "name": "Wechselrichter AC-Ausgang Heute"
+      },
+      "inverter_ac_out_today_raw": {
+        "name": "Wechselrichter AC-Ausgang Heute (Gerät)"
+      },
+      "house_energy_ac_today": {
+        "name": "Hausenergie Heute (AC-Bilanz)"
+      },
+      "house_energy_ac_total": {
+        "name": "Hausenergie Gesamt (AC-Bilanz)"
       },
       "frequency": {
         "name": "Netzfrequenz"
@@ -401,6 +470,81 @@
           "on": "Läuft",
           "off": "Aus"
         }
+      },
+      "manual_mode_active": {
+        "name": "Manueller Modus"
+      },
+      "bms_connected": {
+        "name": "BMS verbunden"
+      },
+      "state2_shutdown_enabled": {
+        "name": "Systemabschaltung aktiviert"
+      },
+      "state2_upgrade_shutdown": {
+        "name": "Abschaltung für Update"
+      },
+      "state2_epo_triggered": {
+        "name": "Not-Aus ausgelöst"
+      },
+      "state2_low_power_mode_triggered": {
+        "name": "Energiesparmodus ausgelöst"
+      },
+      "state2_fan_failure": {
+        "name": "Lüfterfehler"
+      },
+      "state2_system_failure": {
+        "name": "Systemfehler (Status 2)"
+      },
+      "state2_bp_reverse_connection": {
+        "name": "Batteriepack verpolt"
+      },
+      "state2_bp_disconnection": {
+        "name": "Batteriepack getrennt"
+      },
+      "state2_auxiliary_power_failure": {
+        "name": "Hilfsstromversorgung ausgefallen"
+      },
+      "state2_pcs_timeout": {
+        "name": "PCS-Zeitüberschreitung"
+      },
+      "state2_pcs_failure": {
+        "name": "PCS-Fehler"
+      },
+      "state2_igbt_self_test_failure": {
+        "name": "IGBT-Selbsttest fehlgeschlagen"
+      },
+      "state2_ntc_high_temperature_protection": {
+        "name": "NTC-Übertemperaturschutz"
+      },
+      "state2_bp_overheating": {
+        "name": "Batteriepack überhitzt"
+      },
+      "state2_ntc_circuit_failure": {
+        "name": "NTC-Schaltkreisfehler"
+      },
+      "state2_system_reset": {
+        "name": "Systemneustart"
+      },
+      "state2_hardware_version_error": {
+        "name": "Hardwareversionsfehler"
+      },
+      "state2_parallel_power_sync_error": {
+        "name": "Parallelbetrieb Leistungssynchronisation fehlerhaft"
+      },
+      "state2_ntc_low_temperature_protection": {
+        "name": "NTC-Untertemperaturschutz"
+      },
+      "state2_parallel_master_slave_conflict": {
+        "name": "Parallelbetrieb Master-Slave-Konflikt"
+      },
+      "state2_parallel_slave_setting_error": {
+        "name": "Parallelbetrieb Slave-Einstellungsfehler"
+      },
+      "state2_parallel_inverter_error": {
+        "name": "Parallelbetrieb Wechselrichterfehler"
+      },
+      "state2_parallel_meter_fault": {
+        "name": "Parallelbetrieb Zählerfehler"
       }
     },
     "number": {

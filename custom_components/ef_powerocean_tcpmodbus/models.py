@@ -203,6 +203,20 @@ class OperatingMode(StrEnum):
     UNKNOWN = "unknown"
 
 
+class WorkingMode(StrEnum):
+    """The System Working Mode Setting (0x022D)."""
+
+    SELF_CONSUMPTION = "self_consumption"
+    AI = "ai"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def from_register(cls, value: float | None) -> WorkingMode | None:
+        if value is None:
+            return None
+        return {1: cls.SELF_CONSUMPTION, 2: cls.AI}.get(int(value), cls.UNKNOWN)
+
+
 class GridMode(StrEnum):
     GRID = "grid"
     ISLANDED = "islanded"
@@ -251,6 +265,10 @@ _GRID_FEED_MODE_VALUES: Final[Mapping[GridFeedMode, int]] = {
 }
 
 
+# What a status sensor shows for a value the vendor doc does not define.
+UNKNOWN_STATE: Final = "unknown"
+
+
 class ControlMode(StrEnum):
     """Control method the device follows.
 
@@ -265,12 +283,23 @@ class ControlMode(StrEnum):
     @property
     def command_value(self) -> int:
         """Return the protocol enumeration value."""
-        return {
-            ControlMode.DEFAULT: 0,
-            ControlMode.SYSTEM_FEED: 1,
-            ControlMode.INVERTER_FEED: 2,
-            ControlMode.BATTERY_LIMITS: 3,
-        }[self]
+        return _CONTROL_MODE_VALUES[self]
+
+    @classmethod
+    def from_status(cls, value: int) -> ControlMode | None:
+        """Map bits 7-10 of the System Status (0x0211), or None if undefined."""
+        return next(
+            (mode for mode, raw in _CONTROL_MODE_VALUES.items() if raw == value),
+            None,
+        )
+
+
+_CONTROL_MODE_VALUES: Final[Mapping[ControlMode, int]] = {
+    ControlMode.DEFAULT: 0,
+    ControlMode.SYSTEM_FEED: 1,
+    ControlMode.INVERTER_FEED: 2,
+    ControlMode.BATTERY_LIMITS: 3,
+}
 
 
 class ControlFeature(StrEnum):
@@ -576,6 +605,10 @@ class SensorDef:
     entity_category: EntityCategory | None = None
     icon: str | None = None
     options: tuple[str, ...] | None = None
+    # Data keys published as state attributes, such as the raw word a value is
+    # decoded from.
+    attribute_keys: tuple[str, ...] = ()
+    enabled_default: bool = True
 
 
 @dataclass(frozen=True)
@@ -600,6 +633,7 @@ class BinarySensorDef:
     name: str | None = None
     device_class: str | None = None
     entity_category: EntityCategory | None = None
+    enabled_default: bool = True
 
 
 @dataclass(frozen=True, kw_only=True)

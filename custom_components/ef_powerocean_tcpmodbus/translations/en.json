@@ -210,22 +210,91 @@
         "name": "Grid Power"
       },
       "voltage_l1": {
-        "name": "Grid Voltage L1"
+        "name": "Inverter Voltage L1"
       },
       "voltage_l2": {
-        "name": "Grid Voltage L2"
+        "name": "Inverter Voltage L2"
       },
       "voltage_l3": {
-        "name": "Grid Voltage L3"
+        "name": "Inverter Voltage L3"
       },
       "current_l1": {
-        "name": "Grid Current L1"
+        "name": "Inverter Current L1"
       },
       "current_l2": {
-        "name": "Grid Current L2"
+        "name": "Inverter Current L2"
       },
       "current_l3": {
+        "name": "Inverter Current L3"
+      },
+      "breaker_capacity": {
+        "name": "Circuit Breaker Capacity"
+      },
+      "inverter_output_power": {
+        "name": "Inverter AC Power"
+      },
+      "grid_voltage_l1": {
+        "name": "Grid Voltage L1"
+      },
+      "grid_voltage_l2": {
+        "name": "Grid Voltage L2"
+      },
+      "grid_voltage_l3": {
+        "name": "Grid Voltage L3"
+      },
+      "grid_current_l1": {
+        "name": "Grid Current L1"
+      },
+      "grid_current_l2": {
+        "name": "Grid Current L2"
+      },
+      "grid_current_l3": {
         "name": "Grid Current L3"
+      },
+      "working_mode": {
+        "name": "Working Mode",
+        "state": {
+          "self_consumption": "Self-consumption",
+          "ai": "AI",
+          "unknown": "Unknown"
+        }
+      },
+      "active_control_mode": {
+        "name": "Active Control Method",
+        "state": {
+          "default": "Default",
+          "system_feed": "System feed/draw (meter)",
+          "inverter_feed": "Inverter feed/draw",
+          "battery_limits": "Battery charge/discharge",
+          "unknown": "Unknown"
+        }
+      },
+      "system_state_2_flags": {
+        "name": "System State 2"
+      },
+      "inverter_ac_in_total": {
+        "name": "Inverter AC Input Total"
+      },
+      "inverter_ac_in_today": {
+        "name": "Inverter AC Input Today"
+      },
+      "inverter_ac_in_today_raw": {
+        "name": "Inverter AC Input Today (Device)"
+      },
+      "inverter_ac_out_total": {
+        "name": "Inverter AC Output Total"
+      },
+      "inverter_ac_out_today": {
+        "name": "Inverter AC Output Today"
+      },
+      "inverter_ac_out_today_raw": {
+        "name": "Inverter AC Output Today (Device)"
+      },
+      "house_energy_ac_today": {
+        "name": "House Consumption Today (AC Balance)"
+      },
+      "house_energy_ac_total": {
+        "name": "House Consumption Total (AC Balance)"
       },
       "frequency": {
         "name": "Grid Frequency"
@@ -390,6 +459,81 @@
       },
       "system_power_on": {
         "name": "System Powered On"
+      },
+      "manual_mode_active": {
+        "name": "Manual Mode"
+      },
+      "bms_connected": {
+        "name": "BMS Connected"
+      },
+      "state2_shutdown_enabled": {
+        "name": "System Shutdown Enabled"
+      },
+      "state2_upgrade_shutdown": {
+        "name": "Upgrade Shutdown"
+      },
+      "state2_epo_triggered": {
+        "name": "Emergency Power Off Triggered"
+      },
+      "state2_low_power_mode_triggered": {
+        "name": "Low Power Mode Triggered"
+      },
+      "state2_fan_failure": {
+        "name": "Fan Failure"
+      },
+      "state2_system_failure": {
+        "name": "System Failure (State 2)"
+      },
+      "state2_bp_reverse_connection": {
+        "name": "Battery Pack Reverse Connection"
+      },
+      "state2_bp_disconnection": {
+        "name": "Battery Pack Disconnected"
+      },
+      "state2_auxiliary_power_failure": {
+        "name": "Auxiliary Power Failure"
+      },
+      "state2_pcs_timeout": {
+        "name": "PCS Timeout"
+      },
+      "state2_pcs_failure": {
+        "name": "PCS Failure"
+      },
+      "state2_igbt_self_test_failure": {
+        "name": "IGBT Self-Test Failure"
+      },
+      "state2_ntc_high_temperature_protection": {
+        "name": "NTC High-Temperature Protection"
+      },
+      "state2_bp_overheating": {
+        "name": "Battery Pack Overheating"
+      },
+      "state2_ntc_circuit_failure": {
+        "name": "NTC Circuit Failure"
+      },
+      "state2_system_reset": {
+        "name": "System Reset"
+      },
+      "state2_hardware_version_error": {
+        "name": "Hardware Version Error"
+      },
+      "state2_parallel_power_sync_error": {
+        "name": "Parallel Power Synchronisation Error"
+      },
+      "state2_ntc_low_temperature_protection": {
+        "name": "NTC Low-Temperature Protection"
+      },
+      "state2_parallel_master_slave_conflict": {
+        "name": "Parallel Master-Slave Conflict"
+      },
+      "state2_parallel_slave_setting_error": {
+        "name": "Parallel Slave Setting Error"
+      },
+      "state2_parallel_inverter_error": {
+        "name": "Parallel Inverter Error"
+      },
+      "state2_parallel_meter_fault": {
+        "name": "Parallel Meter Fault"
       }
     },
     "number": {

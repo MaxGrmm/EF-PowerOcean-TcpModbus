@@ -16,6 +16,7 @@ from homeassistant.const import (
 )
 
 from .models import (
+    UNKNOWN_STATE,
     BinarySensorDef,
     ControlEntityDef,
     ControlFeature,
@@ -33,6 +34,7 @@ from .models import (
     RegisterDef,
     RegisterType,
     SensorDef,
+    WorkingMode,
     plan_blocks_for_model,
     requires_modbus_control,
 )
@@ -154,6 +156,8 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("battery_soc", 40527, RegisterType.UINT16),
     RegisterDef("inverter_rated_power", 40528, RegisterType.UINT32),
     RegisterDef("system_modes", 40530, RegisterType.UINT32),
+    # 0x0213, a fault bitfield in V1.0 of the vendor doc.
+    RegisterDef("system_state_2", 40532, RegisterType.UINT32, optional=True),
     RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
     RegisterDef("grid_feed_mode", 40537, RegisterType.UINT16),
     # The two export caps the vendor doc tells apart: 0x0219 is the one configured,
@@ -162,15 +166,27 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef(
         FEED_IN_POWER_MAX_SETTING_KEY, 40538, RegisterType.UINT32, optional=True
     ),
+    RegisterDef("breaker_capacity", 40540, RegisterType.UINT16, optional=True),
     RegisterDef("device_led_brightness", 40541, RegisterType.UINT16),
     # Setpoints that take effect the moment the matching control method is engaged.
     RegisterDef("system_power_setpoint", 40542, RegisterType.INT32),
     RegisterDef("inverter_power_setpoint", 40544, RegisterType.INT32),
     RegisterDef(INVERTER_CAPACITY_KEY, 40546, RegisterType.UINT32),
     RegisterDef(RECTIFIER_CAPACITY_KEY, 40548, RegisterType.UINT32),
+    # Rectifying positive, inverting negative.
+    RegisterDef("inverter_output_power", 40550, RegisterType.INT32, optional=True),
     RegisterDef("battery_capacity", 40552, RegisterType.UINT32),
     RegisterDef("battery_discharge_power_limit", 40554, RegisterType.UINT32),
     RegisterDef("battery_charge_power_limit", 40556, RegisterType.UINT32),
+    RegisterDef("working_mode_setting", 40558, RegisterType.UINT16, optional=True),
+    # Measured at the grid connection, unlike voltage_l1 and current_l1 below which
+    # are the inverter's own phases.
+    RegisterDef("grid_current_l1", 40559, optional=True),
+    RegisterDef("grid_current_l2", 40561, optional=True),
+    RegisterDef("grid_current_l3", 40563, optional=True),
+    RegisterDef("grid_voltage_l1", 40565, optional=True),
+    RegisterDef("grid_voltage_l2", 40567, optional=True),
+    RegisterDef("grid_voltage_l3", 40569, optional=True),
     RegisterDef("battery_power_setpoint", 40571, RegisterType.INT32),
     RegisterDef("feed_in_power_max_percent", 40573, RegisterType.UINT16, optional=True),
     RegisterDef("battery_voltage", 40574),
@@ -206,6 +222,10 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("grid_import_today", 42163),
     RegisterDef("grid_export_total", 42177),
     RegisterDef("grid_export_today", 42179),
+    RegisterDef("inverter_ac_in_total", 42193, optional=True),
+    RegisterDef("inverter_ac_in_today", 42195, optional=True),
+    RegisterDef("inverter_ac_out_total", 42209, optional=True),
+    RegisterDef("inverter_ac_out_today", 42211, optional=True),
     RegisterDef("bat_charged_total", 42225),
     RegisterDef("bat_charged_today", 42227),
     RegisterDef("bat_discharged_total", 42241),
@@ -234,6 +254,13 @@ def register_blocks_for(
         exclude=exclude,
     )
 
+
+# The control method the device reports in bits 7-10 of the System Status (0x0211),
+# with a value for anything the vendor doc does not define.
+ACTIVE_CONTROL_MODE_OPTIONS: Final = (
+    *(str(mode) for mode in ControlMode),
+    UNKNOWN_STATE,
+)
 
 SENSOR_MAP: list[SensorDef] = [
     SensorDef(
@@ -455,6 +482,59 @@ SENSOR_MAP: list[SensorDef] = [
         icon="mdi:transmission-tower-export",
     ),
     SensorDef(
+        key="breaker_capacity",
+        unit=UnitOfElectricCurrent.AMPERE,
+        device_class="current",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorDef(
+        key="inverter_output_power",
+        unit=UnitOfPower.WATT,
+        device_class="power",
+        state_class="measurement",
+    ),
+    *[
+        SensorDef(
+            key=f"grid_voltage_l{phase}",
+            unit=UnitOfElectricPotential.VOLT,
+            device_class="voltage",
+            state_class="measurement",
+            entity_category=EntityCategory.DIAGNOSTIC,
+        )
+        for phase in (1, 2, 3)
+    ],
+    *[
+        SensorDef(
+            key=f"grid_current_l{phase}",
+            unit=UnitOfElectricCurrent.AMPERE,
+            device_class="current",
+            state_class="measurement",
+            entity_category=EntityCategory.DIAGNOSTIC,
+        )
+        for phase in (1, 2, 3)
+    ],
+    SensorDef(
+        key="working_mode",
+        device_class="enum",
+        options=tuple(WorkingMode),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:home-lightning-bolt-outline",
+    ),
+    SensorDef(
+        key="active_control_mode",
+        device_class="enum",
+        options=ACTIVE_CONTROL_MODE_OPTIONS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:remote",
+        attribute_keys=("system_modes_hex",),
+    ),
+    SensorDef(
+        key="system_state_2_flags",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:alert-outline",
+        attribute_keys=("system_state_2_hex",),
+    ),
+    SensorDef(
         key="grid_feed_mode",
         device_class="enum",
         options=tuple(GridFeedMode),
@@ -613,6 +693,30 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
         total_source="solar_total",
     ),
     EnergySensorDef(
+        "inverter_ac_in_total",
+        max_power=CONF_MAX_GRID_POWER,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    EnergySensorDef(
+        "inverter_ac_in_today",
+        resets_daily=True,
+        max_power=CONF_MAX_GRID_POWER,
+        total_source="inverter_ac_in_total",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    EnergySensorDef(
+        "inverter_ac_out_total",
+        max_power=CONF_MAX_GRID_POWER,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    EnergySensorDef(
+        "inverter_ac_out_today",
+        resets_daily=True,
+        max_power=CONF_MAX_GRID_POWER,
+        total_source="inverter_ac_out_total",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    EnergySensorDef(
         "house_energy_today",
         is_calculated=True,
         resets_daily=True,
@@ -620,6 +724,19 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
     ),
     EnergySensorDef(
         "house_energy_total",
+        is_calculated=True,
+        max_power=CONF_MAX_GRID_POWER,
+    ),
+    # Balanced at the AC side only, so the inverter's conversion losses are not
+    # counted as house consumption.
+    EnergySensorDef(
+        "house_energy_ac_today",
+        is_calculated=True,
+        resets_daily=True,
+        max_power=CONF_MAX_GRID_POWER,
+    ),
+    EnergySensorDef(
+        "house_energy_ac_total",
         is_calculated=True,
         max_power=CONF_MAX_GRID_POWER,
     ),
@@ -651,6 +768,34 @@ DAILY_ENERGY_SENSORS_DEVICE_RAW: list[SensorDef] = [
 ]
 
 
+# System State 2 (0x0213), bit by bit, as the vendor doc lists it. The third item
+# says whether the flag reports a problem rather than a state.
+SYSTEM_STATE_2_BITS: Final[tuple[tuple[int, str, bool], ...]] = (
+    (0, "state2_shutdown_enabled", False),
+    (1, "state2_upgrade_shutdown", False),
+    (2, "state2_epo_triggered", True),
+    (3, "state2_low_power_mode_triggered", False),
+    (4, "state2_fan_failure", True),
+    (5, "state2_system_failure", True),
+    (6, "state2_bp_reverse_connection", True),
+    (7, "state2_bp_disconnection", True),
+    (8, "state2_auxiliary_power_failure", True),
+    (9, "state2_pcs_timeout", True),
+    (10, "state2_pcs_failure", True),
+    (11, "state2_igbt_self_test_failure", True),
+    (12, "state2_ntc_high_temperature_protection", True),
+    (13, "state2_bp_overheating", True),
+    (14, "state2_ntc_circuit_failure", True),
+    (15, "state2_system_reset", False),
+    (16, "state2_hardware_version_error", True),
+    (17, "state2_parallel_power_sync_error", True),
+    (18, "state2_ntc_low_temperature_protection", True),
+    (19, "state2_parallel_master_slave_conflict", True),
+    (20, "state2_parallel_slave_setting_error", True),
+    (21, "state2_parallel_inverter_error", True),
+    (22, "state2_parallel_meter_fault", True),
+)
+
 BINARY_SENSOR_MAP: list[BinarySensorDef] = [
     BinarySensorDef("self_use_mode_ena"),
     BinarySensorDef("intelligent_mode_ena"),
@@ -663,6 +808,27 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
         device_class="running",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    # Bits 11 and 12 of the System Status (0x0211).
+    BinarySensorDef(
+        "manual_mode_active",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    BinarySensorDef(
+        "bms_connected",
+        device_class="connectivity",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    # Unconfirmed on hardware, and most read zero on a healthy system, so they are
+    # there to be enabled rather than shown by default.
+    *[
+        BinarySensorDef(
+            key,
+            device_class="problem" if is_problem else None,
+            entity_category=EntityCategory.DIAGNOSTIC,
+            enabled_default=False,
+        )
+        for _, key, is_problem in SYSTEM_STATE_2_BITS
+    ],
 ]
 
 # Whether the heartbeat currently holds control authority
