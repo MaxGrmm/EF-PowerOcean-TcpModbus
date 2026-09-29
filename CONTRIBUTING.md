@@ -40,6 +40,12 @@ Pre-commit runs Ruff checks and formatting, Prettier for Markdown, and basic YAM
 
 All checks should pass before requesting review.
 
+## Releases
+
+Keep unreleased user-facing changes under the `Unreleased` heading in [CHANGELOG.md](CHANGELOG.md). When it is time to publish, run the `Prepare Release` workflow from the Actions tab and enter the version without a `v` prefix. It verifies that the Unreleased section is not empty, moves it to a dated version heading, updates the integration manifest, and opens a release pull request.
+
+After that pull request is merged, the `Publish Release` workflow creates the matching `v<version>` tag and GitHub release. The release description starts with that version's changelog section, followed by GitHub's generated release notes. Versions containing a hyphen, such as `2.6.0-beta.7`, are published as prereleases.
+
 ## Architecture
 
 The integration separates
