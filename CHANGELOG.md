@@ -14,9 +14,9 @@
 - Maximum feed-in Power (Configured) and (Effective), 40538 and 40609 read side by side, and Maximum feed-in Power (Percent), 40573. Maximum feed-in Power keeps following the effective cap, or the configured one on the PowerOcean Plus. The PowerOcean Plus gets neither the Effective nor the Percent sensor, since it reads 0 in both.
 - Registers not every model has confirmed can be marked optional. A model that refuses reads over addresses it does not implement, such as the Ocean 2, reads them apart from the others and stops polling any it refuses as invalid, so a missing one cannot break the rest of the poll.
 - More registers from V1.0 of the vendor protocol doc, as diagnostic sensors so they can be checked against each model:
-  - Active Control Method, Manual Mode and BMS Connected, from bits 7-12 of the System Status. The raw status word is the `system_modes_hex` attribute of Active Control Method.
-  - Grid-side voltage and current per phase, Inverter AC Power, Circuit Breaker Capacity and Working Mode. The existing Grid Voltage and Grid Current sensors are renamed Inverter Voltage and Inverter Current, since the doc defines those registers as the inverter's own phases; their entity ids are unchanged.
-  - Inverter AC Input and Output energy counters, and House Consumption (AC Balance), which balances the house on the AC side so the inverter's conversion losses are not counted as consumption.
+  - Active Control Method, Modbus Control (Device) and BMS Connected, from bits 7-12 of the System Status. The raw status word is the `system_modes_hex` attribute of Active Control Method. The doc calls bit 11 "manual mode", but on a PowerOcean Plus it is set from the first heartbeat until about 60 s after the last one, so it is the inverter's own answer to whether Modbus has control.
+  - Grid-side voltage and current per phase, Inverter AC Power, Circuit Breaker Capacity and Working Mode. The existing Grid Voltage and Grid Current sensors are renamed Inverter Voltage and Inverter Current, since the doc defines those registers as the inverter's own phases; their entity ids are unchanged. The PowerOcean Plus reads 0 for the grid-side phases and the working mode, so it does not get those sensors.
+  - Inverter AC Input and Output energy counters.
 
 ### Changed
 

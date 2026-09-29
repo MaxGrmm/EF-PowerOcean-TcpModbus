@@ -234,22 +234,22 @@
         "name": "Inverter AC Power"
       },
       "grid_voltage_l1": {
-        "name": "Grid Voltage L1"
+        "name": "Grid-side Voltage L1"
       },
       "grid_voltage_l2": {
-        "name": "Grid Voltage L2"
+        "name": "Grid-side Voltage L2"
       },
       "grid_voltage_l3": {
-        "name": "Grid Voltage L3"
+        "name": "Grid-side Voltage L3"
       },
       "grid_current_l1": {
-        "name": "Grid Current L1"
+        "name": "Grid-side Current L1"
       },
       "grid_current_l2": {
-        "name": "Grid Current L2"
+        "name": "Grid-side Current L2"
       },
       "grid_current_l3": {
-        "name": "Grid Current L3"
+        "name": "Grid-side Current L3"
       },
       "working_mode": {
         "name": "Working Mode",
@@ -286,12 +286,6 @@
       },
       "inverter_ac_out_today_raw": {
         "name": "Inverter AC Output Today (Device)"
-      },
-      "house_energy_ac_today": {
-        "name": "House Consumption Today (AC Balance)"
-      },
-      "house_energy_ac_total": {
-        "name": "House Consumption Total (AC Balance)"
       },
       "frequency": {
         "name": "Grid Frequency"
@@ -457,8 +451,8 @@
       "system_power_on": {
         "name": "System Powered On"
       },
-      "manual_mode_active": {
-        "name": "Manual Mode"
+      "device_modbus_control": {
+        "name": "Modbus Control (Device)"
       },
       "bms_connected": {
         "name": "BMS Connected"

@@ -610,7 +610,6 @@ class SensorDef:
     # Data keys published as state attributes, such as the raw word a value is
     # decoded from.
     attribute_keys: tuple[str, ...] = ()
-    enabled_default: bool = True
 
 
 @dataclass(frozen=True)
@@ -635,7 +634,6 @@ class BinarySensorDef:
     name: str | None = None
     device_class: str | None = None
     entity_category: EntityCategory | None = None
-    enabled_default: bool = True
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -36,9 +36,6 @@ class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
         self._definition = definition
         self._attr_unique_id = f"{self._entry_id}_{self._definition.key}"
         self._attr_translation_key = self._definition.key
-        self._attr_entity_registry_enabled_default = getattr(
-            self._definition, "enabled_default", True
-        )
 
     @property
     def device_info(self) -> DeviceInfo:

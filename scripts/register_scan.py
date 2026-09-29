@@ -64,6 +64,10 @@ PLAUSIBLE_RANGE: Final[dict[str, tuple[float, float]]] = {
     "voltage": (0, 1000),
 }
 
+PLAUSIBLE_RANGE_BY_KEY: Final[dict[str, tuple[float, float]]] = {
+    "breaker_capacity": (0, 400),
+}
+
 DEVICE_CLASS_BY_KEY: Final[dict[str, str]] = {
     definition.key: definition.device_class
     for definition in (*const.SENSOR_MAP, *const.ENERGY_SENSOR_MAP)
@@ -133,7 +137,9 @@ def plausibility_note(key: str, value: float | None) -> str:
         return "undecodable"
     if value == 0:
         return "zero"
-    bounds = PLAUSIBLE_RANGE.get(DEVICE_CLASS_BY_KEY.get(key, ""))
+    bounds = PLAUSIBLE_RANGE_BY_KEY.get(
+        key, PLAUSIBLE_RANGE.get(DEVICE_CLASS_BY_KEY.get(key, ""))
+    )
     if bounds and not bounds[0] <= value <= bounds[1]:
         return "out of range"
     return "ok"

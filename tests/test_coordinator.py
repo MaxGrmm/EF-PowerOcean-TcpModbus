@@ -1221,6 +1221,16 @@ def test_the_powerocean_reads_optional_registers_without_extra_requests() -> Non
     )
 
 
+def test_the_plus_gets_no_diagnostic_sensor_that_reads_zero_on_it() -> None:
+    plus = models.InverterModel.POWEROCEAN_PLUS
+    hidden = {
+        sensor.key for sensor in const.SENSOR_MAP if plus in sensor.unsupported_models
+    }
+
+    assert {"grid_voltage_l1", "grid_current_l3", "working_mode"} <= hidden
+    assert "breaker_capacity" not in hidden
+
+
 def test_the_powerocean_reads_the_new_diagnostic_registers_in_its_live_block() -> None:
     """They sit inside reads the PowerOcean already makes."""
     keys = {

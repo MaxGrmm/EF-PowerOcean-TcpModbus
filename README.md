@@ -290,18 +290,6 @@ after that the two copies are no longer kept in step.
 | Battery Charged Today    | kWh  | Energy charged today               |
 | Battery Discharged Today | kWh  | Energy discharged today            |
 
-#### AC-Balance House Consumption (Diagnostic)
-
-**House Consumption Today (AC Balance)** and **House Consumption Total (AC
-Balance)** estimate the load on the AC side of the inverter:
-
-`grid import - grid export + inverter AC output - inverter AC input`
-
-Unlike the regular house-consumption counters, this calculation does not use
-solar or battery DC-side energy. It therefore leaves the inverter's conversion
-losses out of house consumption. It is an estimate from independently rounded
-device counters, so small differences are expected.
-
 #### Energy - Today (Diagnostic)
 
 Daily energy values are calculated from the corresponding lifetime counters because device-reported daily values have been shown to not reliably reset. The original device values remain available through these diagnostic sensors.

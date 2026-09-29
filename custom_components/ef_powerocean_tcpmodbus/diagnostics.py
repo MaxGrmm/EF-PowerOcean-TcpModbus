@@ -17,7 +17,7 @@ TO_REDACT = (CONF_HOST, "title", "unique_id")
 PROTOCOL_REPORT_KEYS = (
     "system_modes_hex",
     "active_control_mode",
-    "manual_mode_active",
+    "device_modbus_control",
     "bms_connected",
     "grid_feed_mode",
     "feed_in_power_max_setting",

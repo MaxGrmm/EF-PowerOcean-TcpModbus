@@ -234,22 +234,22 @@
         "name": "Wechselrichter AC-Leistung"
       },
       "grid_voltage_l1": {
-        "name": "Netz Phase L1 Spannung"
+        "name": "Netzanschluss Phase L1 Spannung"
       },
       "grid_voltage_l2": {
-        "name": "Netz Phase L2 Spannung"
+        "name": "Netzanschluss Phase L2 Spannung"
       },
       "grid_voltage_l3": {
-        "name": "Netz Phase L3 Spannung"
+        "name": "Netzanschluss Phase L3 Spannung"
       },
       "grid_current_l1": {
-        "name": "Netz Phase L1 Strom"
+        "name": "Netzanschluss Phase L1 Strom"
       },
       "grid_current_l2": {
-        "name": "Netz Phase L2 Strom"
+        "name": "Netzanschluss Phase L2 Strom"
       },
       "grid_current_l3": {
-        "name": "Netz Phase L3 Strom"
+        "name": "Netzanschluss Phase L3 Strom"
       },
       "working_mode": {
         "name": "Arbeitsmodus",
@@ -286,12 +286,6 @@
       },
       "inverter_ac_out_today_raw": {
         "name": "Wechselrichter AC-Ausgang Heute (Gerät)"
-      },
-      "house_energy_ac_today": {
-        "name": "Hausenergie Heute (AC-Bilanz)"
-      },
-      "house_energy_ac_total": {
-        "name": "Hausenergie Gesamt (AC-Bilanz)"
       },
       "frequency": {
         "name": "Netzfrequenz"
@@ -468,8 +462,8 @@
           "off": "Aus"
         }
       },
-      "manual_mode_active": {
-        "name": "Manueller Modus"
+      "device_modbus_control": {
+        "name": "Modbus-Steuerung (Gerät)"
       },
       "bms_connected": {
         "name": "BMS verbunden"

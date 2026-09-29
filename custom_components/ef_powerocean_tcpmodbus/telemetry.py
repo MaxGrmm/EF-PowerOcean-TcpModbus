@@ -21,7 +21,8 @@ from .models import (
 # Bit layout of the System Status (0x0211) beyond the low flags.
 _CONTROL_MODE_SHIFT = 7
 _CONTROL_MODE_MASK = 0xF
-_MANUAL_MODE_BIT = 11
+# The doc's "manual mode" bit; the PowerOcean Plus sets it while Modbus has control.
+_MODBUS_CONTROL_BIT = 11
 _BMS_CONNECTED_BIT = 12
 
 
@@ -104,10 +105,6 @@ class TelemetryData:
     working_mode_setting: float | None = None
     feed_in_power_max_setting: float | None = None
     feed_in_power_max_effective: float | None = None
-    inverter_ac_in_today: float | None = None
-    inverter_ac_in_total: float | None = None
-    inverter_ac_out_today: float | None = None
-    inverter_ac_out_total: float | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, float | None]) -> TelemetryData:
@@ -142,10 +139,6 @@ class TelemetryData:
             working_mode_setting=data.get("working_mode_setting"),
             feed_in_power_max_setting=data.get("feed_in_power_max_setting"),
             feed_in_power_max_effective=data.get("feed_in_power_max_effective"),
-            inverter_ac_in_today=data.get("inverter_ac_in_today"),
-            inverter_ac_in_total=data.get("inverter_ac_in_total"),
-            inverter_ac_out_today=data.get("inverter_ac_out_today"),
-            inverter_ac_out_total=data.get("inverter_ac_out_total"),
         )
 
 
@@ -175,24 +168,6 @@ def _calculate_house_energy(
     return round(
         solar + grid_import + battery_discharged - grid_export - battery_charged,
         precision,
-    )
-
-
-def _calculate_house_energy_ac(
-    *,
-    grid_import: float | None,
-    grid_export: float | None,
-    inverter_ac_out: float | None,
-    inverter_ac_in: float | None,
-    precision: int,
-) -> float | None:
-    """Balance the AC side: what the grid and the inverter put in, minus what left."""
-    values = (grid_import, grid_export, inverter_ac_out, inverter_ac_in)
-    if any(value is None for value in values):
-        return None
-
-    return round(
-        grid_import - grid_export + inverter_ac_out - inverter_ac_in, precision
     )
 
 
@@ -300,22 +275,6 @@ def calculate_derived_values(
         precision=2,
     )
 
-    calculated["house_energy_ac_today"] = _calculate_house_energy_ac(
-        grid_import=data.grid_import_today,
-        grid_export=data.grid_export_today,
-        inverter_ac_out=data.inverter_ac_out_today,
-        inverter_ac_in=data.inverter_ac_in_today,
-        precision=2,
-    )
-
-    calculated["house_energy_ac_total"] = _calculate_house_energy_ac(
-        grid_import=data.grid_import_total,
-        grid_export=data.grid_export_total,
-        inverter_ac_out=data.inverter_ac_out_total,
-        inverter_ac_in=data.inverter_ac_in_total,
-        precision=2,
-    )
-
     for pv_number in range(1, 4):
         current = getattr(data, f"pv{pv_number}_current")
         voltage = getattr(data, f"pv{pv_number}_voltage")
@@ -355,7 +314,9 @@ def calculate_derived_values(
         calculated["active_control_mode"] = (
             str(active_mode) if active_mode is not None else UNKNOWN_STATE
         )
-        calculated["manual_mode_active"] = _is_bit_set(system_modes, _MANUAL_MODE_BIT)
+        calculated["device_modbus_control"] = _is_bit_set(
+            system_modes, _MODBUS_CONTROL_BIT
+        )
         calculated["bms_connected"] = _is_bit_set(system_modes, _BMS_CONNECTED_BIT)
         calculated["system_modes_hex"] = f"0x{system_modes:08X}"
 

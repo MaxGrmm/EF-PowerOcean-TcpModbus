@@ -500,6 +500,7 @@ SENSOR_MAP: list[SensorDef] = [
         unit=UnitOfPower.WATT,
         device_class="power",
         state_class="measurement",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     *[
         SensorDef(
@@ -508,6 +509,7 @@ SENSOR_MAP: list[SensorDef] = [
             device_class="voltage",
             state_class="measurement",
             entity_category=EntityCategory.DIAGNOSTIC,
+            unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
         )
         for phase in (1, 2, 3)
     ],
@@ -518,6 +520,7 @@ SENSOR_MAP: list[SensorDef] = [
             device_class="current",
             state_class="measurement",
             entity_category=EntityCategory.DIAGNOSTIC,
+            unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
         )
         for phase in (1, 2, 3)
     ],
@@ -527,6 +530,7 @@ SENSOR_MAP: list[SensorDef] = [
         options=tuple(WorkingMode),
         entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:home-lightning-bolt-outline",
+        unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
     ),
     SensorDef(
         key="active_control_mode",
@@ -729,19 +733,6 @@ ENERGY_SENSOR_MAP: list[EnergySensorDef] = [
         is_calculated=True,
         max_power=CONF_MAX_GRID_POWER,
     ),
-    # Balanced at the AC side only, so the inverter's conversion losses are not
-    # counted as house consumption.
-    EnergySensorDef(
-        "house_energy_ac_today",
-        is_calculated=True,
-        resets_daily=True,
-        max_power=CONF_MAX_GRID_POWER,
-    ),
-    EnergySensorDef(
-        "house_energy_ac_total",
-        is_calculated=True,
-        max_power=CONF_MAX_GRID_POWER,
-    ),
 ]
 
 # The counters the device reports, as opposed to the calculated ones. They arrive in
@@ -784,7 +775,8 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
     ),
     # Bits 11 and 12 of the System Status (0x0211).
     BinarySensorDef(
-        "manual_mode_active",
+        "device_modbus_control",
+        device_class="running",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     BinarySensorDef(

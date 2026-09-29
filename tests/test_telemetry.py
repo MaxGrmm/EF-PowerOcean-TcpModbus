@@ -298,7 +298,7 @@ def test_decodes_the_active_control_method_from_the_system_status(
     method_bits: int, expected: str
 ) -> None:
     """Bits 7-10 of 0x0211 carry the control method the device is following."""
-    word = (method_bits << 7) | (1 << 12) | 0b10100
+    word = (method_bits << 7) | (1 << 11) | (1 << 12) | 0b10100
     calculated = calculate_derived_values(
         TelemetryData(system_modes=float(word)),
         calculate_solar_power=False,
@@ -306,29 +306,12 @@ def test_decodes_the_active_control_method_from_the_system_status(
     )
 
     assert calculated["active_control_mode"] == expected
-    assert calculated["manual_mode_active"] is False
+    assert calculated["device_modbus_control"] is True
     assert calculated["bms_connected"] is True
     assert calculated["system_modes_hex"] == f"0x{word:08X}"
     # The low bits keep decoding as before.
     assert calculated["operating_mode"] == "self_consumption"
     assert calculated["system_power_on"] is True
-
-
-def test_house_energy_is_also_balanced_on_the_ac_side() -> None:
-    """Import - export + inverter AC out - inverter AC in leaves out the losses."""
-    calculated = calculate_derived_values(
-        TelemetryData(
-            grid_import_today=3.0,
-            grid_export_today=1.0,
-            inverter_ac_out_today=6.5,
-            inverter_ac_in_today=0.5,
-        ),
-        calculate_solar_power=False,
-        startup_voltage=0,
-    )
-
-    assert calculated["house_energy_ac_today"] == 8.0
-    assert calculated["house_energy_ac_total"] is None
 
 
 def test_decodes_the_working_mode() -> None:
