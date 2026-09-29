@@ -507,7 +507,6 @@ SENSOR_MAP: list[SensorDef] = [
             device_class="voltage",
             state_class="measurement",
             entity_category=EntityCategory.DIAGNOSTIC,
-            unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
         )
         for phase in (1, 2, 3)
     ],
@@ -518,7 +517,6 @@ SENSOR_MAP: list[SensorDef] = [
             device_class="current",
             state_class="measurement",
             entity_category=EntityCategory.DIAGNOSTIC,
-            unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
         )
         for phase in (1, 2, 3)
     ],
