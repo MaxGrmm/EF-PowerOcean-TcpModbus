@@ -15,7 +15,7 @@
 - Registers not every model has confirmed can be marked optional. A model that refuses reads over addresses it does not implement, such as the Ocean 2, reads them apart from the others and stops polling any it refuses as invalid, so a missing one cannot break the rest of the poll.
 - More registers as diagnostic sensors, so they can be checked against each model:
   - Active Control Method, Modbus Control (Device) and BMS Connected, from bits 7-12 of the System Status. The raw status word is the `system_modes_hex` attribute of Active Control Method. On a PowerOcean Plus bit 11 is set from the first heartbeat until about 60 s after the last one, so it is the inverter's own answer to whether Modbus has control.
-  - Grid-side voltage and current per phase, Inverter AC Power, Circuit Breaker Capacity and Working Mode. The existing Grid Voltage and Grid Current sensors are renamed Inverter Voltage and Inverter Current, since those registers measure the inverter's own phases; their entity ids are unchanged. The PowerOcean Plus reads 0 for the grid-side phases and the working mode, so it does not get those sensors.
+  - Grid-side voltage and current per phase, Inverter AC Power and Circuit Breaker Capacity. The existing Grid Voltage and Grid Current sensors are renamed Inverter Voltage and Inverter Current, since those registers measure the inverter's own phases; their entity ids are unchanged. The PowerOcean Plus reads 0 for the grid-side phases, so it does not get those sensors.
   - Inverter AC Input and Output energy counters.
 
 ### Changed

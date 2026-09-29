@@ -1227,7 +1227,7 @@ def test_the_plus_gets_no_diagnostic_sensor_that_reads_zero_on_it() -> None:
         sensor.key for sensor in const.SENSOR_MAP if plus in sensor.unsupported_models
     }
 
-    assert {"grid_voltage_l1", "grid_current_l3", "working_mode"} <= hidden
+    assert {"grid_voltage_l1", "grid_current_l3"} <= hidden
     assert "breaker_capacity" not in hidden
 
 

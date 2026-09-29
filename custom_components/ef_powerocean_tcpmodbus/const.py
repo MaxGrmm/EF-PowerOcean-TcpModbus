@@ -34,7 +34,6 @@ from .models import (
     RegisterDef,
     RegisterType,
     SensorDef,
-    WorkingMode,
     plan_blocks_for_model,
     requires_modbus_control,
 )
@@ -176,7 +175,6 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("battery_capacity", 40552, RegisterType.UINT32),
     RegisterDef("battery_discharge_power_limit", 40554, RegisterType.UINT32),
     RegisterDef("battery_charge_power_limit", 40556, RegisterType.UINT32),
-    RegisterDef("working_mode_setting", 40558, RegisterType.UINT16, optional=True),
     # Measured at the grid connection, unlike voltage_l1 and current_l1 below which
     # are the inverter's own phases.
     RegisterDef("grid_current_l1", 40559, optional=True),
@@ -524,14 +522,6 @@ SENSOR_MAP: list[SensorDef] = [
         )
         for phase in (1, 2, 3)
     ],
-    SensorDef(
-        key="working_mode",
-        device_class="enum",
-        options=tuple(WorkingMode),
-        entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:home-lightning-bolt-outline",
-        unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
-    ),
     SensorDef(
         key="active_control_mode",
         device_class="enum",

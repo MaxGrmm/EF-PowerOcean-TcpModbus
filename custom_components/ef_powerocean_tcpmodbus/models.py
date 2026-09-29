@@ -203,20 +203,6 @@ class OperatingMode(StrEnum):
     UNKNOWN = "unknown"
 
 
-class WorkingMode(StrEnum):
-    """The System Working Mode Setting (40558)."""
-
-    SELF_CONSUMPTION = "self_consumption"
-    AI = "ai"
-    UNKNOWN = "unknown"
-
-    @classmethod
-    def from_register(cls, value: float | None) -> WorkingMode | None:
-        if value is None:
-            return None
-        return {1: cls.SELF_CONSUMPTION, 2: cls.AI}.get(int(value), cls.UNKNOWN)
-
-
 class GridMode(StrEnum):
     GRID = "grid"
     ISLANDED = "islanded"

@@ -251,14 +251,6 @@
       "grid_current_l3": {
         "name": "Netzanschluss Phase L3 Strom"
       },
-      "working_mode": {
-        "name": "Arbeitsmodus",
-        "state": {
-          "self_consumption": "Eigenverbrauch",
-          "ai": "KI",
-          "unknown": "Unbekannt"
-        }
-      },
       "active_control_mode": {
         "name": "Aktive Steuerungsart",
         "state": {

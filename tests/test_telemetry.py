@@ -312,13 +312,3 @@ def test_decodes_the_active_control_method_from_the_system_status(
     # The low bits keep decoding as before.
     assert calculated["operating_mode"] == "self_consumption"
     assert calculated["system_power_on"] is True
-
-
-def test_decodes_the_working_mode() -> None:
-    for raw, expected in ((1, "self_consumption"), (2, "ai"), (0, "unknown")):
-        calculated = calculate_derived_values(
-            TelemetryData(working_mode_setting=float(raw)),
-            calculate_solar_power=False,
-            startup_voltage=0,
-        )
-        assert calculated["working_mode"] == expected

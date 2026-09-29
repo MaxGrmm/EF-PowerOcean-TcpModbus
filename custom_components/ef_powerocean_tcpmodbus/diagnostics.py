@@ -26,7 +26,6 @@ PROTOCOL_REPORT_KEYS = (
     "limit_inv_power",
     "limit_inv_max",
     "inverter_rated_power",
-    "working_mode",
 )
 
 

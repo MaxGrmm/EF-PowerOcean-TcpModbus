@@ -251,14 +251,6 @@
       "grid_current_l3": {
         "name": "Grid-side Current L3"
       },
-      "working_mode": {
-        "name": "Working Mode",
-        "state": {
-          "self_consumption": "Self-consumption",
-          "ai": "AI",
-          "unknown": "Unknown"
-        }
-      },
       "active_control_mode": {
         "name": "Active Control Method",
         "state": {

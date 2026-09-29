@@ -15,7 +15,6 @@ from .models import (
     GridMode,
     OperatingMode,
     RegisterType,
-    WorkingMode,
 )
 
 # Bit layout of the System Status (40530) beyond the low flags.
@@ -102,7 +101,6 @@ class TelemetryData:
     battery_capacity: float | None = None
     grid_feed_mode: float | None = None
     fault_codes: tuple[float | None, ...] = ()
-    working_mode_setting: float | None = None
     feed_in_power_max_setting: float | None = None
     feed_in_power_max_effective: float | None = None
 
@@ -136,7 +134,6 @@ class TelemetryData:
             battery_capacity=data.get("battery_capacity"),
             grid_feed_mode=data.get("grid_feed_mode"),
             fault_codes=tuple(value for _, value in sorted(faults)),
-            working_mode_setting=data.get("working_mode_setting"),
             feed_in_power_max_setting=data.get("feed_in_power_max_setting"),
             feed_in_power_max_effective=data.get("feed_in_power_max_effective"),
         )
@@ -319,8 +316,6 @@ def calculate_derived_values(
         )
         calculated["bms_connected"] = _is_bit_set(system_modes, _BMS_CONNECTED_BIT)
         calculated["system_modes_hex"] = f"0x{system_modes:08X}"
-
-    calculated["working_mode"] = WorkingMode.from_register(data.working_mode_setting)
 
     calculated["active_faults"] = _format_active_faults(data.fault_codes)
 
