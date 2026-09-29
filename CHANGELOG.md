@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.6.0] - 2026-09-29
+
 ### Fixed
 
 - Grid Feed-in Mode 2, a limit by percentage of the rated power, was shown as Unlimited. It is now shown as Limited (percent).
