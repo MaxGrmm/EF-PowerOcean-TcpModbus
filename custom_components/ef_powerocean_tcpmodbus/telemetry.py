@@ -18,7 +18,7 @@ from .models import (
     WorkingMode,
 )
 
-# Bit layout of the System Status (0x0211) beyond the low flags.
+# Bit layout of the System Status (40530) beyond the low flags.
 _CONTROL_MODE_SHIFT = 7
 _CONTROL_MODE_MASK = 0xF
 # The doc's "manual mode" bit; the PowerOcean Plus sets it while Modbus has control.

@@ -253,7 +253,7 @@ def register_blocks_for(
     )
 
 
-# The control method the device reports in bits 7-10 of the System Status (0x0211),
+# The control method the device reports in bits 7-10 of the System Status (40530),
 # with a value for anything the vendor doc does not define.
 ACTIVE_CONTROL_MODE_OPTIONS: Final = (
     *(str(mode) for mode in ControlMode),
@@ -773,7 +773,7 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
         device_class="running",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    # Bits 11 and 12 of the System Status (0x0211).
+    # Bits 11 and 12 of the System Status (40530).
     BinarySensorDef(
         "device_modbus_control",
         device_class="running",

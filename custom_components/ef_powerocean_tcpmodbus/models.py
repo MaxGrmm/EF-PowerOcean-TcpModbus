@@ -204,7 +204,7 @@ class OperatingMode(StrEnum):
 
 
 class WorkingMode(StrEnum):
-    """The System Working Mode Setting (0x022D)."""
+    """The System Working Mode Setting (40558)."""
 
     SELF_CONSUMPTION = "self_consumption"
     AI = "ai"
@@ -287,7 +287,7 @@ class ControlMode(StrEnum):
 
     @classmethod
     def from_status(cls, value: int) -> ControlMode | None:
-        """Map bits 7-10 of the System Status (0x0211), or None if undefined."""
+        """Map bits 7-10 of the System Status (40530), or None if undefined."""
         return next(
             (mode for mode, raw in _CONTROL_MODE_VALUES.items() if raw == value),
             None,

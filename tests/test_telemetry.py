@@ -297,7 +297,7 @@ def test_decodes_every_grid_feed_mode(raw, expected) -> None:
 def test_decodes_the_active_control_method_from_the_system_status(
     method_bits: int, expected: str
 ) -> None:
-    """Bits 7-10 of 0x0211 carry the control method the device is following."""
+    """Bits 7-10 of 40530 carry the control method the device is following."""
     word = (method_bits << 7) | (1 << 11) | (1 << 12) | 0b10100
     calculated = calculate_derived_values(
         TelemetryData(system_modes=float(word)),
