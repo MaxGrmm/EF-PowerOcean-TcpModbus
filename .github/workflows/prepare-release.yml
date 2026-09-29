@@ -1,0 +1,37 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, without the v prefix
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    name: Create release pull request
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare release files
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node scripts/release.mjs prepare "$VERSION"
+
+      - name: Create release pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: release/v${{ inputs.version }}
+          delete-branch: true
+          commit-message: "release: v${{ inputs.version }}"
+          title: "Release v${{ inputs.version }}"
+          body: |
+            Prepares release `v${{ inputs.version }}` from the current Unreleased changelog.
+
+            Merging this pull request creates the GitHub release and tag automatically.

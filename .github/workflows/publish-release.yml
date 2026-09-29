@@ -1,0 +1,34 @@
+name: Publish Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - custom_components/ef_powerocean_tcpmodbus/manifest.json
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract release notes
+        id: notes
+        run: node scripts/release.mjs publish
+
+      - name: Create GitHub release
+        if: steps.notes.outputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.notes.outputs.tag }}
+          name: Release ${{ steps.notes.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true
+          prerelease: ${{ steps.notes.outputs.prerelease }}
