@@ -22,7 +22,7 @@
 - Energy counters: daily and lifetime for grid, solar, battery charge/discharge, house consumption
 - Operating mode, grid mode and system status as dedicated entities
 - Fault reporting: active fault count and raw fault codes
-- Firmware and product information read from the device, with model mismatch detection where supported
+- Serial number and firmware version read from the device. The model it reports pre-fills the setup form; the model you select is the one the integration uses
 - Reconfigurable after setup via **Settings → Configure** (no re-install needed)
 - Debug logging toggle directly in the HA UI
 - German and English translations

@@ -36,13 +36,12 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_S,
     DEVICE_ENERGY_KEYS,
     DEVICE_INFO_BLOCK,
+    DEVICE_INFO_EXTRA,
     DOMAIN,
     FIRMWARE_VERSION,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MODBUS_DISABLED_READ_THRESHOLD,
-    PRODUCT_CATEGORY,
-    PRODUCT_NUMBER,
     SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
@@ -62,6 +61,7 @@ from .telemetry import (
     TelemetryData,
     calculate_derived_values,
     decode_firmware_version,
+    decode_protocol_version,
     decode_register,
     decode_serial_number,
     is_modbus_disabled,
@@ -122,7 +122,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         self.serial_number: str | None = None
         self.firmware_version: str | None = None
-        self.detected_model: InverterModel | None = None
+        self.protocol_version: int | None = None
+        self.device_address: int | None = None
         self._last_inverter_temperature: float | None = None
         self._consecutive_modbus_disabled_reads = 0
         self._modbus_client = ModbusClient(self.host, self.port)
@@ -158,12 +159,12 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     @property
     def device_model(self) -> InverterModel:
-        """The model the device reports, falling back to the configured one.
+        """The model the device is read as, which is always the configured one.
 
-        What the device reports decides how its words are ordered, so a wrong
-        pick in the options cannot corrupt every reading.
+        What the device reports in its product registers only pre-fills the config
+        flow; it never overrides the selection.
         """
-        return self.detected_model or self.inverter_model
+        return self.inverter_model
 
     @property
     def is_modbus_disabled(self) -> bool:
@@ -223,8 +224,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         )
 
     async def async_read_device_info(self) -> None:
-        """Populate the serial number, firmware and detected model from the device."""
-        self.serial_number = "unknown"
+        """Populate the serial number and firmware version from the device.
+
+        Run on every connect, not only the first, because a firmware update reboots
+        the inverter and drops the connection. A failed read keeps what an earlier
+        one found. The product registers in the same block are left alone: the
+        configured model decides how the device is read.
+        """
+        if self.serial_number is None:
+            self.serial_number = "unknown"
 
         try:
             raw = await self._modbus_client.async_read(
@@ -244,20 +252,53 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             decode_serial_number(registers_for(SERIAL_NUMBER)) or "unknown"
         )
 
-        self.detected_model = InverterModel.from_product_info(
-            registers_for(PRODUCT_NUMBER)[0], registers_for(PRODUCT_CATEGORY)[0]
-        )
-
         if firmware := decode_firmware_version(
             registers_for(FIRMWARE_VERSION), self.device_model.traits.high_word_first
         ):
             self.firmware_version = firmware
 
+        await self._async_read_device_info_extra()
+
+    async def _async_read_device_info_extra(self) -> None:
+        """Read the protocol version and device address, where the device has them.
+
+        Each on its own read, and a refusal only leaves the value unknown.
+        """
+        values: dict[str, int | None] = {}
+        for register in DEVICE_INFO_EXTRA:
+            try:
+                raw = await self._modbus_client.async_read(
+                    register.address, register.size
+                )
+            except ModbusException as err:
+                _LOGGER.debug(f"Could not read {register.key}: {err.string}")
+                values[register.key] = None
+                continue
+            value = decode_register(
+                raw, register.data_type, self.device_model.traits.high_word_first
+            )
+            values[register.key] = int(value) if value is not None else None
+
+        self.protocol_version = values.get("protocol_version")
+        self.device_address = values.get("device_address")
+
+    def _device_info_values(self) -> dict[str, Any]:
+        """Return the values read on connect, in the form the sensors show."""
+        return {
+            "protocol_version": decode_protocol_version(self.protocol_version),
+            "device_address": self.device_address,
+        }
+
     async def async_reconnect(self) -> bool:
-        """Reconnect, and assume the device stopped following us while we were away."""
+        """Reconnect, and assume the device stopped following us while we were away.
+
+        The device info is read again: the outage may have been a firmware update,
+        or the first connect may have failed before it could be read at all.
+        """
         if not await self._modbus_client.async_reconnect():
             return False
         self.control.mark_stale()
+        await self.async_read_device_info()
         return True
 
     async def async_get_raw_data(self) -> dict[str, Any]:
@@ -326,6 +367,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 raw_data, self._last_checked_data, self._last_checked_time
             )
             result.update(self._energy_processor.raw_daily_values(raw_data))
+            result.update(self._device_info_values())
             result, is_daily_reset = self._energy_processor.derive_daily(result)
             calculated_results = calculate_derived_values(
                 TelemetryData.from_mapping(result),

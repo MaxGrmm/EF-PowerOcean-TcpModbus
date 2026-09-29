@@ -242,6 +242,12 @@
           "processing_failed": "Processing failed"
         }
       },
+      "protocol_version": {
+        "name": "Modbus Protocol Version"
+      },
+      "device_address": {
+        "name": "Modbus Device Address"
+      },
       "limit_inv_max": {
         "name": "Maximum Rectifier Power (AC to DC)"
       },

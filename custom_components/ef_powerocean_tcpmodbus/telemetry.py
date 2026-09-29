@@ -47,6 +47,16 @@ def decode_firmware_version(
     return ".".join(str((firmware >> shift) & 0xFF) for shift in (24, 16, 8, 0))
 
 
+def decode_protocol_version(raw: int | None) -> str | None:
+    """Format the protocol version's four high-to-low hexadecimal components.
+
+    The register is UINT16, so its two high components are zero.
+    """
+    if raw is None:
+        return None
+    return "V" + ".".join(f"{(raw >> shift) & 0xFF:X}" for shift in (24, 16, 8, 0))
+
+
 def is_modbus_disabled(
     serial_number: str | None,
     inverter_rated_power: float | None,

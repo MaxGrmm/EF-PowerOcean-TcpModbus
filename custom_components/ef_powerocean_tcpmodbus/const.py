@@ -111,15 +111,20 @@ UNIT_OF_RATIO: Final = "%"
 DEFAULT_INVERTER_MODEL: Final = InverterModel.POWEROCEAN_THREE_PHASE
 
 
+PROTOCOL_VERSION: Final = RegisterDef("protocol_version", 40001, RegisterType.UINT16)
 PRODUCT_CATEGORY: Final = RegisterDef("product_category", 40002, RegisterType.UINT16)
 PRODUCT_NUMBER: Final = RegisterDef("product_number", 40003, RegisterType.UINT16)
 SERIAL_NUMBER: Final = RegisterDef("serial_number", 40004, RegisterType.SERIAL)
 FIRMWARE_VERSION: Final = RegisterDef("firmware_version", 40012, RegisterType.UINT32)
 
-# Read once when the connection is established, not on every poll.
+DEVICE_ADDRESS: Final = RegisterDef("device_address", 40014, RegisterType.UINT16)
+
+# Read on every connect, not on every poll.
 DEVICE_INFO_BLOCK: Final = RegisterBlock(
     (PRODUCT_CATEGORY, PRODUCT_NUMBER, SERIAL_NUMBER, FIRMWARE_VERSION)
 )
+# Read one at a time, skipping if any models rejects the register.
+DEVICE_INFO_EXTRA: Final = (PROTOCOL_VERSION, DEVICE_ADDRESS)
 
 BATTERY_SOC_KEYS: Final = tuple(
     f"soc_battery_{battery_number}"
@@ -522,6 +527,16 @@ SENSOR_MAP: list[SensorDef] = [
         device_class="enum",
         entity_category=EntityCategory.DIAGNOSTIC,
         options=tuple(CoordinatorStatus),
+    ),
+    SensorDef(
+        key="protocol_version",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:information-outline",
+    ),
+    SensorDef(
+        key="device_address",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:identifier",
     ),
 ]
 

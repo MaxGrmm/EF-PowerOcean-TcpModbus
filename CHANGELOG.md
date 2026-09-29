@@ -13,6 +13,8 @@
 ### Changed
 
 - Modbus Control is now a switch in the device's Configuration section instead of an option in the setup and settings dialog, so it can be turned on and off without reloading the integration. An existing setting carries over.
+- The inverter model selected in the setup and settings dialog now decides how the device is read. The model the device reports only pre-fills the setup form; it no longer overrides the selection for word order and energy units.
+- Serial number and firmware version are read again after every reconnect, not only at startup. A firmware update reboots the inverter, and a failed first connect used to leave them unknown until Home Assistant restarted. The Modbus Protocol Version and Modbus Device Address diagnostic sensors show the matching registers from V1.0 of the vendor protocol doc.
 
 ## [2.5.2] - 2026-09-28
 

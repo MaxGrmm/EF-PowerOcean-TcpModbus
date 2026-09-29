@@ -242,6 +242,12 @@
           "processing_failed": "Verarbeitung fehlgeschlagen"
         }
       },
+      "protocol_version": {
+        "name": "Modbus-Protokollversion"
+      },
+      "device_address": {
+        "name": "Modbus-Geräteadresse"
+      },
       "limit_inv_max": {
         "name": "Max. Gleichrichterleistung (AC zu DC)"
       },

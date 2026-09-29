@@ -11,6 +11,7 @@ from custom_components.ef_powerocean_tcpmodbus.telemetry import (
     TelemetryData,
     calculate_derived_values,
     decode_firmware_version,
+    decode_protocol_version,
     decode_register,
     is_modbus_disabled,
 )
@@ -87,6 +88,12 @@ def test_decodes_register_values_sent_high_word_first(
     expected: float,
 ) -> None:
     assert decode_register(registers, data_type, high_word_first=True) == expected
+
+
+def test_decodes_the_protocol_version_bytes() -> None:
+    assert decode_protocol_version(0x01234567) == "V1.23.45.67"
+    assert decode_protocol_version(0x0001) == "V0.0.0.1"
+    assert decode_protocol_version(None) is None
 
 
 def test_decodes_firmware_version_sent_high_word_first() -> None:

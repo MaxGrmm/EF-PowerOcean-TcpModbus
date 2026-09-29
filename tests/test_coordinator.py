@@ -38,7 +38,8 @@ def coordinator():
     instance._consecutive_modbus_disabled_reads = 0
     instance._ena_calc_solar_power = False
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
-    instance.detected_model = None
+    instance.protocol_version = None
+    instance.device_address = None
     instance._register_blocks = const.register_blocks_for(instance.inverter_model)
     instance._registers_by_key = {
         register.key: register
@@ -686,7 +687,7 @@ def _float_words(value: float, high_word_first: bool) -> list[int]:
 
 
 def _read_energy_and_power(coordinator, model: models.InverterModel, energy, power):
-    coordinator.detected_model = model
+    coordinator.inverter_model = model
     coordinator._register_blocks = (
         models.RegisterBlock(
             (
@@ -900,40 +901,61 @@ def _device_info_registers(
     return registers
 
 
-def test_reads_device_info_in_a_single_request(coordinator) -> None:
+def test_reads_the_device_info_block_then_the_extra_registers(coordinator) -> None:
     coordinator.firmware_version = None
-    coordinator.detected_model = None
     coordinator.inverter_model = models.InverterModel.POWEROCEAN_PLUS
     coordinator._modbus_client.async_read = AsyncMock(
-        return_value=_device_info_registers()
+        side_effect=[_device_info_registers(), [0x0001], [1]]
     )
 
     asyncio.run(coordinator.async_read_device_info())
 
     assert coordinator.serial_number == "R371ZD1AZH3X0450"
     assert coordinator.firmware_version == "3.0.19.19"
-    assert coordinator.detected_model == models.InverterModel.POWEROCEAN_PLUS
-    coordinator._modbus_client.async_read.assert_awaited_once_with(40002, 12)
+    assert coordinator.protocol_version == 0x0001
+    assert coordinator.device_address == 1
+    # The block first, then the protocol version and device address on their own.
+    reads = coordinator._modbus_client.async_read.await_args_list
+    assert [call.args for call in reads] == [(40002, 12), (40001, 1), (40014, 1)]
 
 
 def test_reads_device_info_of_a_three_phase_ocean_2(coordinator) -> None:
-    """It reports product number 4 and sends 32-bit values high word first."""
+    """A configured Ocean 2 is read high word first."""
     registers = _device_info_registers(product_number=4, product_category=1)
     firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
     registers[firmware_index], registers[firmware_index + 1] = 0x0100, 0x034F
     coordinator.firmware_version = None
-    coordinator.detected_model = None
+    coordinator.inverter_model = models.InverterModel.OCEAN_2_THREE_PHASE
     coordinator._modbus_client.async_read = AsyncMock(return_value=registers)
 
     asyncio.run(coordinator.async_read_device_info())
 
-    assert coordinator.detected_model == models.InverterModel.OCEAN_2_THREE_PHASE
+    assert coordinator.firmware_version == "1.0.3.79"
+
+
+def test_the_configured_model_decides_how_the_device_is_read(coordinator) -> None:
+    """What the device reports only pre-fills the config flow.
+
+    A PowerOcean configured by hand stays a PowerOcean even when the product
+    registers say Ocean 2, so its words are still read low word first.
+    """
+    registers = _device_info_registers(product_number=4, product_category=1)
+    firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
+    registers[firmware_index], registers[firmware_index + 1] = 0x034F, 0x0100
+    coordinator.firmware_version = None
+    coordinator.inverter_model = models.InverterModel.POWEROCEAN_PLUS
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=[registers, [0x0100], [1]]
+    )
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.device_model is models.InverterModel.POWEROCEAN_PLUS
     assert coordinator.firmware_version == "1.0.3.79"
 
 
 def test_device_info_read_failure_closes_connection(coordinator) -> None:
     coordinator.firmware_version = None
-    coordinator.detected_model = None
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=coordinator_module.ModbusException("boom")
     )
@@ -942,6 +964,50 @@ def test_device_info_read_failure_closes_connection(coordinator) -> None:
 
     assert coordinator.serial_number == "unknown"
     coordinator._modbus_client.close.assert_called_once()
+
+
+def test_a_failed_device_info_read_keeps_what_was_known(coordinator) -> None:
+    coordinator.serial_number = "R371ZD1AZH3X0450"
+    coordinator.firmware_version = "3.0.19.19"
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=coordinator_module.ModbusException("timeout")
+    )
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.serial_number == "R371ZD1AZH3X0450"
+    assert coordinator.firmware_version == "3.0.19.19"
+
+
+def test_a_refused_protocol_version_leaves_the_rest_of_the_device_info(
+    coordinator,
+) -> None:
+    coordinator.firmware_version = None
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=[
+            _device_info_registers(),
+            coordinator_module.ModbusException("illegal address"),
+            [1],
+        ]
+    )
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.serial_number == "R371ZD1AZH3X0450"
+    assert coordinator.protocol_version is None
+    assert coordinator._device_info_values() == {
+        "protocol_version": None,
+        "device_address": 1,
+    }
+
+
+def test_a_reconnect_reads_the_device_info_again(coordinator) -> None:
+    """A firmware update reboots the inverter, and the first connect may have failed."""
+    coordinator._modbus_client.async_reconnect = AsyncMock(return_value=True)
+    coordinator.async_read_device_info = AsyncMock()
+
+    assert asyncio.run(coordinator.async_reconnect()) is True
+    coordinator.async_read_device_info.assert_awaited_once()
 
 
 @pytest.mark.parametrize("inverter_model", models.InverterModel)
