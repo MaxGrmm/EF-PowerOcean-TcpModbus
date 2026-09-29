@@ -268,8 +268,8 @@ The meaning of the fault codes is not known, so we only publish the raw values.
 | Maximum Inverter Power (DC to AC)  | W    | Nameplate inverter (discharge direction) capacity               |
 | Maximum Rectifier Power (AC to DC) | W    | Nameplate rectifier (charge direction) capacity                 |
 | Maximum feed-in Power              | W    | The export cap in force, which bounds Export to Grid            |
-| Maximum feed-in Power (Configured) | W    | Export cap as configured (0x0219)                               |
-| Maximum feed-in Power (Effective)  | W    | Export cap after the safety rules (0x0260), not on the PO Plus  |
+| Maximum feed-in Power (Configured) | W    | Export cap as configured (40538)                                |
+| Maximum feed-in Power (Effective)  | W    | Export cap after the safety rules (40609), not on the PO Plus   |
 | Maximum feed-in Power (Percent)    | %    | Export cap as a share of the rated power, not on the PO Plus    |
 | Grid Feed-in Mode                  | –    | Whether the export is limited in watts, in percent or unlimited |
 | System Modes                       | –    | Raw system status                                               |

@@ -821,7 +821,7 @@ def test_blocks_cover_every_register_word_they_map(
 def test_both_feed_in_caps_are_read_on_every_model(
     inverter_model: models.InverterModel,
 ) -> None:
-    """0x0219 is the configured cap and 0x0260 the effective one, per the vendor doc."""
+    """40538 is the configured cap and 40609 the effective one, per the vendor doc."""
     addresses = {
         register.key: register.address
         for block in const.register_blocks_for(inverter_model)

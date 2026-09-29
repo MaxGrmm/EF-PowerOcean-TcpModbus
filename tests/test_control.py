@@ -1060,7 +1060,7 @@ def test_the_grid_feed_switch_refuses_without_a_restore_or_modbus_control(
 
 
 def test_discharge_and_export_are_capped_by_the_inverter_capacity(control) -> None:
-    """0x0221 is the most the inverter turns from DC into AC."""
+    """40546 is the most the inverter turns from DC into AC."""
     control._limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] = 25_000
     control._limits[const.CONF_MAX_BATTERY_CHARGED_POWER] = 25_000
     control._data = {

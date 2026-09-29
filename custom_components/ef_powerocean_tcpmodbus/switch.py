@@ -52,7 +52,7 @@ GRID_FEED_SWITCH: Final = SwitchDef(
         coordinator.control.grid_feed_switchable
         and requires_modbus_control(coordinator.control.status)
     ),
-    # The vendor doc lists both registers it writes (0x0218 and 0x0219) as
+    # The vendor doc lists both registers it writes (40537 and 40538) as
     # read-only, but the PowerOcean Plus and Three Phase both accept the writes
     # and act on them while Modbus control is on (issue #89).
 )

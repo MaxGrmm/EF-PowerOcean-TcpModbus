@@ -99,14 +99,14 @@ CONTROL_COMMAND_BATTERY_SAVER_BIT: Final = 3
 CONTROL_COMMAND_METHOD_SHIFT: Final = 4
 CONTROL_COMMAND_METHOD_MASK: Final = 0xF
 
-# The export cap as configured (0x0219) and as in force (0x0260). feed_in_power_max
+# The export cap as configured (40538) and as in force (40609). feed_in_power_max
 # is the one the export ceiling follows: the effective cap where the model reports
 # it, the configured one elsewhere. Only the configured cap is ever written.
 FEED_IN_POWER_MAX_SETTING_KEY: Final = "feed_in_power_max_setting"
 FEED_IN_POWER_MAX_EFFECTIVE_KEY: Final = "feed_in_power_max_effective"
 FEED_IN_POWER_MAX_KEY: Final = "feed_in_power_max"
 
-# 0x0221 and 0x0223, the most the inverter converts from DC to AC and from AC to DC.
+# 40546 and 40548, the most the inverter converts from DC to AC and from AC to DC.
 # The keys predate the vendor doc and stay as they are to keep the entities' ids.
 INVERTER_CAPACITY_KEY: Final = "limit_inv_power"
 RECTIFIER_CAPACITY_KEY: Final = "limit_inv_max"
@@ -156,8 +156,8 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("system_modes", 40530, RegisterType.UINT32),
     RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
     RegisterDef("grid_feed_mode", 40537, RegisterType.UINT16),
-    # The two export caps the vendor doc tells apart: 0x0219 is the one configured,
-    # and the only one that takes a write; 0x0260 is the one in force after the
+    # The two export caps the vendor doc tells apart: 40538 is the one configured,
+    # and the only one that takes a write; 40609 is the one in force after the
     # internal safety rules. feed_in_power_max is derived from them per model.
     RegisterDef(
         FEED_IN_POWER_MAX_SETTING_KEY, 40538, RegisterType.UINT32, optional=True
@@ -461,7 +461,7 @@ SENSOR_MAP: list[SensorDef] = [
         state_class="measurement",
         entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:transmission-tower-export",
-        # Accepts and stores any value but acts on none of them (0x023C probe).
+        # Accepts and stores any value but acts on none of them (40573 probe).
         unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
     ),
     SensorDef(

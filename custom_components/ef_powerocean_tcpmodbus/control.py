@@ -100,9 +100,9 @@ def _allows_export(
 
 
 def _configured_feed_cap(data: dict[str, Any]) -> float | None:
-    """Return the export cap as configured (0x0219), which is what a restore puts back.
+    """Return the export cap as configured (40538), which is what a restore puts back.
 
-    Deliberately without a fallback: the effective cap (0x0260) can sit below it after
+    Deliberately without a fallback: the effective cap (40609) can sit below it after
     the internal safety rules, and writing that back would lower the configured cap
     for good.
     """

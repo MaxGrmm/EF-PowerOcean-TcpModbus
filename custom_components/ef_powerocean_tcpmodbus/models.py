@@ -80,8 +80,8 @@ class ModelTraits:
     # is refused as a whole. Registers marked optional are then read on their own,
     # so one the firmware lacks cannot take the registers around it down with it.
     rejects_unimplemented: bool = False
-    # Whether 0x0260 (40609) holds the export cap in force after the internal
-    # safety rules. Where it does not, the configured cap at 0x0219 stands in.
+    # Whether 40609 holds the export cap in force after the internal
+    # safety rules. Where it does not, the configured cap at 40538 stands in.
     reports_effective_feed_cap: bool = True
 
     def identifies(
@@ -209,10 +209,10 @@ class GridMode(StrEnum):
 
 
 class GridFeedMode(StrEnum):
-    """How the export is capped, per the Grid Feed Mode Setting (0x0218).
+    """How the export is capped, per the Grid Feed Mode Setting (40537).
 
     0 caps it at the maximum feed-in power in watts, 1 leaves it uncapped and 2
-    caps it at a percentage of the rated power (0x023C).
+    caps it at a percentage of the rated power (40573).
     """
 
     LIMITED = "limited"
