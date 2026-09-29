@@ -218,7 +218,7 @@ class GridFeedMode(StrEnum):
 class ControlMode(StrEnum):
     """Control method the device follows.
 
-    Commanded through bits 4-7 of the System Control Command (0x0215).
+    Commanded through bits 4-7 of the System Control Command (40534).
     """
 
     DEFAULT = "default"

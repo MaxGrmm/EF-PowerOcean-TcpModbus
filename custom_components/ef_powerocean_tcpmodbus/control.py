@@ -880,7 +880,7 @@ class ControlManager:
     def _compose_control_command(self, feature: ControlFeature | None = None) -> int:
         """Build the control word for *feature*, or for the commanded one by default.
 
-        System control command (0x0215)
+        System control command (40534)
         """
         if feature is None:
             feature = self._commanded_feature

@@ -812,7 +812,7 @@ def test_a_reserve_of_zero_disables_the_guard(
 def test_a_command_is_re_sent_only_once_authority_has_lapsed(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0x0213 reads 0 on a PowerOcean Plus, so polling must never second-guess us,
+    """40532 reads 0 on a PowerOcean Plus, so polling must never second-guess us,
     but a lapse hands the device back to the app and loses the setpoint too."""
     write = allow_writes(control, monkeypatch)
     control._data = {"battery_soc": 50.0}

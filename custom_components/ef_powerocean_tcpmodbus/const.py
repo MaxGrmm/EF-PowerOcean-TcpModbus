@@ -88,7 +88,7 @@ HEARTBEAT_MIN_GAP_S: Final = 5
 # invalid rather than ill-timed, which is what firmware without it answers.
 HEARTBEAT_UNSUPPORTED_RETRY_S: Final = 900
 
-# 0x0215, write-only. Bit 0 forces the system off-grid and bit 1 shuts it down, so a
+# 40534, write-only. Bit 0 forces the system off-grid and bit 1 shuts it down, so a
 # command touching either is refused before it reaches the wire. Bit 3 is the
 # battery saver switch and bits 4-7 select the control method; the setpoint registers
 # only take effect while their control method is selected here.
