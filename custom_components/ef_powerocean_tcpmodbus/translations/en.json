@@ -311,6 +311,15 @@
       "feed_in_power_max": {
         "name": "Maximum feed-in Power"
       },
+      "feed_in_power_max_setting": {
+        "name": "Maximum feed-in Power (Configured)"
+      },
+      "feed_in_power_max_effective": {
+        "name": "Maximum feed-in Power (Effective)"
+      },
+      "feed_in_power_max_percent": {
+        "name": "Maximum feed-in Power (Percent)"
+      },
       "inverter_rated_power": {
         "name": "Inverter Rated Power"
       },
@@ -346,7 +355,8 @@
         "name": "Grid Feed-in Mode",
         "state": {
           "limited": "Limited",
-          "unlimited": "Unlimited"
+          "unlimited": "Unlimited",
+          "limited_percent": "Limited (percent)"
         }
       },
       "control_status": {

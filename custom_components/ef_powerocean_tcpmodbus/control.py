@@ -28,6 +28,7 @@ from .const import (
     CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
+    FEED_IN_POWER_MAX_SETTING_KEY,
     GUARD_HANDBACK_MAX_S,
     GUARD_HANDBACK_S,
     GUARD_HANDBACK_W,
@@ -83,9 +84,29 @@ class WriteSetting(Protocol):
     ) -> None: ...
 
 
-def _allows_export(mode: GridFeedMode | None, power: float) -> bool:
-    """Return whether these feed settings let the inverter export at all."""
-    return mode is GridFeedMode.UNLIMITED or int(power) > 0
+def _allows_export(
+    mode: GridFeedMode | None, power: float, percent: float | None = None
+) -> bool:
+    """Return whether these feed settings let the inverter export at all.
+
+    The watt cap only counts in the watt-limited mode and the percentage only in
+    the percentage mode; an unknown percentage is taken to allow some export.
+    """
+    if mode is GridFeedMode.UNLIMITED:
+        return True
+    if mode is GridFeedMode.LIMITED_PERCENT:
+        return percent is None or int(percent) > 0
+    return int(power) > 0
+
+
+def _configured_feed_cap(data: dict[str, Any]) -> float | None:
+    """Return the export cap as configured (0x0219), which is what a restore puts back.
+
+    Deliberately without a fallback: the effective cap (0x0260) can sit below it after
+    the internal safety rules, and writing that back would lower the configured cap
+    for good.
+    """
+    return data.get(FEED_IN_POWER_MAX_SETTING_KEY)
 
 
 class HandbackPhase(Enum):
@@ -272,8 +293,16 @@ class ControlManager:
         """Return whether a frame shows the inverter allowed to export."""
         data = data or {}
         return _allows_export(
-            data.get("grid_feed_mode"), data.get("feed_in_power_max") or 0
+            data.get("grid_feed_mode"),
+            _configured_feed_cap(data) or 0,
+            data.get("feed_in_power_max_percent"),
         )
+
+    @property
+    def grid_feed_supported(self) -> bool:
+        """Return whether the inverter is in a mode the switch knows how to restore."""
+        mode = self._data.get("grid_feed_mode")
+        return mode is None or (isinstance(mode, GridFeedMode) and mode.switchable)
 
     @property
     def grid_feed_switchable(self) -> bool:
@@ -283,8 +312,12 @@ class ControlManager:
         be a one-way door: it could only ever turn the export off.
         """
         original = self._grid_feed_restore
-        return original is not None and _allows_export(
-            GridFeedMode.from_register(original["mode"]), original["power"]
+        return (
+            self.grid_feed_supported
+            and original is not None
+            and _allows_export(
+                GridFeedMode.from_register(original["mode"]), original["power"]
+            )
         )
 
     @property
@@ -474,6 +507,11 @@ class ControlManager:
         in the order that never leaves the export briefly uncapped.
         """
         restore = self._grid_feed_restore
+        if not self.grid_feed_supported:
+            raise HomeAssistantError(
+                "The grid feed cannot be switched while the inverter is in a feed-in "
+                "mode it cannot restore, such as the percentage limit. Nothing written."
+            )
         if not self.grid_feed_switchable:
             raise HomeAssistantError(
                 "The grid feed cannot be switched: the inverter has not reported an "
@@ -483,7 +521,7 @@ class ControlManager:
         await self._async_require_control_authority()
 
         mode = self._registers_by_key["grid_feed_mode"]
-        power = self._registers_by_key["feed_in_power_max"]
+        power = self._registers_by_key[FEED_IN_POWER_MAX_SETTING_KEY]
         mode_value = restore["mode"] if allow else GridFeedMode.LIMITED.register_value
         # Readers expect the enum a poll derives, never the register's raw 0/1.
         mode_state = GridFeedMode.from_register(mode_value)
@@ -500,18 +538,27 @@ class ControlManager:
     def _track_grid_feed_restore(self, data: dict[str, Any]) -> None:
         """Remember the export settings to put back, while there are any to keep.
 
-        Nothing is adopted while the switch holds the export off. What the device
-        reports then is our own write, or on the PowerOcean a mix of our limited mode
-        and its untouched cap at 40609, and adopting either would lose the setting
+        Nothing is adopted while the switch holds the export off, since what the
+        device reports then is our own write and adopting it would lose the setting
         the switch has to put back. Any other reading is the inverter's own, so
         raising the cap in the EcoFlow app - an installer lifting an export limit,
         say - is picked up on the next poll.
+
+        The cap kept is the configured one, never the effective one: the two differ
+        once the safety rules derate the export, and restoring the effective cap
+        would write the derating in for good. A mode the switch cannot restore, such
+        as the percentage limit, is not adopted either.
         """
         if self._grid_feed_stopped:
             return
         mode = data.get("grid_feed_mode")
-        power = data.get("feed_in_power_max")
-        if mode is None or power is None or not _allows_export(mode, power):
+        power = _configured_feed_cap(data)
+        if (
+            not isinstance(mode, GridFeedMode)
+            or not mode.switchable
+            or power is None
+            or not _allows_export(mode, power)
+        ):
             return
 
         updated = {"mode": mode.register_value, "power": int(power)}
@@ -541,6 +588,12 @@ class ControlManager:
             limit := self._limits.get(definition.config_limit_key)
         ):
             ceilings.append(float(limit))
+        # Power that has to pass the inverter's DC to AC stage cannot exceed it. Zero
+        # or missing means the firmware did not report it, which bounds nothing.
+        if definition.capacity_key is not None and (
+            capacity := self._data.get(definition.capacity_key)
+        ):
+            ceilings.append(float(capacity))
         if rated := self._data.get("inverter_rated_power"):
             ceilings.append(float(rated))
 

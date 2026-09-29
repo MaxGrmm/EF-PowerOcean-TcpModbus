@@ -240,3 +240,45 @@ class CalculateValuesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize(
+    ("reports_effective", "expected"), ((True, 4000.0), (False, 10000.0))
+)
+def test_the_export_ceiling_follows_the_cap_the_model_reports(
+    reports_effective: bool, expected: float
+) -> None:
+    calculated = calculate_derived_values(
+        TelemetryData(
+            feed_in_power_max_setting=10000.0, feed_in_power_max_effective=4000.0
+        ),
+        calculate_solar_power=False,
+        startup_voltage=0,
+        reports_effective_feed_cap=reports_effective,
+    )
+
+    assert calculated["feed_in_power_max"] == expected
+
+
+def test_the_export_ceiling_falls_back_when_its_register_is_missing() -> None:
+    calculated = calculate_derived_values(
+        TelemetryData(feed_in_power_max_setting=10000.0),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+
+    assert calculated["feed_in_power_max"] == 10000.0
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    ((0, "limited"), (1, "unlimited"), (2, "limited_percent"), (7, None), (None, None)),
+)
+def test_decodes_every_documented_grid_feed_mode(raw, expected) -> None:
+    calculated = calculate_derived_values(
+        TelemetryData(grid_feed_mode=raw),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+
+    assert calculated["grid_feed_mode"] == expected

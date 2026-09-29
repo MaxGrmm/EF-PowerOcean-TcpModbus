@@ -39,8 +39,11 @@ def test_reads_register_block(client, is_error: bool) -> None:
     )
 
     if is_error:
-        with pytest.raises(modbus_module.ModbusException):
+        with pytest.raises(modbus_module.ModbusReadRejected) as raised:
             asyncio.run(client.async_read(100, 2))
+        # Still a ModbusException, so existing read handling is unchanged.
+        assert isinstance(raised.value, modbus_module.ModbusException)
+        assert raised.value.exception_code == 2
     else:
         assert asyncio.run(client.async_read(100, 2)) == [11, 22]
 

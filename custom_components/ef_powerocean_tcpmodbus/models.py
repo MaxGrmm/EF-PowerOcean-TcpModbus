@@ -76,6 +76,13 @@ class ModelTraits:
     max_register_gap: int = MAX_REGISTER_GAP
     # Whether the lifetime and daily energy counters arrive in Wh rather than kWh.
     energy_in_watt_hours: bool = False
+    # Whether a read that reaches over an address the firmware does not implement
+    # is refused as a whole. Registers marked optional are then read on their own,
+    # so one the firmware lacks cannot take the registers around it down with it.
+    rejects_unimplemented: bool = False
+    # Whether 0x0260 (40609) holds the export cap in force after the internal
+    # safety rules. Where it does not, the configured cap at 0x0219 stands in.
+    reports_effective_feed_cap: bool = True
 
     def identifies(
         self, product_number: int | None, product_category: int | None
@@ -145,6 +152,8 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         "PowerOcean Plus",
         startup_voltage=160,
         product_ids=(ProductId(3),),
+        # It reads 0 at 40609 whatever the cap (issue #44).
+        reports_effective_feed_cap=False,
     ),
     # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1735192805714/EcoFlow%20PowerOcean%20DC%20Fit_Datasheet_EN_20241225.pdf
     InverterModel.POWEROCEAN_DC_FIT: ModelTraits(
@@ -161,6 +170,7 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         # implement, so only neighbouring registers can share a read.
         max_register_gap=0,
         energy_in_watt_hours=True,
+        rejects_unimplemented=True,
     ),
     # Nobody has scanned one yet, so this entry follows the three-phase Ocean 2:
     # same product number, same Modbus dialect, phase told apart by the category.
@@ -174,6 +184,7 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         product_ids=(ProductId(4, ProductCategory.SINGLE_PHASE),),
         high_word_first=True,
         max_register_gap=0,
+        rejects_unimplemented=True,
     ),
 }
 
@@ -198,21 +209,46 @@ class GridMode(StrEnum):
 
 
 class GridFeedMode(StrEnum):
-    """Whether the export is capped by the maximum feed-in power register."""
+    """How the export is capped, per the Grid Feed Mode Setting (0x0218).
+
+    0 caps it at the maximum feed-in power in watts, 1 leaves it uncapped and 2
+    caps it at a percentage of the rated power (0x023C).
+    """
 
     LIMITED = "limited"
     UNLIMITED = "unlimited"
+    LIMITED_PERCENT = "limited_percent"
 
     @property
     def register_value(self) -> int:
         """Return the protocol enumeration value."""
-        return 1 if self is GridFeedMode.UNLIMITED else 0
+        return _GRID_FEED_MODE_VALUES[self]
+
+    @property
+    def switchable(self) -> bool:
+        """Return whether the grid feed switch knows how to stop and restore it.
+
+        The percentage mode is left alone until it has been observed on a device:
+        stopping it would need the percentage register written, which is untested.
+        """
+        return self in (GridFeedMode.LIMITED, GridFeedMode.UNLIMITED)
 
     @classmethod
     def from_register(cls, value: float | None) -> GridFeedMode | None:
+        """Map the register to a mode, or None for a value the doc does not define."""
         if value is None:
             return None
-        return cls.UNLIMITED if int(value) else cls.LIMITED
+        return next(
+            (mode for mode, raw in _GRID_FEED_MODE_VALUES.items() if raw == int(value)),
+            None,
+        )
+
+
+_GRID_FEED_MODE_VALUES: Final[Mapping[GridFeedMode, int]] = {
+    GridFeedMode.LIMITED: 0,
+    GridFeedMode.UNLIMITED: 1,
+    GridFeedMode.LIMITED_PERCENT: 2,
+}
 
 
 class ControlMode(StrEnum):
@@ -290,6 +326,8 @@ class ControlFeatureDef:
     limit_key: str | None = None
     # Configuration that stores the maximum allowed value for this mode, if available
     config_limit_key: str | None = None
+    # Sensor holding the converter capacity the power has to pass through, if any
+    capacity_key: str | None = None
     # None for a mode with no power to configure, which only holds the battery.
     default_power: float | None = None
 
@@ -403,6 +441,9 @@ class RegisterDef:
     address_overrides: Mapping[InverterModel, int] = field(default_factory=dict)
     # Where writes go when the register is read from somewhere else.
     write_address: int | None = None
+    # Documented, but not confirmed on every model. On a model that rejects reads
+    # over unimplemented addresses it is read apart from the registers that are.
+    optional: bool = False
 
     def for_model(self, inverter_model: InverterModel) -> RegisterDef:
         """Return a concrete register definition for an inverter model."""
@@ -444,6 +485,11 @@ class RegisterBlock:
     def count(self) -> int:
         return max(register.end for register in self.registers) - self.start
 
+    @property
+    def optional(self) -> bool:
+        """Return whether the block holds nothing but optional registers."""
+        return all(register.optional for register in self.registers)
+
     def index_of(self, register: RegisterDef) -> int:
         """Return the register's offset within this block's response."""
         return register.address - self.start
@@ -459,13 +505,23 @@ def plan_blocks(
     *,
     avoid: Collection[int] = (),
     max_gap: int = MAX_REGISTER_GAP,
+    isolate_optional: bool = False,
 ) -> tuple[RegisterBlock, ...]:
     """Group registers into the fewest Modbus reads.
 
     A new read starts when the next register is too far away to be worth reading
     through, when the block would outgrow a single Modbus response, or when reading
-    through would take in an address in avoid.
+    through would take in an address in avoid. With isolate_optional, optional
+    registers are never read together with required ones.
     """
+    registers = tuple(registers)
+    if isolate_optional:
+        required = [register for register in registers if not register.optional]
+        optional = [register for register in registers if register.optional]
+        return plan_blocks(required, avoid=avoid, max_gap=max_gap) + plan_blocks(
+            optional, avoid=avoid, max_gap=max_gap
+        )
+
     blocks: list[RegisterBlock] = []
     current: list[RegisterDef] = []
 
@@ -490,12 +546,23 @@ def plan_blocks_for_model(
     inverter_model: InverterModel,
     *,
     avoid: Collection[int] = (),
+    exclude: Collection[str] = (),
 ) -> tuple[RegisterBlock, ...]:
-    """Resolve model-specific addresses and group them into Modbus reads."""
+    """Resolve model-specific addresses and group them into Modbus reads.
+
+    Registers whose key is in exclude are left out, which is how an optional
+    register the firmware turned out not to implement stops being read.
+    """
+    traits = inverter_model.traits
     return plan_blocks(
-        (register.for_model(inverter_model) for register in registers),
+        (
+            register.for_model(inverter_model)
+            for register in registers
+            if register.key not in exclude
+        ),
         avoid=avoid,
-        max_gap=inverter_model.traits.max_register_gap,
+        max_gap=traits.max_register_gap,
+        isolate_optional=traits.rejects_unimplemented,
     )
 
 

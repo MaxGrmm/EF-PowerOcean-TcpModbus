@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Final
 
 from homeassistant.const import (
@@ -98,6 +99,18 @@ CONTROL_COMMAND_BATTERY_SAVER_BIT: Final = 3
 CONTROL_COMMAND_METHOD_SHIFT: Final = 4
 CONTROL_COMMAND_METHOD_MASK: Final = 0xF
 
+# The export cap as configured (0x0219) and as in force (0x0260). feed_in_power_max
+# is the one the export ceiling follows: the effective cap where the model reports
+# it, the configured one elsewhere. Only the configured cap is ever written.
+FEED_IN_POWER_MAX_SETTING_KEY: Final = "feed_in_power_max_setting"
+FEED_IN_POWER_MAX_EFFECTIVE_KEY: Final = "feed_in_power_max_effective"
+FEED_IN_POWER_MAX_KEY: Final = "feed_in_power_max"
+
+# 0x0221 and 0x0223, the most the inverter converts from DC to AC and from AC to DC.
+# The keys predate the vendor doc and stay as they are to keep the entities' ids.
+INVERTER_CAPACITY_KEY: Final = "limit_inv_power"
+RECTIFIER_CAPACITY_KEY: Final = "limit_inv_max"
+
 ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
@@ -143,24 +156,23 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("system_modes", 40530, RegisterType.UINT32),
     RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
     RegisterDef("grid_feed_mode", 40537, RegisterType.UINT16),
+    # The two export caps the vendor doc tells apart: 0x0219 is the one configured,
+    # and the only one that takes a write; 0x0260 is the one in force after the
+    # internal safety rules. feed_in_power_max is derived from them per model.
     RegisterDef(
-        "feed_in_power_max",
-        40609,
-        RegisterType.UINT32,
-        address_overrides={InverterModel.POWEROCEAN_PLUS: 40538},
-        # The PowerOcean refuses writes to 40609, so every model writes the cap here.
-        write_address=40538,
+        FEED_IN_POWER_MAX_SETTING_KEY, 40538, RegisterType.UINT32, optional=True
     ),
     RegisterDef("device_led_brightness", 40541, RegisterType.UINT16),
     # Setpoints that take effect the moment the matching control method is engaged.
     RegisterDef("system_power_setpoint", 40542, RegisterType.INT32),
     RegisterDef("inverter_power_setpoint", 40544, RegisterType.INT32),
-    RegisterDef("limit_inv_power", 40546, RegisterType.UINT32),
-    RegisterDef("limit_inv_max", 40548, RegisterType.UINT32),
+    RegisterDef(INVERTER_CAPACITY_KEY, 40546, RegisterType.UINT32),
+    RegisterDef(RECTIFIER_CAPACITY_KEY, 40548, RegisterType.UINT32),
     RegisterDef("battery_capacity", 40552, RegisterType.UINT32),
     RegisterDef("battery_discharge_power_limit", 40554, RegisterType.UINT32),
     RegisterDef("battery_charge_power_limit", 40556, RegisterType.UINT32),
     RegisterDef("battery_power_setpoint", 40571, RegisterType.INT32),
+    RegisterDef("feed_in_power_max_percent", 40573, RegisterType.UINT16, optional=True),
     RegisterDef("battery_voltage", 40574),
     RegisterDef("battery_current", 40576),
     RegisterDef("battery_temperature", 40578),
@@ -178,6 +190,8 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("pv1_current", 40602),
     RegisterDef("pv2_current", 40604),
     RegisterDef("pv3_current", 40606),
+    # 40609 refuses writes (exception 2 on a PowerOcean Three Phase, issue #89).
+    RegisterDef(FEED_IN_POWER_MAX_EFFECTIVE_KEY, 40609, RegisterType.UINT32),
     RegisterDef("fault_count", 42049, RegisterType.UINT16),
     *(
         RegisterDef(f"fault_{fault_number}", 42049 + fault_number, RegisterType.UINT16)
@@ -203,16 +217,21 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
 REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTERS}
 
 
-def register_blocks_for(inverter_model: InverterModel) -> tuple[RegisterBlock, ...]:
+def register_blocks_for(
+    inverter_model: InverterModel, *, exclude: Collection[str] = ()
+) -> tuple[RegisterBlock, ...]:
     """Return register blocks resolved for an inverter model.
 
-    The heartbeat register is kept out of them, at the cost of one more read on the
-    models that map feed_in_power_max next to it. The inverter answers a write to a
-    register it is serving a read for with "device busy", and losing the heartbeat
-    that way costs a minute of control.
+    The heartbeat register is kept out of them, at the cost of one more read for the
+    effective feed-in cap next to it. The inverter answers a write to a register it
+    is serving a read for with "device busy", and losing the heartbeat that way
+    costs a minute of control. Keys in exclude are not read at all.
     """
     return plan_blocks_for_model(
-        MODBUS_REGISTERS, inverter_model, avoid=(HEARTBEAT_REGISTER,)
+        MODBUS_REGISTERS,
+        inverter_model,
+        avoid=(HEARTBEAT_REGISTER,),
+        exclude=exclude,
     )
 
 
@@ -414,12 +433,26 @@ SENSOR_MAP: list[SensorDef] = [
         state_class="measurement",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    *[
+        SensorDef(
+            key=key,
+            unit=UnitOfPower.WATT,
+            device_class="power",
+            state_class="measurement",
+            entity_category=EntityCategory.DIAGNOSTIC,
+        )
+        for key in (
+            FEED_IN_POWER_MAX_KEY,
+            FEED_IN_POWER_MAX_SETTING_KEY,
+            FEED_IN_POWER_MAX_EFFECTIVE_KEY,
+        )
+    ],
     SensorDef(
-        key="feed_in_power_max",
-        unit=UnitOfPower.WATT,
-        device_class="power",
+        key="feed_in_power_max_percent",
+        unit=UNIT_OF_RATIO,
         state_class="measurement",
         entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:transmission-tower-export",
     ),
     SensorDef(
         key="grid_feed_mode",
@@ -653,12 +686,15 @@ CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
         config_limit_key=CONF_MAX_BATTERY_CHARGED_POWER,
         default_power=2000.0,
     ),
+    # Charging has no converter capacity to respect: PV on the DC side can charge
+    # the battery alongside the rectifier, so its capacity alone is no ceiling.
     ControlFeature.DISCHARGE_BATTERY: ControlFeatureDef(
         method=ControlMode.BATTERY_LIMITS,
         setpoint_key="battery_power_setpoint",
         sign=-1,
         measure_key="battery_power",
         config_limit_key=CONF_MAX_BATTERY_DISCHARGED_POWER,
+        capacity_key=INVERTER_CAPACITY_KEY,
         default_power=2000.0,
     ),
     ControlFeature.EXPORT_TO_GRID: ControlFeatureDef(
@@ -666,7 +702,8 @@ CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
         setpoint_key="system_power_setpoint",
         sign=-1,
         measure_key="grid_power",
-        limit_key="feed_in_power_max",
+        limit_key=FEED_IN_POWER_MAX_KEY,
+        capacity_key=INVERTER_CAPACITY_KEY,
         default_power=3000.0,
     ),
 }

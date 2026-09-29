@@ -86,6 +86,8 @@ class TelemetryData:
     battery_capacity: float | None = None
     grid_feed_mode: float | None = None
     fault_codes: tuple[float | None, ...] = ()
+    feed_in_power_max_setting: float | None = None
+    feed_in_power_max_effective: float | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, float | None]) -> TelemetryData:
@@ -117,6 +119,8 @@ class TelemetryData:
             battery_capacity=data.get("battery_capacity"),
             grid_feed_mode=data.get("grid_feed_mode"),
             fault_codes=tuple(value for _, value in sorted(faults)),
+            feed_in_power_max_setting=data.get("feed_in_power_max_setting"),
+            feed_in_power_max_effective=data.get("feed_in_power_max_effective"),
         )
 
 
@@ -204,9 +208,19 @@ def calculate_derived_values(
     *,
     calculate_solar_power: bool,
     startup_voltage: int,
+    reports_effective_feed_cap: bool = True,
 ) -> dict[str, float | bool | str | None]:
     """Calculate values derived from raw PowerOcean telemetry."""
     calculated: dict[str, float | bool | str | None] = {}
+
+    # The cap the export ceiling follows. A model that does not report the effective
+    # cap falls back to the configured one, and so does a read that came back empty.
+    preferred, fallback = (
+        (data.feed_in_power_max_effective, data.feed_in_power_max_setting)
+        if reports_effective_feed_cap
+        else (data.feed_in_power_max_setting, data.feed_in_power_max_effective)
+    )
+    calculated["feed_in_power_max"] = preferred if preferred is not None else fallback
 
     battery_soc = data.battery_soc
     # The device reports its pack capacity in Wh.

@@ -13,6 +13,18 @@ from .coordinator import EcoflowCoordinator
 
 TO_REDACT = (CONF_HOST, "title", "unique_id")
 
+# Raw readings worth having in a model report, to compare devices against the
+# vendor protocol doc.
+PROTOCOL_REPORT_KEYS = (
+    "grid_feed_mode",
+    "feed_in_power_max_setting",
+    "feed_in_power_max_effective",
+    "feed_in_power_max_percent",
+    "limit_inv_power",
+    "limit_inv_max",
+    "inverter_rated_power",
+)
+
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant,
@@ -54,6 +66,10 @@ async def async_get_config_entry_diagnostics(
             "control_method": str(coordinator.control.method),
             "control_power": coordinator.control.power,
             "control_command": f"0x{coordinator.control.command:08X}",
+            "unsupported_registers": sorted(coordinator.unsupported_registers),
+            "protocol_report": {
+                key: (coordinator.data or {}).get(key) for key in PROTOCOL_REPORT_KEYS
+            },
         },
         TO_REDACT,
     )

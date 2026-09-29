@@ -311,6 +311,15 @@
       "feed_in_power_max": {
         "name": "Max. Einspeiseleistung"
       },
+      "feed_in_power_max_setting": {
+        "name": "Max. Einspeiseleistung (Eingestellt)"
+      },
+      "feed_in_power_max_effective": {
+        "name": "Max. Einspeiseleistung (Wirksam)"
+      },
+      "feed_in_power_max_percent": {
+        "name": "Max. Einspeiseleistung (Prozent)"
+      },
       "inverter_rated_power": {
         "name": "Wechselrichter-Nennleistung"
       },
@@ -349,7 +358,8 @@
         "name": "Einspeisemodus",
         "state": {
           "limited": "Begrenzt",
-          "unlimited": "Unbegrenzt"
+          "unlimited": "Unbegrenzt",
+          "limited_percent": "Begrenzt (Prozent)"
         }
       },
       "control_status": {
