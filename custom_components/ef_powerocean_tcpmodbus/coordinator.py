@@ -61,7 +61,6 @@ from .telemetry import (
     TelemetryData,
     calculate_derived_values,
     decode_firmware_version,
-    decode_protocol_version,
     decode_register,
     decode_serial_number,
     is_modbus_disabled,
@@ -158,15 +157,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         return self._status
 
     @property
-    def device_model(self) -> InverterModel:
-        """The model the device is read as, which is always the configured one.
-
-        What the device reports in its product registers only pre-fills the config
-        flow; it never overrides the selection.
-        """
-        return self.inverter_model
-
-    @property
     def is_modbus_disabled(self) -> bool:
         """Return whether the last telemetry read indicates Modbus is disabled."""
         return self._consecutive_modbus_disabled_reads >= MODBUS_DISABLED_READ_THRESHOLD
@@ -228,8 +218,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         Run on every connect, not only the first, because a firmware update reboots
         the inverter and drops the connection. A failed read keeps what an earlier
-        one found. The product registers in the same block are left alone: the
-        configured model decides how the device is read.
+        one found and leaves the connection open; if it is dead, the poll finds out.
+        The product registers in the same block are left alone: the configured
+        model decides how the device is read.
         """
         if self.serial_number is None:
             self.serial_number = "unknown"
@@ -239,8 +230,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 DEVICE_INFO_BLOCK.start, DEVICE_INFO_BLOCK.count
             )
         except ModbusException as err:
-            _LOGGER.error(f"Can not read device information. {err.string}.")
-            self._modbus_client.close()
+            _LOGGER.warning(f"Can not read device information. {err.string}.")
             return
 
         if not raw or len(raw) < DEVICE_INFO_BLOCK.count:
@@ -253,7 +243,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         )
 
         if firmware := decode_firmware_version(
-            registers_for(FIRMWARE_VERSION), self.device_model.traits.high_word_first
+            registers_for(FIRMWARE_VERSION), self.inverter_model.traits.high_word_first
         ):
             self.firmware_version = firmware
 
@@ -275,7 +265,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 values[register.key] = None
                 continue
             value = decode_register(
-                raw, register.data_type, self.device_model.traits.high_word_first
+                raw, register.data_type, self.inverter_model.traits.high_word_first
             )
             values[register.key] = int(value) if value is not None else None
 
@@ -285,7 +275,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def _device_info_values(self) -> dict[str, Any]:
         """Return the values read on connect, in the form the sensors show."""
         return {
-            "protocol_version": decode_protocol_version(self.protocol_version),
+            "protocol_version": self.protocol_version,
             "device_address": self.device_address,
         }
 
@@ -309,7 +299,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Reconnect failed!")
 
         try:
-            traits = self.device_model.traits
+            traits = self.inverter_model.traits
             for register_block in self._register_blocks:
                 raw = await self._modbus_client.async_read(
                     register_block.start, register_block.count
@@ -443,7 +433,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         readback_value = decode_register(
             readback_words,
             register.data_type,
-            self.device_model.traits.high_word_first,
+            self.inverter_model.traits.high_word_first,
         )
         # A 32-bit register echoes the words just written and only swaps them into
         # read order a few seconds later, so either form means the write landed.

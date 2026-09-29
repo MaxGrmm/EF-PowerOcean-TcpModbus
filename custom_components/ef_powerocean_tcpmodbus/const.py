@@ -123,7 +123,7 @@ DEVICE_ADDRESS: Final = RegisterDef("device_address", 40014, RegisterType.UINT16
 DEVICE_INFO_BLOCK: Final = RegisterBlock(
     (PRODUCT_CATEGORY, PRODUCT_NUMBER, SERIAL_NUMBER, FIRMWARE_VERSION)
 )
-# Read one at a time, skipping if any models rejects the register.
+# Read one at a time, so a model that refuses one still reports the other.
 DEVICE_INFO_EXTRA: Final = (PROTOCOL_VERSION, DEVICE_ADDRESS)
 
 BATTERY_SOC_KEYS: Final = tuple(

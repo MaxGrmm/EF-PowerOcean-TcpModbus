@@ -64,10 +64,6 @@ PLAUSIBLE_RANGE: Final[dict[str, tuple[float, float]]] = {
     "voltage": (0, 1000),
 }
 
-PLAUSIBLE_RANGE_BY_KEY: Final[dict[str, tuple[float, float]]] = {
-    "breaker_capacity": (0, 400),
-}
-
 DEVICE_CLASS_BY_KEY: Final[dict[str, str]] = {
     definition.key: definition.device_class
     for definition in (*const.SENSOR_MAP, *const.ENERGY_SENSOR_MAP)
@@ -137,9 +133,7 @@ def plausibility_note(key: str, value: float | None) -> str:
         return "undecodable"
     if value == 0:
         return "zero"
-    bounds = PLAUSIBLE_RANGE_BY_KEY.get(
-        key, PLAUSIBLE_RANGE.get(DEVICE_CLASS_BY_KEY.get(key, ""))
-    )
+    bounds = PLAUSIBLE_RANGE.get(DEVICE_CLASS_BY_KEY.get(key, ""))
     if bounds and not bounds[0] <= value <= bounds[1]:
         return "out of range"
     return "ok"
@@ -220,28 +214,14 @@ def report_device(
         words_for(const.FIRMWARE_VERSION),
         detected.traits.high_word_first if detected else False,
     )
-    protocol_words, protocol_reason = reader.read(
-        const.PROTOCOL_VERSION.address, const.PROTOCOL_VERSION.size
-    )
-    protocol_value = (
-        telemetry.decode_register(
-            protocol_words,
-            const.PROTOCOL_VERSION.data_type,
-            detected.traits.high_word_first if detected else False,
-        )
-        if protocol_words is not None
-        else None
-    )
-    protocol = telemetry.decode_protocol_version(
-        int(protocol_value) if protocol_value is not None else None
-    )
+    protocol, protocol_reason = reader.read_value(const.PROTOCOL_VERSION)
     address, address_reason = reader.read_value(const.DEVICE_ADDRESS)
 
     print(f"  serial number     {serial if show_serial else serial[:4] + '****'}")
     print(f"  firmware          {firmware}")
     print(
-        f"  protocol version  {protocol}"
-        + (f" [unreadable: {protocol_reason}]" if protocol_words is None else "")
+        f"  protocol version  {int(protocol) if protocol is not None else 'unknown'}"
+        + (f" [unreadable: {protocol_reason}]" if protocol is None else "")
     )
     print(f"  product number    {number}")
     print(f"  product category  {category}")

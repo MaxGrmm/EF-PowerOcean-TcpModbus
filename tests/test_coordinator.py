@@ -950,11 +950,13 @@ def test_the_configured_model_decides_how_the_device_is_read(coordinator) -> Non
 
     asyncio.run(coordinator.async_read_device_info())
 
-    assert coordinator.device_model is models.InverterModel.POWEROCEAN_PLUS
     assert coordinator.firmware_version == "1.0.3.79"
 
 
-def test_device_info_read_failure_closes_connection(coordinator) -> None:
+def test_a_failed_device_info_read_leaves_the_connection_to_the_poll(
+    coordinator,
+) -> None:
+    """It runs on every reconnect, so closing here would fail the poll after it."""
     coordinator.firmware_version = None
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=coordinator_module.ModbusException("boom")
@@ -963,7 +965,7 @@ def test_device_info_read_failure_closes_connection(coordinator) -> None:
     asyncio.run(coordinator.async_read_device_info())
 
     assert coordinator.serial_number == "unknown"
-    coordinator._modbus_client.close.assert_called_once()
+    coordinator._modbus_client.close.assert_not_called()
 
 
 def test_a_failed_device_info_read_keeps_what_was_known(coordinator) -> None:
