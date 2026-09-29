@@ -49,11 +49,12 @@ from .const import (
 )
 from .control import ControlManager
 from .energy_processor import EnergyProcessor
-from .modbus import ModbusClient
+from .modbus import ModbusClient, ModbusReadRejected
 from .models import (
     CoordinatorStatus,
     InverterModel,
     NumberWritableDef,
+    RegisterBlock,
     RegisterDef,
     encode_register,
 )
@@ -73,6 +74,9 @@ _LOGGER = logging.getLogger(__name__)
 
 class EcoflowCoordinator(DataUpdateCoordinator):
     """Fetches data from EcoFlow PowerOcean Plus via Modbus TCP."""
+
+    # Optional registers the device refused to read, which are no longer polled.
+    _unsupported_keys: frozenset[str] = frozenset()
 
     def __init__(
         self,
@@ -309,24 +313,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Reconnect failed!")
 
         try:
-            traits = self.device_model.traits
-            for register_block in self._register_blocks:
-                raw = await self._modbus_client.async_read(
-                    register_block.start, register_block.count
-                )
-                for register in register_block.registers:
-                    value = decode_register(
-                        register_block.registers_for(raw, register),
-                        register.data_type,
-                        traits.high_word_first,
-                    )
-                    if (
-                        value is not None
-                        and traits.energy_in_watt_hours
-                        and register.key in DEVICE_ENERGY_KEYS
-                    ):
-                        value = round(value / 1000, 3)
-                    data[register.key] = value
+            # A probe may replan the blocks, so the loop runs over this poll's plan.
+            for register_block in tuple(self._register_blocks):
+                await self._async_read_block(register_block, data)
 
             if is_modbus_disabled(
                 self.serial_number,
@@ -345,6 +334,77 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
             return data
+
+    @property
+    def unsupported_registers(self) -> frozenset[str]:
+        """Return the optional registers the device refused, which are not polled."""
+        return self._unsupported_keys
+
+    async def _async_read_block(
+        self, register_block: RegisterBlock, data: dict[str, Any]
+    ) -> None:
+        """Read one block into data, probing an optional one register by register.
+
+        A required block that fails raises as before. An optional one refused as
+        an invalid request is read again one register at a time, and each register
+        the device refuses on its own is dropped from polling until the integration
+        reloads. A refusal for the moment, such as device busy, only leaves the
+        block unread for this poll.
+        """
+        try:
+            raw = await self._modbus_client.async_read(
+                register_block.start, register_block.count
+            )
+        except ModbusReadRejected as err:
+            if not register_block.optional:
+                raise
+            if not err.permanent:
+                data.update(dict.fromkeys(r.key for r in register_block.registers))
+                return
+            await self._async_probe_optional_block(register_block, data)
+            return
+
+        for register in register_block.registers:
+            data[register.key] = self._decode(
+                register_block.registers_for(raw, register), register
+            )
+
+    async def _async_probe_optional_block(
+        self, register_block: RegisterBlock, data: dict[str, Any]
+    ) -> None:
+        refused: set[str] = set()
+        for register in register_block.registers:
+            try:
+                raw = await self._modbus_client.async_read(
+                    register.address, register.size
+                )
+            except ModbusReadRejected as err:
+                if err.permanent:
+                    refused.add(register.key)
+                data[register.key] = None
+                continue
+            data[register.key] = self._decode(list(raw), register)
+
+        if refused:
+            _LOGGER.info(
+                "The device does not implement %s; they are no longer read.",
+                ", ".join(sorted(refused)),
+            )
+            self._unsupported_keys = self._unsupported_keys | refused
+            self._register_blocks = register_blocks_for(
+                self.inverter_model, exclude=self._unsupported_keys
+            )
+
+    def _decode(self, words: list[int], register: RegisterDef) -> float | None:
+        traits = self.device_model.traits
+        value = decode_register(words, register.data_type, traits.high_word_first)
+        if (
+            value is not None
+            and traits.energy_in_watt_hours
+            and register.key in DEVICE_ENERGY_KEYS
+        ):
+            value = round(value / 1000, 3)
+        return value
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
@@ -373,6 +433,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 TelemetryData.from_mapping(result),
                 calculate_solar_power=self._ena_calc_solar_power,
                 startup_voltage=self.inverter_model.traits.startup_voltage,
+                reports_effective_feed_cap=(
+                    self.inverter_model.traits.reports_effective_feed_cap
+                ),
             )
             result.update(calculated_results)
             result = self._energy_processor.clamp_calculated(

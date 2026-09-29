@@ -52,6 +52,9 @@ GRID_FEED_SWITCH: Final = SwitchDef(
         coordinator.control.grid_feed_switchable
         and requires_modbus_control(coordinator.control.status)
     ),
+    # The vendor doc lists both registers it writes (0x0218 and 0x0219) as
+    # read-only, but the PowerOcean Plus and Three Phase both accept the writes
+    # and act on them while Modbus control is on (issue #89).
 )
 
 SWITCHES: Final = (MODBUS_CONTROL_SWITCH, BATTERY_SAVER_SWITCH, GRID_FEED_SWITCH)

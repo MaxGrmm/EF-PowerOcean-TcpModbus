@@ -4,11 +4,15 @@
 
 ### Fixed
 
+- Grid Feed-in Mode 2, a limit by percentage of the rated power, was shown as Unlimited. It is now shown as Limited (percent).
+- Discharge Battery and Export to Grid can no longer be set above the inverter's maximum DC-to-AC power (0x0221). Charging is not limited by the rectifier power, because solar on the DC side charges the battery alongside it.
 - Three-phase Ocean 2 energy counters are no longer a thousand times too high. The Ocean 2 reports its lifetime and daily counters in Wh where the PowerOcean models use kWh, so a solar today of 11.84 kWh was read as 11840 kWh. The counters are now converted for this model; every other model is read as before.
 
 ### Added
 
-- Grid Feed-in switch that stops the export to the grid.
+- Grid Feed-in switch that stops the export to the grid and puts the inverter's own settings back afterwards. It remembers the configured cap (0x0219), never the effective one (0x0260), which the safety rules can derate, and it is unavailable while the inverter limits the export by percentage.
+- Maximum feed-in Power (Configured) and (Effective), 0x0219 and 0x0260 from V1.0 of the vendor protocol doc read side by side, and Maximum feed-in Power (Percent), 0x023C. Maximum feed-in Power keeps following the effective cap, or the configured one on the PowerOcean Plus.
+- Registers the vendor doc describes but not every model has confirmed can be marked optional. A model that refuses reads over addresses it does not implement, such as the Ocean 2, reads them apart from the others and stops polling any it refuses as invalid, so a missing one cannot break the rest of the poll.
 
 ### Changed
 

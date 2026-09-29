@@ -962,7 +962,11 @@ def test_the_grid_feed_switch_stops_the_export_and_restores_it_exactly(
     )
 
     def poll(mode: models.GridFeedMode, power: int) -> None:
-        switch.coordinator.data = {"grid_feed_mode": mode, "feed_in_power_max": power}
+        switch.coordinator.data = {
+            "grid_feed_mode": mode,
+            "feed_in_power_max_setting": power,
+        }
+        control._data = switch.coordinator.data
         control._track_grid_feed_restore(switch.coordinator.data)
 
     poll(mode, power)
@@ -975,36 +979,60 @@ def test_the_grid_feed_switch_stops_the_export_and_restores_it_exactly(
     # Each order keeps the export from ever being briefly uncapped.
     assert writes == [
         ("grid_feed_mode", 0),
-        ("feed_in_power_max", 0),
-        ("feed_in_power_max", power),
+        ("feed_in_power_max_setting", 0),
+        ("feed_in_power_max_setting", power),
         ("grid_feed_mode", mode.register_value),
     ]
 
 
-def test_a_stopped_export_keeps_the_mode_to_restore_on_the_powerocean(
+def test_the_restore_keeps_the_configured_cap_not_the_effective_one(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Its cap at 40609 ignores our write, so a stop reads as a limited export."""
+    """A derated effective cap written back would lower the configured one for good."""
     allow_writes(control, monkeypatch)
     control._track_grid_feed_restore(
-        {"grid_feed_mode": Feed.UNLIMITED, "feed_in_power_max": 10000.0}
+        {
+            "grid_feed_mode": Feed.LIMITED,
+            "feed_in_power_max_setting": 10000.0,
+            "feed_in_power_max_effective": 4000.0,
+            "feed_in_power_max": 4000.0,
+        }
     )
 
-    asyncio.run(control.async_set_grid_feed(False))
-    control._track_grid_feed_restore(
-        {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 10000.0}
-    )
+    assert control.grid_feed_restore == {"mode": 0, "power": 10000}
 
-    assert control.grid_feed_restore == {"mode": 1, "power": 10000}
+
+def test_the_percentage_mode_is_never_adopted_or_switched(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Restoring it as a watt limit or as unlimited would change the installer's cap."""
+    allow_writes(control, monkeypatch)
+    frame = {
+        "grid_feed_mode": Feed.LIMITED_PERCENT,
+        "feed_in_power_max_setting": 10000.0,
+        "feed_in_power_max_percent": 70.0,
+    }
+    control._data = frame
+    control._track_grid_feed_restore(frame)
+
+    assert control.grid_feed_restore is None
+    assert control.grid_feed_allowed(frame) is True
+
+    # Even with a restore remembered from before the mode changed.
+    control._grid_feed_restore = {"mode": 1, "power": 9000}
+    assert control.grid_feed_switchable is False
+    with pytest.raises(control_module.HomeAssistantError):
+        asyncio.run(control.async_set_grid_feed(False))
+    control._write_setting.assert_not_awaited()
 
 
 def test_an_export_limit_raised_on_the_device_is_adopted(control) -> None:
     """An installer lifting the limit should not need the entry to be set up again."""
     control._track_grid_feed_restore(
-        {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 9000.0}
+        {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max_setting": 9000.0}
     )
     control._track_grid_feed_restore(
-        {"grid_feed_mode": Feed.UNLIMITED, "feed_in_power_max": 15000.0}
+        {"grid_feed_mode": Feed.UNLIMITED, "feed_in_power_max_setting": 15000.0}
     )
 
     assert control.grid_feed_restore == {"mode": 1, "power": 15000}
@@ -1029,3 +1057,38 @@ def test_the_grid_feed_switch_refuses_without_a_restore_or_modbus_control(
     with pytest.raises(control_module.HomeAssistantError):
         asyncio.run(control.async_set_grid_feed(False))
     control._write_setting.assert_not_awaited()
+
+
+def test_discharge_and_export_are_capped_by_the_inverter_capacity(control) -> None:
+    """0x0221 is the most the inverter turns from DC into AC."""
+    control._limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] = 25_000
+    control._limits[const.CONF_MAX_BATTERY_CHARGED_POWER] = 25_000
+    control._data = {
+        const.INVERTER_CAPACITY_KEY: 8000.0,
+        const.RECTIFIER_CAPACITY_KEY: 4000.0,
+        "feed_in_power_max": 12000.0,
+        "inverter_rated_power": 10000.0,
+    }
+
+    assert control.feature_power_max(Feature.DISCHARGE_BATTERY) == 8000.0
+    assert control.feature_power_max(Feature.EXPORT_TO_GRID) == 8000.0
+    # PV on the DC side charges alongside the rectifier, so its capacity is no cap.
+    assert control.feature_power_max(Feature.CHARGE_BATTERY) == 10000.0
+
+
+def test_an_unreported_inverter_capacity_bounds_nothing(control) -> None:
+    control._limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] = 25_000
+    control._data = {const.INVERTER_CAPACITY_KEY: 0.0, "inverter_rated_power": 10000.0}
+
+    assert control.feature_power_max(Feature.DISCHARGE_BATTERY) == 10000.0
+
+
+def test_the_effective_cap_alone_is_never_remembered_for_a_restore(
+    control,
+) -> None:
+    """Without the configured cap there is nothing safe to write back."""
+    control._track_grid_feed_restore(
+        {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 4000.0}
+    )
+
+    assert control.grid_feed_restore is None

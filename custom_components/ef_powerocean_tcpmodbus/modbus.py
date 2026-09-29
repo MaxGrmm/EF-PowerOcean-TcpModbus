@@ -40,6 +40,27 @@ class ModbusRejected(HomeAssistantError):
         return self.exception_code not in self.PERMANENT_CODES
 
 
+class ModbusReadRejected(ModbusException):
+    """The device answered a read with a Modbus exception response.
+
+    A ModbusException like any other read failure, so existing handling treats it
+    the same, but it can be told apart from a lost connection: the device is there
+    and refused this particular request, typically for an address it lacks.
+    """
+
+    def __init__(self, message: str, *, exception_code: int | None = None) -> None:
+        super().__init__(message)
+        self.exception_code = exception_code
+
+    @property
+    def permanent(self) -> bool:
+        """Return whether the request itself is invalid, so asking again is pointless.
+
+        Illegal address is how a device answers for a register it does not have.
+        """
+        return self.exception_code in ModbusRejected.PERMANENT_CODES
+
+
 class ModbusClient:
     """The modbus client talking to the inverter."""
 
@@ -111,10 +132,11 @@ class ModbusClient:
                 address=address, count=count, device_id=self.slave_id
             )
             if response.isError():
-                # A Modbus error response means the connection may be stale.
-                raise ModbusException(
+                exception_code = getattr(response, "exception_code", None)
+                raise ModbusReadRejected(
                     f"Modbus error response at 0x{address:04X} with "
-                    f"Exception-Code {response.exception_code}"
+                    f"Exception-Code {exception_code}",
+                    exception_code=exception_code,
                 )
             return response.registers
 
