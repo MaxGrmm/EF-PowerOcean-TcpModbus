@@ -28,7 +28,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.notes.outputs.tag }}
-          name: Release ${{ steps.notes.outputs.tag }}
+          name: ${{ steps.notes.outputs.tag }}
           body_path: RELEASE_NOTES.md
           generate_release_notes: true
           prerelease: ${{ steps.notes.outputs.prerelease }}
