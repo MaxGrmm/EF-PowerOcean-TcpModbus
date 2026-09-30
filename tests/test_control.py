@@ -687,6 +687,56 @@ def test_setting_a_limit_keeps_the_latch_when_the_state_of_charge_is_unknown(
     assert control.status is Status.CHARGE_LIMIT_REACHED
 
 
+def test_writing_the_same_limit_again_changes_nothing(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An automation may write the limit it already has every few minutes. Starting
+    the hysteresis afresh each time would release a guard inside its band."""
+    write = allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_charge_limit_soc(60))
+    asyncio.run(control.async_apply({"battery_soc": 60.0}))
+    asyncio.run(control.async_apply({"battery_soc": 57.0}))
+    write.reset_mock()
+
+    asyncio.run(control.async_set_charge_limit_soc(60))
+
+    assert control._charge_guard is True
+    write.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("reserve", "phase"),
+    (
+        # Still at or above the state of charge, so the guard stays on.
+        (52, control_module.HandbackPhase.HANDED_BACK),
+        # Now below it, so the guard is off and there is nothing to hand back.
+        (40, control_module.HandbackPhase.TRACKING),
+    ),
+)
+def test_a_new_limit_keeps_the_hand_back_only_while_its_guard_stays_on(
+    control, monkeypatch: pytest.MonkeyPatch, reserve: int, phase
+) -> None:
+    """A new value that leaves the guard as it was changes nothing about who should
+    run the house, so the inverter is not taken back for a minute."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_battery_reserve_soc(51))
+    surplus = {
+        "battery_soc": 50.0,
+        "solar_power": 3000.0,
+        "house_power": 800.0,
+        "grid_power": 0.0,
+        "battery_power": 2200.0,
+    }
+    for poll in range(int(const.GUARD_HANDBACK_S // 5) + 2):
+        advance(control, monkeypatch, poll * 5)
+        asyncio.run(control.async_apply(surplus))
+    assert control._handback.phase is control_module.HandbackPhase.HANDED_BACK
+
+    asyncio.run(control.async_set_battery_reserve_soc(reserve))
+
+    assert control._handback.phase is phase
+
+
 def test_a_guard_releases_only_past_the_hysteresis_band(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:

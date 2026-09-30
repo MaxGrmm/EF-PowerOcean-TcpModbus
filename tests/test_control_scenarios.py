@@ -411,6 +411,27 @@ def test_a_reserve_leaves_a_lasting_surplus_to_the_inverter_until_dusk(
     assert sim.control._handback.phase is control_module.HandbackPhase.TRACKING
 
 
+def test_a_reserve_raised_as_the_battery_fills_keeps_its_hand_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A planner that freezes the battery raises the reserve a percent above the state
+    of charge every few minutes while the sun fills it. The guard stays latched
+    through every rewrite, so the inverter keeps running itself rather than being
+    taken back for a minute each time."""
+    sim = Simulation(monkeypatch, soc=50.0, reserve=51.0)
+
+    runs = []
+    for _ in range(12):
+        runs.append(sim.run(polls=60, solar=3000, house=800))
+        reserve = round(sim.inverter.soc) + 1
+        asyncio.run(sim.control.async_set_battery_reserve_soc(reserve))
+
+    assert all(min(run.battery) >= 0 for run in runs)
+    assert runs[-1].soc[-1] > 60
+    # Take control, then hand back once for the whole hour.
+    assert sim.inverter.method_writes == 2
+
+
 def test_an_untouched_install_never_touches_the_inverter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

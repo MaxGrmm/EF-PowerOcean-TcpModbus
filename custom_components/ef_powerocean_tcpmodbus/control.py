@@ -474,21 +474,43 @@ class ControlManager:
 
     async def async_set_charge_limit_soc(self, soc: float) -> None:
         """Set the state of charge above which the battery must not be charged."""
-        self._charge_limit_soc = max(0.0, min(100.0, soc))
-        # Clear the latch so the new limit starts its hysteresis afresh, but only
-        # where async_apply can work it out again below.
-        if self._data.get("battery_soc") is not None:
-            self._charge_guard = False
-        self._handback = GuardHandback()
-        await self.async_apply(force=True)
+        if self._update_limits(soc, self._battery_reserve_soc):
+            await self.async_apply(force=True)
 
     async def async_set_battery_reserve_soc(self, soc: float) -> None:
         """Set the state of charge below which the battery must not be drained."""
-        self._battery_reserve_soc = max(0.0, min(100.0, soc))
+        if self._update_limits(self._charge_limit_soc, soc):
+            await self.async_apply(force=True)
+
+    def _update_limits(
+        self, charge_limit_soc: float, battery_reserve_soc: float
+    ) -> bool:
+        """Store new limits and return whether either one changed.
+
+        A changed limit starts its hysteresis afresh, but only where the last frame
+        can work the latch out again. The hand-back survives a change that leaves
+        both guards as they were, since who should run the house is then the same.
+        """
+        charge_limit_soc = max(0.0, min(100.0, charge_limit_soc))
+        battery_reserve_soc = max(0.0, min(100.0, battery_reserve_soc))
+        if (charge_limit_soc, battery_reserve_soc) == (
+            self._charge_limit_soc,
+            self._battery_reserve_soc,
+        ):
+            return False
+
+        latched = (self._charge_guard, self._reserve_guard)
         if self._data.get("battery_soc") is not None:
-            self._reserve_guard = False
-        self._handback = GuardHandback()
-        await self.async_apply(force=True)
+            if charge_limit_soc != self._charge_limit_soc:
+                self._charge_guard = False
+            if battery_reserve_soc != self._battery_reserve_soc:
+                self._reserve_guard = False
+        self._charge_limit_soc = charge_limit_soc
+        self._battery_reserve_soc = battery_reserve_soc
+        self._update_guards(self._data)
+        if (self._charge_guard, self._reserve_guard) != latched:
+            self._handback = GuardHandback()
+        return True
 
     async def async_set_battery_saver(self, enabled: bool) -> None:
         """Command battery saver mode without disturbing the control intent."""
