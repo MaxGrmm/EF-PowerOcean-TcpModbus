@@ -9,7 +9,6 @@ set_battery_command:
       required: true
       selector:
         select:
-          translation_key: battery_mode
           options:
             - automatic
             - hold_battery

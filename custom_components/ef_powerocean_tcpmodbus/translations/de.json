@@ -94,15 +94,6 @@
         "ocean_2": "Ocean 2 3-phasig",
         "ocean_2_single_phase": "Ocean 2 1-phasig"
       }
-    },
-    "battery_mode": {
-      "options": {
-        "automatic": "Automatisch",
-        "hold_battery": "Batterie halten",
-        "charge_battery": "Batterie laden",
-        "discharge_battery": "Batterie entladen",
-        "export_to_grid": "Ins Netz einspeisen"
-      }
     }
   },
   "entity": {
