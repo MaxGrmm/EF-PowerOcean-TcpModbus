@@ -56,6 +56,7 @@ async def async_get_config_entry_diagnostics(
             "last_heartbeat_time": coordinator.control.last_heartbeat_time,
             "in_control": coordinator.control.in_control,
             "selected_feature": str(coordinator.control.selected_feature),
+            "command_expires_at": coordinator.control.expires_at,
             "control_status": str(coordinator.control.status),
             "control_guard": (
                 str(guard) if (guard := coordinator.control.active_guard) else None

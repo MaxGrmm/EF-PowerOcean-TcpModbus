@@ -1,0 +1,39 @@
+set_battery_command:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: ef_powerocean_tcpmodbus
+    mode:
+      required: true
+      selector:
+        select:
+          translation_key: battery_mode
+          options:
+            - automatic
+            - hold_battery
+            - charge_battery
+            - discharge_battery
+            - export_to_grid
+    power:
+      selector:
+        number:
+          min: 0
+          max: 50000
+          step: 100
+          unit_of_measurement: W
+          mode: box
+    charge_limit_soc:
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    timeout:
+      selector:
+        number:
+          min: 60
+          max: 86400
+          unit_of_measurement: s
+          mode: box

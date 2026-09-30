@@ -117,6 +117,7 @@ class EcoFlowControlStatusSensor(EcoFlowBaseEntity, SensorEntity):
             "commanded_power": control.power,
             "control_method": str(control.method),
             "in_control": control.in_control,
+            "expires_at": control.expires_at,
         }
 
 

@@ -187,6 +187,43 @@ On the device page the two are deliberately kept apart:
 Each mode's power stays editable while another mode is selected, so a command can be
 set up before it is needed. Only the selected mode's value is ever sent.
 
+### Commanding the battery from automations
+
+The **Set battery command** action (`ef_powerocean_tcpmodbus.set_battery_command`) sets
+the Battery Mode, its power and the Charge Limit in one step. It is meant for
+automations and battery planners that decide when to charge and discharge.
+
+```yaml
+action: ef_powerocean_tcpmodbus.set_battery_command
+data:
+  device_id: <your inverter's device id>
+  mode: charge_battery
+  power: 3000
+  charge_limit_soc: 80
+  timeout: 900
+```
+
+- It changes the same entities you would change by hand, so the device page always
+  shows what applies, and nothing is changed back behind your back.
+- `power` is required for Charge battery, Discharge battery and Export to grid, and not
+  allowed for the other modes. A value above what the inverter accepts is lowered to its
+  maximum.
+- `charge_limit_soc` is optional. It is applied together with the mode, so the battery
+  never charges past a new limit in between.
+- With a `timeout` (60 to 86400 s) the Battery Mode returns to Automatic unless the
+  command is sent again in time. Sending the same command again only extends the
+  timeout and writes nothing to the inverter, so a controller can repeat it every few
+  minutes. Choosing a mode by hand cancels the timeout, and a restart always starts in
+  Automatic.
+- A command that times out leaves its Charge Limit in place. If that is below 100%, a
+  repair shows under Settings → Repairs until the Battery Mode or a limit is changed.
+- Only `mode: automatic` is accepted while Modbus Control is off.
+- Control Status shows when the running command times out, as its `expires_at`
+  attribute.
+
+Run one controller at a time. The action does not stop an automation and a planner from
+overriding each other.
+
 ---
 
 ## Available Sensors

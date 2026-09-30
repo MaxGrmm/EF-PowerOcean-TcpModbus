@@ -94,6 +94,15 @@
         "ocean_2": "Ocean 2 Three Phase",
         "ocean_2_single_phase": "Ocean 2 Single Phase"
       }
+    },
+    "battery_mode": {
+      "options": {
+        "automatic": "Automatic",
+        "hold_battery": "Hold battery",
+        "charge_battery": "Charge battery",
+        "discharge_battery": "Discharge battery",
+        "export_to_grid": "Export to grid"
+      }
     }
   },
   "entity": {
@@ -495,6 +504,54 @@
       "grid_feed": {
         "name": "Grid Feed-in"
       }
+    }
+  },
+  "services": {
+    "set_battery_command": {
+      "name": "Set battery command",
+      "description": "Sets the Battery Mode, its power and the Charge Limit in one step, optionally for a limited time. Meant for automations and battery planners.",
+      "fields": {
+        "device_id": {
+          "name": "Inverter",
+          "description": "The inverter to command."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "The Battery Mode to select."
+        },
+        "power": {
+          "name": "Power",
+          "description": "Power for the mode. Required for Charge battery, Discharge battery and Export to grid, and not allowed for the others. A value above what the inverter accepts is lowered to its maximum."
+        },
+        "charge_limit_soc": {
+          "name": "Charge limit",
+          "description": "Sets the Charge Limit. Left as it is when omitted. The integration never changes it back by itself."
+        },
+        "timeout": {
+          "name": "Timeout",
+          "description": "Seconds until the mode returns to Automatic, unless the command is sent again. Without a timeout the mode stays until it is changed."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "power_required": {
+      "message": "The {mode} mode needs a power."
+    },
+    "power_not_allowed": {
+      "message": "The {mode} mode takes no power."
+    },
+    "modbus_control_off": {
+      "message": "Modbus Control is off. Turn it on to command the inverter; nothing was changed."
+    },
+    "unknown_device": {
+      "message": "Device {device_id} is not an inverter set up in this integration."
+    }
+  },
+  "issues": {
+    "command_expired": {
+      "title": "Battery command timed out on {device}",
+      "description": "A battery command was not renewed within its timeout, so the Battery Mode went back to Automatic. The Charge Limit it set is still {charge_limit_soc}%, so the battery will not charge above that. Check the automation or planner that sends the command, or change the Charge Limit yourself. This message goes away once the Battery Mode or a limit is changed."
     }
   }
 }
