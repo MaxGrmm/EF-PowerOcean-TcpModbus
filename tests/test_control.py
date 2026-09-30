@@ -41,6 +41,7 @@ def control():
         on_update=Mock(),
         on_refresh=AsyncMock(),
         write_setting=AsyncMock(),
+        on_command_expired=Mock(),
     )
     # A fresh manager assumes the device may still be following an earlier run; the
     # tests start from a settled state and say so where they mean otherwise.
@@ -685,6 +686,175 @@ def test_setting_a_limit_keeps_the_latch_when_the_state_of_charge_is_unknown(
 
     assert control._charge_guard is True
     assert control.status is Status.CHARGE_LIMIT_REACHED
+
+
+def test_writing_the_same_limit_again_changes_nothing(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An automation may write the limit it already has every few minutes. Starting
+    the hysteresis afresh each time would release a guard inside its band."""
+    write = allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_charge_limit_soc(60))
+    asyncio.run(control.async_apply({"battery_soc": 60.0}))
+    asyncio.run(control.async_apply({"battery_soc": 57.0}))
+    write.reset_mock()
+
+    asyncio.run(control.async_set_charge_limit_soc(60))
+
+    assert control._charge_guard is True
+    write.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("reserve", "phase"),
+    (
+        # Still at or above the state of charge, so the guard stays on.
+        (52, control_module.HandbackPhase.HANDED_BACK),
+        # Now below it, so the guard is off and there is nothing to hand back.
+        (40, control_module.HandbackPhase.TRACKING),
+    ),
+)
+def test_a_new_limit_keeps_the_hand_back_only_while_its_guard_stays_on(
+    control, monkeypatch: pytest.MonkeyPatch, reserve: int, phase
+) -> None:
+    """A new value that leaves the guard as it was changes nothing about who should
+    run the house, so the inverter is not taken back for a minute."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_battery_reserve_soc(51))
+    surplus = {
+        "battery_soc": 50.0,
+        "solar_power": 3000.0,
+        "house_power": 800.0,
+        "grid_power": 0.0,
+        "battery_power": 2200.0,
+    }
+    for poll in range(int(const.GUARD_HANDBACK_S // 5) + 2):
+        advance(control, monkeypatch, poll * 5)
+        asyncio.run(control.async_apply(surplus))
+    assert control._handback.phase is control_module.HandbackPhase.HANDED_BACK
+
+    asyncio.run(control.async_set_battery_reserve_soc(reserve))
+
+    assert control._handback.phase is phase
+
+
+def test_a_command_sets_its_limit_before_its_mode_reaches_the_inverter(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Choosing charge and then lowering the Charge Limit would charge for one write
+    past the new limit. A command sets both before anything is sent."""
+    write = allow_writes(control, monkeypatch)
+    control._data = {"battery_soc": 85.0}
+
+    asyncio.run(
+        control.async_set_command(
+            Feature.CHARGE_BATTERY, power=3000.0, charge_limit_soc=80.0, expire_in_s=900
+        )
+    )
+
+    assert control.selected_feature is Feature.CHARGE_BATTERY
+    assert control.feature_power(Feature.CHARGE_BATTERY) == 3000.0
+    assert control.charge_limit_soc == 80.0
+    assert control.expires_at == HEARTBEAT_START + timedelta(seconds=900)
+    # Only the hold goes out: setpoint 1 W, then the method word.
+    setpoint = const.REGISTERS_BY_KEY["battery_power_setpoint"].address
+    assert len(commands(write)) == 2
+    assert commands(write)[0] == (setpoint, [0, 1])
+
+
+def test_repeating_a_command_only_moves_its_expiry(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A planner sends its command again every few minutes, which must cost no write."""
+    write = allow_writes(control, monkeypatch)
+    control._data = {"battery_soc": 50.0}
+    command = control.async_set_command
+    asyncio.run(command(Feature.DISCHARGE_BATTERY, power=2000.0, expire_in_s=900))
+    write.reset_mock()
+
+    advance(control, monkeypatch, 300)
+    asyncio.run(command(Feature.DISCHARGE_BATTERY, power=2000.0, expire_in_s=900))
+
+    assert commands(write) == []
+    assert control.expires_at == HEARTBEAT_START + timedelta(seconds=1200)
+
+
+def test_a_command_not_renewed_returns_to_automatic_and_keeps_its_limit(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the mode is undone. The limit stays where it was set."""
+    allow_writes(control, monkeypatch)
+    frame = {"battery_soc": 50.0}
+    control._data = frame
+    asyncio.run(
+        control.async_set_command(
+            Feature.CHARGE_BATTERY, power=2000.0, charge_limit_soc=80.0, expire_in_s=600
+        )
+    )
+
+    advance(control, monkeypatch, 599)
+    asyncio.run(control.async_apply(frame))
+    assert control.selected_feature is Feature.CHARGE_BATTERY
+
+    advance(control, monkeypatch, 600)
+    asyncio.run(control.async_apply(frame))
+    assert control.selected_feature is Feature.AUTOMATIC
+    assert control._commanded_feature is Feature.AUTOMATIC
+    assert control.charge_limit_soc == 80.0
+    control._on_command_expired.assert_called_once_with(Feature.CHARGE_BATTERY)
+
+
+def test_automatic_has_nothing_to_expire(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A planner's stop command may carry an expiry too, which must not later report
+    a return to automatic that never happened."""
+    allow_writes(control, monkeypatch)
+    frame = {"battery_soc": 50.0}
+    control._data = frame
+    asyncio.run(control.async_set_command(Feature.AUTOMATIC, expire_in_s=60))
+
+    advance(control, monkeypatch, 61)
+    asyncio.run(control.async_apply(frame))
+
+    assert control.expires_at is None
+    control._on_command_expired.assert_not_called()
+
+
+def test_choosing_a_mode_by_hand_cancels_a_commands_expiry(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allow_writes(control, monkeypatch)
+    control._data = {"battery_soc": 50.0}
+    asyncio.run(
+        control.async_set_command(Feature.CHARGE_BATTERY, power=2000.0, expire_in_s=60)
+    )
+    asyncio.run(control.async_select_feature(Feature.DISCHARGE_BATTERY))
+
+    advance(control, monkeypatch, 61)
+    asyncio.run(control.async_apply({"battery_soc": 50.0}))
+
+    assert control.selected_feature is Feature.DISCHARGE_BATTERY
+
+
+def test_a_command_needs_modbus_control_unless_it_only_sets_the_limit(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused command must not leave half of itself behind."""
+    write = allow_writes(control, monkeypatch)
+    control._enabled = False
+
+    with pytest.raises(control_module.HomeAssistantError):
+        asyncio.run(
+            control.async_set_command(
+                Feature.CHARGE_BATTERY, power=2000.0, charge_limit_soc=80.0
+            )
+        )
+    assert control.charge_limit_soc == 100.0
+
+    asyncio.run(control.async_set_command(Feature.AUTOMATIC, charge_limit_soc=80.0))
+    assert control.charge_limit_soc == 80.0
+    write.assert_not_awaited()
 
 
 def test_a_guard_releases_only_past_the_hysteresis_band(

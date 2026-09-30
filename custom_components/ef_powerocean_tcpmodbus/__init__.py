@@ -9,12 +9,17 @@ from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.translation import async_get_translations
+from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
 from .coordinator import EcoflowCoordinator
+from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA: Final = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS: Final = [
     Platform.BINARY_SENSOR,
@@ -29,6 +34,12 @@ WARNING_TRANSLATION_PREFIX: Final = f"component.{DOMAIN}.config.step.warning"
 def _modbus_warning_notification_id(entry: ConfigEntry) -> str:
     """Return the stable Modbus warning notification ID."""
     return f"{DOMAIN}_{entry.entry_id}_modbus_warning"
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the actions, which serve every configured inverter."""
+    async_setup_services(hass)
+    return True
 
 
 async def _async_show_modbus_warning(

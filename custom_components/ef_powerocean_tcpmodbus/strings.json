@@ -496,5 +496,47 @@
         "name": "Grid Feed-in"
       }
     }
+  },
+  "services": {
+    "set_battery_command": {
+      "name": "Set battery command",
+      "description": "Sets the Battery Mode, its power and the Charge Limit in one step, optionally for a limited time. Meant for automations and battery planners.",
+      "fields": {
+        "device_id": {
+          "name": "Inverter",
+          "description": "The inverter to command."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "The Battery Mode to select."
+        },
+        "power": {
+          "name": "Power",
+          "description": "Power for the mode, above 0 W. Required for Charge battery, Discharge battery and Export to grid, and not allowed for the others. A value above what the inverter accepts is lowered to its maximum."
+        },
+        "charge_limit_soc": {
+          "name": "Charge limit",
+          "description": "Sets the Charge Limit. Left as it is when omitted. The integration never changes it back by itself."
+        },
+        "expire_in": {
+          "name": "Expire in",
+          "description": "Seconds until the mode returns to Automatic. Sending the command again starts the count over. Without it the mode stays until it is changed."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "power_required": {
+      "message": "The {mode} mode needs a power above 0 W."
+    },
+    "power_not_allowed": {
+      "message": "The {mode} mode takes no power."
+    },
+    "modbus_control_off": {
+      "message": "Modbus Control is off. Turn it on to command the inverter; nothing was changed."
+    },
+    "unknown_device": {
+      "message": "Device {device_id} is not an inverter set up in this integration."
+    }
   }
 }

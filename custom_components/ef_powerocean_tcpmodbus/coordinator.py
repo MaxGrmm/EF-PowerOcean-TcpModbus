@@ -8,8 +8,10 @@ from functools import partial
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.const import ATTR_DEVICE_ID, ATTR_ENTITY_ID, Platform
+from homeassistant.core import Context, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry, entity_registry
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt
@@ -17,6 +19,8 @@ from pymodbus import __version__ as pyModbusVersion
 from pymodbus.exceptions import ModbusException
 
 from .const import (
+    ATTR_MODE,
+    BATTERY_MODE_SELECT,
     CONF_BATTERY_COUNT,
     CONF_CALC_SOLAR_POWER,
     CONF_HOST,
@@ -38,6 +42,7 @@ from .const import (
     DEVICE_INFO_BLOCK,
     DEVICE_INFO_EXTRA,
     DOMAIN,
+    EVENT_COMMAND_EXPIRED,
     FIRMWARE_VERSION,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
@@ -51,6 +56,7 @@ from .control import ControlManager
 from .energy_processor import EnergyProcessor
 from .modbus import ModbusClient, ModbusReadRejected
 from .models import (
+    ControlFeature,
     CoordinatorStatus,
     InverterModel,
     NumberWritableDef,
@@ -119,6 +125,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=config_entry,
             name=DOMAIN,
             update_interval=timedelta(seconds=self.scan_interval),
         )
@@ -143,7 +150,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             on_update=self.async_update_listeners,
             on_refresh=self.async_refresh,
             write_setting=self._async_write_register,
+            on_command_expired=self._command_expired,
         )
+        # Context of the last expiry event, taken once by the Battery Mode select so its
+        # change to automatic shows the expiry as the cause.
+        self._command_expired_context: Context | None = None
         self._energy_processor = EnergyProcessor(self.limits)
         self._status: CoordinatorStatus | None = None
         self._store: Store[dict[str, Any]] | None = Store(
@@ -167,6 +178,35 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     def get_pymodbus_version(self) -> str:
         return pyModbusVersion
+
+    # ── Command expiry ────────────────────────────────────────────────────────
+
+    @callback
+    def _command_expired(self, feature: ControlFeature) -> None:
+        """Fire an event for a command that was not renewed in time."""
+        entry_id = self.config_entry.entry_id
+        device = device_registry.async_get(self.hass).async_get_device(
+            identifiers={(DOMAIN, entry_id)}
+        )
+        select_id = entity_registry.async_get(self.hass).async_get_entity_id(
+            Platform.SELECT, DOMAIN, f"{entry_id}_{BATTERY_MODE_SELECT.key}"
+        )
+        context = Context()
+        self.hass.bus.async_fire(
+            EVENT_COMMAND_EXPIRED,
+            {
+                ATTR_DEVICE_ID: device.id if device else None,
+                ATTR_ENTITY_ID: select_id,
+                ATTR_MODE: str(feature),
+            },
+            context=context,
+        )
+        self._command_expired_context = context
+
+    def pop_command_expired_context(self) -> Context | None:
+        """Return the context of the last expiry once, for the mode change it caused."""
+        context, self._command_expired_context = self._command_expired_context, None
+        return context
 
     # ── Persistence ───────────────────────────────────────────────────────────
 

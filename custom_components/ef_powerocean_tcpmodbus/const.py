@@ -39,6 +39,8 @@ from .models import (
 )
 
 DOMAIN: Final = "ef_powerocean_tcpmodbus"
+EVENT_COMMAND_EXPIRED: Final = f"{DOMAIN}_command_expired"
+ATTR_MODE: Final = "mode"
 DEFAULT_PORT: Final = 502
 DEFAULT_SLAVE: Final = 1
 DEFAULT_SCAN_INTERVAL_S: Final = 5

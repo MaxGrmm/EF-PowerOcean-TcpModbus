@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Set battery command action for automations and battery planners. It sets the Battery Mode, its power and the Charge Limit in one step. With a timeout, the mode returns to Automatic unless the command is sent again in time, leaving the Charge Limit as it is.
+
+### Fixed
+
+- Changing the Charge Limit or Battery Reserve no longer takes control back from the inverter while the guard stays on. An automation that raises the reserve a percent at a time, as a battery planner does, used to make the integration take over for a minute after every change. Writing the value a limit already has now does nothing at all.
+
 ## [2.6.0] - 2026-09-29
 
 ### Fixed

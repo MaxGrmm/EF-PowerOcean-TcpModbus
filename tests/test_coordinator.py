@@ -62,6 +62,7 @@ def coordinator():
         on_update=Mock(),
         on_refresh=AsyncMock(),
         write_setting=instance._async_write_register,
+        on_command_expired=Mock(),
     )
     instance._energy_processor = coordinator_module.EnergyProcessor(instance.limits)
     return instance

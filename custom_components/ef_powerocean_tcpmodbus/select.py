@@ -6,7 +6,7 @@ from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import BATTERY_MODE_SELECT, DOMAIN
@@ -47,6 +47,13 @@ class EcoFlowBatteryModeSelect(EcoFlowBaseEntity, SelectEntity):
         self._attr_entity_category = definition.entity_category
         if definition.icon:
             self._attr_icon = definition.icon
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        # The logbook then shows the expiry as the cause of the mode change.
+        if context := self.coordinator.pop_command_expired_context():
+            self.async_set_context(context)
+        super()._handle_coordinator_update()
 
     @property
     def current_option(self) -> str:
