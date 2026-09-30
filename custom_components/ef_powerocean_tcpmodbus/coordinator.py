@@ -185,8 +185,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def _command_expired(self, feature: ControlFeature) -> None:
         """Fire an event for a command that was not renewed in time."""
         entry_id = self.config_entry.entry_id
-        device = device_registry.async_get(self.hass).async_get_device(
-            identifiers={(DOMAIN, entry_id)}
+        devices = device_registry.async_entries_for_config_entry(
+            device_registry.async_get(self.hass), entry_id
         )
         select_id = entity_registry.async_get(self.hass).async_get_entity_id(
             Platform.SELECT, DOMAIN, f"{entry_id}_{BATTERY_MODE_SELECT.key}"
@@ -195,7 +195,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self.hass.bus.async_fire(
             EVENT_COMMAND_EXPIRED,
             {
-                ATTR_DEVICE_ID: device.id if device else None,
+                ATTR_DEVICE_ID: devices[0].id if devices else None,
                 ATTR_ENTITY_ID: select_id,
                 ATTR_MODE: str(feature),
             },
