@@ -547,11 +547,5 @@
     "unknown_device": {
       "message": "Device {device_id} is not an inverter set up in this integration."
     }
-  },
-  "issues": {
-    "command_expired": {
-      "title": "Battery command timed out on {device}",
-      "description": "A battery command was not renewed within its timeout, so the Battery Mode went back to Automatic. The Charge Limit it set is still {charge_limit_soc}%, so the battery will not charge above that. Check the automation or planner that sends the command, or change the Charge Limit yourself. This message goes away once the Battery Mode or a limit is changed."
-    }
   }
 }

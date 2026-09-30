@@ -781,8 +781,7 @@ def test_repeating_a_command_only_extends_its_timeout(
 def test_a_command_not_renewed_returns_to_automatic_and_keeps_its_limit(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Only the mode is undone. The limit stays where it was set, and is reported
-    until someone changes it."""
+    """Only the mode is undone. The limit stays where it was set."""
     allow_writes(control, monkeypatch)
     frame = {"battery_soc": 50.0}
     control._data = frame
@@ -801,10 +800,6 @@ def test_a_command_not_renewed_returns_to_automatic_and_keeps_its_limit(
     assert control.selected_feature is Feature.AUTOMATIC
     assert control._commanded_feature is Feature.AUTOMATIC
     assert control.charge_limit_soc == 80.0
-    assert control.expired_charge_limit == 80.0
-
-    asyncio.run(control.async_set_charge_limit_soc(100))
-    assert control.expired_charge_limit is None
 
 
 def test_choosing_a_mode_by_hand_cancels_a_commands_timeout(

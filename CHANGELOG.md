@@ -4,7 +4,7 @@
 
 ### Added
 
-- Set battery command action for automations and battery planners. It sets the Battery Mode, its power and the Charge Limit in one step. With a timeout, the mode returns to Automatic unless the command is sent again in time. A repair points out a Charge Limit that a timed-out command left below 100%.
+- Set battery command action for automations and battery planners. It sets the Battery Mode, its power and the Charge Limit in one step. With a timeout, the mode returns to Automatic unless the command is sent again in time, leaving the Charge Limit as it is.
 
 ### Fixed
 

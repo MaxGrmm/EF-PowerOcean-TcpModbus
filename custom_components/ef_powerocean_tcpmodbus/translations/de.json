@@ -558,11 +558,5 @@
     "unknown_device": {
       "message": "Das Gerät {device_id} ist kein in dieser Integration eingerichteter Wechselrichter."
     }
-  },
-  "issues": {
-    "command_expired": {
-      "title": "Batteriebefehl auf {device} abgelaufen",
-      "description": "Ein Batteriebefehl wurde nicht rechtzeitig erneuert, daher ist der Batteriemodus wieder Automatisch. Die gesetzte Ladegrenze von {charge_limit_soc} % gilt weiterhin, die Batterie wird also nicht darüber hinaus geladen. Prüfen Sie die Automation oder den Planer, der den Befehl sendet, oder ändern Sie die Ladegrenze selbst. Diese Meldung verschwindet, sobald der Batteriemodus oder eine Grenze geändert wird."
-    }
   }
 }

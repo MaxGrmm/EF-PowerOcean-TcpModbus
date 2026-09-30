@@ -215,8 +215,7 @@ data:
   timeout and writes nothing to the inverter, so a controller can repeat it every few
   minutes. Choosing a mode by hand cancels the timeout, and a restart always starts in
   Automatic.
-- A command that times out leaves its Charge Limit in place. If that is below 100%, a
-  repair shows under Settings → Repairs until the Battery Mode or a limit is changed.
+- A command that times out leaves its Charge Limit in place.
 - Only `mode: automatic` is accepted while Modbus Control is off.
 - Control Status shows when the running command times out, as its `expires_at`
   attribute.

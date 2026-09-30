@@ -185,8 +185,6 @@ class ControlManager:
         self._reserve_guard = False
         # When a command sent with a timeout returns to automatic, unless renewed.
         self._expires_at: datetime | None = None
-        # Set when a command timed out, until the mode or a limit is changed.
-        self._expired = False
         # Which guard, if any, is forcing the current command.
         self._blocking_guard: ControlStatus | None = None
         self._handback = GuardHandback()
@@ -269,13 +267,6 @@ class ControlManager:
     def expires_at(self) -> datetime | None:
         """Return when the running command returns to automatic, if it has a timeout."""
         return self._expires_at
-
-    @property
-    def expired_charge_limit(self) -> float | None:
-        """Return the Charge Limit still restricting the battery after a timeout."""
-        if self._expired and self._charge_limit_soc < 100.0:
-            return self._charge_limit_soc
-        return None
 
     @property
     def charge_limit_soc(self) -> float:
@@ -435,7 +426,6 @@ class ControlManager:
             self._blocking_guard = None
             self._handback = GuardHandback()
             self._expires_at = None
-            self._expired = False
             self._control_stale = False
             self._reset_deviation()
         self._on_update()
@@ -482,7 +472,6 @@ class ControlManager:
         self._feature = feature
         self._handback = GuardHandback()
         self._expires_at = None
-        self._expired = False
         await self.async_apply(force=True)
 
     async def async_set_command(
@@ -511,7 +500,6 @@ class ControlManager:
         self._expires_at = (
             None if timeout_s is None else dt.now() + timedelta(seconds=timeout_s)
         )
-        self._expired = False
         await self.async_apply(force=True)
 
     async def async_set_feature_power(
@@ -559,7 +547,6 @@ class ControlManager:
         self._update_guards(self._data)
         if (self._charge_guard, self._reserve_guard) != latched:
             self._handback = GuardHandback()
-        self._expired = False
         return True
 
     async def async_set_battery_saver(self, enabled: bool) -> None:
@@ -1014,7 +1001,6 @@ class ControlManager:
         self._feature = ControlFeature.AUTOMATIC
         self._handback = GuardHandback()
         self._expires_at = None
-        self._expired = True
 
     def _compose_control_command(self, feature: ControlFeature | None = None) -> int:
         """Build the control word for *feature*, or for the commanded one by default.
