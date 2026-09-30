@@ -800,6 +800,10 @@ def test_a_command_not_renewed_returns_to_automatic_and_keeps_its_limit(
     assert control.selected_feature is Feature.AUTOMATIC
     assert control._commanded_feature is Feature.AUTOMATIC
     assert control.charge_limit_soc == 80.0
+    assert control.last_expiry == (
+        Feature.CHARGE_BATTERY,
+        HEARTBEAT_START + timedelta(seconds=600),
+    )
 
 
 def test_choosing_a_mode_by_hand_cancels_a_commands_timeout(

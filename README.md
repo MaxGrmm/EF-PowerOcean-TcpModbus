@@ -216,6 +216,9 @@ data:
   minutes. Choosing a mode by hand cancels the timeout, and a restart always starts in
   Automatic.
 - A command that times out leaves its Charge Limit in place.
+- The device's activity shows a timeout as the cause of the change back to Automatic.
+  Automations can react to it through the `ef_powerocean_tcpmodbus_command_expired`
+  event, which carries the timed-out `mode`.
 - Only `mode: automatic` is accepted while Modbus Control is off.
 - Control Status shows when the running command times out, as its `expires_at`
   attribute.

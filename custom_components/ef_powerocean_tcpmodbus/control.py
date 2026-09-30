@@ -185,6 +185,8 @@ class ControlManager:
         self._reserve_guard = False
         # When a command sent with a timeout returns to automatic, unless renewed.
         self._expires_at: datetime | None = None
+        # The last command that timed out, and when.
+        self._last_expiry: tuple[ControlFeature, datetime] | None = None
         # Which guard, if any, is forcing the current command.
         self._blocking_guard: ControlStatus | None = None
         self._handback = GuardHandback()
@@ -267,6 +269,11 @@ class ControlManager:
     def expires_at(self) -> datetime | None:
         """Return when the running command returns to automatic, if it has a timeout."""
         return self._expires_at
+
+    @property
+    def last_expiry(self) -> tuple[ControlFeature, datetime] | None:
+        """Return the last command that timed out, and when."""
+        return self._last_expiry
 
     @property
     def charge_limit_soc(self) -> float:
@@ -998,6 +1005,7 @@ class ControlManager:
             "The %s command was not renewed in time, returning to automatic",
             self._feature,
         )
+        self._last_expiry = (self._feature, dt.now())
         self._feature = ControlFeature.AUTOMATIC
         self._handback = GuardHandback()
         self._expires_at = None

@@ -11,12 +11,11 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
-from .const import CONTROL_FEATURES, DOMAIN
+from .const import ATTR_MODE, CONTROL_FEATURES, DOMAIN
 from .coordinator import EcoflowCoordinator
 from .models import ControlFeature
 
 SERVICE_SET_BATTERY_COMMAND: Final = "set_battery_command"
-ATTR_MODE: Final = "mode"
 ATTR_POWER: Final = "power"
 ATTR_CHARGE_LIMIT_SOC: Final = "charge_limit_soc"
 ATTR_TIMEOUT: Final = "timeout"
