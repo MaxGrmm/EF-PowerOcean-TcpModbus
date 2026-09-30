@@ -54,7 +54,7 @@ from .const import (
 )
 from .control import ControlManager
 from .energy_processor import EnergyProcessor
-from .modbus import ModbusClient, ModbusReadRejected
+from .modbus import ModbusReadRejected
 from .models import (
     ControlFeature,
     CoordinatorStatus,
@@ -64,6 +64,7 @@ from .models import (
     RegisterDef,
     encode_register,
 )
+from .shared_modbus import create_client
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
@@ -136,7 +137,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self.device_address: int | None = None
         self._last_inverter_temperature: float | None = None
         self._consecutive_modbus_disabled_reads = 0
-        self._modbus_client = ModbusClient(self.host, self.port)
+        self._modbus_client = create_client(hass, config_entry, self.host, self.port)
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
 

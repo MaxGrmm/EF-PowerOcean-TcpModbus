@@ -104,7 +104,7 @@ async def test_modbus_control_enablement_comes_from_config_entry(
 ) -> None:
     monkeypatch.setattr(
         coordinator_module,
-        "ModbusClient",
+        "create_client",
         lambda *args, **kwargs: Mock(connected=False),
     )
     config_entry = MockConfigEntry(domain=const.DOMAIN, data=entry_data)

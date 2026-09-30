@@ -1,6 +1,9 @@
 {
   "domain": "ef_powerocean_tcpmodbus",
   "name": "EF-PowerOcean-TcpModbus",
+  "after_dependencies": [
+    "modbus"
+  ],
   "codeowners": [
     "@MaxGrmm"
   ],
