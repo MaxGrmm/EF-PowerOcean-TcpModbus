@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.7.0] - 2026-09-30
+
 ### Added
 
 - Set battery command action for automations and battery planners. It sets the Battery Mode, its power and the Charge Limit in one step. With a timeout, the mode returns to Automatic unless the command is sent again in time, leaving the Charge Limit as it is.
