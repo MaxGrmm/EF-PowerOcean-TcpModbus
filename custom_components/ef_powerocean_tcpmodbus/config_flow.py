@@ -7,7 +7,7 @@ from typing import Any, Final
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
     BooleanSelector,
@@ -38,7 +38,7 @@ from .const import (
     PRODUCT_NUMBER,
     REGISTERS_BY_KEY,
 )
-from .modbus import TRANSPORT_ERRORS, ModbusClient
+from .modbus import TRANSPORT_ERRORS, ModbusClient, async_temporary_client
 from .models import InverterModel
 from .telemetry import decode_register
 
@@ -63,22 +63,22 @@ DEVICE_SUGGESTED_SETTINGS: Final = {
 }
 
 
-async def async_read_device_settings(host: str, port: int) -> dict[str, Any] | None:
+async def async_read_device_settings(
+    hass: HomeAssistant, host: str, port: int
+) -> dict[str, Any] | None:
     """Connect and return the settings the device reports, or None if unreachable.
 
     The values only pre-fill the form, so a register that cannot be read or holds
     something implausible is left out rather than failing the setup.
     """
-    client = ModbusClient(host, port, timeout=5)
     try:
-        if not await client.async_connect():
-            return None
-        return await _async_read_settings(client)
+        async with async_temporary_client(hass, host, port) as client:
+            if not await client.async_connect():
+                return None
+            return await _async_read_settings(client)
     except Exception as e:
         _LOGGER.warning("EF-PowerOcean connection test failed: %s", e)
         return None
-    finally:
-        client.close()
 
 
 async def _async_read_settings(client: ModbusClient) -> dict[str, Any]:
@@ -132,7 +132,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             device_settings = await async_read_device_settings(
-                user_input[CONF_HOST], user_input[CONF_PORT]
+                self.hass, user_input[CONF_HOST], user_input[CONF_PORT]
             )
             if device_settings is not None:
                 self._device_settings = device_settings
@@ -237,7 +237,7 @@ class EcoflowOptionsFlow(OptionsFlow):
             current_host = self._config_entry.data.get(CONF_HOST)
             current_port = self._config_entry.data.get(CONF_PORT, DEFAULT_PORT)
             if host != current_host or port != current_port:
-                if await async_read_device_settings(host, port) is None:
+                if await async_read_device_settings(self.hass, host, port) is None:
                     errors["base"] = "cannot_connect"
 
             if not errors:

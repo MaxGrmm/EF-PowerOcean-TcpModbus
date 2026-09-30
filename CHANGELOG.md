@@ -5,6 +5,7 @@
 ### Added
 
 - Set battery command action for automations and battery planners. It sets the Battery Mode, its power and the Charge Limit in one step. With a timeout, the mode returns to Automatic unless the command is sent again in time, leaving the Charge Limit as it is.
+- On Home Assistant 2026.9 and later, the inverter is reached over the connection Home Assistant's Modbus integration shares, so another integration using the same host and port no longer competes with this one. Older versions keep their own connection as before.
 
 ### Fixed
 

@@ -234,10 +234,13 @@ class GridFeedMode(StrEnum):
         return self in (GridFeedMode.LIMITED, GridFeedMode.UNLIMITED)
 
     @classmethod
-    def from_register(cls, value: float | None) -> GridFeedMode | None:
+    def from_register(cls, value: float | str | None) -> GridFeedMode | None:
         """Map the register to a mode, or None for a value with no known meaning."""
         if value is None:
             return None
+        # A frame processed a second time already holds the mode.
+        if isinstance(value, str):
+            return cls(value)
         return next(
             (mode for mode, raw in _GRID_FEED_MODE_VALUES.items() if raw == int(value)),
             None,

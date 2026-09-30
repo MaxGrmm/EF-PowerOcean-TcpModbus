@@ -1,17 +1,43 @@
-"""Modbus TCP transport for EcoFlow PowerOcean Plus."""
+"""Modbus TCP transport for EcoFlow PowerOcean Plus.
+
+One ModbusClient talks to the inverter over a link. From Home Assistant 2026.9 the
+link is a unit on the connection Home Assistant shares, so another integration
+talking to the same inverter no longer competes with us for it. Older versions get
+a pymodbus connection of our own.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
-from typing import Final
+from collections.abc import AsyncIterator, Iterator, Sequence
+from contextlib import asynccontextmanager, contextmanager
+from typing import Any, Final, Protocol
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
-from .const import DEFAULT_SLAVE, SLEEP_TIME_AFTER_RECONNECT_S
+from .const import DEFAULT_SLAVE, DEVICE_INFO_BLOCK, SLEEP_TIME_AFTER_RECONNECT_S
+
+try:
+    from homeassistant.components.modbus import (
+        async_get_temporary_unit,
+        async_get_unit,
+    )
+    from modbus_connection import (
+        ModbusError,
+        ModbusExceptionError,
+        ModbusTcpParams,
+        ModbusUnit,
+    )
+except ImportError as err:  # Home Assistant before 2026.9 cannot share a connection.
+    SHARED_CONNECTION = False
+    _UNSHARED_REASON = str(err)
+else:
+    SHARED_CONNECTION = True
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,46 +87,171 @@ class ModbusReadRejected(ModbusException):
         return self.exception_code in ModbusRejected.PERMANENT_CODES
 
 
-class ModbusClient:
-    """The modbus client talking to the inverter."""
+class DeviceRefused(Exception):
+    """A link's report that the device answered with a Modbus exception response."""
+
+    def __init__(self, exception_code: int | None, detail: object = None) -> None:
+        super().__init__(detail or f"Exception-Code {exception_code}")
+        self.exception_code = exception_code
+
+
+class ModbusLink(Protocol):
+    """The part that reaches the inverter; the only thing that differs per client.
+
+    Requests raise DeviceRefused when the device refuses, and one of
+    TRANSPORT_ERRORS when it cannot be reached.
+    """
+
+    @property
+    def connected(self) -> bool: ...
+
+    async def connect(self) -> bool: ...
+
+    def close(self) -> None: ...
+
+    async def read_holding_registers(self, address: int, count: int) -> list[int]: ...
+
+    async def write_register(self, address: int, value: int) -> None: ...
+
+    async def write_registers(self, address: int, values: list[int]) -> None: ...
+
+
+class PymodbusLink:
+    """A connection of our own, opened with pymodbus."""
 
     def __init__(
         self,
         host: str,
         port: int,
         *,
-        slave_id: int = DEFAULT_SLAVE,
+        device_id: int = DEFAULT_SLAVE,
         timeout: float = 20,
     ) -> None:
-        self.host = host
-        self.port = port
-        self.slave_id = slave_id
+        self._device_id = device_id
         self._pymodbus = AsyncModbusTcpClient(
             host=host, port=port, timeout=timeout, reconnect_delay=0, retries=0
         )
-        self._lock = asyncio.Lock()
 
     @property
     def connected(self) -> bool:
         return self._pymodbus.connected
 
-    async def async_connect(self) -> bool:
+    async def connect(self) -> bool:
         await self._pymodbus.connect()
         return self._pymodbus.connected
 
     def close(self) -> None:
         self._pymodbus.close()
 
+    async def read_holding_registers(self, address: int, count: int) -> list[int]:
+        response = await self._pymodbus.read_holding_registers(
+            address=address, count=count, device_id=self._device_id
+        )
+        return _answered(response).registers
+
+    async def write_register(self, address: int, value: int) -> None:
+        _answered(
+            await self._pymodbus.write_register(
+                address=address, value=value, device_id=self._device_id
+            )
+        )
+
+    async def write_registers(self, address: int, values: list[int]) -> None:
+        _answered(
+            await self._pymodbus.write_registers(
+                address=address, values=values, device_id=self._device_id
+            )
+        )
+
+
+def _answered(response: Any) -> Any:
+    """Return a pymodbus response, raising DeviceRefused for an exception response."""
+    if response.isError():
+        raise DeviceRefused(getattr(response, "exception_code", None), response)
+    return response
+
+
+@contextmanager
+def _translated_errors() -> Iterator[None]:
+    """Raise the modbus_connection errors as the ones every link raises."""
+    try:
+        yield
+    except ModbusExceptionError as err:
+        raise DeviceRefused(int(err.exception_code), err) from err
+    except ModbusError as err:
+        raise ModbusException(str(err)) from err
+
+
+class SharedLink:
+    """A unit on the connection the modbus integration shares.
+
+    The connection opens on the first request and again on the next one after it
+    drops. It belongs to the modbus integration, which closes it once the last
+    config entry holding a unit on it unloads, so this link never closes it.
+    """
+
+    def __init__(self, unit: ModbusUnit) -> None:
+        self._unit = unit
+
+    @property
+    def connected(self) -> bool:
+        return self._unit.connected
+
+    async def connect(self) -> bool:
+        """Make one request, which opens the link if it is down.
+
+        Any answer counts, even a refusal: it proves the inverter is reachable.
+        """
+        try:
+            await self._unit.read_holding_registers(DEVICE_INFO_BLOCK.start, 1)
+        except ModbusExceptionError:
+            return True
+        except ModbusError as err:
+            _LOGGER.debug("Modbus probe failed: %s", err)
+            return False
+        return True
+
+    def close(self) -> None:
+        """Leave the link up, since other integrations may be using it."""
+
+    async def read_holding_registers(self, address: int, count: int) -> list[int]:
+        with _translated_errors():
+            return await self._unit.read_holding_registers(address, count)
+
+    async def write_register(self, address: int, value: int) -> None:
+        with _translated_errors():
+            await self._unit.write_register(address, value)
+
+    async def write_registers(self, address: int, values: list[int]) -> None:
+        with _translated_errors():
+            await self._unit.write_registers(address, values)
+
+
+class ModbusClient:
+    """The modbus client talking to the inverter over *link*."""
+
+    def __init__(self, link: ModbusLink) -> None:
+        self._link = link
+        self._lock = asyncio.Lock()
+
+    @property
+    def connected(self) -> bool:
+        return self._link.connected
+
+    async def async_connect(self) -> bool:
+        return await self._link.connect()
+
+    def close(self) -> None:
+        self._link.close()
+
     async def async_close(self) -> None:
         """Close once any transaction in flight has finished."""
         async with self._lock:
-            self._pymodbus.close()
+            self._link.close()
 
     async def async_reconnect(self) -> bool:
         """Retry the connection with a widening backoff."""
-        _LOGGER.debug(
-            f"Modbus TCP {self.host}:{self.port} is not connected. Start reconnect!"
-        )
+        _LOGGER.debug("Modbus TCP is not connected. Start reconnect!")
         attempts = len(RECONNECT_DELAYS_S)
 
         for attempt, delay in enumerate(RECONNECT_DELAYS_S, start=1):
@@ -112,13 +263,13 @@ class ModbusClient:
                     await asyncio.sleep(delay)
 
                 _LOGGER.debug(f"Modbus TCP reconnect (Attempt {attempt}/{attempts})...")
-                if await self._pymodbus.connect() and self._pymodbus.connected:
+                if await self._link.connect():
                     _LOGGER.debug(
                         f"Reconnect successful! Attempts: {attempt}/{attempts}"
                     )
                     await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
                     return True
-                self._pymodbus.close()
+                self._link.close()
 
         _LOGGER.error(
             "EF-Modbus-TCP: All reconnect attempts failed! – will retry next poll"
@@ -128,17 +279,14 @@ class ModbusClient:
     async def async_read(self, address: int, count: int) -> list[int]:
         """Read *count* holding registers starting at *address*."""
         async with self._lock:
-            response = await self._pymodbus.read_holding_registers(
-                address=address, count=count, device_id=self.slave_id
-            )
-            if response.isError():
-                exception_code = getattr(response, "exception_code", None)
+            try:
+                return await self._link.read_holding_registers(address, count)
+            except DeviceRefused as err:
                 raise ModbusReadRejected(
                     f"Modbus error response at 0x{address:04X} with "
-                    f"Exception-Code {exception_code}",
-                    exception_code=exception_code,
-                )
-            return response.registers
+                    f"Exception-Code {err.exception_code}",
+                    exception_code=err.exception_code,
+                ) from err
 
     async def async_write(
         self, address: int, words: Sequence[int], *, what: str
@@ -151,31 +299,63 @@ class ModbusClient:
         """
         values = list(words)
         _LOGGER.debug(
-            "Sending Modbus write command [%s]: %s as %s to address %s (Device ID: %s)",
+            "Sending Modbus write command [%s]: %s as %s to address %s",
             "FC6" if len(values) == 1 else "FC16",
             what,
             [f"0x{word:04X}" for word in values],
             address,
-            self.slave_id,
         )
 
         try:
             async with self._lock:
                 if len(values) == 1:
-                    response = await self._pymodbus.write_register(
-                        address=address, value=values[0], device_id=self.slave_id
-                    )
+                    await self._link.write_register(address, values[0])
                 else:
-                    response = await self._pymodbus.write_registers(
-                        address=address, values=values, device_id=self.slave_id
-                    )
+                    await self._link.write_registers(address, values)
+        except DeviceRefused as err:
+            raise ModbusRejected(
+                f"Modbus rejected {what} to register {address}: {err}",
+                exception_code=err.exception_code,
+            ) from err
         except TRANSPORT_ERRORS as err:
             raise HomeAssistantError(
                 f"Could not send {what} to register {address}: {err!r}"
             ) from err
 
-        if response.isError():
-            raise ModbusRejected(
-                f"Modbus rejected {what} to register {address}: {response}",
-                exception_code=getattr(response, "exception_code", None),
-            )
+
+def create_client(
+    hass: HomeAssistant, entry: ConfigEntry, host: str, port: int
+) -> ModbusClient:
+    """Return the client for *entry*; a shared hold on the link ends when it unloads."""
+    if not SHARED_CONNECTION:
+        _LOGGER.info(
+            "Using an own Modbus connection to %s:%s (%s)",
+            host,
+            port,
+            _UNSHARED_REASON,
+        )
+        return ModbusClient(PymodbusLink(host, port))
+    _LOGGER.info(
+        "Using the Modbus connection Home Assistant shares to %s:%s", host, port
+    )
+    params = ModbusTcpParams(host=host, port=port)
+    unit = async_get_unit(hass, entry, params, DEFAULT_SLAVE)
+    return ModbusClient(SharedLink(unit))
+
+
+@asynccontextmanager
+async def async_temporary_client(
+    hass: HomeAssistant, host: str, port: int
+) -> AsyncIterator[ModbusClient]:
+    """Hold a client for the context, for a config flow that has no entry yet."""
+    if not SHARED_CONNECTION:
+        client = ModbusClient(PymodbusLink(host, port, timeout=5))
+        try:
+            yield client
+        finally:
+            client.close()
+        return
+
+    params = ModbusTcpParams(host=host, port=port)
+    async with async_get_temporary_unit(hass, params, DEFAULT_SLAVE) as unit:
+        yield ModbusClient(SharedLink(unit))

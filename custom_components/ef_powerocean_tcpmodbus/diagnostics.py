@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_HOST, CONTROL_FEATURES, DOMAIN
 from .coordinator import EcoflowCoordinator
+from .modbus import SHARED_CONNECTION
 
 TO_REDACT = (CONF_HOST, "title", "unique_id")
 
@@ -51,6 +52,7 @@ async def async_get_config_entry_diagnostics(
             "protocol_version": coordinator.protocol_version,
             "device_address": coordinator.device_address,
             "pymodbus": coordinator.get_pymodbus_version(),
+            "modbus_connection": "shared" if SHARED_CONNECTION else "own",
             "heartbeat_supported": coordinator.control.heartbeat_supported,
             "modbus_control_enabled": coordinator.control.enabled,
             "last_heartbeat_time": coordinator.control.last_heartbeat_time,

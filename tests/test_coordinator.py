@@ -104,7 +104,7 @@ async def test_modbus_control_enablement_comes_from_config_entry(
 ) -> None:
     monkeypatch.setattr(
         coordinator_module,
-        "ModbusClient",
+        "create_client",
         lambda *args, **kwargs: Mock(connected=False),
     )
     config_entry = MockConfigEntry(domain=const.DOMAIN, data=entry_data)
@@ -437,6 +437,19 @@ def test_publishes_raw_device_daily_as_diagnostic(
 
     assert result["solar_today"] == 10.0
     assert result["solar_today_raw"] == 9.5
+
+
+def test_a_refresh_within_a_second_of_a_poll_keeps_the_grid_feed_mode(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The second update reuses the first one's frame, where the mode is decoded."""
+    first = datetime(2026, 8, 27, 12, 0, 0)
+    frame = {"solar_total": 1000.0, "grid_feed_mode": 0.0}
+
+    run_update(coordinator, frame, first, monkeypatch)
+    result = run_update(coordinator, frame, first + timedelta(seconds=0.5), monkeypatch)
+
+    assert result["grid_feed_mode"] is models.GridFeedMode.LIMITED
 
 
 def test_clamps_derived_house_energy_rounding_jitter(
