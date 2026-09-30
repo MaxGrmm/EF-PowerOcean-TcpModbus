@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_DEVICE_ID, ATTR_ENTITY_ID
-from homeassistant.core import Context, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import ATTR_MODE, BATTERY_MODE_SELECT, DOMAIN, EVENT_COMMAND_EXPIRED
+from .const import BATTERY_MODE_SELECT, DOMAIN
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .models import ControlEntityDef, ControlFeature
@@ -49,26 +47,11 @@ class EcoFlowBatteryModeSelect(EcoFlowBaseEntity, SelectEntity):
         self._attr_entity_category = definition.entity_category
         if definition.icon:
             self._attr_icon = definition.icon
-        self._announced_expiry: tuple[ControlFeature, datetime] | None = None
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        expiry = self.coordinator.control.last_expiry
-        if expiry is not None and expiry != self._announced_expiry:
-            self._announced_expiry = expiry
-            context = Context()
-            self.hass.bus.async_fire(
-                EVENT_COMMAND_EXPIRED,
-                {
-                    ATTR_ENTITY_ID: self.entity_id,
-                    ATTR_DEVICE_ID: self.registry_entry.device_id
-                    if self.registry_entry
-                    else None,
-                    ATTR_MODE: str(expiry[0]),
-                },
-                context=context,
-            )
-            # The logbook then shows the expiry as the cause of the mode change.
+        # The logbook then shows the expiry as the cause of the mode change.
+        if context := self.coordinator.pop_command_expired_context():
             self.async_set_context(context)
         super()._handle_coordinator_update()
 

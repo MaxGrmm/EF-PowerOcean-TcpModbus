@@ -512,7 +512,7 @@
         },
         "power": {
           "name": "Power",
-          "description": "Power for the mode. Required for Charge battery, Discharge battery and Export to grid, and not allowed for the others. A value above what the inverter accepts is lowered to its maximum."
+          "description": "Power for the mode, above 0 W. Required for Charge battery, Discharge battery and Export to grid, and not allowed for the others. A value above what the inverter accepts is lowered to its maximum."
         },
         "charge_limit_soc": {
           "name": "Charge limit",
@@ -527,7 +527,7 @@
   },
   "exceptions": {
     "power_required": {
-      "message": "The {mode} mode needs a power."
+      "message": "The {mode} mode needs a power above 0 W."
     },
     "power_not_allowed": {
       "message": "The {mode} mode takes no power."

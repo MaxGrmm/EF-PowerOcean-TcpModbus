@@ -148,6 +148,7 @@ class Simulation:
             on_update=Mock(),
             on_refresh=AsyncMock(),
             write_setting=AsyncMock(),
+            on_command_expired=Mock(),
         )
         self.control._heartbeat._supported = True
         self.control._heartbeat._last_success = self.now

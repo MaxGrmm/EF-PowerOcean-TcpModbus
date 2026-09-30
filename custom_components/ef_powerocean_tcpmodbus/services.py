@@ -24,7 +24,7 @@ ATTR_EXPIRE_IN: Final = "expire_in"
 # strings.
 SET_BATTERY_COMMAND_SCHEMA: Final = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): vol.All(cv.ensure_list, [cv.string]),
+        vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required(ATTR_MODE): vol.In([str(feature) for feature in ControlFeature]),
         vol.Optional(ATTR_POWER): vol.All(vol.Coerce(float), vol.Range(min=0)),
         vol.Optional(ATTR_CHARGE_LIMIT_SOC): vol.All(
@@ -43,35 +43,33 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def async_set_battery_command(call: ServiceCall) -> None:
         feature = ControlFeature(call.data[ATTR_MODE])
         power = call.data.get(ATTR_POWER)
-        if CONTROL_FEATURES[feature].has_power != (power is not None):
+        placeholders = {"mode": str(feature)}
+        # Handle zero specifically, since 0 means no limit at all.
+        if CONTROL_FEATURES[feature].has_power and not power:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
-                translation_key=(
-                    "power_required"
-                    if CONTROL_FEATURES[feature].has_power
-                    else "power_not_allowed"
-                ),
-                translation_placeholders={"mode": str(feature)},
+                translation_key="power_required",
+                translation_placeholders=placeholders,
+            )
+        if not CONTROL_FEATURES[feature].has_power and power is not None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="power_not_allowed",
+                translation_placeholders=placeholders,
             )
 
-        coordinators = [
-            _coordinator_for(hass, device_id) for device_id in call.data[ATTR_DEVICE_ID]
-        ]
-        # Checked for every device first, so none is changed when one would refuse.
-        if feature is not ControlFeature.AUTOMATIC and not all(
-            coordinator.control.enabled for coordinator in coordinators
-        ):
+        coordinator = _coordinator_for(hass, call.data[ATTR_DEVICE_ID])
+        if feature is not ControlFeature.AUTOMATIC and not coordinator.control.enabled:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="modbus_control_off"
             )
 
-        for coordinator in coordinators:
-            await coordinator.control.async_set_command(
-                feature,
-                power=power,
-                charge_limit_soc=call.data.get(ATTR_CHARGE_LIMIT_SOC),
-                expire_in_s=call.data.get(ATTR_EXPIRE_IN),
-            )
+        await coordinator.control.async_set_command(
+            feature,
+            power=power,
+            charge_limit_soc=call.data.get(ATTR_CHARGE_LIMIT_SOC),
+            expire_in_s=call.data.get(ATTR_EXPIRE_IN),
+        )
 
     hass.services.async_register(
         DOMAIN,

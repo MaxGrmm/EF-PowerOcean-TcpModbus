@@ -523,7 +523,7 @@
         },
         "power": {
           "name": "Leistung",
-          "description": "Leistung für den Modus. Erforderlich für Batterie laden, Batterie entladen und Ins Netz einspeisen, für die anderen nicht erlaubt. Ein Wert über dem Maximum des Wechselrichters wird darauf begrenzt."
+          "description": "Leistung für den Modus, über 0 W. Erforderlich für Batterie laden, Batterie entladen und Ins Netz einspeisen, für die anderen nicht erlaubt. Ein Wert über dem Maximum des Wechselrichters wird darauf begrenzt."
         },
         "charge_limit_soc": {
           "name": "Ladegrenze",
@@ -538,7 +538,7 @@
   },
   "exceptions": {
     "power_required": {
-      "message": "Der Modus {mode} braucht eine Leistung."
+      "message": "Der Modus {mode} braucht eine Leistung über 0 W."
     },
     "power_not_allowed": {
       "message": "Der Modus {mode} nimmt keine Leistung an."

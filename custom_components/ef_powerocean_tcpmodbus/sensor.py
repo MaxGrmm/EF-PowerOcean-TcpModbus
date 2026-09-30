@@ -93,6 +93,9 @@ class EcoFlowControlStatusSensor(EcoFlowBaseEntity, SensorEntity):
     target the battery has no headroom for.
     """
 
+    # Don't record these, since they change every time and it fills up the logbook
+    _unrecorded_attributes = frozenset({"expires_at"})
+
     def __init__(self, coordinator: EcoflowCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry, CONTROL_STATUS_SENSOR)
         self._attr_device_class = CONTROL_STATUS_SENSOR.device_class

@@ -25,15 +25,14 @@ def async_describe_events(
 
     @callback
     def async_describe_command_expired(event: Event) -> dict[str, Any]:
-        entity_id = event.data[ATTR_ENTITY_ID]
-        state = hass.states.get(entity_id)
-        return {
+        entity_id = event.data.get(ATTR_ENTITY_ID)
+        state = hass.states.get(entity_id) if entity_id else None
+        described = {
             LOGBOOK_ENTRY_NAME: state.name if state else "Battery Mode",
-            LOGBOOK_ENTRY_MESSAGE: (
-                f"returned to automatic because the {event.data[ATTR_MODE]} "
-                "command was not renewed before it expired"
-            ),
-            LOGBOOK_ENTRY_ENTITY_ID: entity_id,
+            LOGBOOK_ENTRY_MESSAGE: f"returned to automatic because the {event.data.get(ATTR_MODE)} action expired",
         }
+        if entity_id:
+            described[LOGBOOK_ENTRY_ENTITY_ID] = entity_id
+        return described
 
     async_describe_event(DOMAIN, EVENT_COMMAND_EXPIRED, async_describe_command_expired)

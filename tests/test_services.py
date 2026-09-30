@@ -79,7 +79,10 @@ async def test_a_templated_command_reaches_the_inverter(
     ("data", "error"),
     (
         ({"mode": "charge_battery"}, ServiceValidationError),
+        # The inverter would read a zero setpoint as no limit.
+        ({"mode": "charge_battery", "power": 0}, ServiceValidationError),
         ({"mode": "automatic", "power": 1000}, ServiceValidationError),
+        ({"mode": "automatic", "device_id": ["one", "two"]}, vol.Invalid),
         ({"mode": "charge_battery", "power": 1000, "expire_in": 30}, vol.Invalid),
         (
             {"mode": "charge_battery", "power": 1000, "device_id": "not-an-inverter"},

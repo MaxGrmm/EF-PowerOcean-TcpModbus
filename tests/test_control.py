@@ -41,6 +41,7 @@ def control():
         on_update=Mock(),
         on_refresh=AsyncMock(),
         write_setting=AsyncMock(),
+        on_command_expired=Mock(),
     )
     # A fresh manager assumes the device may still be following an earlier run; the
     # tests start from a settled state and say so where they mean otherwise.
@@ -800,10 +801,24 @@ def test_a_command_not_renewed_returns_to_automatic_and_keeps_its_limit(
     assert control.selected_feature is Feature.AUTOMATIC
     assert control._commanded_feature is Feature.AUTOMATIC
     assert control.charge_limit_soc == 80.0
-    assert control.last_expiry == (
-        Feature.CHARGE_BATTERY,
-        HEARTBEAT_START + timedelta(seconds=600),
-    )
+    control._on_command_expired.assert_called_once_with(Feature.CHARGE_BATTERY)
+
+
+def test_automatic_has_nothing_to_expire(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A planner's stop command may carry an expiry too, which must not later report
+    a return to automatic that never happened."""
+    allow_writes(control, monkeypatch)
+    frame = {"battery_soc": 50.0}
+    control._data = frame
+    asyncio.run(control.async_set_command(Feature.AUTOMATIC, expire_in_s=60))
+
+    advance(control, monkeypatch, 61)
+    asyncio.run(control.async_apply(frame))
+
+    assert control.expires_at is None
+    control._on_command_expired.assert_not_called()
 
 
 def test_choosing_a_mode_by_hand_cancels_a_commands_expiry(

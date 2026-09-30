@@ -84,6 +84,12 @@ class WriteSetting(Protocol):
     ) -> None: ...
 
 
+class CommandExpired(Protocol):
+    """Announces that a command was not renewed and the mode is back to automatic."""
+
+    def __call__(self, feature: ControlFeature) -> None: ...
+
+
 def _allows_export(
     mode: GridFeedMode | None, power: float, percent: float | None = None
 ) -> bool:
@@ -158,6 +164,7 @@ class ControlManager:
         on_update: NotifyListeners,
         on_refresh: RequestRefresh,
         write_setting: WriteSetting,
+        on_command_expired: CommandExpired,
     ) -> None:
         self._modbus_client = modbus_client
         self._registers_by_key = registers_by_key
@@ -166,6 +173,7 @@ class ControlManager:
         self._on_update = on_update
         self._on_refresh = on_refresh
         self._write_setting = write_setting
+        self._on_command_expired = on_command_expired
 
         self._enabled = enabled
         self._heartbeat = Heartbeat(modbus_client, scan_interval_s=scan_interval_s)
@@ -185,8 +193,6 @@ class ControlManager:
         self._reserve_guard = False
         # When a command sent with an expiry returns to automatic, unless renewed.
         self._expires_at: datetime | None = None
-        # The last command that timed out, and when.
-        self._last_expiry: tuple[ControlFeature, datetime] | None = None
         # Which guard, if any, is forcing the current command.
         self._blocking_guard: ControlStatus | None = None
         self._handback = GuardHandback()
@@ -269,11 +275,6 @@ class ControlManager:
     def expires_at(self) -> datetime | None:
         """Return when the running command returns to automatic, if it expires."""
         return self._expires_at
-
-    @property
-    def last_expiry(self) -> tuple[ControlFeature, datetime] | None:
-        """Return the last command that timed out, and when."""
-        return self._last_expiry
 
     @property
     def charge_limit_soc(self) -> float:
@@ -504,8 +505,11 @@ class ControlManager:
         if feature is not self._feature:
             self._feature = feature
             self._handback = GuardHandback()
+        # Automatic is where an expiry would return to, so it has nothing to expire.
         self._expires_at = (
-            None if expire_in_s is None else dt.now() + timedelta(seconds=expire_in_s)
+            None
+            if expire_in_s is None or feature is ControlFeature.AUTOMATIC
+            else dt.now() + timedelta(seconds=expire_in_s)
         )
         await self.async_apply(force=True)
 
@@ -1001,14 +1005,15 @@ class ControlManager:
         """Return to automatic once a command's time runs out, leaving the limits."""
         if self._expires_at is None or dt.now() < self._expires_at:
             return
-        _LOGGER.warning(
+        _LOGGER.debug(
             "The %s command was not renewed in time, returning to automatic",
             self._feature,
         )
-        self._last_expiry = (self._feature, dt.now())
+        expired = self._feature
         self._feature = ControlFeature.AUTOMATIC
         self._handback = GuardHandback()
         self._expires_at = None
+        self._on_command_expired(expired)
 
     def _compose_control_command(self, feature: ControlFeature | None = None) -> int:
         """Build the control word for *feature*, or for the commanded one by default.
