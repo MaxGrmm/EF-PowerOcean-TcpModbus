@@ -32,8 +32,9 @@ try:
         ModbusTcpParams,
         ModbusUnit,
     )
-except ImportError:  # Home Assistant before 2026.9 cannot share a Modbus connection.
+except ImportError as err:  # Home Assistant before 2026.9 cannot share a connection.
     SHARED_CONNECTION = False
+    _UNSHARED_REASON = str(err)
 else:
     SHARED_CONNECTION = True
 
@@ -137,7 +138,16 @@ def create_client(
 ) -> ModbusClient | SharedModbusClient:
     """Return the client for *entry*; a shared hold on the link ends when it unloads."""
     if not SHARED_CONNECTION:
+        _LOGGER.info(
+            "Using an own Modbus connection to %s:%s (%s)",
+            host,
+            port,
+            _UNSHARED_REASON,
+        )
         return ModbusClient(host, port)
+    _LOGGER.info(
+        "Using the Modbus connection Home Assistant shares to %s:%s", host, port
+    )
     params = ModbusTcpParams(host=host, port=port)
     return SharedModbusClient(async_get_unit(hass, entry, params, DEFAULT_SLAVE))
 
