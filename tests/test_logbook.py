@@ -1,4 +1,4 @@
-"""Tests for how a command timeout shows in the device's activity."""
+"""Tests for how a command expiry shows in the device's activity."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from custom_components.ef_powerocean_tcpmodbus.select import (
 )
 
 
-async def test_a_timeout_is_recorded_as_the_cause_of_the_change_to_automatic(
+async def test_an_expiry_is_recorded_as_the_cause_of_the_change_to_automatic(
     hass: HomeAssistant,
 ) -> None:
     """The mode change is written under the event's context, and only once."""

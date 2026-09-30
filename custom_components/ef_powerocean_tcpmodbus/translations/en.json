@@ -518,9 +518,9 @@
           "name": "Charge limit",
           "description": "Sets the Charge Limit. Left as it is when omitted. The integration never changes it back by itself."
         },
-        "timeout": {
-          "name": "Timeout",
-          "description": "Seconds until the mode returns to Automatic, unless the command is sent again. Without a timeout the mode stays until it is changed."
+        "expire_in": {
+          "name": "Expire in",
+          "description": "Seconds until the mode returns to Automatic. Sending the command again starts the count over. Without it the mode stays until it is changed."
         }
       }
     }

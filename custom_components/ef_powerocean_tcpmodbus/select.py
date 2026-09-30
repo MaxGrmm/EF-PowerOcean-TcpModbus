@@ -68,7 +68,7 @@ class EcoFlowBatteryModeSelect(EcoFlowBaseEntity, SelectEntity):
                 },
                 context=context,
             )
-            # The logbook then shows the timeout as the cause of the mode change.
+            # The logbook then shows the expiry as the cause of the mode change.
             self.async_set_context(context)
         super()._handle_coordinator_update()
 

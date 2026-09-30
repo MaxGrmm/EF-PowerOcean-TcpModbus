@@ -747,7 +747,7 @@ def test_a_command_sets_its_limit_before_its_mode_reaches_the_inverter(
 
     asyncio.run(
         control.async_set_command(
-            Feature.CHARGE_BATTERY, power=3000.0, charge_limit_soc=80.0, timeout_s=900
+            Feature.CHARGE_BATTERY, power=3000.0, charge_limit_soc=80.0, expire_in_s=900
         )
     )
 
@@ -761,18 +761,18 @@ def test_a_command_sets_its_limit_before_its_mode_reaches_the_inverter(
     assert commands(write)[0] == (setpoint, [0, 1])
 
 
-def test_repeating_a_command_only_extends_its_timeout(
+def test_repeating_a_command_only_moves_its_expiry(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A planner sends its command again every few minutes, which must cost no write."""
     write = allow_writes(control, monkeypatch)
     control._data = {"battery_soc": 50.0}
     command = control.async_set_command
-    asyncio.run(command(Feature.DISCHARGE_BATTERY, power=2000.0, timeout_s=900))
+    asyncio.run(command(Feature.DISCHARGE_BATTERY, power=2000.0, expire_in_s=900))
     write.reset_mock()
 
     advance(control, monkeypatch, 300)
-    asyncio.run(command(Feature.DISCHARGE_BATTERY, power=2000.0, timeout_s=900))
+    asyncio.run(command(Feature.DISCHARGE_BATTERY, power=2000.0, expire_in_s=900))
 
     assert commands(write) == []
     assert control.expires_at == HEARTBEAT_START + timedelta(seconds=1200)
@@ -787,7 +787,7 @@ def test_a_command_not_renewed_returns_to_automatic_and_keeps_its_limit(
     control._data = frame
     asyncio.run(
         control.async_set_command(
-            Feature.CHARGE_BATTERY, power=2000.0, charge_limit_soc=80.0, timeout_s=600
+            Feature.CHARGE_BATTERY, power=2000.0, charge_limit_soc=80.0, expire_in_s=600
         )
     )
 
@@ -806,13 +806,13 @@ def test_a_command_not_renewed_returns_to_automatic_and_keeps_its_limit(
     )
 
 
-def test_choosing_a_mode_by_hand_cancels_a_commands_timeout(
+def test_choosing_a_mode_by_hand_cancels_a_commands_expiry(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     allow_writes(control, monkeypatch)
     control._data = {"battery_soc": 50.0}
     asyncio.run(
-        control.async_set_command(Feature.CHARGE_BATTERY, power=2000.0, timeout_s=60)
+        control.async_set_command(Feature.CHARGE_BATTERY, power=2000.0, expire_in_s=60)
     )
     asyncio.run(control.async_select_feature(Feature.DISCHARGE_BATTERY))
 

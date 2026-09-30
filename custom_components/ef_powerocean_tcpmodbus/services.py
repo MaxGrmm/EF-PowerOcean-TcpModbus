@@ -18,7 +18,7 @@ from .models import ControlFeature
 SERVICE_SET_BATTERY_COMMAND: Final = "set_battery_command"
 ATTR_POWER: Final = "power"
 ATTR_CHARGE_LIMIT_SOC: Final = "charge_limit_soc"
-ATTR_TIMEOUT: Final = "timeout"
+ATTR_EXPIRE_IN: Final = "expire_in"
 
 # Numbers are coerced because external controllers such as Predbat send templated
 # strings.
@@ -30,7 +30,7 @@ SET_BATTERY_COMMAND_SCHEMA: Final = vol.Schema(
         vol.Optional(ATTR_CHARGE_LIMIT_SOC): vol.All(
             vol.Coerce(float), vol.Range(min=0, max=100)
         ),
-        vol.Optional(ATTR_TIMEOUT): vol.All(
+        vol.Optional(ATTR_EXPIRE_IN): vol.All(
             vol.Coerce(float), vol.Range(min=60, max=86_400)
         ),
     }
@@ -70,7 +70,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 feature,
                 power=power,
                 charge_limit_soc=call.data.get(ATTR_CHARGE_LIMIT_SOC),
-                timeout_s=call.data.get(ATTR_TIMEOUT),
+                expire_in_s=call.data.get(ATTR_EXPIRE_IN),
             )
 
     hass.services.async_register(

@@ -31,7 +31,7 @@ def async_describe_events(
             LOGBOOK_ENTRY_NAME: state.name if state else "Battery Mode",
             LOGBOOK_ENTRY_MESSAGE: (
                 f"returned to automatic because the {event.data[ATTR_MODE]} "
-                "command was not renewed within its timeout"
+                "command was not renewed before it expired"
             ),
             LOGBOOK_ENTRY_ENTITY_ID: entity_id,
         }

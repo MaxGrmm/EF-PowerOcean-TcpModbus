@@ -29,7 +29,7 @@ set_battery_command:
           min: 0
           max: 100
           unit_of_measurement: "%"
-    timeout:
+    expire_in:
       selector:
         number:
           min: 60

@@ -529,9 +529,9 @@
           "name": "Ladegrenze",
           "description": "Setzt die Ladegrenze. Ohne Angabe bleibt sie, wie sie ist. Die Integration setzt sie nie von selbst zurück."
         },
-        "timeout": {
-          "name": "Zeitlimit",
-          "description": "Sekunden, bis der Modus zu Automatisch zurückkehrt, sofern der Befehl nicht erneut gesendet wird. Ohne Zeitlimit bleibt der Modus, bis er geändert wird."
+        "expire_in": {
+          "name": "Läuft ab in",
+          "description": "Sekunden, bis der Modus zu Automatisch zurückkehrt. Erneutes Senden des Befehls startet die Zählung neu. Ohne Angabe bleibt der Modus, bis er geändert wird."
         }
       }
     }

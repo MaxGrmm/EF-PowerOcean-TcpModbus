@@ -183,7 +183,7 @@ class ControlManager:
         self._battery_reserve_soc = DEFAULT_BATTERY_RESERVE_SOC
         self._charge_guard = False
         self._reserve_guard = False
-        # When a command sent with a timeout returns to automatic, unless renewed.
+        # When a command sent with an expiry returns to automatic, unless renewed.
         self._expires_at: datetime | None = None
         # The last command that timed out, and when.
         self._last_expiry: tuple[ControlFeature, datetime] | None = None
@@ -267,7 +267,7 @@ class ControlManager:
 
     @property
     def expires_at(self) -> datetime | None:
-        """Return when the running command returns to automatic, if it has a timeout."""
+        """Return when the running command returns to automatic, if it expires."""
         return self._expires_at
 
     @property
@@ -487,12 +487,12 @@ class ControlManager:
         *,
         power: float | None = None,
         charge_limit_soc: float | None = None,
-        timeout_s: float | None = None,
+        expire_in_s: float | None = None,
     ) -> None:
         """Set a mode, its power and the Charge Limit together, before anything is sent.
 
-        With a timeout the mode returns to automatic unless the command is sent again
-        in time. Sending the same command again only extends that time.
+        With expire_in_s the mode returns to automatic unless the command is sent
+        again in time. Sending the same command again only moves that time.
         """
         if feature is not ControlFeature.AUTOMATIC:
             self._require_modbus_control()
@@ -505,7 +505,7 @@ class ControlManager:
             self._feature = feature
             self._handback = GuardHandback()
         self._expires_at = (
-            None if timeout_s is None else dt.now() + timedelta(seconds=timeout_s)
+            None if expire_in_s is None else dt.now() + timedelta(seconds=expire_in_s)
         )
         await self.async_apply(force=True)
 

@@ -200,7 +200,7 @@ data:
   mode: charge_battery
   power: 3000
   charge_limit_soc: 80
-  timeout: 900
+  expire_in: 900
 ```
 
 - It changes the same entities you would change by hand, so the device page always
@@ -210,13 +210,13 @@ data:
   maximum.
 - `charge_limit_soc` is optional. It is applied together with the mode, so the battery
   never charges past a new limit in between.
-- With a `timeout` (60 to 86400 s) the Battery Mode returns to Automatic unless the
-  command is sent again in time. Sending the same command again only extends the
-  timeout and writes nothing to the inverter, so a controller can repeat it every few
-  minutes. Choosing a mode by hand cancels the timeout, and a restart always starts in
+- With `expire_in` (60 to 86400 s) the Battery Mode returns to Automatic unless the
+  command is sent again in time. Sending the same command again only moves the
+  expiry and writes nothing to the inverter, so a controller can repeat it every few
+  minutes. Choosing a mode by hand cancels the expiry, and a restart always starts in
   Automatic.
-- A command that times out leaves its Charge Limit in place.
-- The device's activity shows a timeout as the cause of the change back to Automatic.
+- A command that expires leaves its Charge Limit in place.
+- The device's activity shows the expiry as the cause of the change back to Automatic.
   Automations can react to it through the `ef_powerocean_tcpmodbus_command_expired`
   event, which carries the timed-out `mode`.
 - Only `mode: automatic` is accepted while Modbus Control is off.

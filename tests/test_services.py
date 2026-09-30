@@ -64,14 +64,14 @@ async def test_a_templated_command_reaches_the_inverter(
         mode="charge_battery",
         power="3000",
         charge_limit_soc="80",
-        timeout="900",
+        expire_in="900",
     )
 
     inverter.control.async_set_command.assert_awaited_once_with(
         ControlFeature.CHARGE_BATTERY,
         power=3000.0,
         charge_limit_soc=80.0,
-        timeout_s=900.0,
+        expire_in_s=900.0,
     )
 
 
@@ -80,7 +80,7 @@ async def test_a_templated_command_reaches_the_inverter(
     (
         ({"mode": "charge_battery"}, ServiceValidationError),
         ({"mode": "automatic", "power": 1000}, ServiceValidationError),
-        ({"mode": "charge_battery", "power": 1000, "timeout": 30}, vol.Invalid),
+        ({"mode": "charge_battery", "power": 1000, "expire_in": 30}, vol.Invalid),
         (
             {"mode": "charge_battery", "power": 1000, "device_id": "not-an-inverter"},
             ServiceValidationError,
