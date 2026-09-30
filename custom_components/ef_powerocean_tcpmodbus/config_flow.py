@@ -38,9 +38,8 @@ from .const import (
     PRODUCT_NUMBER,
     REGISTERS_BY_KEY,
 )
-from .modbus import TRANSPORT_ERRORS, ModbusClient
+from .modbus import TRANSPORT_ERRORS, ModbusClient, async_temporary_client
 from .models import InverterModel
-from .shared_modbus import async_temporary_client
 from .telemetry import decode_register
 
 _LOGGER = logging.getLogger(__name__)

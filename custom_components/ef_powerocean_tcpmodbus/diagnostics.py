@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_HOST, CONTROL_FEATURES, DOMAIN
 from .coordinator import EcoflowCoordinator
-from .shared_modbus import SHARED_CONNECTION
+from .modbus import SHARED_CONNECTION
 
 TO_REDACT = (CONF_HOST, "title", "unique_id")
 

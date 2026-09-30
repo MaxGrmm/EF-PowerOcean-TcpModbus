@@ -54,7 +54,7 @@ from .const import (
 )
 from .control import ControlManager
 from .energy_processor import EnergyProcessor
-from .modbus import ModbusReadRejected
+from .modbus import ModbusReadRejected, create_client
 from .models import (
     ControlFeature,
     CoordinatorStatus,
@@ -64,7 +64,6 @@ from .models import (
     RegisterDef,
     encode_register,
 )
-from .shared_modbus import create_client
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
