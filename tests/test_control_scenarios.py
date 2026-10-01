@@ -8,6 +8,7 @@ must never happen across the whole run.
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Final
@@ -55,6 +56,11 @@ class FakeInverter:
     interruptions: int = 0
     # Most the battery power can change per poll, if limited.
     ramp_w: float | None = None
+    # The export limit, above which the solar is curtailed: infinite for the
+    # unlimited feed mode, and None for a frame that does not report one at all.
+    export_cap: float | None = None
+    # What the export limit took from the solar on the last poll.
+    curtailed: float = 0.0
 
     async def async_write(
         self, address: int, words: list[int], *, what: str = ""
@@ -93,16 +99,27 @@ class FakeInverter:
         self.battery = max(floor, min(ceiling, target))
         moved = self.battery * POLL_S / 36.0 / self.capacity_wh
         self.soc = max(0.0, min(100.0, self.soc + moved))
+        export = self.solar - self.house - self.battery
+        self.curtailed = (
+            max(0.0, export - self.export_cap) if self.export_cap is not None else 0.0
+        )
 
-    def frame(self) -> dict[str, float]:
-        return {
-            "solar_power": self.solar,
+    def frame(self) -> dict[str, float | models.GridFeedMode]:
+        solar = self.solar - self.curtailed
+        frame: dict[str, float | models.GridFeedMode] = {
+            "solar_power": solar,
             "house_power": self.house,
             "battery_power": self.battery,
-            "grid_power": self.house - self.solar + self.battery,
+            "grid_power": self.house - solar + self.battery,
             # Whole percent, as the inverter reports it.
             "battery_soc": float(round(self.soc)),
         }
+        if self.export_cap is not None and math.isinf(self.export_cap):
+            frame["grid_feed_mode"] = models.GridFeedMode.UNLIMITED
+        elif self.export_cap is not None:
+            frame["grid_feed_mode"] = models.GridFeedMode.LIMITED
+            frame[const.FEED_IN_POWER_MAX_KEY] = self.export_cap
+        return frame
 
 
 @dataclass
@@ -113,6 +130,7 @@ class Run:
     grid: list[float] = field(default_factory=list)
     soc: list[float] = field(default_factory=list)
     status: list[models.ControlStatus] = field(default_factory=list)
+    curtailed: list[float] = field(default_factory=list)
 
 
 class Simulation:
@@ -125,8 +143,9 @@ class Simulation:
         soc: float = 50.0,
         charge_limit: float = 100.0,
         reserve: float = 0.0,
+        export_cap: float | None = None,
     ) -> None:
-        self.inverter = FakeInverter(soc=soc)
+        self.inverter = FakeInverter(soc=soc, export_cap=export_cap)
         self.now = START
         monkeypatch.setattr(control_module.dt, "now", lambda: self.now)
 
@@ -200,6 +219,7 @@ class Simulation:
             run.grid.append(frame["grid_power"])
             run.soc.append(frame["battery_soc"])
             run.status.append(self.control.status)
+            run.curtailed.append(self.inverter.curtailed)
         return run
 
 
@@ -511,3 +531,163 @@ def test_a_full_battery_leaves_the_inverter_to_balance(
     assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
     assert max(run.battery) == 0
     assert sim.inverter.method_writes == 0
+
+
+def select(sim: Simulation, feature: models.ControlFeature) -> None:
+    """Choose a mode by hand, against the frame the inverter shows right now."""
+    sim.control._data = sim.inverter.frame()
+    asyncio.run(sim.control.async_select_feature(feature))
+
+
+def sunny_day(polls: int, peak: float) -> list[float]:
+    """Return a clear day's solar, rising from nothing to the peak and back."""
+    return [peak * math.sin(math.pi * step / polls) for step in range(polls)]
+
+
+def test_export_solar_first_exports_up_to_the_cap_and_charges_only_the_rest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 9 kW surplus against a 6 kW cap, with the Solar Export Limit left alone: 5.7
+    kW is exported and the battery takes the rest, where Automatic would put
+    everything it can into the battery."""
+    sim = Simulation(monkeypatch, soc=40.0, export_cap=6000.0)
+    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+
+    run = sim.run(polls=120, solar=9500, house=500)
+
+    settled = slice(12, None)
+    # Rounding the charge up only ever lowers the export, by at most two steps.
+    threshold = 6000.0 - const.SOLAR_EXPORT_MARGIN_W
+    assert all(
+        -threshold <= grid < -threshold + 2 * const.GUARD_TRACKING_STEP_W
+        for grid in run.grid[settled]
+    )
+    assert all(watts >= 3000.0 for watts in run.battery[settled])
+    assert max(run.curtailed) == 0
+    assert set(run.status[settled]) == {models.ControlStatus.ACTIVE}
+    # The mode at work is not a guard, so automations reading one see none.
+    assert sim.control.active_guard is None
+
+
+def test_export_solar_first_holds_the_battery_while_the_surplus_fits_under_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sim = Simulation(monkeypatch, soc=40.0, export_cap=6000.0)
+    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+
+    run = sim.run(polls=60, solar=4500, house=500)
+
+    assert max(run.battery) <= const.HOLD_SETPOINT_W
+    assert min(run.grid) >= -4000.0 - const.HOLD_SETPOINT_W
+    assert set(run.status) == {models.ControlStatus.BELOW_SOLAR_EXPORT_LIMIT}
+
+
+def test_export_solar_first_leaves_the_evening_to_the_inverter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Discharging is not restricted, so once the house has clearly outrun the solar
+    for a while, the inverter covers it by itself, as it does under a charge limit."""
+    sim = Simulation(monkeypatch, soc=70.0, export_cap=6000.0)
+    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    sim.run(polls=12, solar=4500, house=500)
+
+    run = sim.run(polls=60, solar=0, house=1500)
+
+    # The grid only covers the poll the load arrives on.
+    assert sum(watts > 0 for watts in run.grid) <= 1
+    assert sim.inverter.method == models.ControlMode.DEFAULT.command_value
+    assert set(run.status) == {models.ControlStatus.BELOW_SOLAR_EXPORT_LIMIT}
+
+
+def test_export_solar_first_exports_all_of_it_without_a_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the Solar Export Limit left alone and nothing capping the export, solar
+    goes to the grid first and the battery takes none of it."""
+    sim = Simulation(monkeypatch, soc=40.0, export_cap=math.inf)
+    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+
+    run = sim.run(polls=60, solar=4500, house=500)
+
+    assert max(run.battery) <= const.HOLD_SETPOINT_W
+    assert min(run.grid) >= -4000.0 - const.HOLD_SETPOINT_W
+    assert set(run.status) == {models.ControlStatus.BELOW_SOLAR_EXPORT_LIMIT}
+
+
+def test_export_solar_first_follows_a_limit_set_below_the_cap_exactly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The margin only keeps clear of the device's cap. A limit of 3 kW on an install
+    without one exports 3 kW and banks the rest."""
+    sim = Simulation(monkeypatch, soc=40.0, export_cap=math.inf)
+    asyncio.run(
+        sim.control.async_set_feature_power(
+            models.ControlFeature.EXPORT_SOLAR_FIRST, 3000.0
+        )
+    )
+    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+
+    run = sim.run(polls=60, solar=6500, house=500)
+
+    settled = slice(12, None)
+    assert all(
+        -3000.0 <= grid < -3000.0 + 2 * const.GUARD_TRACKING_STEP_W
+        for grid in run.grid[settled]
+    )
+    assert set(run.status[settled]) == {models.ControlStatus.ACTIVE}
+
+
+def test_export_solar_first_with_the_export_off_is_left_as_automatic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the Grid Feed-in switch off there is nothing to export first, so filling
+    the battery first is all there is, and the inverter does that by itself."""
+    sim = Simulation(monkeypatch, soc=40.0, export_cap=0.0)
+    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+
+    run = sim.run(polls=60, solar=4500, house=500)
+
+    assert min(run.battery) > 3000.0
+    assert max(run.curtailed) == 0
+    assert sim.inverter.method_writes == 0
+    assert set(run.status) == {models.ControlStatus.AUTOMATIC}
+
+
+def test_export_solar_first_stops_at_the_charge_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sim = Simulation(monkeypatch, soc=80.0, charge_limit=80.0, export_cap=6000.0)
+    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+
+    run = sim.run(polls=60, solar=9500, house=500)
+
+    assert max(run.battery) <= const.HOLD_SETPOINT_W
+    assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
+
+
+def test_export_solar_first_saves_the_midday_solar_that_automatic_curtails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Over a clear day with a 6 kW export cap, Automatic fills the battery by late
+    morning and curtails the midday peak. Export Solar First keeps the room for it."""
+    polls = 8 * 720
+    # About 5.8 kWh above the limit, which a battery at 20% has room for.
+    solar = sunny_day(polls, peak=8500)
+
+    automatic = Simulation(monkeypatch, soc=20.0, export_cap=6000.0)
+    automatic_run = automatic.run(polls=polls, solar=solar, house=500)
+
+    solar_first = Simulation(monkeypatch, soc=20.0, export_cap=6000.0)
+    select(solar_first, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    solar_first_run = solar_first.run(polls=polls, solar=solar, house=500)
+
+    def kwh(watts: list[float]) -> float:
+        return sum(watts) * POLL_S / 3_600_000
+
+    assert kwh(automatic_run.curtailed) > 4.0
+    assert kwh(solar_first_run.curtailed) == 0
+    # The trade-off: without an expiry the battery ends the day less full.
+    assert solar_first_run.soc[-1] < automatic_run.soc[-1]
+    # A whole-step rounding with a drop held back keeps the writes to one a minute.
+    assert solar_first.inverter.setpoint_writes < polls / 12
+    assert solar_first.inverter.method_writes == 1

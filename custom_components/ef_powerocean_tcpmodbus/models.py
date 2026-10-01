@@ -303,6 +303,8 @@ class ControlFeature(StrEnum):
     CHARGE_BATTERY = "charge_battery"
     DISCHARGE_BATTERY = "discharge_battery"
     EXPORT_TO_GRID = "export_to_grid"
+    IMPORT_FROM_GRID = "import_from_grid"
+    EXPORT_SOLAR_FIRST = "export_solar_first"
 
 
 class ControlStatus(StrEnum):
@@ -313,6 +315,8 @@ class ControlStatus(StrEnum):
     AUTOMATIC = "automatic"
     CHARGE_LIMIT_REACHED = "charge_limit_reached"
     RESERVE_REACHED = "reserve_reached"
+    # Export Solar First with no surplus above its limit, so the battery takes none.
+    BELOW_SOLAR_EXPORT_LIMIT = "below_solar_export_limit"
     HOLD_NOT_NEEDED = "hold_not_needed"
     ACTIVE = "active"
     RAMPING = "ramping"
@@ -348,6 +352,9 @@ class ControlFeatureDef:
     capacity_key: str | None = None
     # None for a mode with no power to configure, which only holds the battery.
     default_power: float | None = None
+    # Whether the action may leave the power out, keeping the number's value. Only
+    # for a mode whose default already means something without being set.
+    power_optional: bool = False
 
     @property
     def commands_power(self) -> bool:

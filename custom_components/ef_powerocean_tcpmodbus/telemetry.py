@@ -98,6 +98,7 @@ class TelemetryData:
     pv3_current: float | None = None
     pv3_voltage: float | None = None
     system_modes: float | None = None
+    system_state_2: float | None = None
     battery_capacity: float | None = None
     grid_feed_mode: float | None = None
     fault_codes: tuple[float | None, ...] = ()
@@ -131,6 +132,7 @@ class TelemetryData:
             pv3_current=data.get("pv3_current"),
             pv3_voltage=data.get("pv3_voltage"),
             system_modes=data.get("system_modes"),
+            system_state_2=data.get("system_state_2"),
             battery_capacity=data.get("battery_capacity"),
             grid_feed_mode=data.get("grid_feed_mode"),
             fault_codes=tuple(value for _, value in sorted(faults)),
@@ -316,6 +318,10 @@ def calculate_derived_values(
         )
         calculated["bms_connected"] = _is_bit_set(system_modes, _BMS_CONNECTED_BIT)
         calculated["system_modes_hex"] = f"0x{system_modes:08X}"
+
+    # The fault flags, raw: no model has shown a flag set yet, so none is named.
+    if data.system_state_2 is not None:
+        calculated["system_state_2_hex"] = f"0x{int(data.system_state_2):08X}"
 
     calculated["active_faults"] = _format_active_faults(data.fault_codes)
 

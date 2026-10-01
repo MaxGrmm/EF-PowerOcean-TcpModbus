@@ -6,6 +6,10 @@ import unittest
 
 import pytest
 
+from custom_components.ef_powerocean_tcpmodbus.const import (
+    REGISTERS_BY_KEY,
+    SENSOR_MAP,
+)
 from custom_components.ef_powerocean_tcpmodbus.models import RegisterType
 from custom_components.ef_powerocean_tcpmodbus.telemetry import (
     TelemetryData,
@@ -312,3 +316,26 @@ def test_decodes_the_active_control_method_from_the_system_status(
     # The low bits keep decoding as before.
     assert calculated["operating_mode"] == "self_consumption"
     assert calculated["system_power_on"] is True
+
+
+def test_system_state_2_is_published_raw_and_only_when_read() -> None:
+    """The fault flags have no confirmed meaning yet, so only the word is published."""
+    flags = (1 << 1) | (1 << 3)
+    read = calculate_derived_values(
+        TelemetryData.from_mapping({"system_state_2": float(flags)}),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+    unread = calculate_derived_values(
+        TelemetryData(), calculate_solar_power=False, startup_voltage=0
+    )
+
+    assert read["system_state_2_hex"] == "0x0000000A"
+    assert "system_state_2_hex" not in unread
+
+
+def test_system_state_2_rides_on_the_fault_count() -> None:
+    fault_count = next(sensor for sensor in SENSOR_MAP if sensor.key == "fault_count")
+
+    assert fault_count.attribute_keys == ("system_state_2_hex",)
+    assert REGISTERS_BY_KEY["system_state_2"].address == 40532

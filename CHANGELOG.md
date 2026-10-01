@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- Import from grid Battery Mode, the counterpart of Export to grid. It holds the grid at a draw with a power of its own, so the battery charges with what the house leaves and backs off when a heavy load starts, where Charge battery keeps charging and the draw grows.
+- Export solar first Battery Mode, which sends solar to the grid before the battery. It exports up to its Solar Export Limit and charges the battery only with the rest, never discharging it to export. Left alone the limit is the most the inverter may export, so on an installation with an export limit the battery takes exactly what would be curtailed and still has room at midday. Set lower, it exports that much and banks the rest. It discharges like Automatic in the evening, both guards bind it, and with the Grid Feed-in switch off it runs as Automatic. In the action its power is optional and sets the limit.
+- Control Status shows Below solar export limit while Export solar first has no surplus above its limit.
+- The System State 2 word (40532) as the `system_state_2_hex` attribute of Active Fault Count and in the diagnostics.
+
 ## [2.7.0] - 2026-09-30
 
 ### Added
