@@ -1262,3 +1262,188 @@ def test_the_effective_cap_alone_is_never_remembered_for_a_restore(
     )
 
     assert control.grid_feed_restore is None
+
+
+def make_single_phase_control(inverter_model: models.InverterModel = models.InverterModel.POWEROCEAN_SINGLE_PHASE):
+    blocks = const.register_blocks_for(inverter_model)
+    manager = control_module.ControlManager(
+        SimpleNamespace(connected=True, async_write=AsyncMock()),
+        registers_by_key={
+            register.key: register for block in blocks for register in block.registers
+        },
+        limits={
+            const.CONF_MAX_GRID_POWER: 15_000,
+            const.CONF_MAX_SOLAR_POWER: 12_000,
+            const.CONF_MAX_BATTERY_CHARGED_POWER: 5_000,
+            const.CONF_MAX_BATTERY_DISCHARGED_POWER: 6_600,
+        },
+        inverter_model=inverter_model,
+        enabled=True,
+        scan_interval_s=const.DEFAULT_SCAN_INTERVAL_S,
+        on_update=Mock(),
+        on_refresh=AsyncMock(),
+        write_setting=AsyncMock(),
+        on_command_expired=Mock(),
+    )
+    manager._control_stale = False
+    return manager
+
+
+@pytest.mark.parametrize(
+    "model",
+    (
+        models.InverterModel.POWEROCEAN_SINGLE_PHASE,
+        models.InverterModel.OCEAN_2_SINGLE_PHASE,
+    ),
+)
+def test_single_phase_charge_guard_hands_back_to_automatic_when_house_exceeds_solar(
+    model: models.InverterModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On single-phase models where Modbus cannot drive self-consumption discharge,
+    a charge limit hands control back to Automatic whenever the house uses more
+    than solar power, letting the inverter supplement house load without grid draw."""
+    sp_control = make_single_phase_control(model)
+    allow_writes(sp_control, monkeypatch)
+    asyncio.run(sp_control.async_set_charge_limit_soc(88))
+
+    # Surplus solar: hold battery to prevent charging above limit.
+    surplus_frame = {
+        "battery_soc": 88.0,
+        "solar_power": 1379.0,
+        "house_power": 186.0,
+        "grid_power": -1193.0,
+        "battery_power": 0.0,
+    }
+    asyncio.run(sp_control.async_apply(surplus_frame))
+    assert sp_control.status is Status.CHARGE_LIMIT_REACHED
+    assert sp_control._commanded_feature is Feature.HOLD_BATTERY
+    assert sp_control.power == 1.0
+
+    # Deficit: house load exceeds solar by 138 W. It hands back to native Automatic.
+    deficit_frame = {
+        "battery_soc": 88.0,
+        "solar_power": 1404.0,
+        "house_power": 1542.0,
+        "grid_power": 0.0,
+        "battery_power": -138.0,
+    }
+    asyncio.run(sp_control.async_apply(deficit_frame))
+    assert sp_control.status is Status.CHARGE_LIMIT_REACHED
+    assert sp_control._commanded_feature is Feature.AUTOMATIC
+    assert sp_control.power == 0.0
+
+    # Solar surplus returns: hold battery again.
+    asyncio.run(sp_control.async_apply(surplus_frame))
+    assert sp_control.status is Status.CHARGE_LIMIT_REACHED
+    assert sp_control._commanded_feature is Feature.HOLD_BATTERY
+    assert sp_control.power == 1.0
+
+
+def test_single_phase_reserve_guard_hands_back_to_automatic_when_solar_exceeds_house(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On single-phase models, a battery reserve hands control back to Automatic
+    whenever solar exceeds house load, allowing solar to recharge the battery."""
+    sp_control = make_single_phase_control()
+    allow_writes(sp_control, monkeypatch)
+    asyncio.run(sp_control.async_set_battery_reserve_soc(20))
+
+    # House deficit: hold battery to protect reserve.
+    deficit_frame = {
+        "battery_soc": 20.0,
+        "solar_power": 100.0,
+        "house_power": 900.0,
+        "grid_power": 800.0,
+        "battery_power": 0.0,
+    }
+    asyncio.run(sp_control.async_apply(deficit_frame))
+    assert sp_control.status is Status.RESERVE_REACHED
+    assert sp_control._commanded_feature is Feature.HOLD_BATTERY
+    assert sp_control.power == 1.0
+
+    # Solar surplus: hands back to native Automatic to recharge.
+    surplus_frame = {
+        "battery_soc": 20.0,
+        "solar_power": 2000.0,
+        "house_power": 500.0,
+        "grid_power": 0.0,
+        "battery_power": 1500.0,
+    }
+    asyncio.run(sp_control.async_apply(surplus_frame))
+    assert sp_control.status is Status.RESERVE_REACHED
+    assert sp_control._commanded_feature is Feature.AUTOMATIC
+    assert sp_control.power == 0.0
+
+
+def test_natural_battery_power_ignores_false_surplus_from_grid_charging(control) -> None:
+    """When the battery is charging from the grid while solar <= house,
+    _natural_battery_power must not report a false positive solar surplus."""
+    data = {
+        "battery_power": 868.0,
+        "grid_power": 758.0,
+        "solar_power": 1375.0,
+        "house_power": 1381.0,
+    }
+    # battery - grid is +110 W, but solar - house is -6 W.
+    natural = control._natural_battery_power(data)
+    assert natural == -6.0
+
+
+def test_single_phase_guard_handback_deadband_hysteresis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Small fluctuations around equilibrium (<= 20W) do not toggle between HOLD
+    and AUTOMATIC, but once handed back, it remains in AUTOMATIC until surplus returns."""
+    sp_control = make_single_phase_control()
+    allow_writes(sp_control, monkeypatch)
+    asyncio.run(sp_control.async_set_charge_limit_soc(88))
+
+    # 1. Clear surplus: holds battery.
+    asyncio.run(
+        sp_control.async_apply(
+            {"battery_soc": 88.0, "solar_power": 1000.0, "house_power": 900.0}
+        )
+    )
+    assert sp_control._commanded_feature is Feature.HOLD_BATTERY
+
+    # 2. Small noise draw of 10 W (<= 20 W deadband): stays in HOLD_BATTERY without toggling.
+    asyncio.run(
+        sp_control.async_apply(
+            {"battery_soc": 88.0, "solar_power": 1000.0, "house_power": 1010.0}
+        )
+    )
+    assert sp_control._commanded_feature is Feature.HOLD_BATTERY
+
+    # 3. Clear draw of 30 W (> 20 W deadband): hands back to AUTOMATIC.
+    asyncio.run(
+        sp_control.async_apply(
+            {"battery_soc": 88.0, "solar_power": 1000.0, "house_power": 1030.0}
+        )
+    )
+    assert sp_control._commanded_feature is Feature.AUTOMATIC
+
+    # 4. Load drops back to 10 W draw (> 0.0 W): hysteresis keeps it in AUTOMATIC.
+    asyncio.run(
+        sp_control.async_apply(
+            {"battery_soc": 88.0, "solar_power": 1000.0, "house_power": 1010.0}
+        )
+    )
+    assert sp_control._commanded_feature is Feature.AUTOMATIC
+
+    # 5. Surplus returns (solar 1005 W > house 1000 W, wanted <= 0): takes back control to HOLD.
+    asyncio.run(
+        sp_control.async_apply(
+            {"battery_soc": 88.0, "solar_power": 1005.0, "house_power": 1000.0}
+        )
+    )
+    assert sp_control._commanded_feature is Feature.HOLD_BATTERY
+
+    # 6. Minor 10 W noise draw again: stays in HOLD_BATTERY without chattering.
+    asyncio.run(
+        sp_control.async_apply(
+            {"battery_soc": 88.0, "solar_power": 1000.0, "house_power": 1010.0}
+        )
+    )
+    assert sp_control._commanded_feature is Feature.HOLD_BATTERY
+
+

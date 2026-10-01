@@ -29,6 +29,7 @@ from .const import (
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
     FEED_IN_POWER_MAX_SETTING_KEY,
+    GUARD_DIRECT_HANDBACK_W,
     GUARD_HANDBACK_MAX_S,
     GUARD_HANDBACK_S,
     GUARD_HANDBACK_W,
@@ -706,13 +707,25 @@ class ControlManager:
         following us or running its own self-consumption. Measuring it on the grid
         side is preferred because it carries the conversion losses the panels do not.
         """
+        solar, house = data.get("solar_power"), data.get("house_power")
+        solar_balance = (
+            float(solar) - float(house)
+            if solar is not None and house is not None
+            else None
+        )
+
         battery, grid = data.get("battery_power"), data.get("grid_power")
         if battery is not None and grid is not None:
-            return float(battery) - float(grid)
-        solar, house = data.get("solar_power"), data.get("house_power")
-        if solar is not None and house is not None:
-            return float(solar) - float(house)
-        return None
+            bg = float(battery) - float(grid)
+            # When solar generation cannot cover house consumption, there is physically
+            # no solar surplus available to charge the battery. If battery - grid reads
+            # positive in that state, the battery is being charged from the grid (or
+            # reacting to a setpoint transient), not from natural solar surplus.
+            if solar_balance is not None and solar_balance <= 0.0 and bg > 0.0:
+                return solar_balance
+            return bg
+
+        return solar_balance
 
     def _guard_blocks(self, direction: int) -> ControlStatus | None:
         """Return the guard forbidding movement in direction, if available."""
@@ -738,6 +751,9 @@ class ControlManager:
 
         if self._advance_handback(natural):
             return ControlFeature.AUTOMATIC, 0.0, blocked
+
+        if not self._inverter_model.traits.emulates_guarded_discharge:
+            return self._hold(data, blocked)
 
         if self._charge_guard:
             natural = min(natural, 0.0)
@@ -813,6 +829,17 @@ class ControlManager:
 
         allowed = -1.0 if self._charge_guard else 1.0
         wanted = natural * allowed
+
+        if not self._inverter_model.traits.emulates_guarded_discharge:
+            if handback.phase is HandbackPhase.HANDED_BACK:
+                if wanted <= 0.0:
+                    handback.take_back(now)
+                    return False
+                return True
+            if wanted > GUARD_DIRECT_HANDBACK_W:
+                handback.enter(HandbackPhase.HANDED_BACK, now)
+                return True
+            return False
 
         match handback.phase:
             case HandbackPhase.TRACKING:
