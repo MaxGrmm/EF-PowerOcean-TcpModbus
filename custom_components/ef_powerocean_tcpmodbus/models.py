@@ -182,7 +182,7 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         # stands in until someone with the device reports a better one.
         startup_voltage=90,
         product_ids=(ProductId(4, ProductCategory.SINGLE_PHASE),),
-        high_word_first=True,
+        high_word_first=False,
         max_register_gap=0,
         rejects_unimplemented=True,
     ),

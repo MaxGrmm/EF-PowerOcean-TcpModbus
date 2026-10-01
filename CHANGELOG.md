@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Fixed the wrong word order for Ocean 2 Single Phase.
+
 ## [2.7.0] - 2026-09-30
 
 ### Added
