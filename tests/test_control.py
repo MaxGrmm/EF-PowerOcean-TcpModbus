@@ -1264,7 +1264,9 @@ def test_the_effective_cap_alone_is_never_remembered_for_a_restore(
     assert control.grid_feed_restore is None
 
 
-def make_single_phase_control(inverter_model: models.InverterModel = models.InverterModel.POWEROCEAN_SINGLE_PHASE):
+def make_single_phase_control(
+    inverter_model: models.InverterModel = models.InverterModel.POWEROCEAN_SINGLE_PHASE,
+):
     blocks = const.register_blocks_for(inverter_model)
     manager = control_module.ControlManager(
         SimpleNamespace(connected=True, async_write=AsyncMock()),
@@ -1375,7 +1377,9 @@ def test_single_phase_reserve_guard_hands_back_to_automatic_when_solar_exceeds_h
     assert sp_control.power == 0.0
 
 
-def test_natural_battery_power_ignores_false_surplus_from_grid_charging(control) -> None:
+def test_natural_battery_power_ignores_false_surplus_from_grid_charging(
+    control,
+) -> None:
     """When the battery is charging from the grid while solar <= house,
     _natural_battery_power must not report a false positive solar surplus."""
     data = {
@@ -1445,5 +1449,3 @@ def test_single_phase_guard_handback_deadband_hysteresis(
         )
     )
     assert sp_control._commanded_feature is Feature.HOLD_BATTERY
-
-
