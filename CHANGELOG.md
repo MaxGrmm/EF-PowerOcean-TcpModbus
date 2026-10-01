@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- Battery guards on single-phase models (PowerOcean Single Phase and Ocean 2 Single Phase) now hand control back directly to native Automatic mode during solar deficits or surpluses rather than attempting Modbus setpoint tracking. Writing discharge setpoints on single-phase hardware caused inverter AC output collapse, battery charging from the grid, and grid import. A 20 W deadband with hysteresis prevents rapid toggling between Hold and Automatic around dusk/dawn equilibrium.
+- Natural battery power calculation no longer reports a false solar surplus when the battery is charging from the grid while solar generation cannot cover house consumption, and redundant sensor lookups were removed.
+
 ## [2.7.0] - 2026-09-30
 
 ### Added
