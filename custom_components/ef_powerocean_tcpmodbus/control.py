@@ -700,32 +700,31 @@ class ControlManager:
             self._reserve_guard = False
 
     def _natural_battery_power(self, data: dict[str, Any]) -> float | None:
-        """Return what the battery would do if the inverter were left to itself.
+        """Estimate the battery power the inverter would reach without us.
 
-        The house balances as solar + grid = house + battery, so the power a battery
-        would need to hold the grid at zero reads the same whether the inverter is
+        The guard logic hands control back when natural power flows the way the guard
+        allows, so this must reconstruct that natural point whether the device is
         following us or running its own self-consumption. Measuring it on the grid
         side is preferred because it carries the conversion losses the panels do not.
         """
-        solar, house = data.get("solar_power"), data.get("house_power")
-        solar_balance = (
-            float(solar) - float(house)
-            if solar is not None and house is not None
-            else None
-        )
+        from_grid_side = self._natural_from_grid_side(data)
+        if from_grid_side is not None:
+            return from_grid_side
+        return self._natural_from_solar_side(data)
 
+    def _natural_from_grid_side(self, data: dict[str, Any]) -> float | None:
+        """Return the natural battery power read from the battery and the grid."""
         battery, grid = data.get("battery_power"), data.get("grid_power")
-        if battery is not None and grid is not None:
-            bg = float(battery) - float(grid)
-            # When solar generation cannot cover house consumption, there is physically
-            # no solar surplus available to charge the battery. If battery - grid reads
-            # positive in that state, the battery is being charged from the grid (or
-            # reacting to a setpoint transient), not from natural solar surplus.
-            if solar_balance is not None and solar_balance <= 0.0 and bg > 0.0:
-                return solar_balance
-            return bg
+        if battery is None or grid is None:
+            return None
+        return float(battery) - float(grid)
 
-        return solar_balance
+    def _natural_from_solar_side(self, data: dict[str, Any]) -> float | None:
+        """Return the natural battery power read from the solar and the house."""
+        solar, house = data.get("solar_power"), data.get("house_power")
+        if solar is None or house is None:
+            return None
+        return float(solar) - float(house)
 
     def _guard_blocks(self, direction: int) -> ControlStatus | None:
         """Return the guard forbidding movement in direction, if available."""
@@ -749,10 +748,22 @@ class ControlManager:
             self._handback.take_back(dt.now())
             return self._hold(data, blocked)
 
+        tracks = self._inverter_model.traits.guard_tracks_setpoints
+        if not tracks:
+            # The two sides of the balance agree in a frame that balances, which the
+            # device does not always publish. Where they disagree, believe the smaller
+            # surplus. That hands back sooner under a charge limit, where holding draws
+            # from the grid, and later under a reserve, where handing back drains the
+            # battery below it.
+            from_grid_side = self._natural_from_grid_side(data)
+            from_solar_side = self._natural_from_solar_side(data)
+            if from_grid_side is not None and from_solar_side is not None:
+                natural = min(from_grid_side, from_solar_side)
+
         if self._advance_handback(natural):
             return ControlFeature.AUTOMATIC, 0.0, blocked
 
-        if not self._inverter_model.traits.emulates_guarded_discharge:
+        if not tracks:
             return self._hold(data, blocked)
 
         if self._charge_guard:
@@ -830,12 +841,19 @@ class ControlManager:
         allowed = -1.0 if self._charge_guard else 1.0
         wanted = natural * allowed
 
-        if not self._inverter_model.traits.emulates_guarded_discharge:
+        if not self._inverter_model.traits.guard_tracks_setpoints:
             if handback.phase is HandbackPhase.HANDED_BACK:
-                if wanted <= 0.0:
+                if (
+                    handback.elapsed_s(now) >= GUARD_SETTLE_S
+                    and wanted <= -GUARD_DIRECT_HANDBACK_W
+                ):
                     handback.take_back(now)
                     return False
                 return True
+
+            if self._control_written_within(GUARD_SETTLE_S):
+                return False
+
             if wanted > GUARD_DIRECT_HANDBACK_W:
                 handback.enter(HandbackPhase.HANDED_BACK, now)
                 return True

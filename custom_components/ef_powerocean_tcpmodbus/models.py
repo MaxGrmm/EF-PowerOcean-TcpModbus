@@ -83,10 +83,11 @@ class ModelTraits:
     # Whether 40609 holds the export cap in force after the internal
     # safety rules. Where it does not, the configured cap at 40538 stands in.
     reports_effective_feed_cap: bool = True
-    # Whether the guard logic emulates self-consumption discharge via Modbus setpoint
-    # tracking under a charge limit, rather than handing control directly back to the
-    # inverter's native self-consumption loop.
-    emulates_guarded_discharge: bool = True
+    # Whether a charge limit or battery reserve is kept by tracking a battery
+    # setpoint each poll. Where it is not, the guard only holds the battery and
+    # hands back to the inverter's own self-consumption whenever power flows the
+    # way the guard allows.
+    guard_tracks_setpoints: bool = True
 
     def identifies(
         self, product_number: int | None, product_category: int | None
@@ -144,7 +145,7 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
             ProductId(1, ProductCategory.SINGLE_PHASE),
             ProductId(2),
         ),
-        emulates_guarded_discharge=False,
+        guard_tracks_setpoints=False,
     ),
     # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1772090325968/EcoFlow%20PowerOcean%20(Three-phase)_Datasheet_EN.pdf
     InverterModel.POWEROCEAN_THREE_PHASE: ModelTraits(
@@ -190,7 +191,7 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         high_word_first=False,
         max_register_gap=0,
         rejects_unimplemented=True,
-        emulates_guarded_discharge=False,
+        guard_tracks_setpoints=False,
     ),
 }
 

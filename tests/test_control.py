@@ -1321,7 +1321,7 @@ def test_single_phase_charge_guard_hands_back_to_automatic_when_house_exceeds_so
     assert sp_control._commanded_feature is Feature.HOLD_BATTERY
     assert sp_control.power == 1.0
 
-    # Deficit: house load exceeds solar by 138 W. It hands back to native Automatic.
+    # Deficit during the settling window (<= 30s): stays in HOLD_BATTERY to let inverter settle.
     deficit_frame = {
         "battery_soc": 88.0,
         "solar_power": 1404.0,
@@ -1330,11 +1330,17 @@ def test_single_phase_charge_guard_hands_back_to_automatic_when_house_exceeds_so
         "battery_power": -138.0,
     }
     asyncio.run(sp_control.async_apply(deficit_frame))
+    assert sp_control._commanded_feature is Feature.HOLD_BATTERY
+
+    # Settling window elapses: house load exceeds solar by 138 W. It hands back to native Automatic.
+    advance(sp_control, monkeypatch, const.GUARD_SETTLE_S)
+    asyncio.run(sp_control.async_apply(deficit_frame))
     assert sp_control.status is Status.CHARGE_LIMIT_REACHED
     assert sp_control._commanded_feature is Feature.AUTOMATIC
     assert sp_control.power == 0.0
 
-    # Solar surplus returns: hold battery again.
+    # Dwell time in Automatic elapses: clear solar surplus returns and holds battery again.
+    advance(sp_control, monkeypatch, 2 * const.GUARD_SETTLE_S)
     asyncio.run(sp_control.async_apply(surplus_frame))
     assert sp_control.status is Status.CHARGE_LIMIT_REACHED
     assert sp_control._commanded_feature is Feature.HOLD_BATTERY
@@ -1363,7 +1369,8 @@ def test_single_phase_reserve_guard_hands_back_to_automatic_when_solar_exceeds_h
     assert sp_control._commanded_feature is Feature.HOLD_BATTERY
     assert sp_control.power == 1.0
 
-    # Solar surplus: hands back to native Automatic to recharge.
+    # Settling window elapses: solar surplus hands back to native Automatic to recharge.
+    advance(sp_control, monkeypatch, const.GUARD_SETTLE_S)
     surplus_frame = {
         "battery_soc": 20.0,
         "solar_power": 2000.0,
@@ -1377,27 +1384,49 @@ def test_single_phase_reserve_guard_hands_back_to_automatic_when_solar_exceeds_h
     assert sp_control.power == 0.0
 
 
-def test_natural_battery_power_ignores_false_surplus_from_grid_charging(
-    control,
-) -> None:
-    """When the battery is charging from the grid while solar <= house,
-    _natural_battery_power must not report a false positive solar surplus."""
+def test_natural_from_grid_side_and_solar_side(control) -> None:
+    """_natural_from_grid_side reads battery - grid, and _natural_from_solar_side
+    reads solar - house."""
     data = {
         "battery_power": 868.0,
         "grid_power": 758.0,
         "solar_power": 1375.0,
         "house_power": 1381.0,
     }
-    # battery - grid is +110 W, but solar - house is -6 W.
-    natural = control._natural_battery_power(data)
-    assert natural == -6.0
+    assert control._natural_from_grid_side(data) == 110.0
+    assert control._natural_from_solar_side(data) == -6.0
+    assert control._natural_battery_power(data) == 110.0
+
+
+def test_single_phase_guarded_command_uses_minimum_surplus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When grid-side and solar-side estimates disagree, single-phase models
+    choose the smaller surplus (min) so false surplus from grid charging does not
+    block handback under a charge limit."""
+    sp_control = make_single_phase_control()
+    allow_writes(sp_control, monkeypatch)
+    asyncio.run(sp_control.async_set_charge_limit_soc(88))
+    # After settling window
+    advance(sp_control, monkeypatch, const.GUARD_SETTLE_S)
+    data = {
+        "battery_soc": 88.0,
+        "battery_power": 868.0,
+        "grid_power": 758.0,
+        "solar_power": 1375.0,
+        "house_power": 1450.0,
+    }
+    # from_grid_side is +110 W, but from_solar_side is -75 W.
+    # min(+110, -75) = -75 W, so wanted = +75 W (> 20 W deadband) -> hands back to AUTOMATIC.
+    asyncio.run(sp_control.async_apply(data))
+    assert sp_control._commanded_feature is Feature.AUTOMATIC
 
 
 def test_single_phase_guard_handback_deadband_hysteresis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Small fluctuations around equilibrium (<= 20W) do not toggle between HOLD
-    and AUTOMATIC, but once handed back, it remains in AUTOMATIC until surplus returns."""
+    and AUTOMATIC, but once handed back, it remains in AUTOMATIC until clear surplus returns."""
     sp_control = make_single_phase_control()
     allow_writes(sp_control, monkeypatch)
     asyncio.run(sp_control.async_set_charge_limit_soc(88))
@@ -1410,7 +1439,8 @@ def test_single_phase_guard_handback_deadband_hysteresis(
     )
     assert sp_control._commanded_feature is Feature.HOLD_BATTERY
 
-    # 2. Small noise draw of 10 W (<= 20 W deadband): stays in HOLD_BATTERY without toggling.
+    # 2. Small noise draw of 10 W (<= 20 W deadband) after settling: stays in HOLD_BATTERY.
+    advance(sp_control, monkeypatch, const.GUARD_SETTLE_S)
     asyncio.run(
         sp_control.async_apply(
             {"battery_soc": 88.0, "solar_power": 1000.0, "house_power": 1010.0}
@@ -1426,7 +1456,7 @@ def test_single_phase_guard_handback_deadband_hysteresis(
     )
     assert sp_control._commanded_feature is Feature.AUTOMATIC
 
-    # 4. Load drops back to 10 W draw (> 0.0 W): hysteresis keeps it in AUTOMATIC.
+    # 4. Load drops back to 10 W draw (> -20 W): hysteresis keeps it in AUTOMATIC.
     asyncio.run(
         sp_control.async_apply(
             {"battery_soc": 88.0, "solar_power": 1000.0, "house_power": 1010.0}
@@ -1434,15 +1464,25 @@ def test_single_phase_guard_handback_deadband_hysteresis(
     )
     assert sp_control._commanded_feature is Feature.AUTOMATIC
 
-    # 5. Surplus returns (solar 1005 W > house 1000 W, wanted <= 0): takes back control to HOLD.
+    # 5. Small 10 W surplus (< 20 W deadband): hysteresis keeps it in AUTOMATIC even after dwell time.
+    advance(sp_control, monkeypatch, 2 * const.GUARD_SETTLE_S)
     asyncio.run(
         sp_control.async_apply(
-            {"battery_soc": 88.0, "solar_power": 1005.0, "house_power": 1000.0}
+            {"battery_soc": 88.0, "solar_power": 1010.0, "house_power": 1000.0}
+        )
+    )
+    assert sp_control._commanded_feature is Feature.AUTOMATIC
+
+    # 6. Clear surplus returns (solar 1030 W > house 1000 W, wanted <= -20 W): takes back control to HOLD.
+    asyncio.run(
+        sp_control.async_apply(
+            {"battery_soc": 88.0, "solar_power": 1030.0, "house_power": 1000.0}
         )
     )
     assert sp_control._commanded_feature is Feature.HOLD_BATTERY
 
-    # 6. Minor 10 W noise draw again: stays in HOLD_BATTERY without chattering.
+    # 7. Minor 10 W noise draw again: stays in HOLD_BATTERY without chattering.
+    advance(sp_control, monkeypatch, 3 * const.GUARD_SETTLE_S)
     asyncio.run(
         sp_control.async_apply(
             {"battery_soc": 88.0, "solar_power": 1000.0, "house_power": 1010.0}
