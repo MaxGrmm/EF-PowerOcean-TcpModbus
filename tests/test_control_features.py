@@ -91,9 +91,12 @@ def test_the_signs_follow_the_devices_own_measurements() -> None:
     """
     export = const.CONTROL_FEATURES[ControlFeature.EXPORT_TO_GRID]
     charge = const.CONTROL_FEATURES[ControlFeature.CHARGE_BATTERY]
+    import_ = const.CONTROL_FEATURES[ControlFeature.IMPORT_FROM_GRID]
 
     assert (export.measure_key, export.sign) == ("grid_power", -1)
     assert (charge.measure_key, charge.sign) == ("battery_power", 1)
+    # A draw reads positive on the meter, as the protocol defines the setpoint.
+    assert (import_.measure_key, import_.sign) == ("grid_power", 1)
 
     # Exporting 2 kW against a 2 kW command is the mode working, not a deviation.
     assert (
@@ -127,6 +130,33 @@ def test_opposing_features_share_a_register_but_not_a_sign() -> None:
     assert discharge.sign == -1
 
 
+def test_import_and_export_share_the_meter_setpoint_but_not_a_sign() -> None:
+    export = const.CONTROL_FEATURES[ControlFeature.EXPORT_TO_GRID]
+    import_ = const.CONTROL_FEATURES[ControlFeature.IMPORT_FROM_GRID]
+
+    assert import_.setpoint_key == export.setpoint_key == "system_power_setpoint"
+    assert import_.method is export.method is ControlMode.SYSTEM_FEED
+    assert import_.sign == -export.sign
+    # The house draws past the inverter, so no converter capacity bounds a draw.
+    assert import_.capacity_key is None
+    assert import_.limit_key is None
+
+
+def test_export_solar_first_defaults_to_all_the_inverter_may_export() -> None:
+    """Its power is the Solar Export Limit, which means something untouched, so it is
+    the one mode the action lets leave its power out."""
+    definition = const.CONTROL_FEATURES[ControlFeature.EXPORT_SOLAR_FIRST]
+
+    assert definition.method is ControlMode.BATTERY_LIMITS
+    assert definition.setpoint_key == "battery_power_setpoint"
+    assert definition.default_power == const.DEFAULT_MAX_POWER
+    assert [
+        feature
+        for feature, feature_def in const.CONTROL_FEATURES.items()
+        if feature_def.power_optional
+    ] == [ControlFeature.EXPORT_SOLAR_FIRST]
+
+
 def test_holding_the_battery_commands_a_method_but_no_power() -> None:
     """Hold is the same method at zero watts, so it needs no parameters."""
     definition = const.CONTROL_FEATURES[ControlFeature.HOLD_BATTERY]
@@ -142,6 +172,8 @@ def test_the_sign_says_which_guard_can_block_a_mode() -> None:
     assert features[ControlFeature.CHARGE_BATTERY].direction == 1
     assert features[ControlFeature.DISCHARGE_BATTERY].direction == -1
     assert features[ControlFeature.EXPORT_TO_GRID].direction == -1
+    # Drawing from the grid is what charges the battery, so the charge limit stops it.
+    assert features[ControlFeature.IMPORT_FROM_GRID].direction == 1
     # Hold moves nothing in either direction, so no guard applies to it.
     assert features[ControlFeature.HOLD_BATTERY].direction == 0
 

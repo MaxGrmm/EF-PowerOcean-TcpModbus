@@ -82,6 +82,7 @@ async def test_a_templated_command_reaches_the_inverter(
         # The inverter would read a zero setpoint as no limit.
         ({"mode": "charge_battery", "power": 0}, ServiceValidationError),
         ({"mode": "automatic", "power": 1000}, ServiceValidationError),
+        ({"mode": "export_solar_first", "power": 0}, ServiceValidationError),
         ({"mode": "automatic", "device_id": ["one", "two"]}, vol.Invalid),
         ({"mode": "charge_battery", "power": 1000, "expire_in": 30}, vol.Invalid),
         (
@@ -97,6 +98,21 @@ async def test_an_invalid_command_changes_nothing(
         await call(hass, **{"device_id": inverter.device_id, **data})
 
     inverter.control.async_set_command.assert_not_awaited()
+
+
+async def test_export_solar_first_keeps_its_limit_when_the_power_is_left_out(
+    hass: HomeAssistant, inverter: SimpleNamespace
+) -> None:
+    await call(
+        hass, device_id=inverter.device_id, mode="export_solar_first", expire_in=3600
+    )
+
+    inverter.control.async_set_command.assert_awaited_once_with(
+        ControlFeature.EXPORT_SOLAR_FIRST,
+        power=None,
+        charge_limit_soc=None,
+        expire_in_s=3600.0,
+    )
 
 
 async def test_only_automatic_is_accepted_while_modbus_control_is_off(

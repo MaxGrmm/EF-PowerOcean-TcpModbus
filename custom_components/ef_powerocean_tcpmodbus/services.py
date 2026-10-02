@@ -42,16 +42,20 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     async def async_set_battery_command(call: ServiceCall) -> None:
         feature = ControlFeature(call.data[ATTR_MODE])
+        definition = CONTROL_FEATURES[feature]
         power = call.data.get(ATTR_POWER)
         placeholders = {"mode": str(feature)}
-        # Handle zero specifically, since 0 means no limit at all.
-        if CONTROL_FEATURES[feature].has_power and not power:
+        # Handle zero specifically, since 0 means no limit at all. A mode whose power
+        # is optional keeps the number's value when it is left out.
+        if definition.has_power and (
+            power == 0 or (power is None and not definition.power_optional)
+        ):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="power_required",
                 translation_placeholders=placeholders,
             )
-        if not CONTROL_FEATURES[feature].has_power and power is not None:
+        if not definition.has_power and power is not None:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="power_not_allowed",
