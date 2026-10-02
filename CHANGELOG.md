@@ -9,6 +9,10 @@
 - Control Status shows Below solar export limit while Export solar first has no surplus above its limit.
 - The System State 2 word (40532) as the `system_state_2_hex` attribute of Active Fault Count and in the diagnostics.
 
+### Fixed
+
+- Fixed the wrong word order for Ocean 2 Single Phase.
+
 ## [2.7.0] - 2026-09-30
 
 ### Added
