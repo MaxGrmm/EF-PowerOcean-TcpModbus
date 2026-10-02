@@ -114,6 +114,12 @@ FEED_IN_POWER_MAX_KEY: Final = "feed_in_power_max"
 INVERTER_CAPACITY_KEY: Final = "limit_inv_power"
 RECTIFIER_CAPACITY_KEY: Final = "limit_inv_max"
 
+# How far below the device's export limit Export Solar First aims, so the meter's
+# jitter and the inverter's own regulation do not reach it and curtail the solar the
+# mode exists to keep. A Solar Export Limit set lower is followed exactly. Its
+# rounding only ever lowers the export further.
+SOLAR_EXPORT_MARGIN_W: Final = 300.0
+
 ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
@@ -157,6 +163,7 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("battery_soc", 40527, RegisterType.UINT16),
     RegisterDef("inverter_rated_power", 40528, RegisterType.UINT32),
     RegisterDef("system_modes", 40530, RegisterType.UINT32),
+    RegisterDef("system_state_2", 40532, RegisterType.UINT32, optional=True),
     RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
     RegisterDef("grid_feed_mode", 40537, RegisterType.UINT16),
     # The two export caps: 40538 is the one configured, and the only one that takes
@@ -625,6 +632,7 @@ SENSOR_MAP: list[SensorDef] = [
         state_class="measurement",
         entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:alert-circle-outline",
+        attribute_keys=("system_state_2_hex",),
     ),
     SensorDef(
         key="active_faults",
@@ -816,6 +824,20 @@ CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
         limit_key=FEED_IN_POWER_MAX_KEY,
         capacity_key=INVERTER_CAPACITY_KEY,
         default_power=3000.0,
+    ),
+    ControlFeature.IMPORT_FROM_GRID: ControlFeatureDef(
+        method=ControlMode.SYSTEM_FEED,
+        setpoint_key="system_power_setpoint",
+        sign=1,
+        measure_key="grid_power",
+        default_power=3000.0,
+    ),
+    ControlFeature.EXPORT_SOLAR_FIRST: ControlFeatureDef(
+        method=ControlMode.BATTERY_LIMITS,
+        setpoint_key="battery_power_setpoint",
+        measure_key="battery_power",
+        default_power=float(DEFAULT_MAX_POWER),
+        power_optional=True,
     ),
 }
 

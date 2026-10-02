@@ -17,6 +17,7 @@ TO_REDACT = (CONF_HOST, "title", "unique_id")
 # Raw readings worth having in a model report, to compare how each model fills them.
 PROTOCOL_REPORT_KEYS = (
     "system_modes_hex",
+    "system_state_2_hex",
     "active_control_mode",
     "device_modbus_control",
     "bms_connected",

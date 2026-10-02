@@ -109,19 +109,26 @@ the app after about 60 seconds.
 
 The **Battery Mode** select is the primary control:
 
-| Mode              | What the inverter does                                                         |
-| ----------------- | ------------------------------------------------------------------------------ |
-| Automatic         | Self-consumption, exactly as the app runs it                                   |
-| Hold battery      | Don't charge or discharge the battery. Surplus solar power is exported         |
-| Charge battery    | Charges at the set power, importing from the grid if solar power is not enough |
-| Discharge battery | Discharges at the set power                                                    |
-| Export to grid    | Exports at the set power, uses the battery if solar power is not enough        |
+| Mode               | What the inverter does                                                              |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| Automatic          | Self-consumption, exactly as the app runs it                                        |
+| Hold battery       | Don't charge or discharge the battery. Surplus solar power is exported              |
+| Charge battery     | Charges at the set power, importing from the grid if solar power is not enough      |
+| Discharge battery  | Discharges at the set power                                                         |
+| Export to grid     | Exports at the set power, uses the battery if solar power is not enough             |
+| Import from grid   | Draws the set power from the grid, charging the battery with what the house leaves  |
+| Export solar first | Exports solar up to the Solar Export Limit, charging the battery only with the rest |
 
 Charge and Export are two views of the same thing: **Charge pins the battery and lets the
 grid float, Export pins the grid and lets the battery float.** The setpoint is a target
 rather than a cap in both directions, and as long as the battery has room the inverter
 reaches it without limiting solar, with whatever is left over going to the battery or is
 exported.
+
+**Export solar first** sends solar to the grid before the battery. It exports up to its
+**Solar Export Limit** and the battery takes only what is left above it. Unlike Export to
+grid, it never discharges the battery to export; in the evening it discharges for the
+house like Automatic.
 
 Two guards apply in every mode, including Automatic. They can only stop the battery:
 
@@ -179,6 +186,7 @@ for automations to read and act on.
 | Ramping                    | The inverter has not reached the target for a few polls         |
 | Charge limit reached       | The Charge Limit guard is preventing further charging           |
 | Reserve reached            | The Battery Reserve guard is preventing further discharge       |
+| Below solar export limit   | Export solar first: no surplus above the limit for the battery  |
 | Unreachable: battery full  | The target requires the battery to absorb power, but it cannot  |
 | Unreachable: battery empty | The target requires the battery to supply power, but it cannot  |
 
@@ -186,7 +194,7 @@ On the device page the two are deliberately kept apart:
 
 | Section           | Entities                                                                                        | Meaning                                                          |
 | ----------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **Controls**      | Battery Mode, Charge/Discharge/Export Power                                                     | What you are asking the inverter to do right now                 |
+| **Controls**      | Battery Mode, Charge/Discharge/Export/Import Power, Solar Export Limit                          | What you are asking the inverter to do right now                 |
 | **Configuration** | Modbus Control, Charge Limit, Battery Reserve, LED Brightness, Battery Saver Mode, Grid Feed-in | Standing settings; the two guards bind whatever mode is selected |
 | **Sensors**       | Control Status                                                                                  | What the inverter is actually doing about it                     |
 
@@ -211,8 +219,9 @@ data:
 
 - It changes the same entities you would change by hand, so the device page always
   shows what applies, and nothing is changed back behind your back.
-- `power` is required for Charge battery, Discharge battery and Export to grid, and not
-  allowed for the other modes. It must be above 0 W, because the inverter reads a zero
+- `power` is required for Charge battery, Discharge battery, Export to grid and Import
+  from grid. It is optional for Export solar first, where it sets the Solar Export Limit
+  and leaving it out keeps the current one. It is not allowed for the other modes. It must be above 0 W, because the inverter reads a zero
   setpoint as no limit at all. A value above what the inverter accepts is lowered to
   its maximum.
 - `charge_limit_soc` is optional. It is applied together with the mode, so the battery

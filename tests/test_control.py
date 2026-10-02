@@ -337,6 +337,93 @@ def test_selecting_automatic_returns_control_to_the_device(
     ]
 
 
+def test_import_from_grid_pins_the_meter_at_a_draw(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The system setpoint with a positive sign, under the system feed method."""
+    write = allow_writes(control, monkeypatch)
+    control._data = {"battery_soc": 50.0, "grid_power": 400.0}
+
+    asyncio.run(control.async_select_feature(Feature.IMPORT_FROM_GRID))
+
+    assert control.method is models.ControlMode.SYSTEM_FEED
+    assert commands(write) == [
+        (const.REGISTERS_BY_KEY["system_power_setpoint"].address, [0x0000, 0x0BB8]),
+        (const.CONTROL_COMMAND_REGISTER, [0x0000, 0x0010]),
+    ]
+
+
+def test_import_from_grid_holds_once_the_charge_limit_is_reached(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allow_writes(control, monkeypatch)
+    control._charge_limit_soc = 80.0
+    control._data = {"battery_soc": 80.0, "grid_power": 400.0}
+
+    asyncio.run(control.async_select_feature(Feature.IMPORT_FROM_GRID))
+
+    assert control.status is Status.CHARGE_LIMIT_REACHED
+    assert control.power == const.HOLD_SETPOINT_W
+    assert control.method is models.ControlMode.BATTERY_LIMITS
+
+
+@pytest.mark.parametrize(
+    ("frame", "limit", "expected"),
+    (
+        # Left alone, the limit is the device's cap less the margin.
+        ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 6000.0}, None, 5700.0),
+        (
+            {
+                "grid_feed_mode": Feed.LIMITED_PERCENT,
+                "feed_in_power_max_percent": 60.0,
+                "inverter_rated_power": 10_000.0,
+            },
+            None,
+            5700.0,
+        ),
+        # Without a cap it is all the inverter may put out.
+        (
+            {"grid_feed_mode": Feed.UNLIMITED, "inverter_rated_power": 10_000.0},
+            None,
+            10_000.0,
+        ),
+        # A limit set below the cap is followed exactly, with or without one.
+        ({"grid_feed_mode": Feed.UNLIMITED}, 3000.0, 3000.0),
+        ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 6000.0}, 3000.0, 3000.0),
+        # Nothing is exported, so there is nothing to export first.
+        ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 0.0}, 3000.0, None),
+        ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 200.0}, None, None),
+        ({"feed_in_power_max": 6000.0}, None, None),
+    ),
+)
+def test_export_solar_first_stays_under_its_limit_and_the_cap(
+    control, frame, limit, expected
+) -> None:
+    control._data = frame
+    if limit is not None:
+        control._feature_power[Feature.EXPORT_SOLAR_FIRST] = limit
+
+    assert control._solar_export_target(frame) == expected
+
+
+def test_the_solar_export_limit_shows_the_cap_but_survives_the_export_off(
+    control,
+) -> None:
+    """Left alone the number reads the most that may be exported. A value set while
+    the Grid Feed-in switch holds the export off is kept for when it comes back."""
+    control._data = {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 6000.0}
+    assert control.feature_power_max(Feature.EXPORT_SOLAR_FIRST) == 5700.0
+
+    control._data = {
+        "grid_feed_mode": Feed.LIMITED,
+        "feed_in_power_max": 0.0,
+        "inverter_rated_power": 10_000.0,
+    }
+    asyncio.run(control.async_set_feature_power(Feature.EXPORT_SOLAR_FIRST, 3000.0))
+
+    assert control.feature_power(Feature.EXPORT_SOLAR_FIRST) == 3000.0
+
+
 def test_the_control_word_refuses_off_grid_and_shutdown_bits(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:

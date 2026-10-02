@@ -419,6 +419,7 @@
           "automatic": "Automatic",
           "charge_limit_reached": "Charge limit reached",
           "reserve_reached": "Battery reserve reached",
+          "below_solar_export_limit": "Below solar export limit",
           "hold_not_needed": "Battery full, hold not needed",
           "active": "Active",
           "ramping": "Ramping",
@@ -460,6 +461,12 @@
       "export_to_grid_power": {
         "name": "Grid Export Power"
       },
+      "import_from_grid_power": {
+        "name": "Grid Import Power"
+      },
+      "export_solar_first_power": {
+        "name": "Solar Export Limit"
+      },
       "charge_limit_soc": {
         "name": "Battery Charge Limit"
       },
@@ -481,7 +488,9 @@
           "hold_battery": "Hold battery",
           "charge_battery": "Charge battery",
           "discharge_battery": "Discharge battery",
-          "export_to_grid": "Export to grid"
+          "export_to_grid": "Export to grid",
+          "import_from_grid": "Import from grid",
+          "export_solar_first": "Export solar first"
         }
       }
     },
@@ -512,7 +521,7 @@
         },
         "power": {
           "name": "Power",
-          "description": "Power for the mode, above 0 W. Required for Charge battery, Discharge battery and Export to grid, and not allowed for the others. A value above what the inverter accepts is lowered to its maximum."
+          "description": "Power for the mode, above 0 W. Required for Charge battery, Discharge battery, Export to grid and Import from grid. Optional for Export solar first, where it sets the Solar Export Limit and leaving it out keeps the current one. Not allowed for the others. A value above what the inverter accepts is lowered to its maximum."
         },
         "charge_limit_soc": {
           "name": "Charge limit",

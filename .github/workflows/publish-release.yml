@@ -23,6 +23,10 @@ jobs:
         id: notes
         run: node scripts/release.mjs publish
 
+      - name: Package integration
+        if: steps.notes.outputs.tag != ''
+        run: zip -r "$RUNNER_TEMP/ef_powerocean_tcpmodbus.zip" custom_components/ef_powerocean_tcpmodbus
+
       - name: Create GitHub release
         if: steps.notes.outputs.tag != ''
         uses: softprops/action-gh-release@v2
@@ -30,5 +34,6 @@ jobs:
           tag_name: ${{ steps.notes.outputs.tag }}
           name: ${{ steps.notes.outputs.tag }}
           body_path: RELEASE_NOTES.md
+          files: ${{ runner.temp }}/ef_powerocean_tcpmodbus.zip
           generate_release_notes: true
           prerelease: ${{ steps.notes.outputs.prerelease }}
