@@ -150,6 +150,12 @@ is on. The integration takes over again as soon as the power flow turns. Leave M
 and schedules in the EcoFlow app off, since the inverter follows them when it runs by
 itself.
 
+On single-phase models (PowerOcean Single Phase and Ocean 2 Single Phase), which do not
+support Modbus discharge setpoint tracking, the integration hands control back to
+Automatic directly without waiting for a minute, so the inverter can cover the house load
+immediately without drawing from the grid. A 20 W deadband with hysteresis, a 30-second
+settling window, and a 30-second dwell time prevent rapid toggling between Hold and Automatic.
+
 If a load keeps switching on and off, like an oven heating in bursts, the integration
 waits longer each time before letting go, so it settles instead of switching back and
 forth. Small power corrections wait until the battery has reached the last one, because

@@ -873,6 +873,10 @@ GUARD_TRACKING_STEP_W: Final = 100.0
 GUARD_SETTLE_S: Final = 30.0
 # Minimum power in the direction a guard allows before it hands control back.
 GUARD_HANDBACK_W: Final = 500.0
+# On models whose guards do not track a setpoint, the power in the allowed direction
+# that hands control back. Control is taken back once that power reaches zero, so
+# this is also the width of the hysteresis band.
+GUARD_DIRECT_HANDBACK_W: Final = 20.0
 # How long that power must last before a guard hands control back.
 GUARD_HANDBACK_S: Final = 60.0
 # Longest hand-back wait; the wait doubles each time a hand-back ends early.
