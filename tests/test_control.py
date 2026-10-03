@@ -370,8 +370,9 @@ def test_import_from_grid_holds_once_the_charge_limit_is_reached(
 @pytest.mark.parametrize(
     ("frame", "limit", "expected"),
     (
-        # Left alone, the limit is the device's cap less the margin.
-        ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 6000.0}, None, 5700.0),
+        # Left alone, or set at the cap, the meter is held just under the cap.
+        ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 6000.0}, None, 5900.0),
+        ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 6000.0}, 6000.0, 5900.0),
         (
             {
                 "grid_feed_mode": Feed.LIMITED_PERCENT,
@@ -379,24 +380,33 @@ def test_import_from_grid_holds_once_the_charge_limit_is_reached(
                 "inverter_rated_power": 10_000.0,
             },
             None,
-            5700.0,
+            5900.0,
         ),
-        # Without a cap it is all the inverter may put out.
+        # Without a cap it is all the inverter can put out.
         (
             {"grid_feed_mode": Feed.UNLIMITED, "inverter_rated_power": 10_000.0},
             None,
             10_000.0,
         ),
-        # A limit set below the cap is followed exactly, with or without one.
+        (
+            {
+                "grid_feed_mode": Feed.UNLIMITED,
+                const.INVERTER_CAPACITY_KEY: 8000.0,
+                "inverter_rated_power": 10_000.0,
+            },
+            None,
+            8000.0,
+        ),
+        # A limit set below the cap is used as it is, with or without one.
         ({"grid_feed_mode": Feed.UNLIMITED}, 3000.0, 3000.0),
         ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 6000.0}, 3000.0, 3000.0),
         # Nothing is exported, so there is nothing to export first.
         ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 0.0}, 3000.0, None),
-        ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 200.0}, None, None),
+        ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 100.0}, None, None),
         ({"feed_in_power_max": 6000.0}, None, None),
     ),
 )
-def test_export_solar_first_stays_under_its_limit_and_the_cap(
+def test_export_solar_first_holds_the_meter_at_its_limit_under_the_cap(
     control, frame, limit, expected
 ) -> None:
     control._data = frame
@@ -406,14 +416,62 @@ def test_export_solar_first_stays_under_its_limit_and_the_cap(
     assert control._solar_export_target(frame) == expected
 
 
-def test_the_solar_export_limit_shows_the_cap_but_survives_the_export_off(
-    control,
+@pytest.mark.parametrize(
+    ("frame", "maximum"),
+    (
+        ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 6000.0}, 6000.0),
+        (
+            {
+                "grid_feed_mode": Feed.LIMITED_PERCENT,
+                "feed_in_power_max_percent": 60.0,
+                "inverter_rated_power": 10_000.0,
+            },
+            6000.0,
+        ),
+        # Without a cap, the most the inverter can put out.
+        (
+            {
+                "grid_feed_mode": Feed.UNLIMITED,
+                const.INVERTER_CAPACITY_KEY: 8000.0,
+                "inverter_rated_power": 10_000.0,
+            },
+            8000.0,
+        ),
+        (
+            {"grid_feed_mode": Feed.UNLIMITED, "inverter_rated_power": 10_000.0},
+            10_000.0,
+        ),
+        # A cap the inverter cannot reach bounds nothing the inverter does not.
+        (
+            {
+                "grid_feed_mode": Feed.LIMITED,
+                "feed_in_power_max": 15_000.0,
+                "inverter_rated_power": 10_000.0,
+            },
+            10_000.0,
+        ),
+    ),
+)
+def test_the_solar_export_limit_goes_up_to_the_cap_itself(
+    control, frame, maximum
 ) -> None:
-    """Left alone the number reads the most that may be exported. A value set while
-    the Grid Feed-in switch holds the export off is kept for when it comes back."""
-    control._data = {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 6000.0}
-    assert control.feature_power_max(Feature.EXPORT_SOLAR_FIRST) == 5700.0
+    """The number ends where users expect: at the export cap, or at the inverter's
+    maximum without one. Left alone it reads that maximum."""
+    control._data = frame
 
+    assert control.feature_power_max(Feature.EXPORT_SOLAR_FIRST) == maximum
+    assert (
+        min(
+            control.feature_power(Feature.EXPORT_SOLAR_FIRST),
+            control.feature_power_max(Feature.EXPORT_SOLAR_FIRST),
+        )
+        == maximum
+    )
+
+
+def test_the_solar_export_limit_survives_the_export_off(control) -> None:
+    """A value set while the Grid Feed-in switch holds the export off is kept for when
+    it comes back, rather than cut to nothing."""
     control._data = {
         "grid_feed_mode": Feed.LIMITED,
         "feed_in_power_max": 0.0,

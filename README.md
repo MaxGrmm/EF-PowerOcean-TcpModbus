@@ -128,7 +128,14 @@ exported.
 **Export solar first** sends solar to the grid before the battery. It exports up to its
 **Solar Export Limit** and the battery takes only what is left above it. Unlike Export to
 grid, it never discharges the battery to export; in the evening it discharges for the
-house like Automatic.
+house like Automatic. The limit goes up to your export limit, or the inverter's maximum
+output if you have none, and left alone it sits there.
+
+It does this by switching between the inverter's own modes: Hold battery while the
+surplus is below the limit, Export to grid at the limit once it reaches it, and
+Automatic while the house needs the battery. Active Control Method shows which one is
+running. Set at the export limit, it holds the export 100 W under it, so the inverter's
+own regulation does not run into the limit and curtail solar.
 
 Two guards apply in every mode, including Automatic. They can only stop the battery:
 

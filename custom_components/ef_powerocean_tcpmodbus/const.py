@@ -114,11 +114,10 @@ FEED_IN_POWER_MAX_KEY: Final = "feed_in_power_max"
 INVERTER_CAPACITY_KEY: Final = "limit_inv_power"
 RECTIFIER_CAPACITY_KEY: Final = "limit_inv_max"
 
-# How far below the device's export limit Export Solar First aims, so the meter's
-# jitter and the inverter's own regulation do not reach it and curtail the solar the
-# mode exists to keep. A Solar Export Limit set lower is followed exactly. Its
-# rounding only ever lowers the export further.
-SOLAR_EXPORT_MARGIN_W: Final = 300.0
+# How far under the device's export cap Export Solar First pins the meter. The inverter
+# holds the meter there by itself, and keeping a little under the cap stops its own
+# overshoot from being curtailed. A Solar Export Limit set lower is used as it is.
+SOLAR_EXPORT_CAP_MARGIN_W: Final = 100.0
 
 ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
@@ -832,10 +831,15 @@ CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
         measure_key="grid_power",
         default_power=3000.0,
     ),
+    # Never commanded as such: it runs Hold, Export to Grid or Automatic, whichever
+    # suits the surplus, so the method and setpoint here are those of its hold. Its
+    # power, the Solar Export Limit, goes up to the export cap, or to the most the
+    # inverter can put out without one, and left alone it reads that.
     ControlFeature.EXPORT_SOLAR_FIRST: ControlFeatureDef(
         method=ControlMode.BATTERY_LIMITS,
         setpoint_key="battery_power_setpoint",
         measure_key="battery_power",
+        capacity_key=INVERTER_CAPACITY_KEY,
         default_power=float(DEFAULT_MAX_POWER),
         power_optional=True,
     ),

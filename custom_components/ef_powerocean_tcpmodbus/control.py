@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, auto
 from typing import Any, Protocol
@@ -42,7 +42,7 @@ from .const import (
     HEARTBEAT_WINDOW_S,
     HOLD_SETPOINT_W,
     MIN_CONTROL_DWELL_S,
-    SOLAR_EXPORT_MARGIN_W,
+    SOLAR_EXPORT_CAP_MARGIN_W,
 )
 from .heartbeat import Heartbeat
 from .modbus import ModbusClient
@@ -176,6 +176,47 @@ class GuardHandback:
         self.enter(HandbackPhase.TRACKING, now)
 
 
+@dataclass
+class SolarFirstState:
+    """Which of the inverter's own modes Export Solar First is running.
+
+    Hold while the surplus fits under the limit, Export to Grid at the limit once it
+    reaches it, and Automatic while the house needs the battery. Each of these does
+    the right thing by itself, so the mode only picks one, and every pick is a
+    method switch. Leaving for the hold is always at once, but a mode left within a
+    minute of being picked waits before it may be picked again, doubling each time.
+    """
+
+    feature: ControlFeature = ControlFeature.HOLD_BATTERY
+    since: datetime | None = None
+    cooldown_s: dict[ControlFeature, float] = field(default_factory=dict)
+    left_at: dict[ControlFeature, datetime] = field(default_factory=dict)
+
+    def may_enter(self, feature: ControlFeature, now: datetime) -> bool:
+        """Return whether *feature* has waited out its cooldown."""
+        left_at = self.left_at.get(feature)
+        if left_at is None:
+            return True
+        waited = (now - left_at).total_seconds()
+        return waited >= self.cooldown_s.get(feature, 0.0)
+
+    def switch(self, feature: ControlFeature, now: datetime) -> None:
+        """Run *feature* from now on, noting how long the one left lasted."""
+        if feature is self.feature:
+            return
+        if self.feature is not ControlFeature.HOLD_BATTERY and self.since is not None:
+            lasted = (now - self.since).total_seconds()
+            previous = self.cooldown_s.get(self.feature, 0.0)
+            self.cooldown_s[self.feature] = (
+                min(max(2 * previous, GUARD_HANDBACK_S), GUARD_HANDBACK_MAX_S)
+                if lasted < GUARD_HANDBACK_S
+                else 0.0
+            )
+            self.left_at[self.feature] = now
+        self.feature = feature
+        self.since = now
+
+
 class ControlManager:
     """Manages the control of the inverter."""
 
@@ -223,6 +264,7 @@ class ControlManager:
         # Which guard, if any, is forcing the current command.
         self._blocking_guard: ControlStatus | None = None
         self._handback = GuardHandback()
+        self._solar_first = SolarFirstState()
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
@@ -389,12 +431,6 @@ class ControlManager:
         if self._blocking_guard is not None:
             if self._deviation is not ControlStatus.ACTIVE:
                 return self._deviation
-            # Export Solar First taking the overflow is its setpoint being met.
-            if (
-                self._blocking_guard is ControlStatus.BELOW_SOLAR_EXPORT_LIMIT
-                and self._commanded_feature is ControlFeature.CHARGE_BATTERY
-            ):
-                return ControlStatus.ACTIVE
             return self._blocking_guard
         # Only a hold the battery cannot need leaves a selected mode uncommanded.
         if (
@@ -710,8 +746,8 @@ class ControlManager:
         if feature is ControlFeature.EXPORT_SOLAR_FIRST and (
             limit := _device_export_limit(self._data)
         ):
-            if limit - SOLAR_EXPORT_MARGIN_W > 0:
-                ceilings.append(limit - SOLAR_EXPORT_MARGIN_W)
+            if limit > SOLAR_EXPORT_CAP_MARGIN_W:
+                ceilings.append(limit)
 
         return min(ceilings)
 
@@ -783,17 +819,12 @@ class ControlManager:
         self,
         data: dict[str, Any],
         blocked: ControlStatus,
-        *,
-        export_limit: float | None = None,
     ) -> tuple[ControlFeature, float, ControlStatus | None]:
         """Command the inverter to either charge or discharge.
 
         The battery setpoint is a target and zero means no limit, so no single value
         says "do not charge, but discharge freely". We therefore clamp the natural
         battery power to the allowed direction.
-
-        With an export limit, charging is not forbidden but moved above it: the
-        battery only takes what the export would otherwise have to leave behind.
         """
         natural = self._natural_battery_power(data)
         if natural is None:
@@ -812,8 +843,7 @@ class ControlManager:
             if from_grid_side is not None and from_solar_side is not None:
                 natural = min(from_grid_side, from_solar_side)
 
-        charge_restricted = self._charge_guard or export_limit is not None
-        if self._advance_handback(natural, charge_restricted=charge_restricted):
+        if self._advance_handback(natural):
             return ControlFeature.AUTOMATIC, 0.0, blocked
 
         if not tracks:
@@ -821,13 +851,6 @@ class ControlManager:
 
         if self._charge_guard:
             natural = min(natural, 0.0)
-        elif export_limit is not None:
-            natural = max(natural - export_limit, min(natural, 0.0))
-            # A full battery cannot take the overflow, so curtailing is all that is
-            # left, and the inverter does that by itself.
-            soc = data.get("battery_soc")
-            if natural > 0 and soc is not None and float(soc) >= BATTERY_FULL_SOC:
-                return self._hold(data, blocked)
         if self._reserve_guard:
             natural = max(natural, 0.0)
 
@@ -842,28 +865,15 @@ class ControlManager:
             feature = ControlFeature.DISCHARGE_BATTERY
             watts = float(math.ceil(-natural))
 
+        # Small changes wait for the battery to settle, and tiny ones that only
+        # export a little are skipped.
         held = self._commanded_power
-        if export_limit is not None and natural > 0:
-            # What the battery misses here is curtailed, not drawn from the grid, so
-            # this is the guards' rounding turned around: up to a whole step, and a
-            # rise is sent at once while a drop waits until it passes a step.
-            watts = float(
-                math.ceil(natural / GUARD_TRACKING_STEP_W) * GUARD_TRACKING_STEP_W
-            )
-            if (
-                self._commanded_feature is feature
-                and watts <= held <= watts + GUARD_TRACKING_STEP_W
-            ):
-                watts = held
-        else:
-            # Small changes wait for the battery to settle, and tiny ones that only
-            # export a little are skipped.
-            slack = watts - held if natural > 0 else held - watts
-            if self._commanded_feature is feature and (
-                0.0 <= slack < GUARD_TRACKING_STEP_W
-                or (abs(slack) < POWER_TOLERANCE_W and not self._battery_settled(data))
-            ):
-                watts = held
+        slack = watts - held if natural > 0 else held - watts
+        if self._commanded_feature is feature and (
+            0.0 <= slack < GUARD_TRACKING_STEP_W
+            or (abs(slack) < POWER_TOLERANCE_W and not self._battery_settled(data))
+        ):
+            watts = held
 
         if watts <= 0.0:
             return self._hold(data, blocked)
@@ -897,22 +907,21 @@ class ControlManager:
                 return True
         return not self._control_written_within(GUARD_SETTLE_S)
 
-    def _advance_handback(self, natural: float, *, charge_restricted: bool) -> bool:
+    def _advance_handback(self, natural: float) -> bool:
         """Move the hand-back on by one poll and return whether the inverter runs itself.
 
         Under a charge limit, a house that clearly uses more than the solar can only
         be served by discharging, which the limit allows. The inverter does that by
         itself and faster than we can, so after a while we let it. The same goes for
-        a clear surplus above the battery reserve. Export Solar First restricts
-        charging the way a charge limit does, so its evenings are handed back too.
+        a clear surplus above the battery reserve.
         """
         handback = self._handback
         now = dt.now()
-        if charge_restricted and self._reserve_guard:
+        if self._charge_guard and self._reserve_guard:
             handback.take_back(now)
             return False
 
-        allowed = -1.0 if charge_restricted else 1.0
+        allowed = -1.0 if self._charge_guard else 1.0
         wanted = natural * allowed
 
         if not self._inverter_model.traits.guard_tracks_setpoints:
@@ -977,6 +986,8 @@ class ControlManager:
         self, data: dict[str, Any]
     ) -> tuple[ControlFeature, float, ControlStatus | None]:
         """Determine what command the inverter should do now."""
+        if self._feature is not ControlFeature.EXPORT_SOLAR_FIRST:
+            self._solar_first = SolarFirstState()
         if not self._enabled:
             return ControlFeature.AUTOMATIC, 0.0, None
         if self._feature is ControlFeature.EXPORT_SOLAR_FIRST:
@@ -1014,43 +1025,90 @@ class ControlManager:
         """Export solar up to the Solar Export Limit, and charge only with the rest.
 
         Automatic fills the battery first, so on an install with an export cap
-        everything above it is curtailed once the battery is full. Here the battery
-        only takes what is left above the limit, which the device's cap bounds. It
-        discharges as Automatic does, never to export, and both guards bind it as
-        they bind Automatic.
+        everything above it is curtailed once the battery is full. The inverter has
+        a mode for each part of doing it the other way round, so this only picks
+        one, watching what the one running leaves free to move:
+
+        - Hold, battery idle: the export shows the surplus. Reaching the limit, or
+          the cap curtailing it there, means Export to Grid; a draw means Automatic.
+        - Export to Grid at the limit: the battery takes what is above it, and it
+          would discharge to keep the export up, so a discharge means Hold.
+        - Automatic: the battery covers the house, and a charge means Hold.
+
+        The charge limit keeps it from Export to Grid, which charges, and the battery
+        reserve from Automatic, which discharges. Both leave the hold instead.
         """
         target = self._solar_export_target(data)
         if target is None:
+            self._solar_first = SolarFirstState()
             # Nothing to export first, so filling the battery first is all there is.
             if (blocked := self._guard_blocks(0)) is not None:
                 return self._guarded_command(data, blocked)
             return ControlFeature.AUTOMATIC, 0.0, ControlStatus.AUTOMATIC
+
+        state = self._solar_first
+        now = dt.now()
+        battery, grid = data.get("battery_power"), data.get("grid_power")
+        soc = data.get("battery_soc")
+        full = soc is not None and float(soc) >= BATTERY_FULL_SOC
+        if battery is None or grid is None:
+            wanted = ControlFeature.HOLD_BATTERY
+        elif state.feature is ControlFeature.EXPORT_TO_GRID:
+            leaving = float(battery) < -GUARD_POWER_DEADBAND_W or full
+            wanted = ControlFeature.HOLD_BATTERY if leaving else state.feature
+        elif state.feature is ControlFeature.AUTOMATIC:
+            leaving = float(battery) > GUARD_POWER_DEADBAND_W
+            wanted = ControlFeature.HOLD_BATTERY if leaving else state.feature
+        elif abs(float(battery)) > GUARD_POWER_DEADBAND_W:
+            # The hold has not reached the battery yet, so the grid tells nothing.
+            wanted = ControlFeature.HOLD_BATTERY
+        elif -float(grid) >= target and not full:
+            wanted = ControlFeature.EXPORT_TO_GRID
+        elif float(grid) > GUARD_POWER_DEADBAND_W:
+            wanted = ControlFeature.AUTOMATIC
+        else:
+            wanted = ControlFeature.HOLD_BATTERY
+
+        if (
+            (wanted is ControlFeature.EXPORT_TO_GRID and self._charge_guard)
+            or (wanted is ControlFeature.AUTOMATIC and self._reserve_guard)
+            or (wanted is not state.feature and not state.may_enter(wanted, now))
+        ):
+            wanted = ControlFeature.HOLD_BATTERY
+        state.switch(wanted, now)
+
         if self._charge_guard:
-            # Not charging at all is stricter than charging only the overflow.
-            return self._guarded_command(data, ControlStatus.CHARGE_LIMIT_REACHED)
-        reason = (
-            ControlStatus.RESERVE_REACHED
-            if self._reserve_guard
-            else ControlStatus.BELOW_SOLAR_EXPORT_LIMIT
-        )
-        return self._guarded_command(data, reason, export_limit=target)
+            reason = ControlStatus.CHARGE_LIMIT_REACHED
+        elif self._reserve_guard:
+            reason = ControlStatus.RESERVE_REACHED
+        elif wanted is ControlFeature.EXPORT_TO_GRID:
+            reason = ControlStatus.ACTIVE
+        elif wanted is ControlFeature.AUTOMATIC:
+            reason = ControlStatus.AUTOMATIC
+        else:
+            reason = ControlStatus.BELOW_SOLAR_EXPORT_LIMIT
+
+        if wanted is ControlFeature.EXPORT_TO_GRID:
+            return ControlFeature.EXPORT_TO_GRID, target, reason
+        if wanted is ControlFeature.AUTOMATIC:
+            return ControlFeature.AUTOMATIC, 0.0, reason
+        return self._hold(data, reason)
 
     def _solar_export_target(self, data: dict[str, Any]) -> float | None:
-        """Return the export to keep solar at, or None if there is none to keep.
+        """Return the export to hold the meter at, or None if there is none.
 
-        The Solar Export Limit, below the device's own cap by the margin. None when
-        the device exports nothing, such as with the Grid Feed-in switch off, or when
-        its cap cannot be told.
+        The Solar Export Limit, kept just under the device's cap when it is set at
+        it. None when the device exports nothing, such as with the Grid Feed-in
+        switch off, or when its cap cannot be told.
         """
         device_limit = _device_export_limit(data)
-        if device_limit is None:
+        if device_limit is None or device_limit <= SOLAR_EXPORT_CAP_MARGIN_W:
             return None
         feature = ControlFeature.EXPORT_SOLAR_FIRST
-        target = min(
+        return min(
             self._clamp_power(self.feature_power(feature), feature),
-            device_limit - SOLAR_EXPORT_MARGIN_W,
+            device_limit - SOLAR_EXPORT_CAP_MARGIN_W,
         )
-        return target if target > 0 else None
 
     def _control_written_within(self, seconds: float) -> bool:
         """Return whether the last command went out less than *seconds* ago."""
@@ -1121,11 +1179,7 @@ class ControlManager:
         data = self._data
         self._expire_command()
         self._update_guards(data)
-        if not (
-            self._charge_guard
-            or self._reserve_guard
-            or self._feature is ControlFeature.EXPORT_SOLAR_FIRST
-        ):
+        if not (self._charge_guard or self._reserve_guard):
             self._handback = GuardHandback()
 
         # A lapsed window hands the inverter back to its app settings, so the command
