@@ -22,7 +22,6 @@ from simulation import (
 )
 
 from custom_components.ef_powerocean_tcpmodbus import const, models
-from custom_components.ef_powerocean_tcpmodbus import control as control_module
 
 
 def test_a_charge_limit_holds_through_a_cycling_load(
@@ -169,7 +168,8 @@ def test_a_guard_never_imports_across_a_hand_back(
 
     run = sim.run(polls=60, solar=147.0, house=1280.4)
 
-    assert sim.control._handback.phase is control_module.HandbackPhase.HANDED_BACK
+    # Handed back: the inverter runs itself.
+    assert sim.inverter.method == AUTOMATIC
     assert max(run.grid) <= 0
     assert min(run.grid) >= -const.GUARD_TRACKING_STEP_W
 
@@ -225,13 +225,15 @@ def test_a_reserve_leaves_a_lasting_surplus_to_the_inverter_until_dusk(
     sim = Simulation(monkeypatch, soc=18.0, reserve=20.0)
 
     day = sim.run(polls=60, solar=3000, house=800)
-    assert sim.control._handback.phase is control_module.HandbackPhase.HANDED_BACK
+    # The surplus is left to the inverter, which runs itself.
+    assert sim.inverter.method == AUTOMATIC
 
     dusk = sim.run(polls=60, solar=0, house=1000)
 
     assert max(day.grid) <= 0
     assert min(dusk.battery) >= 0
-    assert sim.control._handback.phase is control_module.HandbackPhase.TRACKING
+    # Taken back to hold the battery once the house would reach it.
+    assert sim.inverter.method == BATTERY_LIMITS
 
 
 def test_a_reserve_raised_as_the_battery_fills_keeps_its_hand_back(
@@ -459,7 +461,7 @@ def test_the_house_is_never_left_on_the_grid_after_flapping(
     assert set(run.status[1:]) == {models.ControlStatus.AUTOMATIC}
 
 
-def test_a_departure_left_early_waits_while_automatic_runs(
+def test_a_departure_left_early_waits_longer_each_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Passing clouds would switch the method every poll. Export to Grid left within a
@@ -469,21 +471,24 @@ def test_a_departure_left_early_waits_while_automatic_runs(
     select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
     sim.run(polls=4, solar=9500, house=500)
     assert sim.inverter.method == SYSTEM_FEED
-    sim.run(polls=2, solar=4500, house=500)
 
-    # The minute runs from leaving Export to Grid, two polls of it in the hold.
-    waiting = sim.run(
-        polls=int(const.GUARD_HANDBACK_S / POLL_S) - 3, solar=9500, house=500
-    )
-    assert sim.inverter.method == AUTOMATIC
-    assert set(waiting.status) == {models.ControlStatus.AUTOMATIC}
-    assert max(waiting.curtailed) == 0
+    def polls_until_exporting_again() -> int:
+        for polls in range(1, 120):
+            run = sim.run(polls=1, solar=9500, house=500)
+            assert run.curtailed[-1] == 0
+            if run.method[-1] == SYSTEM_FEED:
+                return polls
+            assert run.method[-1] == AUTOMATIC
+        raise AssertionError("Export to Grid never came back")
 
-    sim.run(polls=4, solar=9500, house=500)
-    assert sim.inverter.method == SYSTEM_FEED
-    sim.run(polls=2, solar=4500, house=500)
-    cooldown = sim.control._solar_first.cooldown_s[models.ControlFeature.EXPORT_TO_GRID]
-    assert cooldown == 2 * const.GUARD_HANDBACK_S
+    waits = []
+    for _ in range(2):
+        # A cloud ends it within the minute.
+        sim.run(polls=2, solar=4500, house=500)
+        waits.append((polls_until_exporting_again() + 2) * POLL_S)
+
+    assert waits[0] == pytest.approx(60, abs=POLL_S)
+    assert waits[1] == pytest.approx(120, abs=POLL_S)
 
 
 def test_export_solar_first_is_automatic_with_a_full_battery(

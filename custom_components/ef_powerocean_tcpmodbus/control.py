@@ -234,6 +234,7 @@ class ControlManager:
         on_refresh: RequestRefresh,
         write_setting: WriteSetting,
         on_command_expired: CommandExpired,
+        heartbeat: Heartbeat | None = None,
     ) -> None:
         self._modbus_client = modbus_client
         self._registers_by_key = registers_by_key
@@ -245,7 +246,10 @@ class ControlManager:
         self._on_command_expired = on_command_expired
 
         self._enabled = enabled
-        self._heartbeat = Heartbeat(modbus_client, scan_interval_s=scan_interval_s)
+        # One beating on another clock can be passed in, as for a simulation.
+        self._heartbeat = heartbeat or Heartbeat(
+            modbus_client, scan_interval_s=scan_interval_s
+        )
 
         # A restart stops the heartbeat, so the inverter has already handed control
         # back to the app by the time we get here: automatic is the truth, not a

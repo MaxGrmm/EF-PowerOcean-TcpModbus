@@ -2,21 +2,29 @@
 
 Shared by the closed-loop scenarios and the behaviour tests. The fake follows every
 command at once and exactly, so what a run shows is the control manager's decisions.
+
+The control manager is only driven the way the integration drives it: built with an
+inverter and a heartbeat, polled with frames, set up through its public setters, and
+read through what it writes and reports. Nothing here reaches into it, so the tests
+on top keep passing however it is arranged inside, as long as it behaves the same.
 """
 
 from __future__ import annotations
 
 import asyncio
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Final
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util import dt as dt_util
 
 from custom_components.ef_powerocean_tcpmodbus import const, models
-from custom_components.ef_powerocean_tcpmodbus import control as control_module
+from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
 
 POLL_S: Final = 5.0
 START: Final = datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc)
@@ -73,7 +81,7 @@ class FakeInverter:
         self, address: int, words: list[int], *, what: str = ""
     ) -> None:
         if not self.reachable:
-            raise control_module.HomeAssistantError("the inverter is unreachable")
+            raise HomeAssistantError("the inverter is unreachable")
         if address not in (
             const.CONTROL_COMMAND_REGISTER,
             SETPOINT_REGISTER,
@@ -141,6 +149,57 @@ class FakeInverter:
 
 
 @dataclass
+class FakeHeartbeat:
+    """The heartbeat, beating on the simulated clock instead of a background task.
+
+    It keeps the inverter following commands as the real one does: a recent beat is
+    reused, and an older one is written again before a command, which fails while
+    the inverter cannot be reached.
+    """
+
+    inverter: FakeInverter
+    clock: Callable[[], datetime]
+    supported: bool | None = True
+    last_success: datetime | None = None
+    beating: bool = True
+
+    @property
+    def in_control(self) -> bool:
+        return self._age() <= const.HEARTBEAT_WINDOW_S
+
+    def start(self) -> None:
+        self.beating = True
+
+    async def async_stop(self) -> None:
+        self.beating = False
+
+    def note_reconnect(self) -> None:
+        """Nothing to probe again: the fake inverter always takes the heartbeat."""
+
+    async def async_ensure_fresh(self) -> bool:
+        if self._age() <= const.HEARTBEAT_REUSE_S:
+            return True
+        try:
+            await self.inverter.async_write(
+                const.HEARTBEAT_REGISTER, [const.HEARTBEAT_VALUE], what="heartbeat"
+            )
+        except HomeAssistantError:
+            return False
+        self.last_success = self.clock()
+        return True
+
+    def beat(self) -> None:
+        """Write a beat, as the background task does between polls."""
+        if self.beating and self.inverter.reachable:
+            self.last_success = self.clock()
+
+    def _age(self) -> float:
+        if self.last_success is None:
+            return float("inf")
+        return (self.clock() - self.last_success).total_seconds()
+
+
+@dataclass
 class Run:
     """What the house did over one stretch of weather, one entry per poll."""
 
@@ -151,10 +210,6 @@ class Run:
     curtailed: list[float] = field(default_factory=list)
     # The method word the inverter was told after each poll.
     method: list[int] = field(default_factory=list)
-    # Whether each guard is engaged, its state of charge at its limit, whether or not
-    # anything the mode does is being stopped by it.
-    charge_guard: list[bool] = field(default_factory=list)
-    reserve_guard: list[bool] = field(default_factory=list)
 
 
 class Simulation:
@@ -172,10 +227,14 @@ class Simulation:
     ) -> None:
         self.inverter = FakeInverter(soc=soc, export_cap=export_cap)
         self.now = START
-        monkeypatch.setattr(control_module.dt, "now", lambda: self.now)
+        monkeypatch.setattr(dt_util, "now", lambda *_args, **_kwargs: self.now)
+        self.heartbeat = FakeHeartbeat(self.inverter, clock=lambda: self.now)
+        self.heartbeat.beat()
+        # Called when a command with an expiry runs out, as the integration's logbook.
+        self.command_expired = Mock()
 
         blocks = const.register_blocks_for(model)
-        self.control = control_module.ControlManager(
+        self.control = ControlManager(
             self.inverter,
             registers_by_key={
                 register.key: register
@@ -192,16 +251,23 @@ class Simulation:
             on_update=Mock(),
             on_refresh=AsyncMock(),
             write_setting=AsyncMock(),
-            on_command_expired=Mock(),
+            on_command_expired=self.command_expired,
+            heartbeat=self.heartbeat,
         )
-        self.control._heartbeat._supported = True
-        self.control._heartbeat._last_success = self.now
-        # A failed beat would otherwise wait out a real poll cycle between retries.
-        self.control._heartbeat._retry_delays = (0.0,)
-        # Already settled, as after the first poll of a run that is underway.
-        self.control._control_stale = False
-        self.control._charge_limit_soc = charge_limit
-        self.control._battery_reserve_soc = reserve
+        asyncio.run(self._async_start(charge_limit, reserve))
+
+    async def _async_start(self, charge_limit: float, reserve: float) -> None:
+        """Start as the integration does: a first poll, then the limits restored as
+        after a restart, so the first decision under them is the next poll's.
+
+        Writes are counted from here, as for a run that is already underway.
+        """
+        await self.control.async_poll(self.inverter.frame())
+        self.control.load_state(
+            {"charge_limit_soc": charge_limit, "battery_reserve_soc": reserve}
+        )
+        self.inverter.method_writes = self.inverter.setpoint_writes = 0
+        self.inverter.system_setpoint_writes = self.inverter.interruptions = 0
 
     def run(
         self,
@@ -234,8 +300,7 @@ class Simulation:
             self.inverter.settle()
 
             self.now += timedelta(seconds=POLL_S)
-            if reachable:
-                self.control._heartbeat._last_success = self.now
+            self.heartbeat.beat()
 
             frame = self.inverter.frame()
             await self.control.async_poll(frame)
@@ -246,14 +311,11 @@ class Simulation:
             run.status.append(self.control.status)
             run.curtailed.append(self.inverter.curtailed)
             run.method.append(self.inverter.method)
-            run.charge_guard.append(self.control._charge_guard)
-            run.reserve_guard.append(self.control._reserve_guard)
         return run
 
 
 def select(sim: Simulation, feature: models.ControlFeature) -> None:
-    """Choose a mode by hand, against the frame the inverter shows right now."""
-    sim.control._data = sim.inverter.frame()
+    """Choose a mode by hand between polls, as from the Battery Mode select."""
     asyncio.run(sim.control.async_select_feature(feature))
 
 
