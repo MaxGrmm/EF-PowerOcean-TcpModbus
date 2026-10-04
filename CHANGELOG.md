@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.8.0] - 2026-10-04
+
 ### Added
 
 - Import from grid Battery Mode, the counterpart of Export to grid. It holds the grid at a draw with a power of its own, so the battery charges with what the house leaves and backs off when a heavy load starts, where Charge battery keeps charging and the draw grows.
