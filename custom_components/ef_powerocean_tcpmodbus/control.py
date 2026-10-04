@@ -1034,9 +1034,15 @@ class ControlManager:
         same whichever mode runs. With the export pinned at the cap it reads as the
         cap, which is enough to know it has reached the limit.
 
-        The charge limit keeps it from Export to Grid, which charges, and the battery
-        reserve from Automatic, which discharges. Both hold the battery instead.
+        Once the charge limit is reached nothing may go into the battery, which is
+        all this mode decides, so it runs as Automatic does under the charge limit.
+        The battery reserve keeps it from Automatic, which discharges, and holds the
+        battery instead.
         """
+        if self._charge_guard:
+            self._solar_first = SolarFirstState()
+            return self._guarded_command(data, ControlStatus.CHARGE_LIMIT_REACHED)
+
         target = self._solar_export_target(data)
         if target is None:
             self._solar_first = SolarFirstState()
@@ -1060,26 +1066,20 @@ class ControlManager:
         ):
             wanted = ControlFeature.EXPORT_TO_GRID
         elif surplus < -GUARD_POWER_DEADBAND_W or (
-            # Automatic stays until the surplus is clear of zero, and under the
-            # charge limit until there is any, since Automatic would store it.
-            running is ControlFeature.AUTOMATIC
-            and surplus <= (0.0 if self._charge_guard else GUARD_POWER_DEADBAND_W)
+            # Automatic stays until the surplus is clear of zero.
+            running is ControlFeature.AUTOMATIC and surplus <= GUARD_POWER_DEADBAND_W
         ):
             wanted = ControlFeature.AUTOMATIC
         else:
             wanted = ControlFeature.HOLD_BATTERY
 
-        if wanted is ControlFeature.EXPORT_TO_GRID and self._charge_guard:
-            wanted = ControlFeature.HOLD_BATTERY
         if wanted is not running and not state.may_enter(wanted, now):
             wanted = ControlFeature.AUTOMATIC
         if wanted is ControlFeature.AUTOMATIC and self._reserve_guard:
             wanted = ControlFeature.HOLD_BATTERY
         state.switch(wanted, now)
 
-        if self._charge_guard:
-            reason = ControlStatus.CHARGE_LIMIT_REACHED
-        elif self._reserve_guard:
+        if self._reserve_guard:
             reason = ControlStatus.RESERVE_REACHED
         elif wanted is ControlFeature.EXPORT_TO_GRID:
             reason = ControlStatus.ACTIVE

@@ -533,6 +533,39 @@ def test_export_solar_first_holds_at_the_charge_limit(
     assert run.battery[-1] <= const.HOLD_SETPOINT_W
 
 
+@pytest.mark.parametrize(
+    ("solar", "house"),
+    (
+        (2000, [1600, 1600, 2400, 2400]),
+        ([2600] * 8 + [1400] * 5 + [2300] * 9 + [1700] * 4, 2000),
+    ),
+    ids=("flickering_load", "partly_cloudy"),
+)
+def test_export_solar_first_is_automatic_under_a_reached_charge_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    solar: float | list[float],
+    house: float | list[float],
+) -> None:
+    """With solar hovering around the house load, the hold kept ending early, and
+    while it cooled down the mode ran plain Automatic, which charged the battery
+    past the limit. Once nothing may go into the battery, the mode has nothing of
+    its own to decide, so it does what Automatic does under the charge limit."""
+    runs = {}
+    for mode in (
+        models.ControlFeature.EXPORT_SOLAR_FIRST,
+        models.ControlFeature.AUTOMATIC,
+    ):
+        sim = Simulation(monkeypatch, soc=80.0, charge_limit=80.0, export_cap=CAP)
+        select(sim, mode)
+        runs[mode] = (sim.run(polls=720, solar=solar, house=house), sim.inverter)
+
+    solar_first, solar_first_inverter = runs[models.ControlFeature.EXPORT_SOLAR_FIRST]
+    automatic, automatic_inverter = runs[models.ControlFeature.AUTOMATIC]
+    assert solar_first.battery == automatic.battery
+    assert solar_first_inverter.method_writes == automatic_inverter.method_writes == 1
+    assert max(solar_first.battery) <= const.HOLD_SETPOINT_W
+
+
 def test_export_solar_first_holds_at_the_battery_reserve(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
