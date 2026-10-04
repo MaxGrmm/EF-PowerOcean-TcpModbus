@@ -234,6 +234,7 @@ class ControlManager:
         on_refresh: RequestRefresh,
         write_setting: WriteSetting,
         on_command_expired: CommandExpired,
+        heartbeat: Heartbeat | None = None,
     ) -> None:
         self._modbus_client = modbus_client
         self._registers_by_key = registers_by_key
@@ -245,7 +246,10 @@ class ControlManager:
         self._on_command_expired = on_command_expired
 
         self._enabled = enabled
-        self._heartbeat = Heartbeat(modbus_client, scan_interval_s=scan_interval_s)
+        # One beating on another clock can be passed in, as for a simulation.
+        self._heartbeat = heartbeat or Heartbeat(
+            modbus_client, scan_interval_s=scan_interval_s
+        )
 
         # A restart stops the heartbeat, so the inverter has already handed control
         # back to the app by the time we get here: automatic is the truth, not a
@@ -1034,9 +1038,15 @@ class ControlManager:
         same whichever mode runs. With the export pinned at the cap it reads as the
         cap, which is enough to know it has reached the limit.
 
-        The charge limit keeps it from Export to Grid, which charges, and the battery
-        reserve from Automatic, which discharges. Both hold the battery instead.
+        Once the charge limit is reached nothing may go into the battery, which is
+        all this mode decides, so it runs as Automatic does under the charge limit.
+        The battery reserve keeps it from Automatic, which discharges, and holds the
+        battery instead.
         """
+        if self._charge_guard:
+            self._solar_first = SolarFirstState()
+            return self._guarded_command(data, ControlStatus.CHARGE_LIMIT_REACHED)
+
         target = self._solar_export_target(data)
         if target is None:
             self._solar_first = SolarFirstState()
@@ -1060,26 +1070,20 @@ class ControlManager:
         ):
             wanted = ControlFeature.EXPORT_TO_GRID
         elif surplus < -GUARD_POWER_DEADBAND_W or (
-            # Automatic stays until the surplus is clear of zero, and under the
-            # charge limit until there is any, since Automatic would store it.
-            running is ControlFeature.AUTOMATIC
-            and surplus <= (0.0 if self._charge_guard else GUARD_POWER_DEADBAND_W)
+            # Automatic stays until the surplus is clear of zero.
+            running is ControlFeature.AUTOMATIC and surplus <= GUARD_POWER_DEADBAND_W
         ):
             wanted = ControlFeature.AUTOMATIC
         else:
             wanted = ControlFeature.HOLD_BATTERY
 
-        if wanted is ControlFeature.EXPORT_TO_GRID and self._charge_guard:
-            wanted = ControlFeature.HOLD_BATTERY
         if wanted is not running and not state.may_enter(wanted, now):
             wanted = ControlFeature.AUTOMATIC
         if wanted is ControlFeature.AUTOMATIC and self._reserve_guard:
             wanted = ControlFeature.HOLD_BATTERY
         state.switch(wanted, now)
 
-        if self._charge_guard:
-            reason = ControlStatus.CHARGE_LIMIT_REACHED
-        elif self._reserve_guard:
+        if self._reserve_guard:
             reason = ControlStatus.RESERVE_REACHED
         elif wanted is ControlFeature.EXPORT_TO_GRID:
             reason = ControlStatus.ACTIVE

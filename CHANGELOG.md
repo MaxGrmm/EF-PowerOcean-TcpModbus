@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Export solar first no longer charges the battery past the Battery Charge Limit when solar hovers around the house load.
+
 ## [2.8.0] - 2026-10-04
 
 ### Added
