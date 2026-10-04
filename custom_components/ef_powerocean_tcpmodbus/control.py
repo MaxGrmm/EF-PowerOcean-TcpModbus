@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum, auto
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt
@@ -60,14 +60,7 @@ from .models import (
     deviation_state,
     encode_register,
 )
-from .plans import (
-    FOLLOWS_THE_BALANCE,
-    PLANS,
-    Plan,
-    PlanState,
-    battery_power,
-    situation_for,
-)
+from .plans import Plan, PlanState, battery_power
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -184,6 +177,17 @@ class GuardHandback:
         self.enter(HandbackPhase.TRACKING, now)
 
 
+class Decision(NamedTuple):
+    """What to send the inverter, and the status that explains it, if any."""
+
+    feature: ControlFeature
+    power: float
+    status: ControlStatus | None = None
+    # A guard must not lag the battery, and an adapting mode has its own
+    # hysteresis, so neither waits out the dwell between commands.
+    bypass_dwell: bool = False
+
+
 class ControlManager:
     """Manages the control of the inverter."""
 
@@ -233,9 +237,11 @@ class ControlManager:
         # When a command sent with an expiry returns to automatic, unless renewed.
         self._expires_at: datetime | None = None
         # Which guard, if any, is forcing the current command.
-        self._blocking_guard: ControlStatus | None = None
+        self._command_status: ControlStatus | None = None
         self._handback = GuardHandback()
-        self._plan_state = PlanState.begin(ControlFeature.AUTOMATIC)
+        self._plan_state = PlanState(ControlFeature.AUTOMATIC)
+        # The guard stopping the selected command, kept until it is clearly clear.
+        self._guard_holding: ControlStatus | None = None
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
@@ -382,7 +388,7 @@ class ControlManager:
         Export Solar First explains its commands the same way a guard does, but it
         is the mode at work rather than a limit, so it is left out.
         """
-        guard = self._blocking_guard if self.in_control else None
+        guard = self._command_status if self.in_control else None
         return guard if guard in _GUARDS else None
 
     def feature_power(self, feature: ControlFeature) -> float:
@@ -399,10 +405,10 @@ class ControlManager:
             if self.handing_back:
                 return ControlStatus.HANDING_BACK
             return ControlStatus.NO_MODBUS_CONTROL
-        if self._blocking_guard is not None:
+        if self._command_status is not None:
             if self._deviation is not ControlStatus.ACTIVE:
                 return self._deviation
-            return self._blocking_guard
+            return self._command_status
         # Only a hold the battery cannot need leaves a selected mode uncommanded.
         if (
             self._feature is not ControlFeature.AUTOMATIC
@@ -476,7 +482,7 @@ class ControlManager:
             self._commanded_feature = ControlFeature.AUTOMATIC
             self._commanded_power = 0.0
             self._retuned_from = None
-            self._blocking_guard = None
+            self._command_status = None
             self._handback = GuardHandback()
             self._expires_at = None
             self._control_stale = False
@@ -778,20 +784,12 @@ class ControlManager:
             return None
         return float(solar) - float(house)
 
-    def _guard_blocks(self, direction: int) -> ControlStatus | None:
-        """Return the guard forbidding movement in direction, if available."""
-        if direction >= 0 and self._charge_guard:
-            return ControlStatus.CHARGE_LIMIT_REACHED
-        if direction <= 0 and self._reserve_guard:
-            return ControlStatus.RESERVE_REACHED
-        return None
-
     def _guarded_command(
         self,
         data: dict[str, Any],
         blocked: ControlStatus,
-    ) -> tuple[ControlFeature, float, ControlStatus | None]:
-        """Command the inverter to either charge or discharge.
+    ) -> Decision:
+        """Reproduce Automatic on the battery setpoint, the allowed way only.
 
         The battery setpoint is a target and zero means no limit, so no single value
         says "do not charge, but discharge freely". We therefore clamp the natural
@@ -815,7 +813,7 @@ class ControlManager:
                 natural = min(from_grid_side, from_solar_side)
 
         if self._advance_handback(natural):
-            return ControlFeature.AUTOMATIC, 0.0, blocked
+            return Decision(ControlFeature.AUTOMATIC, 0.0, blocked, bypass_dwell=True)
 
         if not tracks:
             return self._hold(data, blocked)
@@ -848,7 +846,9 @@ class ControlManager:
 
         if watts <= 0.0:
             return self._hold(data, blocked)
-        return feature, self._clamp_power(watts, feature), blocked
+        return Decision(
+            feature, self._clamp_power(watts, feature), blocked, bypass_dwell=True
+        )
 
     def _battery_settled(self, data: dict[str, Any]) -> bool:
         """Return whether the battery has reached the current setpoint.
@@ -932,9 +932,7 @@ class ControlManager:
                     return False
                 return True
 
-    def _hold(
-        self, data: dict[str, Any], blocked: ControlStatus | None
-    ) -> tuple[ControlFeature, float, ControlStatus | None]:
+    def _hold(self, data: dict[str, Any], blocked: ControlStatus | None) -> Decision:
         """Hold the battery, unless holding it could only limit solar.
 
         A full battery cannot charge, so a battery limit set against a surplus
@@ -943,6 +941,8 @@ class ControlManager:
         short of a clear surplus counts as a draw, so the hold is back before the
         house can reach the battery.
         """
+        # A guard's hold goes out at once, a hold the mode asks for after the dwell.
+        urgent = blocked is not None
         soc = data.get("battery_soc")
         surplus = self._natural_battery_power(data) or 0.0
         if (
@@ -950,127 +950,129 @@ class ControlManager:
             and float(soc) >= BATTERY_FULL_SOC
             and surplus > GUARD_POWER_DEADBAND_W
         ):
-            return ControlFeature.AUTOMATIC, 0.0, blocked
-        return ControlFeature.HOLD_BATTERY, HOLD_SETPOINT_W, blocked
-
-    def _desired_command(
-        self, data: dict[str, Any]
-    ) -> tuple[ControlFeature, float, ControlStatus | None]:
-        """Carry out the selected mode's plan: see plans.py for what each runs."""
-        if self._plan_state.mode is not self._feature:
-            self._plan_state = PlanState.begin(self._feature)
-        if not self._enabled:
-            return ControlFeature.AUTOMATIC, 0.0, None
-
-        plan = PLANS[self._feature]
-        limit = self._plan_limit(data)
-        surplus = self._natural_battery_power(data)
-        steered = (self._charge_guard and plan.steers > 0) or (
-            self._reserve_guard and plan.steers < 0
+            return Decision(ControlFeature.AUTOMATIC, 0.0, blocked, bypass_dwell=urgent)
+        return Decision(
+            ControlFeature.HOLD_BATTERY, HOLD_SETPOINT_W, blocked, bypass_dwell=urgent
         )
-        if not plan.departs:
-            command = plan.otherwise
-        elif steered or limit is None:
-            # Nothing left to decide, under that guard or with no limit to steer by.
-            self._plan_state = PlanState.begin(self._feature)
-            command = plan.otherwise
-        else:
-            command = self._situated_command(plan, data, surplus, limit)
-        return self._carry_out(plan, command, surplus, limit, data)
 
-    def _situated_command(
-        self, plan: Plan, data: dict[str, Any], surplus: float | None, limit: float
+    def _desired_command(self, data: dict[str, Any]) -> Decision:
+        """Decide what to send for the selected mode; plans.py says what each runs."""
+        if self._plan_state.mode is not self._feature or not self._enabled:
+            self._plan_state = PlanState(self._feature)
+            self._guard_holding = None
+        if not self._enabled:
+            return Decision(ControlFeature.AUTOMATIC, 0.0)
+
+        plan = self._plan_state.plan
+        power = self._mode_power(data)
+        surplus = self._natural_battery_power(data)
+        command = self._adapt(data, surplus, power) if plan.adapts else plan.default
+        return self._carry_out(plan, command, surplus, power, data)
+
+    def _adapt(
+        self, data: dict[str, Any], surplus: float | None, limit: float | None
     ) -> ControlFeature:
-        """Return what *plan* runs for the balance as it stands, cooldowns allowing."""
-        state = self._plan_state
+        """Return the command an adapting mode runs for the surplus now."""
         soc = data.get("battery_soc")
-        if surplus is None or (soc is not None and float(soc) >= BATTERY_FULL_SOC):
-            # Unknown, or nothing the battery could take: nothing to steer.
-            command = plan.otherwise
-        else:
-            state.situation = situation_for(
-                surplus, limit, state.situation, GUARD_POWER_DEADBAND_W
-            )
-            command = plan.run(state.situation)
-        now = dt.now()
-        if command is not state.command and not state.may_depart(command, now):
-            command = plan.otherwise
-        state.switch(command, now)
-        return command
+        battery_full = soc is not None and float(soc) >= BATTERY_FULL_SOC
+        # An adapting mode only decides where a surplus goes. A full battery takes
+        # none of it, and under the Charge Limit none may go into the battery, which
+        # Automatic under that guard already ensures.
+        if battery_full or self._charge_guard or limit is None:
+            surplus = None
+        return self._plan_state.choose(
+            surplus, limit or 0.0, dt.now(), GUARD_POWER_DEADBAND_W
+        )
 
     def _carry_out(
         self,
         plan: Plan,
         command: ControlFeature,
         surplus: float | None,
-        limit: float | None,
+        power: float | None,
         data: dict[str, Any],
-    ) -> tuple[ControlFeature, float, ControlStatus | None]:
+    ) -> Decision:
         """Send *command*, holding the battery where a guard forbids what it does."""
-        state = self._plan_state
-        if plan.departs:
-            # What the plan is doing, unless a guard is on, which it then shows.
-            reason: ControlStatus | None = self._guard_blocks(0) or {
-                ControlFeature.AUTOMATIC: ControlStatus.AUTOMATIC,
-                ControlFeature.HOLD_BATTERY: plan.held_status,
-            }.get(command, ControlStatus.ACTIVE)
-        else:
-            reason = None
+        guard = self._engaged_guard()
 
         if command is ControlFeature.AUTOMATIC:
-            state.held_by = None
-            # Until guards run on plans too, Automatic under one follows the house on
-            # the battery setpoint, as the guard loop above does.
-            if (blocked := self._guard_blocks(0)) is not None:
-                return self._guarded_command(data, blocked)
-            return ControlFeature.AUTOMATIC, 0.0, reason
+            self._guard_holding = None
+            if guard is not None:
+                # The inverter has no Automatic that only goes one way, so under a
+                # guard it is reproduced on the battery setpoint.
+                return self._guarded_command(data, guard)
+            status = ControlStatus.AUTOMATIC if plan.adapts else None
+            return Decision(command, 0.0, status, bypass_dwell=plan.adapts)
+
         if command is ControlFeature.HOLD_BATTERY:
-            state.held_by = None
-            if not plan.departs:
+            self._guard_holding = None
+            if not plan.adapts:
                 return self._hold(data, None)
-            return ControlFeature.HOLD_BATTERY, HOLD_SETPOINT_W, reason
+            return Decision(
+                command,
+                HOLD_SETPOINT_W,
+                guard or plan.hold_status,
+                bypass_dwell=True,
+            )
 
-        power = limit or 0.0
-        state.held_by = self._guard_against(
-            command, battery_power(command, surplus, power)
-        )
-        if state.held_by is not None:
-            # A mode the user chose is restricted to nothing in the forbidden
-            # direction, never turned around.
-            return self._hold(data, state.held_by)
-        return command, power, reason
+        power = power or 0.0
+        if power <= 0.0 and command in (
+            ControlFeature.CHARGE_BATTERY,
+            ControlFeature.DISCHARGE_BATTERY,
+        ):
+            # The inverter reads a zero battery setpoint as no limit at all and runs
+            # itself, guards or not.
+            self._guard_holding = None
+            return self._hold(data, None)
 
-    def _plan_limit(self, data: dict[str, Any]) -> float | None:
-        """Return the selected mode's limit: its power, and what its plan steers by."""
+        self._guard_holding = self._guard_against(command, surplus, power)
+        if self._guard_holding is not None:
+            # A mode the user chose is stopped, never turned around.
+            return self._hold(data, self._guard_holding)
+        status = (guard or ControlStatus.ACTIVE) if plan.adapts else None
+        return Decision(command, power, status, bypass_dwell=plan.adapts)
+
+    def _mode_power(self, data: dict[str, Any]) -> float | None:
+        """Return the selected mode's power, which an adapting mode uses as its limit.
+
+        None for a mode without one, or for Export Solar First while the device
+        exports nothing.
+        """
         if self._feature is ControlFeature.EXPORT_SOLAR_FIRST:
             return self._solar_export_target(data)
         if CONTROL_FEATURES[self._feature].has_power:
             return self._clamp_power(self.feature_power(self._feature), self._feature)
         return None
 
-    def _guard_against(
-        self, command: ControlFeature, battery: float | None
-    ) -> ControlStatus | None:
-        """Return the guard *command* would breach by moving the battery *battery* W.
+    def _engaged_guard(self) -> ControlStatus | None:
+        """Return the guard that is on, the Charge Limit first if both are."""
+        if self._charge_guard:
+            return ControlStatus.CHARGE_LIMIT_REACHED
+        if self._reserve_guard:
+            return ControlStatus.RESERVE_REACHED
+        return None
 
-        A command that chooses its way, such as Charge, is held from the first watt.
-        One whose way follows the balance, such as Export to Grid, is held once it
-        would clearly breach, and then until it would not at all, so a balance near
-        the turning point does not switch it back and forth.
-        """
-        for status, engaged, way in (
-            (ControlStatus.CHARGE_LIMIT_REACHED, self._charge_guard, 1.0),
-            (ControlStatus.RESERVE_REACHED, self._reserve_guard, -1.0),
+    def _guard_against(
+        self, command: ControlFeature, surplus: float | None, power: float
+    ) -> ControlStatus | None:
+        """Return the guard *command* would breach, if any."""
+        battery = battery_power(command, surplus, power)
+        # Export and Import move the battery with the surplus, so near their turning
+        # point a guard would stop and release them every poll. They get a deadband
+        # before they are stopped, then stay stopped until they would not breach.
+        moves_with_surplus = battery_power(command, None, power) is None
+        if battery is None:
+            return self._engaged_guard()
+        for status, engaged, forbidden_w in (
+            (ControlStatus.CHARGE_LIMIT_REACHED, self._charge_guard, battery),
+            (ControlStatus.RESERVE_REACHED, self._reserve_guard, -battery),
         ):
-            if not engaged:
-                continue
-            if battery is None:
-                return status
-            settling = (
-                command in FOLLOWS_THE_BALANCE
-                and self._plan_state.held_by is not status
+            margin = (
+                GUARD_POWER_DEADBAND_W
+                if moves_with_surplus and self._guard_holding is not status
+                else 0.0
             )
-            if battery * way > (GUARD_POWER_DEADBAND_W if settling else 0.0):
+            if engaged and forbidden_w > margin:
                 return status
         return None
 
@@ -1167,7 +1169,8 @@ class ControlManager:
         if self._enabled and not self.in_control:
             self._control_stale = True
 
-        feature, power, blocked = self._desired_command(data)
+        decision = self._desired_command(data)
+        feature, power = decision.feature, decision.power
         changed = (feature, round(power)) != (
             self._commanded_feature,
             round(self._commanded_power),
@@ -1176,7 +1179,7 @@ class ControlManager:
         if (
             changed
             and not force
-            and blocked is None
+            and not decision.bypass_dwell
             and not self._control_stale
             and self._control_written_within(MIN_CONTROL_DWELL_S)
         ):
@@ -1194,10 +1197,10 @@ class ControlManager:
                 self._retuned_from = None if retargeted else self._commanded_power
             self._commanded_feature = feature
             self._commanded_power = power
-            self._blocking_guard = blocked
+            self._command_status = decision.status
             # A guard changes its power nearly every poll, and judging each new value
             # from scratch would hide a battery that never catches up.
-            if retargeted or (changed and blocked is None):
+            if retargeted or (changed and decision.status is None):
                 self._reset_deviation()
             self._update_deviation(data)
         finally:

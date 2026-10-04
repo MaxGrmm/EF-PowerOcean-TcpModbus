@@ -220,6 +220,33 @@ def test_a_guard_never_lets_the_battery_move_the_way_it_forbids(
                 )
 
 
+@pytest.mark.parametrize("guard", ("no guard", "charge limit", "reserve"))
+@pytest.mark.parametrize(
+    ("mode", "solar", "house"),
+    (
+        # The balance that would move the battery the way the mode is named for.
+        (Feature.CHARGE_BATTERY, 3000, 500),
+        (Feature.DISCHARGE_BATTERY, 0, 2000),
+    ),
+)
+def test_charging_or_discharging_at_nothing_holds_the_battery(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: Feature,
+    solar: float,
+    house: float,
+    guard: str,
+) -> None:
+    """A zero setpoint is no limit to the inverter, so it is never sent: 0 W holds."""
+    sim = Simulation(monkeypatch, export_cap=CAP, **GUARDS[guard])
+    asyncio.run(sim.control.async_set_feature_power(mode, 0))
+    select(sim, mode)
+
+    run = sim.run(polls=SETTLE_POLLS, solar=solar, house=house)
+
+    assert max(abs(watts) for watts in run.battery[LAST_MINUTE]) <= NOISE_W
+    assert sim.inverter.setpoint != 0
+
+
 def _jitter(
     monkeypatch: pytest.MonkeyPatch,
     mode: Feature,

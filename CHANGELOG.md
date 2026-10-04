@@ -2,10 +2,16 @@
 
 ## Unreleased
 
+### Changed
+
+- Export solar first under the Battery Reserve can charge from a surplus while it waits to switch, as Automatic does, instead of always holding.
+- Export solar first keeps its wait between switches through a full battery or a reached Charge Limit.
+
 ### Fixed
 
-- Export solar first no longer charges the battery past the Battery Charge Limit when solar hovers around the house load.
-- Export to grid and Import from grid respect the Battery Charge Limit and Battery Reserve whichever way they move the battery, so a large surplus no longer charges past the limit and a heavy house load no longer discharges below the reserve.
+- Export solar first no longer charges the battery past the Charge Limit when solar hovers around the house load.
+- Export to grid and Import from grid respect the Charge Limit and Battery Reserve whichever way they move the battery.
+- Charge battery and Discharge battery at 0 W hold the battery instead of running as Automatic past the guards.
 
 ## [2.8.0] - 2026-10-04
 

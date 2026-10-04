@@ -1,196 +1,167 @@
-"""What each Battery Mode runs, written as a plan the control manager carries out.
+"""How each Battery Mode picks the inverter command to run.
 
-A plan says which of the inverter's own commands runs in each situation the balance
-can be in, solar less the house: a deficit or a surplus, either one past the mode's
-limit. A situation a plan leaves out runs its ``otherwise``. Every mode is carried
-out by the same rules, so modes differ only in their plans:
+Most modes run one command all the time. Export Solar First adapts to the solar
+surplus, which is solar power minus house load and negative when the house uses
+more:
 
-- The balance is read the same whichever command runs, and a situation is left only
-  once the balance is past its edge by the deadband. The limit is the exception on
-  the way up: with the export held at a cap, the balance cannot read past it.
-- Running something other than ``otherwise`` is a departure, and every switch is a
-  method change, so a departure left within a minute is not taken again for a
-  minute, doubling each time. ``otherwise`` runs meanwhile and is never held back.
-- A full battery takes nothing, so a plan that departs runs ``otherwise`` then.
-- A guard holds the battery wherever the command would move it the way the guard
-  forbids, judged by what the command would do with the balance as it is. A plan
-  whose departures only steer the very direction a guard forbids has nothing left
-  to decide while that guard is on, and runs ``otherwise`` under it.
+- below zero it runs Automatic, so the battery covers the house;
+- under the Solar Export Limit it holds the battery, so all of the surplus is
+  exported;
+- at the limit it runs Export to Grid, so the battery only takes what is above it.
+
+Two things keep it from switching back and forth: a zone is only left once the
+surplus is clearly outside it, and a command left within a minute of switching to
+it is not used again for a minute, then two, and so on.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import StrEnum
-from typing import Final
+from enum import Enum, auto
 
 from .const import GUARD_HANDBACK_MAX_S, GUARD_HANDBACK_S
 from .models import ControlFeature, ControlStatus
 
-AUTOMATIC = ControlFeature.AUTOMATIC
-HOLD_BATTERY = ControlFeature.HOLD_BATTERY
-CHARGE_BATTERY = ControlFeature.CHARGE_BATTERY
-DISCHARGE_BATTERY = ControlFeature.DISCHARGE_BATTERY
-EXPORT_TO_GRID = ControlFeature.EXPORT_TO_GRID
-IMPORT_FROM_GRID = ControlFeature.IMPORT_FROM_GRID
 
+class Zone(Enum):
+    """Where the surplus stands against zero and the mode's limit."""
 
-class Situation(StrEnum):
-    """Where the balance, solar less the house, stands against zero and the limit."""
-
-    DEFICIT_OVER_LIMIT = "deficit_over_limit"
-    DEFICIT = "deficit"
-    SURPLUS = "surplus"
-    SURPLUS_OVER_LIMIT = "surplus_over_limit"
-
-
-SURPLUSES: Final = frozenset({Situation.SURPLUS, Situation.SURPLUS_OVER_LIMIT})
+    DEFICIT = auto()
+    SURPLUS = auto()
+    AT_LIMIT = auto()
 
 
 @dataclass(frozen=True)
 class Plan:
-    """What a mode runs in each situation, and ``otherwise`` in the rest."""
+    """The command a mode runs in each zone. A deficit always runs the default."""
 
-    otherwise: ControlFeature
-    deficit_over_limit: ControlFeature | None = None
-    deficit: ControlFeature | None = None
+    default: ControlFeature
     surplus: ControlFeature | None = None
-    surplus_over_limit: ControlFeature | None = None
-    # What Control Status shows while the plan holds the battery, if it departs.
-    held_status: ControlStatus | None = None
-
-    def run(self, situation: Situation) -> ControlFeature:
-        """Return the command for *situation*."""
-        return getattr(self, situation.value) or self.otherwise
+    at_limit: ControlFeature | None = None
+    # Holding is how Export Solar First exports, so it gets its own status rather
+    # than looking like a guard.
+    hold_status: ControlStatus | None = None
 
     @property
-    def departs(self) -> bool:
-        """Return whether any situation runs something other than ``otherwise``."""
-        return any(self.run(situation) is not self.otherwise for situation in Situation)
+    def adapts(self) -> bool:
+        return self.surplus is not None or self.at_limit is not None
 
-    @property
-    def steers(self) -> int:
-        """Return +1 if the plan only departs with a surplus, -1 if only with a
-        deficit, else 0: which way of the battery its departures decide on."""
-        departing = {s for s in Situation if self.run(s) is not self.otherwise}
-        if not departing:
-            return 0
-        if departing <= SURPLUSES:
-            return 1
-        if not departing & SURPLUSES:
-            return -1
-        return 0
-
-    @property
-    def start(self) -> Situation:
-        """Return a situation that runs ``otherwise``, to begin as if it had been."""
-        return next(s for s in Situation if self.run(s) is self.otherwise)
+    def command_for(self, zone: Zone) -> ControlFeature:
+        if zone is Zone.SURPLUS and self.surplus is not None:
+            return self.surplus
+        if zone is Zone.AT_LIMIT and self.at_limit is not None:
+            return self.at_limit
+        return self.default
 
 
-def always(feature: ControlFeature) -> Plan:
-    """Return the plan of a mode that runs one command whatever the balance."""
-    return Plan(otherwise=feature)
+EXPORT_SOLAR_FIRST_PLAN = Plan(
+    default=ControlFeature.AUTOMATIC,
+    surplus=ControlFeature.HOLD_BATTERY,
+    at_limit=ControlFeature.EXPORT_TO_GRID,
+    hold_status=ControlStatus.BELOW_SOLAR_EXPORT_LIMIT,
+)
 
 
-PLANS: Final[dict[ControlFeature, Plan]] = {
-    AUTOMATIC: always(AUTOMATIC),
-    HOLD_BATTERY: always(HOLD_BATTERY),
-    CHARGE_BATTERY: always(CHARGE_BATTERY),
-    DISCHARGE_BATTERY: always(DISCHARGE_BATTERY),
-    EXPORT_TO_GRID: always(EXPORT_TO_GRID),
-    IMPORT_FROM_GRID: always(IMPORT_FROM_GRID),
-    ControlFeature.EXPORT_SOLAR_FIRST: Plan(
-        otherwise=AUTOMATIC,
-        surplus=HOLD_BATTERY,
-        surplus_over_limit=EXPORT_TO_GRID,
-        held_status=ControlStatus.BELOW_SOLAR_EXPORT_LIMIT,
-    ),
-}
+def plan_for(mode: ControlFeature) -> Plan:
+    if mode is ControlFeature.EXPORT_SOLAR_FIRST:
+        return EXPORT_SOLAR_FIRST_PLAN
+    return Plan(default=mode)
 
 
-def situation_for(
-    surplus: float, limit: float, current: Situation | None, deadband: float
-) -> Situation:
-    """Return the situation *surplus* is in, leaving *current* only once past its edge
-    by *deadband*. The limit is entered at the limit itself on the way up."""
-    was_surplus = current in SURPLUSES if current is not None else surplus >= 0
-    if surplus >= -deadband if was_surplus else surplus > deadband:
-        stays_over = current is Situation.SURPLUS_OVER_LIMIT
-        if surplus >= (limit - deadband if stays_over else limit):
-            return Situation.SURPLUS_OVER_LIMIT
-        return Situation.SURPLUS
-    stays_over = current is Situation.DEFICIT_OVER_LIMIT
-    if surplus <= (-limit + deadband if stays_over else -limit):
-        return Situation.DEFICIT_OVER_LIMIT
-    return Situation.DEFICIT
+def zone_for(surplus: float, limit: float, current: Zone, deadband: float) -> Zone:
+    """Return the zone *surplus* is in, leaving *current* only once clearly outside.
+
+    The limit is reached at the limit itself, because at the device's export cap
+    the solar is curtailed and the surplus reads no higher than the cap.
+    """
+    if surplus >= limit or (current is Zone.AT_LIMIT and surplus >= limit - deadband):
+        return Zone.AT_LIMIT
+    if surplus < -deadband or (current is Zone.DEFICIT and surplus <= deadband):
+        return Zone.DEFICIT
+    return Zone.SURPLUS
 
 
 def battery_power(
     command: ControlFeature, surplus: float | None, power: float
 ) -> float | None:
-    """Return what *command* at *power* does to the battery, positive charging.
+    """Return the battery power *command* at *power* leads to, positive charging.
 
-    None when it depends on a balance that is not known.
+    None when that depends on a surplus that is not known.
     """
-    if command is HOLD_BATTERY:
-        return 0.0
-    if command is CHARGE_BATTERY:
-        return power
-    if command is DISCHARGE_BATTERY:
-        return -power
+    match command:
+        case ControlFeature.HOLD_BATTERY:
+            return 0.0
+        case ControlFeature.CHARGE_BATTERY:
+            return power
+        case ControlFeature.DISCHARGE_BATTERY:
+            return -power
     if surplus is None:
         return None
-    if command is EXPORT_TO_GRID:
-        return surplus - power
-    if command is IMPORT_FROM_GRID:
-        return surplus + power
+    match command:
+        case ControlFeature.EXPORT_TO_GRID:
+            return surplus - power
+        case ControlFeature.IMPORT_FROM_GRID:
+            return surplus + power
     return surplus
-
-
-# Commands whose way of the battery follows the balance, rather than being chosen.
-FOLLOWS_THE_BALANCE: Final = frozenset({AUTOMATIC, EXPORT_TO_GRID, IMPORT_FROM_GRID})
 
 
 @dataclass
 class PlanState:
-    """Where a mode's plan stands: its situation, what runs, and the cooldowns."""
+    """The command a mode is running, and how long each other command must wait."""
 
     mode: ControlFeature
-    situation: Situation | None = None
-    command: ControlFeature | None = None
+    zone: Zone = Zone.DEFICIT
+    command: ControlFeature = field(init=False)
     since: datetime | None = None
-    # The guard holding the battery against the command, until it is clearly clear.
-    held_by: ControlStatus | None = None
-    cooldown_s: dict[ControlFeature, float] = field(default_factory=dict)
-    left_at: dict[ControlFeature, datetime] = field(default_factory=dict)
+    _cooldown_s: dict[ControlFeature, float] = field(default_factory=dict)
+    _left_at: dict[ControlFeature, datetime] = field(default_factory=dict)
 
-    @classmethod
-    def begin(cls, mode: ControlFeature) -> PlanState:
-        """Start *mode*'s plan as if it had been running ``otherwise``."""
-        plan = PLANS[mode]
-        return cls(mode=mode, situation=plan.start, command=plan.otherwise)
+    def __post_init__(self) -> None:
+        self.command = self.plan.default
 
-    def may_depart(self, command: ControlFeature, now: datetime) -> bool:
-        """Return whether *command* has waited out its cooldown."""
-        left_at = self.left_at.get(command)
+    @property
+    def plan(self) -> Plan:
+        return plan_for(self.mode)
+
+    def choose(
+        self, surplus: float | None, limit: float, now: datetime, deadband: float
+    ) -> ControlFeature:
+        """Return and remember the command for *surplus*; None runs the default."""
+        zone = (
+            Zone.DEFICIT
+            if surplus is None
+            else zone_for(surplus, limit, self.zone, deadband)
+        )
+        command = self.plan.command_for(zone)
+        if command is not self.command and not self._may_switch_to(command, now):
+            # Waiting out a cooldown counts as a deficit, so the mode switches again
+            # only once the surplus is clearly above zero.
+            zone, command = Zone.DEFICIT, self.plan.default
+        self.zone = zone
+        self._switch_to(command, now)
+        return command
+
+    def _may_switch_to(self, command: ControlFeature, now: datetime) -> bool:
+        left_at = self._left_at.get(command)
         if left_at is None:
             return True
-        return (now - left_at).total_seconds() >= self.cooldown_s.get(command, 0.0)
+        return (now - left_at).total_seconds() >= self._cooldown_s.get(command, 0.0)
 
-    def switch(self, command: ControlFeature, now: datetime) -> None:
-        """Run *command* from now on, noting how long a departure left lasted."""
+    def _switch_to(self, command: ControlFeature, now: datetime) -> None:
         if command is self.command:
             return
-        otherwise = PLANS[self.mode].otherwise
-        if self.command not in (None, otherwise) and self.since is not None:
+        leaving = self.command
+        if leaving is not self.plan.default and self.since is not None:
+            # Each switch rewrites the inverter's method, so a command that lasted
+            # under a minute waits twice as long as last time before it is used again.
             lasted = (now - self.since).total_seconds()
-            previous = self.cooldown_s.get(self.command, 0.0)
-            self.cooldown_s[self.command] = (
+            previous = self._cooldown_s.get(leaving, 0.0)
+            self._cooldown_s[leaving] = (
                 min(max(2 * previous, GUARD_HANDBACK_S), GUARD_HANDBACK_MAX_S)
                 if lasted < GUARD_HANDBACK_S
                 else 0.0
             )
-            self.left_at[self.command] = now
+            self._left_at[leaving] = now
         self.command = command
         self.since = now

@@ -1,4 +1,4 @@
-"""The plans each Battery Mode runs, and the rules every plan is carried out by."""
+"""How each Battery Mode picks its command, and how Export Solar First adapts."""
 
 from __future__ import annotations
 
@@ -8,54 +8,33 @@ import pytest
 
 from custom_components.ef_powerocean_tcpmodbus.models import ControlFeature
 from custom_components.ef_powerocean_tcpmodbus.plans import (
-    PLANS,
-    Plan,
     PlanState,
-    Situation,
-    always,
+    Zone,
     battery_power,
-    situation_for,
+    plan_for,
+    zone_for,
 )
 
 Feature = ControlFeature
 DEADBAND = 200.0
+LIMIT = 6000.0
 START = datetime(2026, 6, 1, 12, tzinfo=timezone.utc)
 
 
-def test_every_mode_has_a_plan() -> None:
-    assert set(PLANS) == set(Feature)
-
-
-def test_a_fixed_mode_runs_one_command_whatever_the_balance() -> None:
+def test_only_export_solar_first_adapts() -> None:
     for mode in Feature:
-        if mode is Feature.EXPORT_SOLAR_FIRST:
-            continue
-        assert PLANS[mode] == always(mode)
-        assert not PLANS[mode].departs
+        plan = plan_for(mode)
+        assert plan.adapts is (mode is Feature.EXPORT_SOLAR_FIRST)
+        if not plan.adapts:
+            assert all(plan.command_for(zone) is mode for zone in Zone)
 
 
-def test_export_solar_first_departs_only_with_a_surplus() -> None:
-    plan = PLANS[Feature.EXPORT_SOLAR_FIRST]
+def test_export_solar_first_exports_before_it_stores() -> None:
+    plan = plan_for(Feature.EXPORT_SOLAR_FIRST)
 
-    assert [plan.run(situation) for situation in Situation] == [
-        Feature.AUTOMATIC,
-        Feature.AUTOMATIC,
-        Feature.HOLD_BATTERY,
-        Feature.EXPORT_TO_GRID,
-    ]
-    # Which is all a charge limit forbids, so under one it has nothing to decide.
-    assert plan.steers == 1
-
-
-def test_a_plan_departing_only_with_a_deficit_steers_discharging() -> None:
-    peak_shaving = Plan(
-        otherwise=Feature.AUTOMATIC,
-        deficit=Feature.HOLD_BATTERY,
-        deficit_over_limit=Feature.IMPORT_FROM_GRID,
-    )
-
-    assert peak_shaving.steers == -1
-    assert peak_shaving.start is Situation.SURPLUS
+    assert plan.command_for(Zone.DEFICIT) is Feature.AUTOMATIC
+    assert plan.command_for(Zone.SURPLUS) is Feature.HOLD_BATTERY
+    assert plan.command_for(Zone.AT_LIMIT) is Feature.EXPORT_TO_GRID
 
 
 @pytest.mark.parametrize(
@@ -71,7 +50,7 @@ def test_a_plan_departing_only_with_a_deficit_steers_discharging() -> None:
         (Feature.EXPORT_TO_GRID, 500.0, -1500.0),
         (Feature.IMPORT_FROM_GRID, -1000.0, 1000.0),
         (Feature.IMPORT_FROM_GRID, -3000.0, -1000.0),
-        # A command that follows the balance cannot tell without it.
+        # A command that moves with the surplus cannot tell without it.
         (Feature.EXPORT_TO_GRID, None, None),
         (Feature.HOLD_BATTERY, None, 0.0),
     ),
@@ -85,57 +64,79 @@ def test_what_each_command_does_to_the_battery(
 @pytest.mark.parametrize(
     ("surplus", "current", "expected"),
     (
-        # Read as it stands at first.
-        (150.0, None, Situation.SURPLUS),
-        (-150.0, None, Situation.DEFICIT),
-        # Zero is left only once past it by the deadband, either way.
-        (150.0, Situation.DEFICIT, Situation.DEFICIT),
-        (250.0, Situation.DEFICIT, Situation.SURPLUS),
-        (-150.0, Situation.SURPLUS, Situation.SURPLUS),
-        (-250.0, Situation.SURPLUS, Situation.DEFICIT),
-        # The limit is entered at the limit itself, since a cap holds the balance
-        # there, and left once under it by the deadband.
-        (6000.0, Situation.SURPLUS, Situation.SURPLUS_OVER_LIMIT),
-        (5850.0, Situation.SURPLUS, Situation.SURPLUS),
-        (5850.0, Situation.SURPLUS_OVER_LIMIT, Situation.SURPLUS_OVER_LIMIT),
-        (5750.0, Situation.SURPLUS_OVER_LIMIT, Situation.SURPLUS),
-        (-6100.0, Situation.DEFICIT, Situation.DEFICIT_OVER_LIMIT),
-        (-5850.0, Situation.DEFICIT_OVER_LIMIT, Situation.DEFICIT_OVER_LIMIT),
-        (-5750.0, Situation.DEFICIT_OVER_LIMIT, Situation.DEFICIT),
+        # Zero is crossed only once the deadband past it, either way.
+        (150.0, Zone.DEFICIT, Zone.DEFICIT),
+        (250.0, Zone.DEFICIT, Zone.SURPLUS),
+        (-150.0, Zone.SURPLUS, Zone.SURPLUS),
+        (-250.0, Zone.SURPLUS, Zone.DEFICIT),
+        # The limit is reached at the limit itself and left the deadband below it.
+        (6000.0, Zone.SURPLUS, Zone.AT_LIMIT),
+        (6000.0, Zone.DEFICIT, Zone.AT_LIMIT),
+        (5850.0, Zone.SURPLUS, Zone.SURPLUS),
+        (5850.0, Zone.AT_LIMIT, Zone.AT_LIMIT),
+        (5750.0, Zone.AT_LIMIT, Zone.SURPLUS),
     ),
 )
-def test_a_situation_is_left_only_once_clearly_past_its_edge(
-    surplus: float, current: Situation | None, expected: Situation
+def test_a_zone_is_left_only_once_clearly_outside_it(
+    surplus: float, current: Zone, expected: Zone
 ) -> None:
-    assert situation_for(surplus, 6000.0, current, DEADBAND) is expected
+    assert zone_for(surplus, LIMIT, current, DEADBAND) is expected
 
 
-def test_a_departure_left_early_waits_longer_each_time() -> None:
-    state = PlanState.begin(Feature.EXPORT_SOLAR_FIRST)
-    now = START
+def _choose(state: PlanState, surplus: float | None, at_s: float) -> Feature:
+    return state.choose(surplus, LIMIT, START + timedelta(seconds=at_s), DEADBAND)
+
+
+def test_export_solar_first_follows_the_surplus() -> None:
+    state = PlanState(Feature.EXPORT_SOLAR_FIRST)
+
+    assert _choose(state, 150.0, 0) is Feature.AUTOMATIC
+    assert _choose(state, 300.0, 5) is Feature.HOLD_BATTERY
+    assert _choose(state, 6000.0, 10) is Feature.EXPORT_TO_GRID
+    assert _choose(state, -300.0, 70) is Feature.AUTOMATIC
+
+
+def test_an_unknown_surplus_runs_the_default_and_starts_over() -> None:
+    state = PlanState(Feature.EXPORT_SOLAR_FIRST)
+    _choose(state, 300.0, 0)
+
+    assert _choose(state, None, 120) is Feature.AUTOMATIC
+    # Back as if from a deficit: a small surplus is not enough to switch.
+    assert _choose(state, 150.0, 125) is Feature.AUTOMATIC
+
+
+def test_a_command_left_early_waits_longer_each_time() -> None:
+    state = PlanState(Feature.EXPORT_SOLAR_FIRST)
+    now = 0.0
+    assert _choose(state, 300.0, now) is Feature.HOLD_BATTERY
     waits = []
     for _ in range(3):
-        state.switch(Feature.EXPORT_TO_GRID, now)
-        now += timedelta(seconds=20)
-        state.switch(Feature.AUTOMATIC, now)
+        now += 20
+        _choose(state, -300.0, now)
         wait = 0
-        while not state.may_depart(
-            Feature.EXPORT_TO_GRID, now + timedelta(seconds=wait)
+        while (
+            _choose(state, 300.0, now + (wait := wait + 5)) is not Feature.HOLD_BATTERY
         ):
-            wait += 5
+            pass
         waits.append(wait)
-        now += timedelta(seconds=wait)
+        now += wait
 
     assert waits == [60, 120, 240]
-    # Running otherwise never waits.
-    assert state.may_depart(Feature.AUTOMATIC, now)
 
 
-def test_a_departure_that_lasted_resets_its_wait() -> None:
-    state = PlanState.begin(Feature.EXPORT_SOLAR_FIRST)
-    state.switch(Feature.EXPORT_TO_GRID, START)
-    state.switch(Feature.AUTOMATIC, START + timedelta(seconds=20))
-    state.switch(Feature.EXPORT_TO_GRID, START + timedelta(seconds=80))
-    state.switch(Feature.AUTOMATIC, START + timedelta(seconds=200))
+def test_a_command_that_lasted_does_not_wait() -> None:
+    state = PlanState(Feature.EXPORT_SOLAR_FIRST)
+    _choose(state, 300.0, 0)
+    _choose(state, -300.0, 120)
 
-    assert state.may_depart(Feature.EXPORT_TO_GRID, START + timedelta(seconds=200))
+    assert _choose(state, 300.0, 125) is Feature.HOLD_BATTERY
+
+
+def test_waits_outlast_a_stretch_with_nothing_to_decide() -> None:
+    """A full battery or the Charge Limit in between does not reset a wait."""
+    state = PlanState(Feature.EXPORT_SOLAR_FIRST)
+    _choose(state, 300.0, 0)
+    _choose(state, -300.0, 20)
+    _choose(state, None, 25)
+
+    assert _choose(state, 300.0, 30) is Feature.AUTOMATIC
