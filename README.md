@@ -14,7 +14,7 @@
 - **Local polling** – no EcoFlow cloud account needed
 - **Configurable poll interval** (2–30 seconds, default 5 s)
 - Real-time power flow: house consumption, grid import/export, solar generation, battery
-- Optional **Battery Controls**: charge, discharge, export or hold, with state-of-charge guards and a grid feed-in switch
+- Optional **Battery Controls**: charge, discharge, hold, export, import or export solar first, with state-of-charge guards and a grid feed-in switch
 - Full battery monitoring: SOC, voltage, current, power, temperature, remaining energy
 - Per-module state of charge for up to 12 battery modules
 - Per-string PV power, current and voltage (1–3 strings)
@@ -101,119 +101,88 @@ To change settings after setup: **Settings → Devices & Services → EF-PowerOc
 
 ## Battery Control
 
-Off by default. Turning on the **Modbus Control** switch (in the device's
-Configuration section) makes the integration hold control authority over the
-inverter, which **locks the EcoFlow app out control** for as long as the
-integration is running and the switch is on. Turning it off hands control back to
-the app after about 60 seconds.
+Off by default. Turning on **Modbus Control** (in the device's Configuration section)
+lets the integration control the inverter and **locks the EcoFlow app out** while it is
+on. Turning it off hands control back to the app within about 60 seconds.
 
-The **Battery Mode** select is the primary control:
+Choose what the battery does with the **Battery Mode** select:
 
-| Mode               | What the inverter does                                                              |
-| ------------------ | ----------------------------------------------------------------------------------- |
-| Automatic          | Self-consumption, exactly as the app runs it                                        |
-| Hold battery       | Don't charge or discharge the battery. Surplus solar power is exported              |
-| Charge battery     | Charges at the set power, importing from the grid if solar power is not enough      |
-| Discharge battery  | Discharges at the set power                                                         |
-| Export to grid     | Exports at the set power, uses the battery if solar power is not enough             |
-| Import from grid   | Draws the set power from the grid, charging the battery with what the house leaves  |
-| Export solar first | Exports solar up to the Solar Export Limit, charging the battery only with the rest |
+| Mode               | Goal                                        | How                                                                                                         |
+| ------------------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Automatic          | Use as much of your own solar as possible   | The inverter's normal self-consumption, as the app runs it.                                                 |
+| Hold battery       | Keep the battery's charge for later         | The battery neither charges nor discharges; surplus solar is exported.                                      |
+| Charge battery     | Fill the battery                            | Charges at Battery Charge Power, from the grid when solar is not enough.                                    |
+| Discharge battery  | Empty the battery                           | Discharges at Battery Discharge Power; what the house does not use is exported.                             |
+| Export to grid     | Sell power                                  | Exports Grid Export Power, using the battery when solar falls short and charging it with any surplus above. |
+| Import from grid   | Charge from the grid without overloading it | Draws Grid Import Power; the battery takes what the house leaves and backs off as the house takes more.     |
+| Export solar first | Export solar, and store only what is left   | Exports surplus up to the Solar Export Limit and stores only the rest; otherwise runs as Automatic.         |
 
-Charge and Export are two views of the same thing: **Charge pins the battery and lets the
-grid float, Export pins the grid and lets the battery float.** The setpoint is a target
-rather than a cap in both directions, and as long as the battery has room the inverter
-reaches it without limiting solar, with whatever is left over going to the battery or is
-exported.
+Each mode's power can be set ahead of time; only the selected mode's is sent. The
+Solar Export Limit goes up to your export limit, or the inverter's maximum without
+one, and keeps 100 W under an export limit it is set at.
 
-**Export solar first** sends solar to the grid before the battery. It exports up to its
-**Solar Export Limit** and the battery takes only what is left above it. Unlike Export to
-grid, it never discharges the battery to export; in the evening it discharges for the
-house like Automatic. The limit goes up to your export limit, or the inverter's maximum
-output if you have none, and left alone it sits there.
+### Guards
 
-It runs as Automatic, except while solar covers the house: then Hold battery, so the
-surplus is exported, and Export to grid at the limit once the surplus reaches it, so the
-battery takes only what is above. As soon as the house needs more than the solar, it is
-Automatic again. Active Control Method shows which one is running. Set at the export
-limit, it holds the export 100 W under it, so the inverter's own regulation does not run
-into the limit and curtail solar.
+Two guards bind whatever mode is selected. They only ever stop the battery, never turn
+it around:
 
-Two guards apply in every mode, including Automatic. They can only stop the battery:
+| Guard           | The battery is not…                   | Off at |
+| --------------- | ------------------------------------- | ------ |
+| Charge Limit    | charged above this state of charge    | 100 %  |
+| Battery Reserve | discharged below this state of charge | 0 %    |
 
-- **Charge Limit** – the battery is not charged above this state of charge (100 = off)
-- **Battery Reserve** – the battery is not discharged below this state of charge (0 = off)
+A guard holds the battery wherever the selected mode would move it the forbidden way.
+In Automatic the battery can still power the house under the Charge Limit, and still
+charge from solar under the Battery Reserve. A guard lets go once the state of charge
+has moved 5% back. Leave Min SOC and schedules in the EcoFlow app off, since the
+inverter follows them whenever it runs by itself.
+
+<details>
+<summary>How the guards keep control</summary>
 
 The inverter has no setting for a charge limit, so while a guard is on the integration
-runs self-consumption itself. It tells the inverter what it would have done anyway,
-except in the direction the guard forbids. With the Charge Limit on, the battery can
-still power the house. With the Battery Reserve on, it can still charge from solar. The
-guard stays on until the state of charge has moved 5% back, because the inverter would
-start charging (or discharging) again within seconds if it got control back earlier.
-
-There is one exception. If the house clearly uses more than the solar for a minute
-while the Charge Limit is on, the only thing the battery can do is discharge, which the
-limit allows. The inverter does that faster and more smoothly by itself, so the
-integration lets it. The same goes for a clear solar surplus while the Battery Reserve
-is on. The integration takes over again as soon as the power flow turns. Leave Min SOC
-and schedules in the EcoFlow app off, since the inverter follows them when it runs by
-itself.
-
-On single-phase models (PowerOcean Single Phase and Ocean 2 Single Phase), which do not
-support Modbus discharge setpoint tracking, the integration hands control back to
-Automatic directly without waiting for a minute, so the inverter can cover the house load
-immediately without drawing from the grid. A 20 W deadband with hysteresis, a 30-second
-settling window, and a 30-second dwell time prevent rapid toggling between Hold and Automatic.
-
-If a load keeps switching on and off, like an oven heating in bursts, the integration
-waits longer each time before letting go, so it settles instead of switching back and
-forth. Small power corrections wait until the battery has reached the last one, because
-some inverters start over on every new setting.
+runs self-consumption itself, except in the direction the guard forbids. When the
+battery can only move the allowed way for a while, such as the house clearly drawing
+more than the solar under the Charge Limit, the inverter does that faster by itself, so
+the integration lets it and takes over again once the power flow turns. On single-phase
+models it does so at once, with a 20 W deadband and 30 s settling. A load that keeps
+switching, like an oven, makes it wait longer each time.
 
 The guards are soft limits: the battery can move the wrong way for a few seconds before
-the integration catches it, which is harmless for battery wear or a backup reserve.
+it is caught. While held near zero, the battery wanders a few hundred watts either way
+as clouds pass, because EcoFlow does not expose the power limit the app's schedules use.
+See [Battery power limits](EcoFlow_PowerOcean_Modbus.md#battery-power-limits).
 
-While the battery is held near zero it will wander a few hundred watts either way as
-clouds come and go. This is due to the inverter itself balancing and unfortunately
-EcoFlow doesn't expose the robust power limit that the app's Schedule feature uses.
-Read more about that in
-[Battery power limits](EcoFlow_PowerOcean_Modbus.md#battery-power-limits).
+</details>
 
-Both guards default to off. Separately, **Modbus Control** defaults to off, so an
-untouched install never takes control away from the app.
-**Control Status** shows what the selected mode is achieving, including which guard is
-on and whether a full or empty battery blocks the target. If the inverter misses the
-target a guard sets, the status shows Ramping or Unreachable instead of the guard. The guard is still available as a `guard` attribute on the Control Status sensor,
-for automations to read and act on.
+### Control Status
 
 | Control Status             | Meaning                                                         |
 | -------------------------- | --------------------------------------------------------------- |
-| No Modbus control          | Modbus Control is disabled or control authority was lost        |
+| No Modbus control          | Modbus Control is off, or control authority was lost            |
 | Handing back to the app    | Modbus Control was switched off; the app takes over within 60 s |
-| Automatic                  | The inverter is running its normal self-consumption mode        |
-| Active                     | The selected target is being maintained                         |
+| Automatic                  | The inverter runs its normal self-consumption                   |
+| Active                     | The selected mode is doing what it should                       |
 | Ramping                    | The inverter has not reached the target for a few polls         |
-| Charge limit reached       | The Charge Limit guard is preventing further charging           |
-| Reserve reached            | The Battery Reserve guard is preventing further discharge       |
-| Below solar export limit   | Export solar first: no surplus above the limit for the battery  |
-| Unreachable: battery full  | The target requires the battery to absorb power, but it cannot  |
-| Unreachable: battery empty | The target requires the battery to supply power, but it cannot  |
+| Charge limit reached       | The Charge Limit is stopping the battery from charging          |
+| Reserve reached            | The Battery Reserve is stopping the battery from discharging    |
+| Below solar export limit   | Export solar first: the whole surplus is being exported         |
+| Unreachable: battery full  | The target needs the battery to charge, but it is full          |
+| Unreachable: battery empty | The target needs the battery to discharge, but it is empty      |
 
-On the device page the two are deliberately kept apart:
+When the inverter misses a target a guard set, the status shows Ramping or Unreachable
+instead; the guard stays available in the `guard` attribute for automations.
 
-| Section           | Entities                                                                                        | Meaning                                                          |
-| ----------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **Controls**      | Battery Mode, Charge/Discharge/Export/Import Power, Solar Export Limit                          | What you are asking the inverter to do right now                 |
-| **Configuration** | Modbus Control, Charge Limit, Battery Reserve, LED Brightness, Battery Saver Mode, Grid Feed-in | Standing settings; the two guards bind whatever mode is selected |
-| **Sensors**       | Control Status                                                                                  | What the inverter is actually doing about it                     |
-
-Each mode's power stays editable while another mode is selected, so a command can be
-set up before it is needed. Only the selected mode's value is ever sent.
+On the device page, **Controls** hold what you ask for (Battery Mode and each mode's
+power), **Configuration** the standing settings (Modbus Control, the guards, LED
+Brightness, Battery Saver Mode, Grid Feed-in), and **Control Status** what the inverter
+is actually doing.
 
 ### Commanding the battery from automations
 
 The **Set battery command** action (`ef_powerocean_tcpmodbus.set_battery_command`) sets
-the Battery Mode, its power and the Charge Limit in one step. It is meant for
-automations and battery planners that decide when to charge and discharge.
+the Battery Mode, its power and the Charge Limit in one step, for automations and
+battery planners.
 
 ```yaml
 action: ef_powerocean_tcpmodbus.set_battery_command
@@ -225,30 +194,20 @@ data:
   expire_in: 900
 ```
 
-- It changes the same entities you would change by hand, so the device page always
-  shows what applies, and nothing is changed back behind your back.
+- It changes the same entities you would change by hand.
 - `power` is required for Charge battery, Discharge battery, Export to grid and Import
-  from grid. It is optional for Export solar first, where it sets the Solar Export Limit
-  and leaving it out keeps the current one. It is not allowed for the other modes. It must be above 0 W, because the inverter reads a zero
-  setpoint as no limit at all. A value above what the inverter accepts is lowered to
-  its maximum.
-- `charge_limit_soc` is optional. It is applied together with the mode, so the battery
-  never charges past a new limit in between.
-- With `expire_in` (60 to 86400 s) the Battery Mode returns to Automatic unless the
-  command is sent again in time. Sending the same command again only moves the
-  expiry and writes nothing to the inverter, so a controller can repeat it every few
-  minutes. Choosing a mode by hand cancels the expiry, and a restart always starts in
-  Automatic. `mode: automatic` has nothing to expire, so `expire_in` is ignored there.
-- A command that expires leaves its Charge Limit in place.
-- The device's activity shows the expiry as the cause of the change back to Automatic.
-  Automations can react to it through the `ef_powerocean_tcpmodbus_command_expired`
-  event, which carries the timed-out `mode`.
+  from grid, optional for Export solar first (it sets the Solar Export Limit), and not
+  allowed otherwise. It must be above 0 W and is capped at the inverter's maximum.
+- `charge_limit_soc` is optional and applied together with the mode.
+- With `expire_in` (60 to 86400 s) the mode returns to Automatic unless the command is
+  sent again in time; repeating it only moves the expiry. Choosing a mode by hand
+  cancels it, a restart starts in Automatic, and the Charge Limit stays. Control Status shows when it runs out as
+  `expires_at`, and the `ef_powerocean_tcpmodbus_command_expired` event fires when it
+  does.
 - Only `mode: automatic` is accepted while Modbus Control is off.
-- Control Status shows when the running command times out, as its `expires_at`
-  attribute.
 
-Run one controller at a time. The action does not stop an automation and a planner from
-overriding each other.
+Run one controller at a time: the action does not stop two of them overriding each
+other.
 
 ---
 

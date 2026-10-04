@@ -5,6 +5,7 @@
 ### Fixed
 
 - Export solar first no longer charges the battery past the Battery Charge Limit when solar hovers around the house load.
+- Export to grid and Import from grid respect the Battery Charge Limit and Battery Reserve whichever way they move the battery, so a large surplus no longer charges past the limit and a heavy house load no longer discharges below the reserve.
 
 ## [2.8.0] - 2026-10-04
 
