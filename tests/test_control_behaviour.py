@@ -29,7 +29,7 @@ from simulation import (
     select,
 )
 
-from custom_components.ef_powerocean_tcpmodbus import models
+from custom_components.ef_powerocean_tcpmodbus import const, models
 
 Feature = models.ControlFeature
 Status = models.ControlStatus
@@ -218,6 +218,33 @@ def test_a_guard_never_lets_the_battery_move_the_way_it_forbids(
                 assert streak <= ALLOWED_POLLS[model], (
                     f"{model.name}, {weather}: {poll}"
                 )
+
+
+@pytest.mark.parametrize(
+    ("mode", "guard", "solar", "house"),
+    (
+        # Just past the turning point, each would move the battery 100 W the way the
+        # guard forbids.
+        (Feature.EXPORT_TO_GRID, "charge limit", 3600, 500),
+        (Feature.IMPORT_FROM_GRID, "reserve", 0, 3100),
+        (Feature.EXPORT_SOLAR_FIRST, "charge limit", SOLAR_FIRST_LIMIT + 600, 500),
+    ),
+)
+def test_a_guard_stops_a_command_from_the_first_watt(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: Feature,
+    guard: str,
+    solar: float,
+    house: float,
+) -> None:
+    sim = Simulation(monkeypatch, export_cap=CAP, **GUARDS[guard])
+    select(sim, mode)
+
+    run = sim.run(polls=SETTLE_POLLS, solar=solar, house=house)
+
+    assert (
+        max(abs(watts) for watts in run.battery[LAST_MINUTE]) <= const.HOLD_SETPOINT_W
+    )
 
 
 @pytest.mark.parametrize("guard", ("no guard", "charge limit", "reserve"))

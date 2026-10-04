@@ -60,7 +60,7 @@ from .models import (
     deviation_state,
     encode_register,
 )
-from .plans import Plan, PlanState, battery_power
+from .plans import CHARGE, DISCHARGE, Mode, ModeState, Step, Way, battery_power
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -239,9 +239,14 @@ class ControlManager:
         # Which guard, if any, is forcing the current command.
         self._command_status: ControlStatus | None = None
         self._handback = GuardHandback()
-        self._plan_state = PlanState(ControlFeature.AUTOMATIC)
-        # The guard stopping the selected command, kept until it is clearly clear.
-        self._guard_holding: ControlStatus | None = None
+        self._mode_state = ModeState(ControlFeature.AUTOMATIC)
+        # The step held because it would move the battery a forbidden way, and that
+        # way, kept until the step clearly would not.
+        self._stopped: tuple[Step, Way] | None = None
+        # The hand-back belongs to one set of forbidden ways and starts over with
+        # another.
+        self._handback_for: frozenset[Way] = frozenset()
+        self._one_way_ran = False
 
         self._commanded_feature = ControlFeature.AUTOMATIC
         self._commanded_power = 0.0
@@ -784,9 +789,10 @@ class ControlManager:
             return None
         return float(solar) - float(house)
 
-    def _guarded_command(
+    def _one_way_automatic(
         self,
         data: dict[str, Any],
+        forbidden: frozenset[Way],
         blocked: ControlStatus,
     ) -> Decision:
         """Reproduce Automatic on the battery setpoint, the allowed way only.
@@ -795,6 +801,10 @@ class ControlManager:
         says "do not charge, but discharge freely". We therefore clamp the natural
         battery power to the allowed direction.
         """
+        self._one_way_ran = True
+        if forbidden != self._handback_for:
+            self._handback = GuardHandback()
+            self._handback_for = forbidden
         natural = self._natural_battery_power(data)
         if natural is None:
             self._handback.take_back(dt.now())
@@ -812,15 +822,15 @@ class ControlManager:
             if from_grid_side is not None and from_solar_side is not None:
                 natural = min(from_grid_side, from_solar_side)
 
-        if self._advance_handback(natural):
+        if self._advance_handback(natural, forbidden):
             return Decision(ControlFeature.AUTOMATIC, 0.0, blocked, bypass_dwell=True)
 
         if not tracks:
             return self._hold(data, blocked)
 
-        if self._charge_guard:
+        if CHARGE in forbidden:
             natural = min(natural, 0.0)
-        if self._reserve_guard:
+        if DISCHARGE in forbidden:
             natural = max(natural, 0.0)
 
         if natural == 0.0:
@@ -878,7 +888,7 @@ class ControlManager:
                 return True
         return not self._control_written_within(GUARD_SETTLE_S)
 
-    def _advance_handback(self, natural: float) -> bool:
+    def _advance_handback(self, natural: float, forbidden: frozenset[Way]) -> bool:
         """Move the hand-back on by one poll and return whether the inverter runs itself.
 
         Under a charge limit, a house that clearly uses more than the solar can only
@@ -888,11 +898,11 @@ class ControlManager:
         """
         handback = self._handback
         now = dt.now()
-        if self._charge_guard and self._reserve_guard:
+        if CHARGE in forbidden and DISCHARGE in forbidden:
             handback.take_back(now)
             return False
 
-        allowed = -1.0 if self._charge_guard else 1.0
+        allowed = -1.0 if CHARGE in forbidden else 1.0
         wanted = natural * allowed
 
         if not self._inverter_model.traits.guard_tracks_setpoints:
@@ -957,62 +967,63 @@ class ControlManager:
 
     def _desired_command(self, data: dict[str, Any]) -> Decision:
         """Decide what to send for the selected mode; plans.py says what each runs."""
-        if self._plan_state.mode is not self._feature or not self._enabled:
-            self._plan_state = PlanState(self._feature)
-            self._guard_holding = None
+        if self._mode_state.feature is not self._feature or not self._enabled:
+            self._mode_state = ModeState(self._feature)
+            self._stopped = None
         if not self._enabled:
             return Decision(ControlFeature.AUTOMATIC, 0.0)
 
-        plan = self._plan_state.plan
+        mode = self._mode_state.mode
         power = self._mode_power(data)
         surplus = self._natural_battery_power(data)
-        command = self._adapt(data, surplus, power) if plan.adapts else plan.default
-        return self._carry_out(plan, command, surplus, power, data)
+        step = self._choose_step(mode, data, surplus, power)
+        return self._carry_out(mode, step, surplus, power, data)
 
-    def _adapt(
-        self, data: dict[str, Any], surplus: float | None, limit: float | None
-    ) -> ControlFeature:
-        """Return the command an adapting mode runs for the surplus now."""
+    def _choose_step(
+        self,
+        mode: Mode,
+        data: dict[str, Any],
+        surplus: float | None,
+        limit: float | None,
+    ) -> Step:
+        if not mode.adapts:
+            return mode.deficit
         soc = data.get("battery_soc")
-        battery_full = soc is not None and float(soc) >= BATTERY_FULL_SOC
-        # An adapting mode only decides where a surplus goes. A full battery takes
-        # none of it, and under the Charge Limit none may go into the battery, which
-        # Automatic under that guard already ensures.
-        if battery_full or self._charge_guard or limit is None:
-            surplus = None
-        return self._plan_state.choose(
-            surplus, limit or 0.0, dt.now(), GUARD_POWER_DEADBAND_W
+        return self._mode_state.choose(
+            surplus,
+            limit,
+            dt.now(),
+            GUARD_POWER_DEADBAND_W,
+            battery_full=soc is not None and float(soc) >= BATTERY_FULL_SOC,
         )
 
     def _carry_out(
         self,
-        plan: Plan,
-        command: ControlFeature,
+        mode: Mode,
+        step: Step,
         surplus: float | None,
         power: float | None,
         data: dict[str, Any],
     ) -> Decision:
-        """Send *command*, holding the battery where a guard forbids what it does."""
+        """Send *step*, holding the battery wherever it would move a forbidden way."""
+        command = step.command
+        forbidden = self._forbidden_ways(step)
         guard = self._engaged_guard()
 
-        if command is ControlFeature.AUTOMATIC:
-            self._guard_holding = None
-            if guard is not None:
-                # The inverter has no Automatic that only goes one way, so under a
-                # guard it is reproduced on the battery setpoint.
-                return self._guarded_command(data, guard)
-            status = ControlStatus.AUTOMATIC if plan.adapts else None
-            return Decision(command, 0.0, status, bypass_dwell=plan.adapts)
+        if command is ControlFeature.AUTOMATIC and guard is not None:
+            # The inverter has no Automatic that only goes one way, so under a guard
+            # it is reproduced on the battery setpoint. That rewrites the setpoint as
+            # the house changes, which a guard near its limit can afford but a mode
+            # running all day cannot, so a step's own never holds instead, below.
+            self._stopped = None
+            return self._one_way_automatic(data, frozenset(forbidden), guard)
 
         if command is ControlFeature.HOLD_BATTERY:
-            self._guard_holding = None
-            if not plan.adapts:
+            self._stopped = None
+            if not mode.adapts:
                 return self._hold(data, None)
             return Decision(
-                command,
-                HOLD_SETPOINT_W,
-                guard or plan.hold_status,
-                bypass_dwell=True,
+                command, HOLD_SETPOINT_W, guard or step.status, bypass_dwell=True
             )
 
         power = power or 0.0
@@ -1022,15 +1033,31 @@ class ControlManager:
         ):
             # The inverter reads a zero battery setpoint as no limit at all and runs
             # itself, guards or not.
-            self._guard_holding = None
+            self._stopped = None
             return self._hold(data, None)
 
-        self._guard_holding = self._guard_against(command, surplus, power)
-        if self._guard_holding is not None:
-            # A mode the user chose is stopped, never turned around.
-            return self._hold(data, self._guard_holding)
-        status = (guard or ControlStatus.ACTIVE) if plan.adapts else None
-        return Decision(command, power, status, bypass_dwell=plan.adapts)
+        way = self._forbidden_way_moved(step, surplus, power, forbidden)
+        self._stopped = None if way is None else (step, way)
+        if way is not None:
+            # A command is stopped, never turned around.
+            return self._hold(data, forbidden[way] or ControlStatus.ACTIVE)
+
+        if command is ControlFeature.AUTOMATIC:
+            status = ControlStatus.AUTOMATIC if mode.adapts else None
+            return Decision(command, 0.0, status, bypass_dwell=mode.adapts)
+        status = (guard or ControlStatus.ACTIVE) if mode.adapts else None
+        return Decision(command, power, status, bypass_dwell=mode.adapts)
+
+    def _forbidden_ways(self, step: Step) -> dict[Way, ControlStatus | None]:
+        """Return the ways the battery may not move, each with the status to show."""
+        forbidden: dict[Way, ControlStatus | None] = {}
+        if step.never is not None:
+            forbidden[step.never] = step.status
+        if self._charge_guard:
+            forbidden[CHARGE] = ControlStatus.CHARGE_LIMIT_REACHED
+        if self._reserve_guard:
+            forbidden[DISCHARGE] = ControlStatus.RESERVE_REACHED
+        return forbidden
 
     def _mode_power(self, data: dict[str, Any]) -> float | None:
         """Return the selected mode's power, which an adapting mode uses as its limit.
@@ -1052,28 +1079,28 @@ class ControlManager:
             return ControlStatus.RESERVE_REACHED
         return None
 
-    def _guard_against(
-        self, command: ControlFeature, surplus: float | None, power: float
-    ) -> ControlStatus | None:
-        """Return the guard *command* would breach, if any."""
-        battery = battery_power(command, surplus, power)
-        # Export and Import move the battery with the surplus, so near their turning
-        # point a guard would stop and release them every poll. They get a deadband
-        # before they are stopped, then stay stopped until they would not breach.
-        moves_with_surplus = battery_power(command, None, power) is None
+    def _forbidden_way_moved(
+        self,
+        step: Step,
+        surplus: float | None,
+        power: float,
+        forbidden: dict[Way, ControlStatus | None],
+    ) -> Way | None:
+        """Return the forbidden way *step* would move the battery, if any."""
+        battery = battery_power(step.command, surplus, power)
         if battery is None:
-            return self._engaged_guard()
-        for status, engaged, forbidden_w in (
-            (ControlStatus.CHARGE_LIMIT_REACHED, self._charge_guard, battery),
-            (ControlStatus.RESERVE_REACHED, self._reserve_guard, -battery),
-        ):
-            margin = (
-                GUARD_POWER_DEADBAND_W
-                if moves_with_surplus and self._guard_holding is not status
-                else 0.0
-            )
-            if engaged and forbidden_w > margin:
-                return status
+            return next((way for way in (CHARGE, DISCHARGE) if way in forbidden), None)
+        for way, watts in ((CHARGE, battery), (DISCHARGE, -battery)):
+            if way not in forbidden:
+                continue
+            # Automatic, Export and Import move the battery with the surplus, so near
+            # their turning point they would be stopped and released every poll.
+            # Stopped from the first watt, they are released only once clearly clear.
+            if self._stopped == (step, way):
+                if watts > -GUARD_POWER_DEADBAND_W:
+                    return way
+            elif watts > 0.0:
+                return way
         return None
 
     def _solar_export_target(self, data: dict[str, Any]) -> float | None:
@@ -1161,15 +1188,17 @@ class ControlManager:
         data = self._data
         self._expire_command()
         self._update_guards(data)
-        if not (self._charge_guard or self._reserve_guard):
-            self._handback = GuardHandback()
 
         # A lapsed window hands the inverter back to its app settings, so the command
         # is sent again rather than assumed to have survived.
         if self._enabled and not self.in_control:
             self._control_stale = True
 
+        self._one_way_ran = False
         decision = self._desired_command(data)
+        if not self._one_way_ran:
+            self._handback = GuardHandback()
+            self._handback_for = frozenset()
         feature, power = decision.feature, decision.power
         changed = (feature, round(power)) != (
             self._commanded_feature,

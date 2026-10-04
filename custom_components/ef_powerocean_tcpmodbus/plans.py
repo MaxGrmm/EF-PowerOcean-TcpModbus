@@ -1,83 +1,171 @@
-"""How each Battery Mode picks the inverter command to run.
+"""The Battery Modes: what each one runs, depending on the solar surplus.
 
-Most modes run one command all the time. Export Solar First adapts to the solar
-surplus, which is solar power minus house load and negative when the house uses
-more:
+The surplus is solar power minus house load, negative when the house needs more.
+A mode can run something different in each of four zones:
 
-- below zero it runs Automatic, so the battery covers the house;
-- under the Solar Export Limit it holds the battery, so all of the surplus is
-  exported;
-- at the limit it runs Export to Grid, so the battery only takes what is above it.
+    deficit_above_limit   the house needs more than the solar, by more than the limit
+    deficit               the house needs more than the solar
+    surplus               there is spare solar
+    surplus_above_limit   there is more spare solar than the limit
 
-Two things keep it from switching back and forth: a zone is only left once the
-surplus is clearly outside it, and a command left within a minute of switching to
-it is not used again for a minute, then two, and so on.
+The limit is the mode's power setting. A zone left out runs the same as its
+neighbour closer to zero, and ``always`` runs one thing in every zone.
+
+What runs is one of the inverter's commands. It can also say ``never`` charge or
+discharge the battery, which then holds whenever the command would move it that
+way, just as the guards do.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
+from typing import Final
 
 from .const import GUARD_HANDBACK_MAX_S, GUARD_HANDBACK_S
 from .models import ControlFeature, ControlStatus
 
 
-class Zone(Enum):
-    """Where the surplus stands against zero and the mode's limit."""
+class Way(Enum):
+    """A way the battery can move."""
 
-    DEFICIT = auto()
-    SURPLUS = auto()
-    AT_LIMIT = auto()
+    CHARGE = auto()
+    DISCHARGE = auto()
+
+
+CHARGE: Final = Way.CHARGE
+DISCHARGE: Final = Way.DISCHARGE
 
 
 @dataclass(frozen=True)
-class Plan:
-    """The command a mode runs in each zone. A deficit always runs the default."""
+class Step:
+    """An inverter command, optionally forbidding the battery one way."""
 
-    default: ControlFeature
-    surplus: ControlFeature | None = None
-    at_limit: ControlFeature | None = None
-    # Holding is how Export Solar First exports, so it gets its own status rather
-    # than looking like a guard.
-    hold_status: ControlStatus | None = None
+    command: ControlFeature
+    never: Way | None = None
+    # Shown while never holds the battery, which the command alone would not explain.
+    status: ControlStatus | None = None
+
+
+def automatic(*, never: Way | None = None, status: ControlStatus | None = None) -> Step:
+    """The inverter's own self-consumption."""
+    return Step(ControlFeature.AUTOMATIC, never, status)
+
+
+def hold_battery() -> Step:
+    """The battery idles; the grid takes or covers the rest."""
+    return Step(ControlFeature.HOLD_BATTERY)
+
+
+def charge_battery() -> Step:
+    """The battery charges at the mode's power."""
+    return Step(ControlFeature.CHARGE_BATTERY)
+
+
+def discharge_battery() -> Step:
+    """The battery discharges at the mode's power."""
+    return Step(ControlFeature.DISCHARGE_BATTERY)
+
+
+def export_to_grid() -> Step:
+    """The grid export is fixed at the mode's power; the battery takes or covers
+    the difference."""
+    return Step(ControlFeature.EXPORT_TO_GRID)
+
+
+def import_from_grid() -> Step:
+    """The grid import is fixed at the mode's power; the battery takes or covers
+    the difference."""
+    return Step(ControlFeature.IMPORT_FROM_GRID)
+
+
+class Zone(Enum):
+    """Where the surplus stands against zero and the mode's limit."""
+
+    DEFICIT_ABOVE_LIMIT = auto()
+    DEFICIT = auto()
+    SURPLUS = auto()
+    SURPLUS_ABOVE_LIMIT = auto()
+
+    @property
+    def is_surplus(self) -> bool:
+        return self in (Zone.SURPLUS, Zone.SURPLUS_ABOVE_LIMIT)
+
+
+@dataclass(frozen=True)
+class Mode:
+    """What a mode runs in each zone; see the module docstring."""
+
+    deficit: Step
+    surplus: Step | None = None
+    surplus_above_limit: Step | None = None
+    deficit_above_limit: Step | None = None
 
     @property
     def adapts(self) -> bool:
-        return self.surplus is not None or self.at_limit is not None
+        return (
+            self.surplus is not None
+            or self.surplus_above_limit is not None
+            or self.deficit_above_limit is not None
+        )
 
-    def command_for(self, zone: Zone) -> ControlFeature:
-        if zone is Zone.SURPLUS and self.surplus is not None:
-            return self.surplus
-        if zone is Zone.AT_LIMIT and self.at_limit is not None:
-            return self.at_limit
-        return self.default
+    @property
+    def uses_limit(self) -> bool:
+        return (
+            self.surplus_above_limit is not None or self.deficit_above_limit is not None
+        )
+
+    def step_for(self, zone: Zone) -> Step:
+        surplus = self.surplus or self.deficit
+        match zone:
+            case Zone.DEFICIT_ABOVE_LIMIT:
+                return self.deficit_above_limit or self.deficit
+            case Zone.SURPLUS:
+                return surplus
+            case Zone.SURPLUS_ABOVE_LIMIT:
+                return self.surplus_above_limit or surplus
+        return self.deficit
 
 
-EXPORT_SOLAR_FIRST_PLAN = Plan(
-    default=ControlFeature.AUTOMATIC,
-    surplus=ControlFeature.HOLD_BATTERY,
-    at_limit=ControlFeature.EXPORT_TO_GRID,
-    hold_status=ControlStatus.BELOW_SOLAR_EXPORT_LIMIT,
-)
+def always(step: Step) -> Mode:
+    return Mode(deficit=step)
 
 
-def plan_for(mode: ControlFeature) -> Plan:
-    if mode is ControlFeature.EXPORT_SOLAR_FIRST:
-        return EXPORT_SOLAR_FIRST_PLAN
-    return Plan(default=mode)
+MODES: Final[dict[ControlFeature, Mode]] = {
+    ControlFeature.AUTOMATIC: always(automatic()),
+    ControlFeature.HOLD_BATTERY: always(hold_battery()),
+    ControlFeature.CHARGE_BATTERY: always(charge_battery()),
+    ControlFeature.DISCHARGE_BATTERY: always(discharge_battery()),
+    ControlFeature.EXPORT_TO_GRID: always(export_to_grid()),
+    ControlFeature.IMPORT_FROM_GRID: always(import_from_grid()),
+    ControlFeature.EXPORT_SOLAR_FIRST: Mode(
+        deficit=automatic(),
+        # Under the limit the battery may not take the surplus, so all of it is
+        # exported.
+        surplus=automatic(never=CHARGE, status=ControlStatus.BELOW_SOLAR_EXPORT_LIMIT),
+        # Above it the export is fixed at the limit, and the battery stores the rest.
+        surplus_above_limit=export_to_grid(),
+    ),
+}
 
 
 def zone_for(surplus: float, limit: float, current: Zone, deadband: float) -> Zone:
     """Return the zone *surplus* is in, leaving *current* only once clearly outside.
 
-    The limit is reached at the limit itself, because at the device's export cap
-    the solar is curtailed and the surplus reads no higher than the cap.
+    A limit is reached at the limit itself, because at the device's export cap the
+    solar is curtailed and the surplus reads no higher than the cap.
     """
-    if surplus >= limit or (current is Zone.AT_LIMIT and surplus >= limit - deadband):
-        return Zone.AT_LIMIT
-    if surplus < -deadband or (current is Zone.DEFICIT and surplus <= deadband):
+    if surplus >= limit or (
+        current is Zone.SURPLUS_ABOVE_LIMIT and surplus >= limit - deadband
+    ):
+        return Zone.SURPLUS_ABOVE_LIMIT
+    if surplus <= -limit or (
+        current is Zone.DEFICIT_ABOVE_LIMIT and surplus <= -limit + deadband
+    ):
+        return Zone.DEFICIT_ABOVE_LIMIT
+    if surplus < -deadband or (not current.is_surplus and surplus <= deadband):
         return Zone.DEFICIT
     return Zone.SURPLUS
 
@@ -107,53 +195,65 @@ def battery_power(
 
 
 @dataclass
-class PlanState:
-    """The command a mode is running, and how long each other command must wait."""
+class ModeState:
+    """The zone and step a mode is in, and how long each step must wait."""
 
-    mode: ControlFeature
+    feature: ControlFeature
     zone: Zone = Zone.DEFICIT
-    command: ControlFeature = field(init=False)
+    step: Step = field(init=False)
     since: datetime | None = None
-    _cooldown_s: dict[ControlFeature, float] = field(default_factory=dict)
-    _left_at: dict[ControlFeature, datetime] = field(default_factory=dict)
+    _cooldown_s: dict[Step, float] = field(default_factory=dict)
+    _left_at: dict[Step, datetime] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.command = self.plan.default
+        self.step = self.mode.deficit
 
     @property
-    def plan(self) -> Plan:
-        return plan_for(self.mode)
+    def mode(self) -> Mode:
+        return MODES[self.feature]
 
     def choose(
-        self, surplus: float | None, limit: float, now: datetime, deadband: float
-    ) -> ControlFeature:
-        """Return and remember the command for *surplus*; None runs the default."""
-        zone = (
-            Zone.DEFICIT
-            if surplus is None
-            else zone_for(surplus, limit, self.zone, deadband)
-        )
-        command = self.plan.command_for(zone)
-        if command is not self.command and not self._may_switch_to(command, now):
+        self,
+        surplus: float | None,
+        limit: float | None,
+        now: datetime,
+        deadband: float,
+        *,
+        battery_full: bool = False,
+    ) -> Step:
+        """Return and remember the step to run for *surplus*."""
+        mode = self.mode
+        if surplus is None or (mode.uses_limit and limit is None):
+            zone = Zone.DEFICIT
+        else:
+            zone = zone_for(
+                surplus, math.inf if limit is None else limit, self.zone, deadband
+            )
+            if battery_full and zone.is_surplus:
+                # A full battery takes none of a surplus, so there is nothing to
+                # decide about it.
+                zone = Zone.DEFICIT
+        step = mode.step_for(zone)
+        if step != self.step and not self._may_switch_to(step, now):
             # Waiting out a cooldown counts as a deficit, so the mode switches again
             # only once the surplus is clearly above zero.
-            zone, command = Zone.DEFICIT, self.plan.default
+            zone, step = Zone.DEFICIT, mode.deficit
         self.zone = zone
-        self._switch_to(command, now)
-        return command
+        self._switch_to(step, now)
+        return step
 
-    def _may_switch_to(self, command: ControlFeature, now: datetime) -> bool:
-        left_at = self._left_at.get(command)
+    def _may_switch_to(self, step: Step, now: datetime) -> bool:
+        left_at = self._left_at.get(step)
         if left_at is None:
             return True
-        return (now - left_at).total_seconds() >= self._cooldown_s.get(command, 0.0)
+        return (now - left_at).total_seconds() >= self._cooldown_s.get(step, 0.0)
 
-    def _switch_to(self, command: ControlFeature, now: datetime) -> None:
-        if command is self.command:
+    def _switch_to(self, step: Step, now: datetime) -> None:
+        if step == self.step:
             return
-        leaving = self.command
-        if leaving is not self.plan.default and self.since is not None:
-            # Each switch rewrites the inverter's method, so a command that lasted
+        leaving = self.step
+        if leaving != self.mode.deficit and self.since is not None:
+            # Each switch rewrites the inverter's method, so a step that lasted
             # under a minute waits twice as long as last time before it is used again.
             lasted = (now - self.since).total_seconds()
             previous = self._cooldown_s.get(leaving, 0.0)
@@ -163,5 +263,5 @@ class PlanState:
                 else 0.0
             )
             self._left_at[leaving] = now
-        self.command = command
+        self.step = step
         self.since = now
