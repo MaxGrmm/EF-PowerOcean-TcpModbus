@@ -12,6 +12,7 @@
 - Export solar first no longer charges the battery past the Charge Limit when solar hovers around the house load.
 - Export to grid and Import from grid respect the Charge Limit and Battery Reserve whichever way they move the battery, and are stopped from the first watt rather than after 200 W.
 - Charge battery and Discharge battery at 0 W hold the battery instead of running as Automatic past the guards.
+- HACS now installs from the release zip asset, so GitHub tracks download counts. The zip contains the integration files at its root, as HACS expects.
 
 ## [2.8.0] - 2026-10-04
 
