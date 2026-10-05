@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Added the Ocean 2 Plus Single Phase
 - Export solar first under the Battery Reserve can charge from a surplus while it waits to switch, as Automatic does, instead of always holding.
 - Export solar first keeps its wait between switches through a full battery or a reached Charge Limit.
 
