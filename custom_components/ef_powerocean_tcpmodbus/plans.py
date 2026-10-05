@@ -14,6 +14,8 @@ neighbour closer to zero, and ``always`` runs one thing in every zone.
 What runs is one of the inverter's commands. It can also say ``never`` charge or
 discharge the battery, which then holds whenever the command would move it that
 way, just as the guards do.
+
+The per-feature plans are defined in ``MODES`` below.
 """
 
 from __future__ import annotations
@@ -133,6 +135,7 @@ def always(step: Step) -> Mode:
     return Mode(deficit=step)
 
 
+# Mode definitions
 MODES: Final[dict[ControlFeature, Mode]] = {
     ControlFeature.AUTOMATIC: always(automatic()),
     ControlFeature.HOLD_BATTERY: always(hold_battery()),
