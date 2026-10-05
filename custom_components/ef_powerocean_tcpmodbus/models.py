@@ -108,6 +108,7 @@ class InverterModel(StrEnum):
     # already store, so its value stays as it is.
     OCEAN_2_THREE_PHASE = "ocean_2"
     OCEAN_2_SINGLE_PHASE = "ocean_2_single_phase"
+    OCEAN_2_PLUS_SINGLE_PHASE = "ocean_2_plus_single_phase"
 
     @property
     def traits(self) -> ModelTraits:
@@ -178,10 +179,6 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         energy_in_watt_hours=True,
         rejects_unimplemented=True,
     ),
-    # Nobody has scanned one yet, so this entry follows the three-phase Ocean 2:
-    # same product number, same Modbus dialect, phase told apart by the category.
-    # A single-phase Ocean 2 on older firmware has been seen reporting number 2
-    # instead, which is the PowerOcean single phase above and reads like it.
     InverterModel.OCEAN_2_SINGLE_PHASE: ModelTraits(
         "Ocean 2 Single Phase",
         # No startup voltage is published; the PowerOcean single phase figure
@@ -192,6 +189,18 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         max_register_gap=0,
         rejects_unimplemented=True,
         guard_tracks_setpoints=False,
+    ),
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1789469573432/EcoFlow%20OCEAN%202%20Plus%20Single-Phase_Datasheet_EN.pdf
+    InverterModel.OCEAN_2_PLUS_SINGLE_PHASE: ModelTraits(
+        "Ocean 2 Plus Single Phase",
+        # No startup voltage is published; the PowerOcean single phase figure
+        # stands in until someone with the device reports a better one.
+        startup_voltage=120,
+        product_ids=(ProductId(4, ProductCategory.SINGLE_PHASE),),
+        high_word_first=True,
+        max_register_gap=0,
+        rejects_unimplemented=True,
+        guard_tracks_setpoints=True,
     ),
 }
 
