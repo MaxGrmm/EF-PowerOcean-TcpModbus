@@ -122,7 +122,7 @@ The main blocks are the following:
 | Faults      | 42049 | 45    | Fault count and codes, per-battery SOC |
 | Energy      | 42161 | 100   | Lifetime and daily energy counters\*   |
 
-\* In kWh, except on the three-phase Ocean 2, which reports them in Wh
+\* In kWh, except on the three-phase Ocean 2 and the single-phase Ocean 2 Plus, which report them in Wh
 (`energy_in_watt_hours` in the model traits). Over 22 minutes its solar-today
 counter rose by 189 while the solar power register averaged 517 W, which
 integrates to 190 Wh.

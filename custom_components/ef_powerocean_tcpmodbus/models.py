@@ -88,6 +88,9 @@ class ModelTraits:
     # hands back to the inverter's own self-consumption whenever power flows the
     # way the guard allows.
     guard_tracks_setpoints: bool = True
+    # Raised when a fix changes how energy counters are read, which resets using the
+    # inverters own energy state.
+    energy_state_revision: int = 0
 
     def identifies(
         self, product_number: int | None, product_category: int | None
@@ -194,11 +197,14 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
     InverterModel.OCEAN_2_PLUS_SINGLE_PHASE: ModelTraits(
         "Ocean 2 Plus Single Phase",
         startup_voltage=120,
-        product_ids=(ProductId(4, ProductCategory.SINGLE_PHASE),),
+        product_ids=(ProductId(5, ProductCategory.SINGLE_PHASE),),
         high_word_first=True,
         max_register_gap=0,
+        energy_in_watt_hours=True,
         rejects_unimplemented=True,
         guard_tracks_setpoints=True,
+        # Fixes energy counters stored in kW before this fix
+        energy_state_revision=1,
     ),
 }
 

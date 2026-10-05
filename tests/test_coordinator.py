@@ -180,6 +180,81 @@ def test_persisted_state_round_trips(coordinator) -> None:
     )
 
 
+@pytest.mark.parametrize("model", list(models.InverterModel))
+def test_state_saved_at_the_current_revision_is_kept(coordinator, model) -> None:
+    coordinator.inverter_model = model
+    coordinator._last_checked_data = {"grid_import_total": 12.5}
+    coordinator._energy_processor.daily_snapshots = {"grid_import_today": 10.0}
+    stored = coordinator._persisted_state()
+    coordinator._last_checked_data = {}
+    coordinator._energy_processor.daily_snapshots = {}
+    coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
+
+    asyncio.run(coordinator.async_load_persisted_state())
+
+    assert coordinator._last_checked_data == {"grid_import_total": 12.5}
+    assert coordinator._energy_processor.daily_snapshots == {"grid_import_today": 10.0}
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        model
+        for model in models.InverterModel
+        if model.traits.energy_state_revision == 0
+    ],
+)
+def test_state_saved_without_a_revision_is_kept(coordinator, model) -> None:
+    coordinator.inverter_model = model
+    stored = {
+        "last_checked_data": {"grid_import_total": 12.5},
+        "daily_energy_snapshots": {"grid_import_today": 10.0},
+    }
+    coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
+
+    asyncio.run(coordinator.async_load_persisted_state())
+
+    assert coordinator._last_checked_data == {"grid_import_total": 12.5}
+    assert coordinator._energy_processor.daily_snapshots == {"grid_import_today": 10.0}
+
+
+def test_ocean_2_plus_energy_state_from_beta_2_is_dropped(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Counters 1000x too large would read as a decrease and be held forever."""
+    coordinator.inverter_model = models.InverterModel.OCEAN_2_PLUS_SINGLE_PHASE
+    coordinator.control._battery_saver = True
+    stored = {
+        **coordinator._persisted_state(),
+        "last_checked_data": {"grid_import_total": 12500.0},
+        "last_checked_time": "2026-08-07T12:00:00+00:00",
+        "daily_energy_snapshots": {"grid_import_today": 10000.0},
+    }
+    del stored["energy_state_revision"]
+    coordinator.control._battery_saver = False
+    coordinator._store = SimpleNamespace(
+        async_load=AsyncMock(return_value=stored), async_delay_save=Mock()
+    )
+
+    asyncio.run(coordinator.async_load_persisted_state())
+
+    assert coordinator._last_checked_data == {}
+    assert coordinator._last_checked_time is None
+    assert coordinator._energy_processor.daily_snapshots == {}
+    assert coordinator.control.battery_saver_commanded is True
+
+    # Today's energy so far comes back from the device's own daily counter.
+    result = run_update(
+        coordinator,
+        {"grid_import_total": 12.5, "grid_import_today": 2.5},
+        datetime(2026, 8, 7, 12, 5, tzinfo=timezone.utc),
+        monkeypatch,
+    )
+
+    assert result["grid_import_total"] == 12.5
+    assert result["grid_import_today"] == 2.5
+
+
 def test_control_state_is_persisted_with_the_coordinators(coordinator) -> None:
     """The manager owns the values; the coordinator only carries them to the store."""
     coordinator.control._battery_saver = True

@@ -213,6 +213,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def _persisted_state(self) -> dict[str, Any]:
         """Return the state in a JSON-serializable form."""
         return {
+            "energy_state_revision": self.inverter_model.traits.energy_state_revision,
             "last_checked_data": self._last_checked_data,
             "last_checked_time": self._last_checked_time.isoformat()
             if self._last_checked_time is not None
@@ -226,9 +227,18 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         if self._store is None or (stored := await self._store.async_load()) is None:
             return
 
+        self.control.load_state(stored)
+
+        revision = self.inverter_model.traits.energy_state_revision
+        if stored.get("energy_state_revision", 0) != revision:
+            _LOGGER.info(
+                "Saved energy counters predate a fix to how they are read; "
+                "starting them afresh."
+            )
+            return
+
         self._last_checked_data = stored.get("last_checked_data") or {}
         self._last_checked_time = parse_datetime(stored.get("last_checked_time"))
-        self.control.load_state(stored)
         self._energy_processor.load_state(stored)
 
     # ── Connection ────────────────────────────────────────────────────────────
