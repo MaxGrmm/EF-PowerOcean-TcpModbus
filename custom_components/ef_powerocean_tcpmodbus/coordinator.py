@@ -47,6 +47,8 @@ from .const import (
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MODBUS_DISABLED_READ_THRESHOLD,
+    PRODUCT_CATEGORY,
+    PRODUCT_NUMBER,
     SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
@@ -58,6 +60,7 @@ from .modbus import ModbusReadRejected, create_client
 from .models import (
     ControlFeature,
     CoordinatorStatus,
+    DeviceIdentity,
     InverterModel,
     NumberWritableDef,
     RegisterBlock,
@@ -130,10 +133,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=self.scan_interval),
         )
 
-        self.serial_number: str | None = None
-        self.firmware_version: str | None = None
-        self.protocol_version: int | None = None
-        self.device_address: int | None = None
+        self.identity = DeviceIdentity()
         self._last_inverter_temperature: float | None = None
         self._consecutive_modbus_disabled_reads = 0
         self._modbus_client = create_client(hass, config_entry, self.host, self.port)
@@ -254,20 +254,21 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         await self.async_read_device_info()
         _LOGGER.info(
-            f"Modbus TCP is connected to {self.host}:{self.port} (SN: {self.serial_number})"
+            f"Modbus TCP is connected to {self.host}:{self.port} (SN: {self.identity.serial_number})"
         )
 
     async def async_read_device_info(self) -> None:
-        """Populate the serial number and firmware version from the device.
+        """Populate the device identity from the device.
 
         Run on every connect, not only the first, because a firmware update reboots
         the inverter and drops the connection. A failed read keeps what an earlier
         one found and leaves the connection open; if it is dead, the poll finds out.
-        The product registers in the same block are left alone: the configured
-        model decides how the device is read.
+        The product registers are only kept for diagnostics: the configured model
+        decides how the device is read.
         """
-        if self.serial_number is None:
-            self.serial_number = "unknown"
+        identity = self.identity
+        if identity.serial_number is None:
+            identity.serial_number = "unknown"
 
         try:
             raw = await self._modbus_client.async_read(
@@ -282,14 +283,16 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
         registers_for = partial(DEVICE_INFO_BLOCK.registers_for, raw)
 
-        self.serial_number = (
+        identity.serial_number = (
             decode_serial_number(registers_for(SERIAL_NUMBER)) or "unknown"
         )
+        identity.product_number = registers_for(PRODUCT_NUMBER)[0]
+        identity.product_category = registers_for(PRODUCT_CATEGORY)[0]
 
         if firmware := decode_firmware_version(
             registers_for(FIRMWARE_VERSION), self.inverter_model.traits.high_word_first
         ):
-            self.firmware_version = firmware
+            identity.firmware_version = firmware
 
         await self._async_read_device_info_extra()
 
@@ -313,14 +316,14 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             )
             values[register.key] = int(value) if value is not None else None
 
-        self.protocol_version = values.get("protocol_version")
-        self.device_address = values.get("device_address")
+        self.identity.protocol_version = values.get("protocol_version")
+        self.identity.device_address = values.get("device_address")
 
     def _device_info_values(self) -> dict[str, Any]:
         """Return the values read on connect, in the form the sensors show."""
         return {
-            "protocol_version": self.protocol_version,
-            "device_address": self.device_address,
+            "protocol_version": self.identity.protocol_version,
+            "device_address": self.identity.device_address,
         }
 
     async def async_reconnect(self) -> bool:
@@ -348,7 +351,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 await self._async_read_block(register_block, data)
 
             if is_modbus_disabled(
-                self.serial_number,
+                self.identity.serial_number,
                 data.get("inverter_rated_power"),
                 data.get("limit_inv_max"),
             ):

@@ -34,12 +34,10 @@ def coordinator():
     )
     instance._status = None
     instance._store = None
-    instance.serial_number = None
+    instance.identity = models.DeviceIdentity()
     instance._consecutive_modbus_disabled_reads = 0
     instance._ena_calc_solar_power = False
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
-    instance.protocol_version = None
-    instance.device_address = None
     instance._register_blocks = const.register_blocks_for(instance.inverter_model)
     instance._registers_by_key = {
         register.key: register
@@ -765,7 +763,7 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
     monkeypatch.setattr(coordinator_module, "decode_register", decode_register)
     coordinator._modbus_client.connected = True
     coordinator._modbus_client.async_read = AsyncMock(return_value=[0, 0, 0])
-    coordinator.serial_number = "R123456789"
+    coordinator.identity.serial_number = "R123456789"
 
     for _ in range(const.MODBUS_DISABLED_READ_THRESHOLD - 1):
         asyncio.run(coordinator.async_get_raw_data())
@@ -920,7 +918,6 @@ def _device_info_registers(
 
 
 def test_reads_the_device_info_block_then_the_extra_registers(coordinator) -> None:
-    coordinator.firmware_version = None
     coordinator.inverter_model = models.InverterModel.POWEROCEAN_PLUS
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=[_device_info_registers(), [0x0001], [1]]
@@ -928,10 +925,14 @@ def test_reads_the_device_info_block_then_the_extra_registers(coordinator) -> No
 
     asyncio.run(coordinator.async_read_device_info())
 
-    assert coordinator.serial_number == "R371ZD1AZH3X0450"
-    assert coordinator.firmware_version == "3.0.19.19"
-    assert coordinator.protocol_version == 0x0001
-    assert coordinator.device_address == 1
+    assert coordinator.identity == models.DeviceIdentity(
+        serial_number="R371ZD1AZH3X0450",
+        firmware_version="3.0.19.19",
+        product_number=3,
+        product_category=1,
+        protocol_version=0x0001,
+        device_address=1,
+    )
     # The block first, then the protocol version and device address on their own.
     reads = coordinator._modbus_client.async_read.await_args_list
     assert [call.args for call in reads] == [(40002, 12), (40001, 1), (40014, 1)]
@@ -942,13 +943,12 @@ def test_reads_device_info_of_a_three_phase_ocean_2(coordinator) -> None:
     registers = _device_info_registers(product_number=4, product_category=1)
     firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
     registers[firmware_index], registers[firmware_index + 1] = 0x0100, 0x034F
-    coordinator.firmware_version = None
     coordinator.inverter_model = models.InverterModel.OCEAN_2_THREE_PHASE
     coordinator._modbus_client.async_read = AsyncMock(return_value=registers)
 
     asyncio.run(coordinator.async_read_device_info())
 
-    assert coordinator.firmware_version == "1.0.3.79"
+    assert coordinator.identity.firmware_version == "1.0.3.79"
 
 
 def test_the_configured_model_decides_how_the_device_is_read(coordinator) -> None:
@@ -960,7 +960,6 @@ def test_the_configured_model_decides_how_the_device_is_read(coordinator) -> Non
     registers = _device_info_registers(product_number=4, product_category=1)
     firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
     registers[firmware_index], registers[firmware_index + 1] = 0x034F, 0x0100
-    coordinator.firmware_version = None
     coordinator.inverter_model = models.InverterModel.POWEROCEAN_PLUS
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=[registers, [0x0100], [1]]
@@ -968,41 +967,39 @@ def test_the_configured_model_decides_how_the_device_is_read(coordinator) -> Non
 
     asyncio.run(coordinator.async_read_device_info())
 
-    assert coordinator.firmware_version == "1.0.3.79"
+    assert coordinator.identity.firmware_version == "1.0.3.79"
 
 
 def test_a_failed_device_info_read_leaves_the_connection_to_the_poll(
     coordinator,
 ) -> None:
     """It runs on every reconnect, so closing here would fail the poll after it."""
-    coordinator.firmware_version = None
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=coordinator_module.ModbusException("boom")
     )
 
     asyncio.run(coordinator.async_read_device_info())
 
-    assert coordinator.serial_number == "unknown"
+    assert coordinator.identity.serial_number == "unknown"
     coordinator._modbus_client.close.assert_not_called()
 
 
 def test_a_failed_device_info_read_keeps_what_was_known(coordinator) -> None:
-    coordinator.serial_number = "R371ZD1AZH3X0450"
-    coordinator.firmware_version = "3.0.19.19"
+    coordinator.identity.serial_number = "R371ZD1AZH3X0450"
+    coordinator.identity.firmware_version = "3.0.19.19"
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=coordinator_module.ModbusException("timeout")
     )
 
     asyncio.run(coordinator.async_read_device_info())
 
-    assert coordinator.serial_number == "R371ZD1AZH3X0450"
-    assert coordinator.firmware_version == "3.0.19.19"
+    assert coordinator.identity.serial_number == "R371ZD1AZH3X0450"
+    assert coordinator.identity.firmware_version == "3.0.19.19"
 
 
 def test_a_refused_protocol_version_leaves_the_rest_of_the_device_info(
     coordinator,
 ) -> None:
-    coordinator.firmware_version = None
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=[
             _device_info_registers(),
@@ -1013,8 +1010,8 @@ def test_a_refused_protocol_version_leaves_the_rest_of_the_device_info(
 
     asyncio.run(coordinator.async_read_device_info())
 
-    assert coordinator.serial_number == "R371ZD1AZH3X0450"
-    assert coordinator.protocol_version is None
+    assert coordinator.identity.serial_number == "R371ZD1AZH3X0450"
+    assert coordinator.identity.protocol_version is None
     assert coordinator._device_info_values() == {
         "protocol_version": None,
         "device_address": 1,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -38,20 +39,16 @@ async def async_get_config_entry_diagnostics(
     """Return diagnostics for a config entry."""
     coordinator: EcoflowCoordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
 
-    serial_number = coordinator.serial_number
-
-    if serial_number != "unknown":
-        serial_number = serial_number[:4]
+    identity = asdict(coordinator.identity)
+    if identity["serial_number"] not in (None, "unknown"):
+        identity["serial_number"] = identity["serial_number"][:4]
 
     return async_redact_data(
         {
             "entry": entry.as_dict(),
             "domain": DOMAIN,
-            "serial_number": serial_number,
-            "firmware_version": coordinator.firmware_version,
             "inverter_model": coordinator.inverter_model,
-            "protocol_version": coordinator.protocol_version,
-            "device_address": coordinator.device_address,
+            **identity,
             "pymodbus": coordinator.get_pymodbus_version(),
             "modbus_connection": "shared" if SHARED_CONNECTION else "own",
             "heartbeat_supported": coordinator.control.heartbeat_supported,
