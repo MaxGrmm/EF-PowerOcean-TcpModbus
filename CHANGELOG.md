@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- HACS now installs from the release zip asset, so GitHub tracks download counts. The zip contains the integration files at its root, as HACS expects.
 - Export solar first no longer charges the battery past the Battery Charge Limit when solar hovers around the house load.
 
 ## [2.8.0] - 2026-10-04

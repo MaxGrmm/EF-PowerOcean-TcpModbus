@@ -1,5 +1,7 @@
 {
   "name": "EF-PowerOcean-TcpModbus",
   "homeassistant": "2025.12.0",
-  "render_readme": true
+  "render_readme": true,
+  "zip_release": true,
+  "filename": "ef_powerocean_tcpmodbus.zip"
 }

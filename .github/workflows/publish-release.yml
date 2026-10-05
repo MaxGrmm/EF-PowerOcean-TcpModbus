@@ -25,7 +25,8 @@ jobs:
 
       - name: Package integration
         if: steps.notes.outputs.tag != ''
-        run: zip -r "$RUNNER_TEMP/ef_powerocean_tcpmodbus.zip" custom_components/ef_powerocean_tcpmodbus
+        working-directory: custom_components/ef_powerocean_tcpmodbus
+        run: zip -r "$RUNNER_TEMP/ef_powerocean_tcpmodbus.zip" . -x "__pycache__/*" "*/__pycache__/*"
 
       - name: Create GitHub release
         if: steps.notes.outputs.tag != ''
