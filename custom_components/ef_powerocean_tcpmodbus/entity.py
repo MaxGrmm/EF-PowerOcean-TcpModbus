@@ -45,11 +45,11 @@ class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
             "name": "EcoFlow PowerOcean",
             "manufacturer": "EcoFlow",
             "model": self.coordinator.inverter_model.traits.display_name,
-            "serial_number": self.coordinator.serial_number,
+            "serial_number": self.coordinator.identity.serial_number,
             "entry_type": DeviceEntryType.SERVICE,
         }
-        if self.coordinator.firmware_version:
-            info["sw_version"] = self.coordinator.firmware_version
+        if self.coordinator.identity.firmware_version:
+            info["sw_version"] = self.coordinator.identity.firmware_version
 
         return DeviceInfo(**info)
 

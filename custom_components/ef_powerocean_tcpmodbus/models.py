@@ -196,6 +196,18 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
 }
 
 
+@dataclass(slots=True)
+class DeviceIdentity:
+    """What the device reports about itself, read again on every connect."""
+
+    serial_number: str | None = None
+    firmware_version: str | None = None
+    product_number: int | None = None
+    product_category: int | None = None
+    protocol_version: int | None = None
+    device_address: int | None = None
+
+
 class CoordinatorStatus(StrEnum):
     SUCCESS = "success"
     READ_FAILED = "read_failed"
