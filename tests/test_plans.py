@@ -186,3 +186,40 @@ def test_a_deficit_beyond_the_limit_can_have_a_step_of_its_own() -> None:
     assert mode.uses_limit
     assert mode.step_for(Zone.DEFICIT_ABOVE_LIMIT) == import_from_grid()
     assert mode.step_for(Zone.SURPLUS) == hold_battery()
+
+
+def test_a_waiting_step_runs_its_neighbour_closer_to_zero() -> None:
+    """With 4.2 kW to spare while Export to Grid waits, the surplus is still kept
+    out of the battery rather than left to Automatic."""
+    mode = MODES[Feature.EXPORT_SOLAR_FIRST]
+    state = ModeState(Feature.EXPORT_SOLAR_FIRST)
+    at = lambda s: START + timedelta(seconds=s)  # noqa: E731
+    state.choose(300.0, LIMIT, at(0), DEADBAND)
+    state.choose(6000.0, LIMIT, at(400), DEADBAND)
+    # Back under the limit after 4 s, so Export to Grid waits a minute.
+    state.choose(5700.0, LIMIT, at(404), DEADBAND)
+
+    assert state.choose(6200.0, LIMIT, at(416), DEADBAND) == mode.surplus
+    assert state.zone is Zone.SURPLUS
+    assert state.choose(6200.0, LIMIT, at(463), DEADBAND) == mode.surplus
+    assert state.choose(6200.0, LIMIT, at(464), DEADBAND) == mode.surplus_above_limit
+
+
+def test_with_every_neighbour_waiting_the_deficit_step_runs() -> None:
+    mode = MODES[Feature.EXPORT_SOLAR_FIRST]
+    state = ModeState(Feature.EXPORT_SOLAR_FIRST)
+    at = lambda s: START + timedelta(seconds=s)  # noqa: E731
+    state.choose(300.0, LIMIT, at(0), DEADBAND)
+    state.choose(6000.0, LIMIT, at(10), DEADBAND)
+    # Export to Grid lasted 10 s and the surplus step before it 10 s, so both wait.
+    state.choose(-300.0, LIMIT, at(20), DEADBAND)
+
+    assert state.choose(6200.0, LIMIT, at(25), DEADBAND) == mode.deficit
+    assert state.zone is Zone.DEFICIT
+
+
+def test_closer_to_zero_ends_at_a_deficit() -> None:
+    assert Zone.SURPLUS_ABOVE_LIMIT.closer_to_zero() is Zone.SURPLUS
+    assert Zone.SURPLUS.closer_to_zero() is Zone.DEFICIT
+    assert Zone.DEFICIT_ABOVE_LIMIT.closer_to_zero() is Zone.DEFICIT
+    assert Zone.DEFICIT.closer_to_zero() is Zone.DEFICIT

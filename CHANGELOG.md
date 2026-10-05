@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Export solar first keeps exporting while it waits to switch back to Export to grid, instead of charging the battery under Automatic, unless the surplus is more than the grid can take.
 - Export solar first no longer charges the battery past the Charge Limit when solar hovers around the house load.
 - Export to grid and Import from grid respect the Charge Limit and Battery Reserve whichever way they move the battery, and are stopped from the first watt rather than after 200 W.
 - Charge battery and Discharge battery at 0 W hold the battery instead of running as Automatic past the guards.

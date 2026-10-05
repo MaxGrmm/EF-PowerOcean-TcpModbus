@@ -11,9 +11,13 @@ A mode can run something different in each of four zones:
 The limit is the mode's power setting. A zone left out runs the same as its
 neighbour closer to zero, and ``always`` runs one thing in every zone.
 
+A step left within a minute of switching to it waits a minute before it runs
+again, then two, and so on. Meanwhile its zone also runs like its neighbour
+closer to zero.
+
 What runs is one of the inverter's commands. It can also say ``never`` charge or
 discharge the battery, which then holds whenever the command would move it that
-way, just as the guards do.
+way, just as the guards do, unless holding could only curtail solar.
 
 The per-feature plans are defined in ``MODES`` below.
 """
@@ -94,6 +98,14 @@ class Zone(Enum):
     @property
     def is_surplus(self) -> bool:
         return self in (Zone.SURPLUS, Zone.SURPLUS_ABOVE_LIMIT)
+
+    def closer_to_zero(self) -> Zone:
+        match self:
+            case Zone.SURPLUS_ABOVE_LIMIT:
+                return Zone.SURPLUS
+            case Zone.SURPLUS | Zone.DEFICIT_ABOVE_LIMIT:
+                return Zone.DEFICIT
+        return Zone.DEFICIT
 
 
 @dataclass(frozen=True)
@@ -237,10 +249,10 @@ class ModeState:
                 # decide about it.
                 zone = Zone.DEFICIT
         step = mode.step_for(zone)
-        if step != self.step and not self._may_switch_to(step, now):
-            # Waiting out a cooldown counts as a deficit, so the mode switches again
-            # only once the surplus is clearly above zero.
-            zone, step = Zone.DEFICIT, mode.deficit
+        # The deficit step never waits, so this ends there at the latest.
+        while step != self.step and not self._may_switch_to(step, now):
+            zone = zone.closer_to_zero()
+            step = mode.step_for(zone)
         self.zone = zone
         self._switch_to(step, now)
         return step

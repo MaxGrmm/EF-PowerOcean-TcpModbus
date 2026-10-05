@@ -1037,6 +1037,14 @@ class ControlManager:
             return self._hold(data, None)
 
         way = self._forbidden_way_moved(step, surplus, power, forbidden)
+        if (
+            way is CHARGE
+            and not self._charge_guard
+            and self._grid_cannot_take(data, surplus)
+        ):
+            # A step's own never only keeps a surplus for the grid, so it gives way
+            # where holding could only curtail solar. A guard never does.
+            way = None
         self._stopped = None if way is None else (step, way)
         if way is not None:
             # A command is stopped, never turned around.
@@ -1058,6 +1066,14 @@ class ControlManager:
         if self._reserve_guard:
             forbidden[DISCHARGE] = ControlStatus.RESERVE_REACHED
         return forbidden
+
+    def _grid_cannot_take(self, data: dict[str, Any], surplus: float | None) -> bool:
+        """Return whether holding the battery would export more than the device lets
+        out, with the same margin Export Solar First keeps under the cap."""
+        device_limit = _device_export_limit(data)
+        if surplus is None or device_limit is None:
+            return False
+        return surplus > device_limit - SOLAR_EXPORT_CAP_MARGIN_W
 
     def _mode_power(self, data: dict[str, Any]) -> float | None:
         """Return the selected mode's power, which an adapting mode uses as its limit.
