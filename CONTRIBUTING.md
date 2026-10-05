@@ -102,6 +102,14 @@ Writable changes require confirmation against real hardware. A write response or
 
 Keep Modbus control opt-in and fail-safe. New control paths must respect control authority, existing command safety checks, configured power limits, and state-of-charge guards. Tests must cover rejection and failure paths as well as successful writes.
 
+### Battery Modes
+
+Each Battery Mode is one entry in `MODES` in [plans.py](custom_components/ef_powerocean_tcpmodbus/plans.py), saying what it runs depending on the solar surplus. The control manager carries out every mode by the same rules, guards included, so a new mode should not need changes there. Besides its entry, a new mode needs:
+
+- a `ControlFeature` value in [models.py](custom_components/ef_powerocean_tcpmodbus/models.py) and a `CONTROL_FEATURES` entry in [const.py](custom_components/ef_powerocean_tcpmodbus/const.py), with a `default_power` if it has a power setting;
+- its name in the translations and in the `mode` options of [services.yaml](custom_components/ef_powerocean_tcpmodbus/services.yaml);
+- a row in each outcome table in [test_control_behaviour.py](tests/test_control_behaviour.py), and in the mode table in [README.md](README.md).
+
 ### Entities and Translations
 
 When adding or changing an entity:

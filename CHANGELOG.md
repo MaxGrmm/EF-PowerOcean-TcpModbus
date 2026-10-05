@@ -2,10 +2,18 @@
 
 ## Unreleased
 
+### Changed
+
+- Export solar first under the Battery Reserve can charge from a surplus while it waits to switch, as Automatic does, instead of always holding.
+- Export solar first keeps its wait between switches through a full battery or a reached Charge Limit.
+
 ### Fixed
 
+- Export solar first keeps exporting while it waits to switch back to Export to grid, instead of charging the battery under Automatic, unless the surplus is more than the grid can take.
+- Export solar first no longer charges the battery past the Charge Limit when solar hovers around the house load.
+- Export to grid and Import from grid respect the Charge Limit and Battery Reserve whichever way they move the battery, and are stopped from the first watt rather than after 200 W.
+- Charge battery and Discharge battery at 0 W hold the battery instead of running as Automatic past the guards.
 - HACS now installs from the release zip asset, so GitHub tracks download counts. The zip contains the integration files at its root, as HACS expects.
-- Export solar first no longer charges the battery past the Battery Charge Limit when solar hovers around the house load.
 
 ## [2.8.0] - 2026-10-04
 

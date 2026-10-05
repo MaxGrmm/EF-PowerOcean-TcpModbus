@@ -29,7 +29,7 @@ from simulation import (
     select,
 )
 
-from custom_components.ef_powerocean_tcpmodbus import models
+from custom_components.ef_powerocean_tcpmodbus import const, models
 
 Feature = models.ControlFeature
 Status = models.ControlStatus
@@ -116,9 +116,7 @@ def test_each_mode_tells_the_inverter_its_command(mode: Feature, model: Model) -
 
 
 # What the battery and the grid do once each mode has settled: the battery charges,
-# discharges or idles, and the grid imports, exports or is balanced. A cell marked
-# with ! is what should happen but does not yet: the guards take Export to Grid as
-# only ever discharging and Import from Grid as only ever charging.
+# discharges or idles, and the grid imports, exports or is balanced.
 #                    deficit          heavy deficit    small surplus    large surplus
 OUTCOMES: Final = {
     "no guard": _table("""
@@ -135,8 +133,8 @@ automatic           discharges bal   discharges bal   idle exports     idle expo
 hold_battery        idle imports     idle imports     idle exports     idle exports
 charge_battery      idle imports     idle imports     idle exports     idle exports
 discharge_battery   discharges exports discharges imports discharges exports discharges exports
-export_to_grid      discharges exports discharges exports discharges exports idle exports!
-import_from_grid    idle imports     discharges imports! idle exports  idle exports
+export_to_grid      discharges exports discharges exports discharges exports idle exports
+import_from_grid    idle imports     discharges imports idle exports  idle exports
 export_solar_first  discharges bal   discharges bal   idle exports     idle exports
 """),
     "reserve": _table("""
@@ -144,8 +142,8 @@ automatic           idle imports     idle imports     charges bal      charges e
 hold_battery        idle imports     idle imports     idle exports     idle exports
 charge_battery      charges imports  charges imports  charges bal      charges exports
 discharge_battery   idle imports     idle imports     idle exports     idle exports
-export_to_grid      idle imports     idle imports     idle exports     charges exports!
-import_from_grid    charges imports  idle imports!    charges imports  charges exports
+export_to_grid      idle imports     idle imports     idle exports     charges exports
+import_from_grid    charges imports  idle imports    charges imports  charges exports
 export_solar_first  idle imports     idle imports     idle exports     charges exports
 """),
 }
@@ -157,22 +155,18 @@ def _direction(watts: list[float], up: str, down: str, still: str) -> str:
 
 
 def _outcome_cases() -> list[pytest.param]:
-    cases = []
-    for guard, rows in OUTCOMES.items():
-        for mode, cells in rows.items():
-            for balance, cell in zip(BALANCES, cells, strict=True):
-                marks = (
-                    [pytest.mark.xfail(strict=True, reason="one-way guard")]
-                    if cell.endswith("!")
-                    else []
-                )
-                case_id = f"{mode.value}-{guard}-{balance}".replace(" ", "_")
-                cases.append(
-                    pytest.param(
-                        mode, guard, balance, cell.rstrip("!"), marks=marks, id=case_id
-                    )
-                )
-    return cases
+    return [
+        pytest.param(
+            mode,
+            guard,
+            balance,
+            cell,
+            id=f"{mode.value}-{guard}-{balance}".replace(" ", "_"),
+        )
+        for guard, rows in OUTCOMES.items()
+        for mode, cells in rows.items()
+        for balance, cell in zip(BALANCES, cells, strict=True)
+    ]
 
 
 @pytest.mark.parametrize(("mode", "guard", "balance", "expected"), _outcome_cases())
@@ -200,28 +194,10 @@ WEATHER: Final = {
 # one it takes to see a change, or on a single-phase model the 30 s its guard waits
 # after a change before it takes control back.
 ALLOWED_POLLS: Final = {Model.POWEROCEAN_PLUS: 1, Model.POWEROCEAN_SINGLE_PHASE: 6}
-KNOWN_GUARD_GAPS: Final = {
-    (Feature.EXPORT_TO_GRID, "charge limit"),
-    (Feature.IMPORT_FROM_GRID, "reserve"),
-}
 
 
-def _guard_cases() -> list[pytest.param]:
-    return [
-        pytest.param(
-            mode,
-            guard,
-            marks=[pytest.mark.xfail(strict=True, reason="one-way guard")]
-            if (mode, guard) in KNOWN_GUARD_GAPS
-            else [],
-            id=f"{mode.value}-{guard.replace(' ', '_')}",
-        )
-        for mode in Feature
-        for guard in ("charge limit", "reserve")
-    ]
-
-
-@pytest.mark.parametrize(("mode", "guard"), _guard_cases())
+@pytest.mark.parametrize("guard", ("charge limit", "reserve"))
+@pytest.mark.parametrize("mode", Feature)
 def test_a_guard_never_lets_the_battery_move_the_way_it_forbids(
     monkeypatch: pytest.MonkeyPatch, mode: Feature, guard: str
 ) -> None:
@@ -242,6 +218,60 @@ def test_a_guard_never_lets_the_battery_move_the_way_it_forbids(
                 assert streak <= ALLOWED_POLLS[model], (
                     f"{model.name}, {weather}: {poll}"
                 )
+
+
+@pytest.mark.parametrize(
+    ("mode", "guard", "solar", "house"),
+    (
+        # Just past the turning point, each would move the battery 100 W the way the
+        # guard forbids.
+        (Feature.EXPORT_TO_GRID, "charge limit", 3600, 500),
+        (Feature.IMPORT_FROM_GRID, "reserve", 0, 3100),
+        (Feature.EXPORT_SOLAR_FIRST, "charge limit", SOLAR_FIRST_LIMIT + 600, 500),
+    ),
+)
+def test_a_guard_stops_a_command_from_the_first_watt(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: Feature,
+    guard: str,
+    solar: float,
+    house: float,
+) -> None:
+    sim = Simulation(monkeypatch, export_cap=CAP, **GUARDS[guard])
+    select(sim, mode)
+
+    run = sim.run(polls=SETTLE_POLLS, solar=solar, house=house)
+
+    assert (
+        max(abs(watts) for watts in run.battery[LAST_MINUTE]) <= const.HOLD_SETPOINT_W
+    )
+
+
+@pytest.mark.parametrize("guard", ("no guard", "charge limit", "reserve"))
+@pytest.mark.parametrize(
+    ("mode", "solar", "house"),
+    (
+        # The balance that would move the battery the way the mode is named for.
+        (Feature.CHARGE_BATTERY, 3000, 500),
+        (Feature.DISCHARGE_BATTERY, 0, 2000),
+    ),
+)
+def test_charging_or_discharging_at_nothing_holds_the_battery(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: Feature,
+    solar: float,
+    house: float,
+    guard: str,
+) -> None:
+    """A zero setpoint is no limit to the inverter, so it is never sent: 0 W holds."""
+    sim = Simulation(monkeypatch, export_cap=CAP, **GUARDS[guard])
+    asyncio.run(sim.control.async_set_feature_power(mode, 0))
+    select(sim, mode)
+
+    run = sim.run(polls=SETTLE_POLLS, solar=solar, house=house)
+
+    assert max(abs(watts) for watts in run.battery[LAST_MINUTE]) <= NOISE_W
+    assert sim.inverter.setpoint != 0
 
 
 def _jitter(
@@ -330,6 +360,35 @@ def test_export_solar_first_rides_out_a_surplus_jittering_around_its_limit(
 
     assert method_writes == 0
     assert set(run.grid) == {-SOLAR_FIRST_LIMIT}
+
+
+def test_export_solar_first_exports_a_surplus_just_under_its_limit_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Export to Grid at the limit would make up the last 100 W from the battery, so
+    it only takes over once the surplus reaches the limit."""
+    sim = Simulation(monkeypatch, export_cap=CAP)
+    select(sim, Feature.EXPORT_SOLAR_FIRST)
+
+    run = sim.run(polls=60, solar=SOLAR_FIRST_LIMIT + 400, house=500)
+
+    assert set(run.method) == {BATTERY_LIMITS}
+    # All of it exported, less the watt the hold keeps in the battery.
+    assert set(run.grid) == {-(SOLAR_FIRST_LIMIT - 100 - 1)}
+
+
+def test_export_solar_first_covers_a_small_draw_under_a_reached_charge_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the charge limit reached it has nothing left to decide, so it covers even
+    a draw too small to switch for from the battery, as Automatic does."""
+    sim = Simulation(monkeypatch, soc=80.0, charge_limit=80.0, export_cap=CAP)
+    select(sim, Feature.EXPORT_SOLAR_FIRST)
+    sim.run(polls=12, solar=2500, house=500)
+
+    run = sim.run(polls=24, solar=2500, house=2650)
+
+    assert max(run.grid[1:]) <= 0
 
 
 @pytest.mark.parametrize(

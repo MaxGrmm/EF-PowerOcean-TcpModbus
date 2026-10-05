@@ -371,11 +371,6 @@ class ControlFeatureDef:
     def has_power(self) -> bool:
         return self.default_power is not None
 
-    @property
-    def direction(self) -> int:
-        """Return +1 while charging the battery, -1 while draining it, 0 for neither."""
-        return self.sign if self.has_power else 0
-
 
 @dataclass(frozen=True)
 class ControlEntityDef:

@@ -612,3 +612,38 @@ def test_export_solar_first_saves_the_midday_solar_that_automatic_curtails(
     inverter = solar_first.inverter
     assert inverter.setpoint_writes + inverter.system_setpoint_writes <= 6
     assert inverter.method_writes <= 6
+
+
+# Solar surplus (W) every 5 s from 10:39:00 on 5 Oct 2026, measured on a
+# PowerOcean Plus while Export Solar First held a 4 kW limit under passing cloud.
+CLOUDY_MORNING_SURPLUS = [
+    350, 340, 340, 380, 440, 520, 590, 700, 790, 930, 1300, 3190, 3540, 3620,
+    3650, 3720, 3750, 3820, 3860, 3920, 3960, 4020, 3760, 3660, 3990, 4200,
+    4240, 4320, 4360, 4380, 4400, 4420, 4450, 4460, 4480, 4690, 4710, 4550,
+    4560, 4570, 4580, 4600,
+]  # fmt: skip
+
+
+def test_export_solar_first_keeps_exporting_while_export_to_grid_waits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Export to Grid lasted 5 s before the surplus dipped under the limit, so it
+    waited a minute when the surplus came back over. Automatic ran meanwhile and
+    charged the battery with what should have been exported; holding exports it."""
+    surplus = CLOUDY_MORNING_SURPLUS
+    solar = [watts + 500 for watts in surplus]
+    sim = Simulation(monkeypatch, soc=47.0, export_cap=8000.0)
+    asyncio.run(
+        sim.control.async_set_feature_power(
+            models.ControlFeature.EXPORT_SOLAR_FIRST, 4000
+        )
+    )
+    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+
+    run = sim.run(polls=len(surplus), solar=solar, house=500)
+
+    over_the_limit = [
+        method for method, watts in zip(run.method, surplus) if watts >= 4000
+    ]
+    assert AUTOMATIC not in over_the_limit
+    assert run.method[-1] == SYSTEM_FEED
