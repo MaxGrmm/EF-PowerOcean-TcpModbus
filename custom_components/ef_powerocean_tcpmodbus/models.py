@@ -193,8 +193,6 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
     # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1789469573432/EcoFlow%20OCEAN%202%20Plus%20Single-Phase_Datasheet_EN.pdf
     InverterModel.OCEAN_2_PLUS_SINGLE_PHASE: ModelTraits(
         "Ocean 2 Plus Single Phase",
-        # No startup voltage is published; the PowerOcean single phase figure
-        # stands in until someone with the device reports a better one.
         startup_voltage=120,
         product_ids=(ProductId(4, ProductCategory.SINGLE_PHASE),),
         high_word_first=True,
