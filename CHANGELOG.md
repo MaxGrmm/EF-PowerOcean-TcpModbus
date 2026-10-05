@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.8.1] - 2026-10-05
+
 ### Changed
 
 - Added the Ocean 2 Plus Single Phase
