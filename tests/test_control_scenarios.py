@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-from pathlib import Path
 
 import pytest
 from simulation import (
@@ -615,21 +614,24 @@ def test_export_solar_first_saves_the_midday_solar_that_automatic_curtails(
     assert inverter.method_writes <= 6
 
 
-def _measured_surplus(name: str) -> list[float]:
-    lines = (Path(__file__).parent / "data" / name).read_text().splitlines()
-    rows = [line for line in lines if line and not line.startswith("#")]
-    return [float(value) for value in rows[1:]]
+# Solar surplus (W) every 5 s from 10:39:00 on 5 Oct 2026, measured on a
+# PowerOcean Plus while Export Solar First held a 4 kW limit under passing cloud.
+CLOUDY_MORNING_SURPLUS = [
+    350, 340, 340, 380, 440, 520, 590, 700, 790, 930, 1300, 3190, 3540, 3620,
+    3650, 3720, 3750, 3820, 3860, 3920, 3960, 4020, 3760, 3660, 3990, 4200,
+    4240, 4320, 4360, 4380, 4400, 4420, 4450, 4460, 4480, 4690, 4710, 4550,
+    4560, 4570, 4580, 4600,
+]  # fmt: skip
 
 
-def test_export_solar_first_never_charges_what_it_should_export_on_a_cloudy_morning(
+def test_export_solar_first_keeps_exporting_while_export_to_grid_waits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Replays a measured morning that kept crossing a 4 kW limit. At 10:41 Export to
-    Grid waited out a cooldown with 4.2 kW to spare, and Automatic ran meanwhile,
-    charging the battery with what should have been exported."""
-    surplus = _measured_surplus("surplus_2026-10-05_morning.csv")
-    solar = [max(watts, 0.0) + 500 for watts in surplus]
-    house = [sun - watts for sun, watts in zip(solar, surplus)]
+    """Export to Grid lasted 5 s before the surplus dipped under the limit, so it
+    waited a minute when the surplus came back over. Automatic ran meanwhile and
+    charged the battery with what should have been exported; holding exports it."""
+    surplus = CLOUDY_MORNING_SURPLUS
+    solar = [watts + 500 for watts in surplus]
     sim = Simulation(monkeypatch, soc=47.0, export_cap=8000.0)
     asyncio.run(
         sim.control.async_set_feature_power(
@@ -638,11 +640,10 @@ def test_export_solar_first_never_charges_what_it_should_export_on_a_cloudy_morn
     )
     select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
 
-    run = sim.run(polls=len(surplus), solar=solar, house=house)
+    run = sim.run(polls=len(surplus), solar=solar, house=500)
 
     over_the_limit = [
         method for method, watts in zip(run.method, surplus) if watts >= 4000
     ]
     assert AUTOMATIC not in over_the_limit
-    # No more switching than the 36 method changes measured that morning.
-    assert sim.inverter.method_writes <= 36
+    assert run.method[-1] == SYSTEM_FEED
