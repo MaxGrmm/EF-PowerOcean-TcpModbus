@@ -824,11 +824,15 @@ CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
         capacity_key=INVERTER_CAPACITY_KEY,
         default_power=3000.0,
     ),
+    # The target is the meter reading, so the house counts towards it: bounded by
+    # the grid connection rather than by what the inverter can convert.
     ControlFeature.IMPORT_FROM_GRID: ControlFeatureDef(
         method=ControlMode.SYSTEM_FEED,
         setpoint_key="system_power_setpoint",
         sign=1,
         measure_key="grid_power",
+        config_limit_key=CONF_MAX_GRID_POWER,
+        bounded_by_rating=False,
         default_power=3000.0,
     ),
     # Never commanded as such: it runs Automatic, Hold or Export to Grid, whichever

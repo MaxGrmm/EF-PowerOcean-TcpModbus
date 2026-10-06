@@ -382,6 +382,9 @@ class ControlFeatureDef:
     config_limit_key: str | None = None
     # Sensor holding the converter capacity the power has to pass through, if any
     capacity_key: str | None = None
+    # Whether the power has to pass the inverter, so its AC rating caps it. False
+    # for a meter target, which the house adds to and can take far beyond it.
+    bounded_by_rating: bool = True
     # None for a mode with no power to configure, which only holds the battery.
     default_power: float | None = None
     # Whether the action may leave the power out, keeping the number's value. Only

@@ -695,12 +695,13 @@ class ControlManager:
     def _control_power_ceiling(self, feature: ControlFeature) -> float:
         """Return the lowest ceiling that applies to *feature*.
 
-        Nothing can exceed the inverter's AC rating whatever the feature asks for,
-        and a ceiling the firmware publishes caps it further. The battery modes are
-        bounded by the configured module count instead: the inverter's charge and
-        discharge limit registers report the limit set in the EcoFlow app, which
-        Modbus control ignores, so honouring them would cap the user below what the
-        hardware accepts.
+        Nothing that passes the inverter can exceed its AC rating, and a ceiling the
+        firmware publishes caps it further. Import from Grid targets the meter, which
+        the house adds to, so the configured grid connection bounds it instead. The
+        battery modes are bounded by the configured module count instead: the
+        inverter's charge and discharge limit registers report the limit set in the
+        EcoFlow app, which Modbus control ignores, so honouring them would cap the
+        user below what the hardware accepts.
         """
         definition = CONTROL_FEATURES[feature]
         ceilings = [float(CONTROL_POWER_FALLBACK_MAX)]
@@ -709,7 +710,7 @@ class ControlManager:
             limit := self._data.get(definition.limit_key)
         ):
             ceilings.append(float(limit))
-        # Zero means no battery count was configured, which bounds nothing.
+        # Zero means it was not configured, e.g. no battery count, which bounds nothing.
         if definition.config_limit_key is not None and (
             limit := self._limits.get(definition.config_limit_key)
         ):
@@ -720,7 +721,9 @@ class ControlManager:
             capacity := self._data.get(definition.capacity_key)
         ):
             ceilings.append(float(capacity))
-        if rated := self._data.get("inverter_rated_power"):
+        if definition.bounded_by_rating and (
+            rated := self._data.get("inverter_rated_power")
+        ):
             ceilings.append(float(rated))
         # The export cap only binds in the feed mode that applies it. One too small to
         # keep the margin under bounds nothing here, so a Solar Export Limit set while
