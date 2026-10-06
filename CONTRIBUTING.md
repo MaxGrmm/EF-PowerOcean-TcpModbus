@@ -96,6 +96,26 @@ Reading the result:
 - A refused register that is readable elsewhere means the address moved on that model. Add an `address_overrides` entry to its `RegisterDef` rather than changing the shared address.
 - A `maybe ...` in the `looks like` column is only a guess from the value's magnitude. It's an educated guess, but can be wrong. Use it as a reference together with the [protocol notes](EcoFlow_PowerOcean_Modbus.md).
 
+### Control Test
+
+[scripts/control_feature_scan.py](scripts/control_feature_scan.py) checks which Modbus controls a live inverter follows. Like the register scan it imports the map, the model traits and the control constants from the integration, and it sends commands the way the control manager does: the heartbeat first, then the setpoint, then the control word.
+
+Unlike the scan, it **writes**. It runs in two parts:
+
+1. **Without the heartbeat**, the way the integration writes them: battery saver, LED brightness and backup reserve are each changed to another value, confirmed by you in the EcoFlow app, and changed back. A register read-back only proves the words arrived, so the app answer is what counts.
+2. **With the heartbeat**, the three control methods of the EcoFlow Open Modbus Protocol, each both ways at the test power: battery (40571), system power at the meter (40542) and inverter power (40544). Each is judged on whether the measured power reaches the setpoint and whether System Status (40530, bits 7-10) reports the method that was sent. The integration's own modes, such as Hold and Export Solar First, are built on these and not tested separately. Last, it exports with the system method and switches the export off and on again the way the grid feed switch does (limited mode and a 0 W cap, then the cap and mode put back), checking on the meter that the export stops and resumes. The feed-in settings are never changed otherwise.
+
+It also learns the 32-bit write word order from one setpoint write before anything else, and watches the inverter hand back to the app at the end. Ctrl+C at any point puts back the setpoints and any setting it was in the middle of checking.
+
+Turn off Modbus Control in the integration first and wait a minute; the script refuses to start while the inverter reports Modbus control. Have the EcoFlow app open, then:
+
+```shell
+uv pip install -r requirements-development.txt
+uv run python scripts/control_feature_scan.py <inverter_ip>
+```
+
+It takes 5 to 10 minutes. `--power` sets the test power (default 1500 W), `--skip-manual` leaves out the app checks and `--no-handback-wait` skips the final 80 s. A method counts as followed once the measurement has stayed within the integration's tolerance for three samples in a row, so the verdicts match what the Control Status sensor would show.
+
 ### Writable Registers and Battery Control
 
 Writable changes require confirmation against real hardware. A write response or register readback alone is not proof that firmware applied a command; describe the observed physical or application behavior, inverter model, and firmware version in the pull request.

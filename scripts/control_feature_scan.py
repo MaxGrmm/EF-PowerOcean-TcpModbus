@@ -1,0 +1,1398 @@
+#!/usr/bin/env python3
+"""Test which Modbus controls an inverter supports.
+
+Before running it, turn off Modbus Control in the integration and wait a minute,
+so nothing else is commanding the inverter. Have the EcoFlow app open, battery
+saver and the settings are confirmed by you there.
+
+    uv pip install -r requirements-development.txt
+    uv run python scripts/control_feature_scan.py <inverter_ip>
+
+It takes 5 to 10 minutes. The battery charges and discharges briefly at the test
+power and the inverter is handed back to the EcoFlow app at the end.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import statistics
+import sys
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any, Final
+
+from pymodbus.client import ModbusTcpClient
+
+# The scan script loads the register map without Home Assistant; reusing it keeps
+# both scripts on exactly the integration's map, decoding and model detection.
+from register_scan import (
+    EXCEPTION_MEANINGS,
+    MANIFEST,
+    RegisterReader,
+    const,
+    models,
+    render_address,
+    report_device,
+    telemetry,
+)
+
+ControlMode = models.ControlMode
+Feature = models.ControlFeature
+RegisterType = models.RegisterType
+
+SETPOINT_KEYS: Final = (
+    "battery_power_setpoint",
+    "system_power_setpoint",
+    "inverter_power_setpoint",
+)
+
+# The registers sampled while testing; a small set, so a sample takes a second.
+WATCHED_KEYS: Final = (
+    "house_power",
+    "grid_power",
+    "solar_power",
+    "battery_power",
+    "battery_soc",
+    "system_modes",
+    "min_soc_limit",
+    "grid_feed_mode",
+    const.FEED_IN_POWER_MAX_SETTING_KEY,
+    const.FEED_IN_POWER_MAX_EFFECTIVE_KEY,
+    "device_led_brightness",
+    "inverter_output_power",
+    *SETPOINT_KEYS,
+)
+
+DEFAULT_TEST_POWER_W: Final = 1500
+MIN_TEST_POWER_W: Final = 600
+MAX_TEST_POWER_W: Final = 3000
+PROBE_SETPOINT_W: Final = 500
+# A 32-bit write is echoed as sent and only republished in read order a few
+# seconds later, so the word order is judged on the reading after this.
+WRITE_ORDER_SETTLE_S: Final = 15
+SAMPLE_GAP_S: Final = 3
+# The PowerOcean Plus took up to 30s to ramp to 1500 W, so this leaves margin.
+CONTROL_SETTLE_S: Final = 60
+RETURN_SETTLE_S: Final = 9
+STATUS_BIT_WAIT_S: Final = 15
+HANDBACK_WAIT_S: Final = const.HEARTBEAT_WINDOW_S + 20
+# Room left above the inverter's own floor before discharging, and below full
+# before charging, so the battery can actually move the way the test asks.
+SOC_MARGIN: Final = 5.0
+MIN_ACHIEVABLE_W: Final = 300.0
+# The grid power above which the export counts as stopped. The inverter holds a
+# zero-export limit to within a few tens of watts, not exactly.
+EXPORT_STOPPED_W: Final = const.GUARD_POWER_DEADBAND_W
+GRID_FEED_SETTLE_S: Final = 45
+BUSY_RETRIES: Final = 3
+# Illegal function, address and value: the request itself is wrong, so the device
+# will refuse it again. Anything else, device busy above all, is worth retrying.
+PERMANENT_CODES: Final = frozenset({1, 2, 3})
+
+
+class Aborted(Exception):
+    """A precondition failed; nothing more is written."""
+
+
+@dataclass(frozen=True)
+class CoreTest:
+    """One direction of one of the protocol's three control methods.
+
+    Each method acts on its own setpoint register and drives its own measurement:
+    the battery method the battery power, the system method the grid power at the
+    meter, and the inverter method the inverter's AC power.
+    """
+
+    name: str
+    method: models.ControlMode
+    setpoint_key: str
+    measure_key: str
+    # +1 draws into the battery or from the grid, -1 feeds out.
+    sign: int
+
+    @property
+    def charges(self) -> bool:
+        return self.sign > 0
+
+
+def from_feature(name: str, feature: models.ControlFeature) -> CoreTest:
+    """A core test sent exactly as the integration sends the feature."""
+    definition = const.CONTROL_FEATURES[feature]
+    return CoreTest(
+        name,
+        definition.method,
+        definition.setpoint_key,
+        definition.measure_key,
+        definition.sign,
+    )
+
+
+# The protocol's three control methods, each in both directions. The integration's
+# own modes (Hold, Export Solar First) are built on top of these and left out.
+CORE_TESTS: Final = (
+    from_feature("battery charge", Feature.CHARGE_BATTERY),
+    from_feature("battery discharge", Feature.DISCHARGE_BATTERY),
+    from_feature("grid draw", Feature.IMPORT_FROM_GRID),
+    from_feature("grid feed", Feature.EXPORT_TO_GRID),
+    # Not an integration feature yet, so declared here against the protocol:
+    # 40544 Inverter Power Draw/Feed Setting, positive draws from the grid, and
+    # 40550 Inverter Output Power, rectification positive.
+    CoreTest(
+        "inverter draw",
+        ControlMode.INVERTER_FEED,
+        "inverter_power_setpoint",
+        "inverter_output_power",
+        1,
+    ),
+    CoreTest(
+        "inverter feed",
+        ControlMode.INVERTER_FEED,
+        "inverter_power_setpoint",
+        "inverter_output_power",
+        -1,
+    ),
+)
+
+
+@dataclass
+class ControlResult:
+    test: CoreTest
+    verdict: str
+    detail: str = ""
+    settle_s: float | None = None
+    mode_report: str = ""
+
+
+@dataclass
+class ManualResult:
+    """A write the register accepted, and what the person saw in the app."""
+
+    register: str
+    app: str = "not asked"
+
+    def __str__(self) -> str:
+        return f"register {self.register}; app {self.app}"
+
+
+@dataclass
+class Report:
+    write_order: str = "not tested"
+    heartbeat: str = "not tested"
+    manual_mode_bit: str = "not tested"
+    grid_feed: str = "not tested"
+    handback: str = "not tested"
+    manual: dict[str, ManualResult | str] = field(default_factory=dict)
+    controls: list[ControlResult] = field(default_factory=list)
+
+
+def describe_refusal(reason: str) -> str:
+    return reason or "no answer"
+
+
+def refusal_code(reason: str) -> int | None:
+    """The exception code in a RegisterReader refusal, if the device gave one."""
+    match = re.match(r"exception code (\d+)", reason)
+    return int(match.group(1)) if match else None
+
+
+class Inverter:
+    """Reads and writes the inverter the way the integration does."""
+
+    def __init__(
+        self,
+        client: ModbusTcpClient,
+        reader: RegisterReader,
+        slave: int,
+        model: models.InverterModel,
+    ) -> None:
+        self._client = client
+        self._reader = reader
+        self._slave = slave
+        self.model = model
+        self.registers = {
+            key: const.REGISTERS_BY_KEY[key].for_model(model) for key in WATCHED_KEYS
+        }
+        self.refused: set[str] = set()
+        # The integration sends 32-bit values high word first on every model. The
+        # probe below checks that, and the rest of the run follows what it finds.
+        self.high_word_first_writes = True
+        self.last_heartbeat: float | None = None
+        self.heartbeat_running = False
+        self.writes = 0
+        # Settings changed for a check and not yet put back, with their old value.
+        self.pending_settings: dict[str, int] = {}
+        self.started = time.monotonic()
+
+    # ── Reading ──────────────────────────────────────────────────────────────
+
+    def sample(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return the watched registers and the values derived from them."""
+        self.keep_alive()
+        raw: dict[str, Any] = {}
+        for key, register in self.registers.items():
+            if key in self.refused:
+                continue
+            value, reason = self._reader.read_value(register)
+            if refusal_code(reason) in PERMANENT_CODES:
+                self.refused.add(key)
+            raw[key] = value
+        derived = telemetry.calculate_derived_values(
+            telemetry.TelemetryData.from_mapping(raw),
+            calculate_solar_power=False,
+            startup_voltage=self.model.traits.startup_voltage,
+            reports_effective_feed_cap=self.model.traits.reports_effective_feed_cap,
+        )
+        return raw, derived
+
+    def read_int(self, key: str) -> int | None:
+        return self.read_int_reason(key)[0]
+
+    def read_int_reason(self, key: str) -> tuple[int | None, str]:
+        """The value, or None and why: the device's refusal, or 'undecodable'."""
+        register = const.REGISTERS_BY_KEY[key].for_model(self.model)
+        value, reason = self._reader.read_value(register)
+        if value is None:
+            return None, reason or "undecodable"
+        return int(value), ""
+
+    def read_words_reason(
+        self, address: int, count: int
+    ) -> tuple[list[int] | None, str]:
+        return self._reader.read(address, count)
+
+    def decode(self, words: list[int], register: models.RegisterDef) -> float | None:
+        return self._reader.decode(words, register)
+
+    # ── Writing ──────────────────────────────────────────────────────────────
+
+    def encode(self, value: int, data_type: RegisterType) -> list[int]:
+        words = models.encode_register(value, data_type)
+        return words if self.high_word_first_writes else list(reversed(words))
+
+    def write(self, address: int, words: list[int]) -> tuple[bool, str, int | None]:
+        """Write FC6 for one word and FC16 for more, as the integration does.
+
+        Returns whether it was accepted, the reason if not, and the exception code.
+        A busy device is asked again, like the integration's heartbeat retries.
+        """
+        reason, code = "", None
+        for attempt in range(BUSY_RETRIES):
+            if attempt:
+                time.sleep(1)
+            self.writes += 1
+            try:
+                if len(words) == 1:
+                    response = self._client.write_register(
+                        address=address, value=words[0], device_id=self._slave
+                    )
+                else:
+                    response = self._client.write_registers(
+                        address=address, values=words, device_id=self._slave
+                    )
+            except Exception as error:  # a dropped connection rather than a refusal
+                reason, code = str(error), None
+                self._client.connect()
+                continue
+            if not response.isError():
+                return True, "", None
+            code = getattr(response, "exception_code", None)
+            reason = (
+                f"exception code {code}, {EXCEPTION_MEANINGS.get(code, '?')}"
+                if code
+                else str(response)
+            )
+            if code in PERMANENT_CODES:
+                break
+        return False, reason, code
+
+    def write_value(self, key: str, value: int) -> tuple[bool, str, int | None]:
+        register = const.REGISTERS_BY_KEY[key].for_model(self.model)
+        address = register.write_address or register.address
+        return self.write(address, self.encode(value, register.data_type))
+
+    def write_control_word(self, value: int) -> tuple[bool, str, int | None]:
+        if value & const.CONTROL_COMMAND_UNSAFE_BITS:
+            raise Aborted(f"Refusing control word 0x{value:08X}: off-grid or shutdown")
+        return self.write(
+            const.CONTROL_COMMAND_REGISTER, self.encode(value, RegisterType.UINT32)
+        )
+
+    # ── Control authority ────────────────────────────────────────────────────
+
+    def heartbeat(self) -> tuple[bool, str, int | None]:
+        sent_at = time.monotonic()
+        result = self.write(const.HEARTBEAT_REGISTER, [const.HEARTBEAT_VALUE])
+        if result[0]:
+            self.last_heartbeat = sent_at
+        return result
+
+    def keep_alive(self) -> None:
+        """Write the heartbeat whenever it is due, as the integration's timer does."""
+        if not self.heartbeat_running:
+            return
+        age = (
+            float("inf")
+            if self.last_heartbeat is None
+            else time.monotonic() - self.last_heartbeat
+        )
+        if age >= const.HEARTBEAT_INTERVAL_S:
+            self.heartbeat()
+
+    def ensure_fresh(self) -> None:
+        """Make sure the command that follows is acted on, like async_ensure_fresh."""
+        if not self.heartbeat_running:
+            return
+        if (
+            self.last_heartbeat is None
+            or time.monotonic() - self.last_heartbeat > const.HEARTBEAT_REUSE_S
+        ):
+            self.heartbeat()
+
+    def wait(self, seconds: float) -> None:
+        """Sleep without letting the heartbeat lapse."""
+        end = time.monotonic() + seconds
+        while (left := end - time.monotonic()) > 0:
+            time.sleep(min(1.0, left))
+            self.keep_alive()
+
+    def elapsed(self) -> str:
+        seconds = int(time.monotonic() - self.started)
+        return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def compose_control_word(method: models.ControlMode, battery_saver: bool) -> int:
+    """The control word as ControlManager._compose_control_command builds it."""
+    word = (
+        method.command_value & const.CONTROL_COMMAND_METHOD_MASK
+    ) << const.CONTROL_COMMAND_METHOD_SHIFT
+    if battery_saver:
+        word |= 1 << const.CONTROL_COMMAND_BATTERY_SAVER_BIT
+    return word
+
+
+def fmt_power(value: Any) -> str:
+    return "     -" if value is None else f"{value:>+6.0f}"
+
+
+def sample_line(inverter: Inverter, raw: dict, derived: dict, note: str = "") -> str:
+    soc = raw.get("battery_soc")
+    control = derived.get("device_modbus_control")
+    return (
+        f"    [{inverter.elapsed()}] battery {fmt_power(raw.get('battery_power'))} W"
+        f"  grid {fmt_power(raw.get('grid_power'))} W"
+        f"  solar {fmt_power(raw.get('solar_power'))} W"
+        f"  inverter {fmt_power(raw.get('inverter_output_power'))} W"
+        f"  soc {'-' if soc is None else f'{soc:.0f}'}%"
+        f"  method {derived.get('active_control_mode', '-')}"
+        f"  modbus {'-' if control is None else ('on' if control else 'off')}"
+        + (f"  {note}" if note else "")
+    )
+
+
+# ── Steps ────────────────────────────────────────────────────────────────────
+
+
+def preflight(inverter: Inverter, force: bool) -> tuple[dict, dict]:
+    """Refuse to start while something else is commanding the inverter."""
+    print("== Before writing anything ==")
+    raw, derived = inverter.sample()
+    print(sample_line(inverter, raw, derived))
+    if raw.get("system_modes") is None:
+        raise Aborted(
+            "System Status (40530) is unreadable, so the test could not see what "
+            "the inverter does. Run the register scan first."
+        )
+    if all(not raw.get(key) for key in ("battery_power", "grid_power", "battery_soc")):
+        raise Aborted(
+            "Power and SOC all read zero, the signature of Modbus TCP being off "
+            "in the EcoFlow app."
+        )
+
+    busy = derived.get("device_modbus_control") or derived.get(
+        "active_control_mode"
+    ) not in (str(ControlMode.DEFAULT), None)
+    if busy:
+        message = (
+            "The inverter is already under Modbus control or following a control "
+            "method. Turn off Modbus Control in the integration (or stop Home "
+            "Assistant), wait a minute and run this again."
+        )
+        if not force:
+            raise Aborted(message)
+        print(f"  WARNING: {message} Carrying on because of --force.")
+    else:
+        print("  Nothing else is commanding the inverter.")
+    print()
+    return raw, derived
+
+
+def test_write_order(inverter: Inverter, report: Report) -> None:
+    """Find out which word order the inverter parses 32-bit writes in.
+
+    Done before taking control: without a fresh heartbeat the inverter stores the
+    setpoint but does not act on it.
+    """
+    print("== 32-bit write word order ==")
+    key = "battery_power_setpoint"
+    register = const.REGISTERS_BY_KEY[key].for_model(inverter.model)
+    original = inverter.read_int(key)
+    print(f"  {key} at {render_address(register.address)} holds {original}")
+
+    sent = models.encode_register(PROBE_SETPOINT_W, RegisterType.INT32)
+    ok, reason, _ = inverter.write(register.address, sent)
+    if not ok:
+        report.write_order = f"untested, the setpoint write was refused ({reason})"
+        print(f"  write refused: {describe_refusal(reason)}\n")
+        return
+
+    print(
+        f"  wrote {PROBE_SETPOINT_W} as {[f'0x{w:04X}' for w in sent]} (high word "
+        f"first, as the integration does), reading back for {WRITE_ORDER_SETTLE_S}s"
+    )
+    readings: list[int | None] = []
+    end = time.monotonic() + WRITE_ORDER_SETTLE_S
+    while time.monotonic() < end:
+        readings.append(inverter.read_int(key))
+        time.sleep(2)
+    settled = inverter.read_int(key)
+    readings.append(settled)
+    print(f"  read back {' -> '.join(str(r) for r in dict.fromkeys(readings))}")
+
+    if settled == PROBE_SETPOINT_W:
+        report.write_order = "high word first, as the integration sends"
+        inverter.high_word_first_writes = True
+    elif settled == PROBE_SETPOINT_W << 16:
+        report.write_order = (
+            "LOW word first: the integration's writes arrive 65536x too large"
+        )
+        inverter.high_word_first_writes = False
+    else:
+        report.write_order = f"unclear, read back {settled} after writing 500"
+    print(f"  -> {report.write_order}")
+
+    restore = original if original is not None else 0
+    ok, reason, _ = inverter.write_value(key, restore)
+    print(
+        f"  restored {restore}"
+        + ("" if ok else f" FAILED ({describe_refusal(reason)})")
+        + "\n"
+    )
+
+
+def wait_for(
+    inverter: Inverter, check: Callable[[dict], bool | None], seconds: float
+) -> float | None:
+    """Seconds until the derived values satisfy *check*, or None."""
+    start = time.monotonic()
+    while time.monotonic() - start < seconds:
+        _, derived = inverter.sample()
+        if check(derived):
+            return time.monotonic() - start
+        inverter.wait(1.5)
+    return None
+
+
+# ── Manual checks, without the heartbeat ─────────────────────────────────────
+
+
+def ask_app(question: str) -> str:
+    """Ask the person what the EcoFlow app shows."""
+    while True:
+        try:
+            answer = input(f"  >> {question} [y]es / [n]o / [c]an't see: ")
+        except EOFError:
+            return "no answer"
+        answer = answer.strip().lower()
+        if answer in ("y", "yes"):
+            return "confirmed"
+        if answer in ("n", "no"):
+            return "NOT confirmed"
+        if answer in ("c", "cant", "can't", "cannot"):
+            return "not visible"
+
+
+def test_battery_saver(
+    inverter: Inverter, report: Report, saver: bool, manual: bool
+) -> None:
+    """Flip the power-saving bit of the control word and back.
+
+    The integration writes it without control authority, so it is tested before
+    the first heartbeat: whether the inverter acts on it then is the question.
+    """
+    print("== Battery saver (control word bit 3), without the heartbeat ==")
+    toggled = not saver
+    word = compose_control_word(ControlMode.DEFAULT, toggled)
+    ok, reason, _ = inverter.write_control_word(word)
+    if not ok:
+        report.manual["battery saver"] = f"control word refused ({reason})"
+        print(f"  control word 0x{word:08X} refused: {reason}\n")
+        return
+    state = "ON" if toggled else "OFF"
+    print(f"  wrote control word 0x{word:08X}: battery saver {state}")
+    took = wait_for(
+        inverter,
+        lambda d: d.get("battery_saver_mode_ena") == toggled,
+        STATUS_BIT_WAIT_S,
+    )
+    result = ManualResult(
+        f"status bit 3 followed after {took:.0f}s"
+        if took is not None
+        else f"status bit 3 unchanged after {STATUS_BIT_WAIT_S}s"
+    )
+    print(f"  {result.register}")
+    if manual:
+        result.app = ask_app(
+            f"Does the app now show battery saver / power saving {state}?"
+        )
+    report.manual["battery saver"] = result
+
+    inverter.write_control_word(compose_control_word(ControlMode.DEFAULT, saver))
+    back = wait_for(
+        inverter,
+        lambda d: d.get("battery_saver_mode_ena") == saver,
+        STATUS_BIT_WAIT_S,
+    )
+    print(
+        f"  restored battery saver {'ON' if saver else 'OFF'}"
+        + ("" if back is not None or took is None else ", status bit not back yet")
+        + "\n"
+    )
+
+
+@dataclass(frozen=True)
+class SettingChange:
+    key: str
+    # What to look for in the app.
+    app_label: str
+    # Returns the value to write and why, or None and why the change is skipped.
+    choose: Callable[[int, dict], tuple[int | None, str]]
+
+
+def _led_value(current: int, _raw: dict) -> tuple[int | None, str]:
+    return (20 if current >= 60 else 100), ""
+
+
+def _reserve_value(current: int, raw: dict) -> tuple[int | None, str]:
+    # Raised while that stays well below the current charge, since a reserve above
+    # it could make the inverter charge from the grid to reach it. Otherwise
+    # lowered, but not to 0 %, which the app may not offer.
+    soc = raw.get("battery_soc")
+    if soc is not None and current + 5 <= soc - SOC_MARGIN:
+        return current + 5, ""
+    if current >= 10:
+        return current - 5, ""
+    return None, "the reserve can neither go down nor safely up"
+
+
+SETTING_CHANGES: Final = (
+    SettingChange("device_led_brightness", "LED brightness", _led_value),
+    SettingChange("min_soc_limit", "backup reserve / minimum SOC", _reserve_value),
+)
+
+FEED_MODE_NAMES: Final = {
+    mode.register_value: str(mode) for mode in models.GridFeedMode
+}
+
+
+def render_setting(key: str, value: int | None) -> str:
+    if key == "grid_feed_mode" and value is not None:
+        return f"{value} ({FEED_MODE_NAMES.get(value, '?')})"
+    unit = {"device_led_brightness": " %", "min_soc_limit": " %"}.get(key, " W")
+    return f"{value}{unit}"
+
+
+def test_settings(inverter: Inverter, report: Report, manual: bool) -> None:
+    """Change each setting to a value the app shows, confirm, and change it back.
+
+    Done before the first heartbeat, as the integration writes the LED and the
+    reserve without control authority.
+    """
+    print("== Settings, without the heartbeat ==")
+    raw, _ = inverter.sample()
+    for change in SETTING_CHANGES:
+        key = change.key
+        register = const.REGISTERS_BY_KEY[key].for_model(inverter.model)
+        is_wide = register.data_type is not RegisterType.UINT16
+        current = inverter.read_int(key)
+        print(f"  {key} at {render_address(register.address)}")
+        if current is None:
+            report.manual[key] = "unreadable, skipped"
+            print("    unreadable, skipped")
+            continue
+        if is_wide and report.write_order.startswith(("unclear", "untested")):
+            report.manual[key] = "skipped, the write word order is unknown"
+            print("    skipped, the write word order is unknown")
+            continue
+        target, why = change.choose(current, raw)
+        if target is None:
+            report.manual[key] = f"skipped, {why}"
+            print(f"    skipped: {why}")
+            continue
+
+        inverter.pending_settings[key] = current
+        ok, reason, _ = inverter.write_value(key, target)
+        if not ok:
+            del inverter.pending_settings[key]
+            report.manual[key] = f"write refused ({reason})"
+            print(f"    write refused: {reason}")
+            continue
+        inverter.wait(WRITE_ORDER_SETTLE_S if is_wide else 3)
+        after = inverter.read_int(key)
+        result = ManualResult(
+            f"reads back {render_setting(key, after)}"
+            + ("" if after == target else f", not {render_setting(key, target)}")
+        )
+        print(
+            f"    {render_setting(key, current)} -> {render_setting(key, target)}, "
+            f"{result.register}"
+        )
+        if manual:
+            result.app = ask_app(
+                f"Does the app show {change.app_label} "
+                f"{render_setting(key, target)}? (refresh the page first)"
+            )
+        report.manual[key] = result
+
+        ok, reason, _ = inverter.write_value(key, current)
+        if ok:
+            del inverter.pending_settings[key]
+        inverter.wait(WRITE_ORDER_SETTLE_S if is_wide else 2)
+        restored = inverter.read_int(key)
+        print(
+            f"    restored {render_setting(key, current)}"
+            + ("" if ok and restored == current else f" FAILED, reads {restored}")
+        )
+    print(
+        "  The protocol says Modbus settings are not synchronised back to the app,\n"
+        "  so 'can't see' is a useful answer too.\n"
+    )
+
+
+# ── Control methods, with the heartbeat ──────────────────────────────────────
+
+
+def take_control(inverter: Inverter, report: Report) -> bool:
+    print("== Modbus control authority ==")
+    ok, reason, code = inverter.heartbeat()
+    if not ok:
+        unsupported = code in PERMANENT_CODES
+        report.heartbeat = (
+            f"refused as invalid ({reason}): commands would be stored, never acted on"
+            if unsupported
+            else f"failed ({reason})"
+        )
+        print(f"  heartbeat {render_address(const.HEARTBEAT_REGISTER)}: {reason}\n")
+        return False
+    inverter.heartbeat_running = True
+    report.heartbeat = "accepted"
+    print(f"  heartbeat {render_address(const.HEARTBEAT_REGISTER)} accepted")
+    took = wait_for(
+        inverter, lambda d: d.get("device_modbus_control"), STATUS_BIT_WAIT_S
+    )
+    report.manual_mode_bit = (
+        f"set {took:.0f}s after the first heartbeat"
+        if took is not None
+        else f"not set within {STATUS_BIT_WAIT_S}s"
+    )
+    print(f"  Manual Mode Status (bit 11): {report.manual_mode_bit}\n")
+    return True
+
+
+def send(inverter: Inverter, test: CoreTest, power: float, saver: bool) -> str:
+    """Send the setpoint, then the method, as ControlManager._async_send_control."""
+    inverter.ensure_fresh()
+    ok, reason, _ = inverter.write_value(
+        test.setpoint_key, int(round(power)) * test.sign
+    )
+    if not ok:
+        return f"setpoint write refused ({reason})"
+    ok, reason, _ = inverter.write_control_word(
+        compose_control_word(test.method, saver)
+    )
+    if not ok:
+        return f"control word refused ({reason})"
+    return ""
+
+
+def return_to_default(inverter: Inverter, saver: bool) -> None:
+    """Clear every setpoint and select the default method."""
+    inverter.ensure_fresh()
+    for key in SETPOINT_KEYS:
+        if key not in inverter.refused:
+            inverter.write_value(key, 0)
+    inverter.write_control_word(compose_control_word(ControlMode.DEFAULT, saver))
+
+
+def measure(test: CoreTest, raw: dict) -> tuple[float | None, bool]:
+    """The test's measurement, and whether it had to be derived.
+
+    Without the inverter output register, the inverter's AC power is the battery
+    power less the solar power: what charges the battery and did not come from PV
+    came through the rectifier.
+    """
+    value = raw.get(test.measure_key)
+    if value is not None:
+        return float(value), False
+    if test.measure_key == "inverter_output_power":
+        battery, solar = raw.get("battery_power"), raw.get("solar_power")
+        if battery is not None and solar is not None:
+            return float(battery) - float(solar), True
+    return None, False
+
+
+def export_limit(derived: dict) -> float | None:
+    """The watt cap on the export, as control._device_export_limit reads it.
+
+    Only the watt-limited mode caps in watts; the other modes return None.
+    """
+    if derived.get("grid_feed_mode") is not models.GridFeedMode.LIMITED:
+        return None
+    return derived.get(const.FEED_IN_POWER_MAX_KEY)
+
+
+def achievable_power(test: CoreTest, raw: dict, derived: dict) -> float | None:
+    """The most this test can show, where the export cap limits it.
+
+    Whatever flows out and the house does not use goes to the grid, so a feed is
+    capped by the house load plus the export cap, less the solar that competes for
+    the same export. The grid feed is capped by the export cap alone.
+    """
+    if test.charges:
+        return None
+    cap = export_limit(derived)
+    configured = raw.get(const.FEED_IN_POWER_MAX_SETTING_KEY)
+    # Some models read 0 for the effective cap whatever the setting.
+    if cap is not None and cap < MIN_ACHIEVABLE_W and configured:
+        cap = configured
+    if cap is None:
+        return None
+    if test.method is ControlMode.SYSTEM_FEED:
+        return cap
+    house = float(raw.get("house_power") or 0)
+    solar = float(raw.get("solar_power") or 0)
+    return max(0.0, house + cap - solar)
+
+
+def skip_reason(test: CoreTest, raw: dict) -> str:
+    soc = raw.get("battery_soc")
+    floor = float(raw.get("min_soc_limit") or 0)
+    if soc is None:
+        return ""
+    if test.charges and soc >= models.BATTERY_FULL_SOC - SOC_MARGIN:
+        return f"battery at {soc:.0f}%, too full to take a charge"
+    if not test.charges and soc <= floor + SOC_MARGIN:
+        return f"battery at {soc:.0f}%, too close to its {floor:.0f}% reserve"
+    return ""
+
+
+def observe(
+    inverter: Inverter, test: CoreTest, signed_target: float, reserve: float
+) -> tuple[
+    float | None, list[float], models.ControlStatus | None, list[tuple[float, str]]
+]:
+    """Sample until the measurement has stayed on target for three samples in a
+    row, as the integration's status damping does.
+
+    Returns when it settled, the measurements, the last state and, for every
+    sample, the seconds since the command and the method System Status reported.
+    The first sample waits one gap, so it cannot be a reading from before the
+    inverter had the command.
+    """
+    start = time.monotonic()
+    measured: list[float] = []
+    modes: list[tuple[float, str]] = []
+    streak, state = 0, None
+    inverter.wait(SAMPLE_GAP_S)
+    while time.monotonic() - start < CONTROL_SETTLE_S:
+        raw, derived = inverter.sample()
+        value, _ = measure(test, raw)
+        soc = raw.get("battery_soc")
+        state = models.deviation_state(
+            signed_target=signed_target,
+            measured=value,
+            soc=None if soc is None else float(soc),
+            min_soc=reserve,
+        )
+        modes.append(
+            (time.monotonic() - start, str(derived.get("active_control_mode")))
+        )
+        if value is not None:
+            measured.append(value)
+        print(sample_line(inverter, raw, derived, str(state)))
+        streak = streak + 1 if state is models.ControlStatus.ACTIVE else 0
+        if streak >= const.CONTROL_STATUS_DAMPING_POLLS:
+            return time.monotonic() - start, measured, state, modes
+        inverter.wait(SAMPLE_GAP_S)
+    return None, measured, state, modes
+
+
+def judge_modes(expected: str, modes: list[tuple[float, str]]) -> str:
+    """Whether the System Status reported the method that was sent, and how soon.
+
+    Judged on the last samples, since the status may lag the command by a poll.
+    """
+    tail = [mode for _, mode in modes[-const.CONTROL_STATUS_DAMPING_POLLS :]]
+    if tail and all(mode == expected for mode in tail):
+        first = next(at for at, mode in modes if mode == expected)
+        return f"reports {expected} within {first:.0f}s"
+    seen = ", ".join(dict.fromkeys(tail)) or "nothing"
+    return f"reports {seen}, NOT {expected}"
+
+
+def is_decisive(test: CoreTest, power: float, baseline: float) -> bool:
+    """Whether reaching the target would show, being out of tolerance before."""
+    target = power * test.sign
+    return abs(target - baseline) > tolerance(target)
+
+
+def pick_decisive_power(
+    test: CoreTest, power: float, baseline: float, limit: float | None
+) -> float | None:
+    """The test power nearest the requested one that would show a change.
+
+    When the measurement already sits near the target, as a battery charging from
+    PV at about the test power does, a test there proves nothing.
+    """
+    ceiling = min(MAX_TEST_POWER_W, limit) if limit is not None else MAX_TEST_POWER_W
+    candidates = sorted(
+        range(MIN_TEST_POWER_W, int(ceiling) + 1, 100),
+        key=lambda candidate: abs(candidate - power),
+    )
+    return next((float(c) for c in candidates if is_decisive(test, c, baseline)), None)
+
+
+def tolerance(target: float) -> float:
+    return max(models.POWER_TOLERANCE_W, abs(target) * models.POWER_TOLERANCE_FRACTION)
+
+
+def test_control(
+    inverter: Inverter, report: Report, test: CoreTest, power: float, saver: bool
+) -> None:
+    print(f"== {test.name}: method {test.method}, {test.setpoint_key} ==")
+    raw, _derived = inverter.sample()
+    if reason := skip_reason(test, raw):
+        report.controls.append(ControlResult(test, "skipped", reason))
+        print(f"  skipped: {reason}\n")
+        return
+
+    notes: list[str] = []
+    limit = achievable_power(test, raw, _derived)
+    if limit is not None and limit < MIN_ACHIEVABLE_W:
+        reason = f"the export cap leaves only {limit:.0f} W to feed"
+        report.controls.append(ControlResult(test, "skipped", reason))
+        print(f"  skipped: {reason}\n")
+        return
+    if limit is not None and limit < power:
+        notes.append(f"tested at {limit:.0f} W, the most the export cap allows")
+        power = limit
+
+    baseline, derived_measure = measure(test, raw)
+    if derived_measure:
+        notes.append(f"{test.measure_key} unreadable, used battery minus solar")
+    if baseline is not None and not is_decisive(test, power, baseline):
+        decisive_power = pick_decisive_power(test, power, baseline, limit)
+        if decisive_power is not None:
+            notes.append(
+                f"tested at {decisive_power:.0f} W, as {power:.0f} W was already "
+                "flowing before the command"
+            )
+            power = decisive_power
+    signed_target = power * test.sign
+    decisive = baseline is None or is_decisive(test, power, baseline)
+    print(
+        f"  target {test.measure_key} {signed_target:+.0f} W; "
+        f"before: {fmt_power(baseline).strip()} W"
+    )
+
+    if failure := send(inverter, test, power, saver):
+        report.controls.append(ControlResult(test, "write refused", failure))
+        print(f"  {failure}\n")
+        return_to_default(inverter, saver)
+        return
+
+    reserve = float(raw.get("min_soc_limit") or 0)
+    took, measured, state, modes = observe(inverter, test, signed_target, reserve)
+    tail = statistics.fmean(measured[-3:]) if measured else None
+    if took is not None and decisive:
+        result = ControlResult(test, "FOLLOWED", settle_s=took)
+    elif took is not None:
+        result = ControlResult(
+            test,
+            "inconclusive",
+            f"{test.measure_key} was already near the target before the command",
+        )
+    elif state in (
+        models.ControlStatus.UNREACHABLE_BATTERY_FULL,
+        models.ControlStatus.UNREACHABLE_BATTERY_EMPTY,
+    ):
+        result = ControlResult(test, "unreachable", str(state))
+    else:
+        result = ControlResult(
+            test,
+            "NOT FOLLOWED",
+            f"{test.measure_key} averaged {fmt_power(tail).strip()} W "
+            f"against {signed_target:+.0f} W",
+        )
+    result.mode_report = judge_modes(str(test.method), modes)
+    if notes:
+        result.detail = "; ".join(filter(None, (result.detail, *notes)))
+    print(
+        f"  -> {result.verdict}"
+        + (f" after {took:.0f}s" if result.settle_s is not None else "")
+        + (f", {result.detail}" if result.detail else "")
+    )
+    print(f"  -> status {result.mode_report}")
+
+    return_to_default(inverter, saver)
+    inverter.wait(RETURN_SETTLE_S)
+    _, derived = inverter.sample()
+    back = str(derived.get("active_control_mode"))
+    if back != str(ControlMode.DEFAULT):
+        result.mode_report += f"; still reports {back} {RETURN_SETTLE_S}s after default"
+    print(f"  back to default, status reports {back}\n")
+    report.controls.append(result)
+
+
+def watch_grid(
+    inverter: Inverter,
+    check: Callable[[float], bool],
+    seconds: float,
+    since: float | None = None,
+) -> tuple[float | None, float | None, dict]:
+    """Seconds until the grid power has passed *check* three samples in a row.
+
+    Timed from *since*, the moment of the command, when given. Returns that time
+    or None, the last grid power and the last raw sample.
+    """
+    start = since if since is not None else time.monotonic()
+    # As in observe(), the first sample waits a gap so it cannot be a reading
+    # from before the inverter had the command.
+    inverter.wait(SAMPLE_GAP_S)
+    streak, grid, raw = 0, None, {}
+    while time.monotonic() - start < seconds:
+        raw, derived = inverter.sample()
+        grid = raw.get("grid_power")
+        passed = grid is not None and check(float(grid))
+        print(sample_line(inverter, raw, derived, "ok" if passed else ""))
+        streak = streak + 1 if passed else 0
+        if streak >= const.CONTROL_STATUS_DAMPING_POLLS:
+            return time.monotonic() - start, grid, raw
+        inverter.wait(SAMPLE_GAP_S)
+    return None, grid, raw
+
+
+def write_setting_like_integration(inverter: Inverter, key: str, value: int) -> str:
+    """Write a setting and read it straight back, as _async_write_register does.
+
+    The integration accepts the words it sent or the value in read order, and
+    raises when the read-back fails, so a problem here is an error in the switch.
+    Returns what went wrong, or "".
+    """
+    register = const.REGISTERS_BY_KEY[key].for_model(inverter.model)
+    words = inverter.encode(value, register.data_type)
+    ok, reason, _ = inverter.write(register.write_address or register.address, words)
+    if not ok:
+        return f"{key} write refused ({reason})"
+    readback, reason = inverter.read_words_reason(register.address, register.size)
+    if readback is None:
+        return f"{key} read-back right after the write failed ({reason})"
+    decoded = inverter.decode(readback, register)
+    if readback != words and (decoded is None or int(decoded) != value):
+        return f"{key} read back {decoded} right after writing {value}"
+    return ""
+
+
+def check_settled(inverter: Inverter, key: str, value: int, written: float) -> str:
+    """Whether a setting holds *value* once its words have settled.
+
+    A 32-bit value reads back as sent at first and in read order only a few
+    seconds after the write at *written*, so it is not judged before then.
+    """
+    inverter.wait(WRITE_ORDER_SETTLE_S - (time.monotonic() - written))
+    after, reason = inverter.read_int_reason(key)
+    if after == value:
+        return ""
+    return f"{key} reads {after if after is not None else reason} later, not {value}"
+
+
+def test_grid_feed(
+    inverter: Inverter, report: Report, power: float, saver: bool
+) -> None:
+    """Stop an export the way the grid feed switch does, and start it again.
+
+    ControlManager.async_set_grid_feed stops it by writing the limited mode and
+    then a zero cap, and restores the cap before the mode, all under control. The
+    export is created with the system method first, so stopping it shows on the
+    meter rather than having to be read from a register.
+    """
+    print("== Grid feed switch: stop and restore the export ==")
+    export = next(test for test in CORE_TESTS if test.name == "grid feed")
+    raw, derived = inverter.sample()
+    mode = derived.get("grid_feed_mode")
+    raw_mode = raw.get("grid_feed_mode")
+    cap = raw.get(const.FEED_IN_POWER_MAX_SETTING_KEY)
+
+    def skip(reason: str) -> None:
+        report.grid_feed = f"skipped, {reason}"
+        print(f"  skipped: {reason}\n")
+
+    if mode is None or raw_mode is None or cap is None:
+        return skip("the feed-in mode or cap is unreadable")
+    if not mode.switchable:
+        return skip(f"the feed-in mode is {mode}, which the switch leaves alone")
+    if mode is models.GridFeedMode.LIMITED and cap < MIN_ACHIEVABLE_W:
+        return skip(f"the export is already capped at {cap:.0f} W")
+    if report.write_order.startswith(("unclear", "untested")):
+        return skip("the write word order is unknown")
+    if reason := skip_reason(export, raw):
+        return skip(reason)
+    limit = achievable_power(export, raw, derived)
+    if limit is not None:
+        power = min(power, limit)
+    original_mode, original_cap = int(raw_mode), int(cap)
+    print(f"  feed-in mode {mode}, cap {original_cap} W")
+
+    print(f"  exporting {power:.0f} W with the system method")
+    if failure := send(inverter, export, power, saver):
+        return_to_default(inverter, saver)
+        return skip(failure)
+    took, grid, _ = watch_grid(
+        inverter,
+        lambda grid: abs(grid + power) <= tolerance(power),
+        CONTROL_SETTLE_S,
+    )
+    if took is None:
+        return_to_default(inverter, saver)
+        return skip(
+            f"no export to stop, the grid stayed at {fmt_power(grid).strip()} W"
+        )
+
+    print("  switching the export off: limited mode, then a 0 W cap")
+    inverter.ensure_fresh()
+    limited = models.GridFeedMode.LIMITED.register_value
+    inverter.pending_settings["grid_feed_mode"] = original_mode
+    inverter.pending_settings[const.FEED_IN_POWER_MAX_SETTING_KEY] = original_cap
+    switched_off = time.monotonic()
+    problems = [
+        problem
+        for problem in (
+            write_setting_like_integration(inverter, "grid_feed_mode", limited),
+            write_setting_like_integration(
+                inverter, const.FEED_IN_POWER_MAX_SETTING_KEY, 0
+            ),
+        )
+        if problem
+    ]
+    stopped, grid_off, raw_off = watch_grid(
+        inverter,
+        lambda grid: grid >= -EXPORT_STOPPED_W,
+        GRID_FEED_SETTLE_S,
+        since=switched_off,
+    )
+    effective = raw_off.get(const.FEED_IN_POWER_MAX_EFFECTIVE_KEY)
+    # By now the 32-bit cap has been republished in read order.
+    problems += filter(
+        None,
+        (
+            check_settled(inverter, "grid_feed_mode", limited, switched_off),
+            check_settled(
+                inverter, const.FEED_IN_POWER_MAX_SETTING_KEY, 0, switched_off
+            ),
+        ),
+    )
+
+    print("  switching the export back on: the cap, then the mode")
+    inverter.ensure_fresh()
+    switched_on = time.monotonic()
+    restores = (
+        (const.FEED_IN_POWER_MAX_SETTING_KEY, original_cap),
+        ("grid_feed_mode", original_mode),
+    )
+    for key, value in restores:
+        if problem := write_setting_like_integration(inverter, key, value):
+            problems.append(problem)
+    resumed, grid_on, _ = watch_grid(
+        inverter,
+        lambda grid: abs(grid + power) <= tolerance(power),
+        GRID_FEED_SETTLE_S,
+        since=switched_on,
+    )
+    for key, value in restores:
+        if problem := check_settled(inverter, key, value, switched_on):
+            problems.append(problem)
+        else:
+            del inverter.pending_settings[key]
+    return_to_default(inverter, saver)
+
+    parts = [
+        f"stopped, the grid at {fmt_power(grid_off).strip()} W after {stopped:.0f}s"
+        if stopped is not None
+        else f"NOT stopped, the grid still at {fmt_power(grid_off).strip()} W after "
+        f"{GRID_FEED_SETTLE_S}s",
+        f"resumed after {resumed:.0f}s"
+        if resumed is not None
+        else f"NOT resumed, the grid at {fmt_power(grid_on).strip()} W after "
+        f"{GRID_FEED_SETTLE_S}s",
+    ]
+    # Only where 40609 is known to carry the cap; elsewhere it reads 0 regardless.
+    if effective is not None and inverter.model.traits.reports_effective_feed_cap:
+        parts.append(f"effective cap (40609) read {effective:.0f} W while off")
+    parts += problems
+    report.grid_feed = "; ".join(parts)
+    print(f"  -> {report.grid_feed}\n")
+
+
+def hand_back(inverter: Inverter, report: Report, saver: bool, wait: bool) -> None:
+    print("== Handing back to the EcoFlow app ==")
+    return_to_default(inverter, saver)
+    inverter.heartbeat_running = False
+    print("  default method selected, setpoints cleared, heartbeat stopped")
+    if not wait:
+        report.handback = "not observed (--no-handback-wait)"
+        print()
+        return
+    print(f"  watching Manual Mode Status for up to {HANDBACK_WAIT_S}s")
+    took = wait_for(
+        inverter, lambda d: d.get("device_modbus_control") is False, HANDBACK_WAIT_S
+    )
+    since = time.monotonic() - (inverter.last_heartbeat or time.monotonic())
+    report.handback = (
+        f"bit 11 cleared {since:.0f}s after the last heartbeat"
+        if took is not None
+        else f"bit 11 still set {since:.0f}s after the last heartbeat"
+    )
+    print(f"  -> {report.handback}\n")
+
+
+def restore_originals(inverter: Inverter, originals: dict[str, int | None]) -> None:
+    """Put back the setpoints, and any setting a check left changed."""
+    for key, value in originals.items():
+        if value is not None and key not in inverter.refused:
+            inverter.write_value(key, value)
+    # Newest first: the grid feed cap goes back before its mode, the order the
+    # integration's grid feed switch restores them in.
+    for key, value in reversed(list(inverter.pending_settings.items())):
+        if inverter.write_value(key, value)[0]:
+            del inverter.pending_settings[key]
+            print(f"  {key} put back to {render_setting(key, value)}")
+
+
+def print_summary(inverter: Inverter, report: Report) -> None:
+    rows: list[tuple[str, str]] = [
+        ("model", inverter.model.traits.display_name),
+        ("32-bit write word order", report.write_order),
+    ]
+    rows += [(label, str(result)) for label, result in report.manual.items()]
+    rows += [
+        ("heartbeat", report.heartbeat),
+        ("manual mode status bit", report.manual_mode_bit),
+    ]
+    for result in report.controls:
+        line = result.verdict
+        if result.settle_s is not None:
+            line += f" in {result.settle_s:.0f}s"
+        if result.detail:
+            line += f" ({result.detail})"
+        if result.mode_report:
+            line += f"; status {result.mode_report}"
+        rows.append((result.test.name, line))
+    rows.append(("grid feed switch", report.grid_feed))
+    rows.append(("hand back", report.handback))
+
+    print("== Summary ==")
+    width = max(len(label) for label, _ in rows)
+    for label, value in rows:
+        print(f"  {label:<{width}}  {value}")
+    print()
+
+
+# ── Entry point ──────────────────────────────────────────────────────────────
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("host", help="the inverter's IP address")
+    parser.add_argument("--port", type=int, default=const.DEFAULT_PORT)
+    parser.add_argument("--slave", type=int, default=const.DEFAULT_SLAVE)
+    parser.add_argument(
+        "--model",
+        choices=[model.value for model in models.InverterModel],
+        help="model to test as. Default: whatever the device reports. Required "
+        "when the device is not recognised.",
+    )
+    parser.add_argument(
+        "--power",
+        type=int,
+        default=DEFAULT_TEST_POWER_W,
+        metavar="WATTS",
+        help=f"power to test each control method at. Default "
+        f"{DEFAULT_TEST_POWER_W}, between {MIN_TEST_POWER_W} and {MAX_TEST_POWER_W}.",
+    )
+    parser.add_argument(
+        "--yes", action="store_true", help="start without asking for confirmation"
+    )
+    parser.add_argument(
+        "--skip-manual",
+        action="store_true",
+        help="skip battery saver and the settings, which need checking in the app",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="start even though the inverter already reports Modbus control",
+    )
+    parser.add_argument(
+        "--no-handback-wait",
+        action="store_true",
+        help="skip watching the inverter return to the app at the end (saves 80s)",
+    )
+    parser.add_argument(
+        "--show-serial", action="store_true", help="the serial is masked by default"
+    )
+    arguments = parser.parse_args()
+    if not MIN_TEST_POWER_W <= arguments.power <= MAX_TEST_POWER_W:
+        parser.error(
+            f"--power must be between {MIN_TEST_POWER_W} and {MAX_TEST_POWER_W}"
+        )
+    return arguments
+
+
+def confirm(arguments: argparse.Namespace, manual: bool) -> bool:
+    print("This test WRITES to the inverter. Over 5 to 10 minutes it will:")
+    print("  - write a battery setpoint once to learn the 32-bit word order,")
+    if manual:
+        print("  - switch battery saver, the LED brightness and the backup reserve to")
+        print("    another value, ask you to check each in the EcoFlow app, and switch")
+        print("    it back,")
+    print(
+        f"  - take Modbus control and run the battery, system and inverter control "
+        f"methods\n    at {arguments.power} W, both ways, for up to "
+        f"{CONTROL_SETTLE_S}s each,"
+    )
+    print("  - export to the grid, switch the export off as the integration's grid")
+    print("    feed switch does, check that it stopped, and switch it back on,")
+    print("  - hand the inverter back to the EcoFlow app.")
+    print("Turn off Modbus Control in the integration first. Ctrl+C stops the test")
+    print("at any point and still puts the inverter back.")
+    if arguments.yes:
+        return True
+    try:
+        return input("Type yes to start: ").strip().lower() == "yes"
+    except EOFError:
+        return False
+
+
+def main() -> int:
+    arguments = parse_arguments()
+    manual = not arguments.skip_manual and sys.stdin.isatty()
+    version = json.loads(MANIFEST.read_text(encoding="utf-8"))["version"]
+    print("EcoFlow PowerOcean control test")
+    print(
+        f"integration {version}, target {arguments.host}:{arguments.port}, "
+        f"unit id {arguments.slave}\n"
+    )
+    if not confirm(arguments, manual):
+        print("Nothing was written.")
+        return 1
+    print()
+
+    client = ModbusTcpClient(arguments.host, port=arguments.port, timeout=10)
+    if not client.connect():
+        print(f"Could not connect to {arguments.host}:{arguments.port}.")
+        print("Check the IP, and that Modbus TCP is enabled in the EcoFlow app.")
+        return 1
+
+    reader = RegisterReader(client, arguments.slave)
+    report = Report()
+    inverter: Inverter | None = None
+    saver = False
+    originals: dict[str, int | None] = {}
+    # Set from the first write until everything is put back, so an interruption
+    # anywhere in between still restores the inverter.
+    needs_cleanup = False
+    interrupted = False
+    try:
+        detected = report_device(reader, arguments.show_serial)
+        if arguments.model:
+            model = models.InverterModel(arguments.model)
+        elif detected is not None:
+            model = detected
+        else:
+            raise Aborted(
+                "The model is not recognised. Writing to an unknown map is unsafe; "
+                "pass --model to say which one to test as."
+            )
+        print(f"Testing as the {model.traits.display_name}.\n")
+        reader.high_word_first = model.traits.high_word_first
+        inverter = Inverter(client, reader, arguments.slave, model)
+
+        _, derived = preflight(inverter, arguments.force)
+        saver = bool(derived.get("battery_saver_mode_ena"))
+        originals = {key: inverter.read_int(key) for key in SETPOINT_KEYS}
+
+        needs_cleanup = True
+        test_write_order(inverter, report)
+        if manual:
+            print("Have the EcoFlow app open on this inverter for the next part.\n")
+            test_battery_saver(inverter, report, saver, manual)
+            test_settings(inverter, report, manual)
+        else:
+            reason = (
+                "skipped (--skip-manual)"
+                if arguments.skip_manual
+                else "skipped, no terminal to answer in"
+            )
+            report.manual["battery saver and settings"] = reason
+        if take_control(inverter, report):
+            for test in CORE_TESTS:
+                test_control(inverter, report, test, arguments.power, saver)
+            test_grid_feed(inverter, report, arguments.power, saver)
+            hand_back(inverter, report, saver, not arguments.no_handback_wait)
+        restore_originals(inverter, originals)
+        needs_cleanup = False
+    except KeyboardInterrupt:
+        interrupted = True
+        print("\n\nInterrupted.")
+    except Aborted as reason:
+        print(f"Stopped: {reason}\n")
+    finally:
+        if inverter is not None and needs_cleanup:
+            print("Putting the inverter back as it was ...")
+            try:
+                return_to_default(inverter, saver)
+                # The grid feed settings are only acted on under control, so they
+                # go back before the heartbeat stops.
+                restore_originals(inverter, originals)
+                inverter.heartbeat_running = False
+                print(
+                    "  default method selected and setpoints restored; the app takes "
+                    f"over within {const.HEARTBEAT_WINDOW_S}s."
+                )
+                for key, value in inverter.pending_settings.items():
+                    print(
+                        f"  COULD NOT put {key} back to {render_setting(key, value)}; "
+                        "set it in the app."
+                    )
+                print()
+            except (Exception, KeyboardInterrupt) as error:  # noqa: BLE001
+                print(
+                    f"  FAILED ({error!r}). Without the heartbeat the inverter "
+                    f"returns to the app on its own within "
+                    f"{const.HEARTBEAT_WINDOW_S}s.\n"
+                )
+        if inverter is not None:
+            print_summary(inverter, report)
+            print(f"{reader.reads} reads and {inverter.writes} writes issued.")
+        client.close()
+
+    if interrupted:
+        print("The test was interrupted, so the summary is incomplete.")
+    print("Please attach this whole report to the GitHub issue.")
+    return 0 if inverter is not None and not interrupted else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
