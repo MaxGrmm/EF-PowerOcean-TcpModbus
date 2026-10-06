@@ -100,10 +100,10 @@ Reading the result:
 
 [scripts/control_feature_scan.py](scripts/control_feature_scan.py) checks which Modbus controls a live inverter follows. Like the register scan it imports the map, the model traits and the control constants from the integration, and it sends commands the way the control manager does: the heartbeat first, then the setpoint, then the control word.
 
-Unlike the scan, it **writes**. It runs in two parts:
+Unlike the scan, it **writes**, and runs in two parts:
 
-1. **Without the heartbeat**, the way the integration writes them: battery saver, LED brightness and backup reserve are each changed to another value, confirmed by you in the EcoFlow app, and changed back. A register read-back only proves the words arrived, so the app answer is what counts.
-2. **With the heartbeat**, the three control methods of the EcoFlow Open Modbus Protocol, each both ways at the test power: battery (40571), system power at the meter (40542) and inverter power (40544). Each is judged on whether the measured power reaches the setpoint and whether System Status (40530, bits 7-10) reports the method that was sent. The integration's own modes, such as Hold and Export Solar First, are built on these and not tested separately. Last, it exports with the system method and switches the export off and on again the way the grid feed switch does (limited mode and a 0 W cap, then the cap and mode put back), checking on the meter that the export stops and resumes. The feed-in settings are never changed otherwise.
+1. **Without the heartbeat**, tests that the battery saver, LED brightness and backup reserve are each changed to another value, confirmed by you in the EcoFlow app, and changed back.
+2. **With the heartbeat**, the three control methods, each both ways, battery (40571), system power at the meter (40542) and inverter power (40544). Each is judged on whether the measured power reaches the setpoint and whether System Status (40530, bits 7-10) reports the method that was sent.
 
 It also learns the 32-bit write word order from one setpoint write before anything else, and watches the inverter hand back to the app at the end. Ctrl+C at any point puts back the setpoints and any setting it was in the middle of checking.
 

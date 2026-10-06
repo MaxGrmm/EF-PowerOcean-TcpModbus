@@ -10,45 +10,21 @@ To run it:
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import sys
 import time
-import types
-from pathlib import Path
 from typing import Final
 
-INTEGRATION: Final = (
-    Path(__file__).resolve().parents[1]
-    / "custom_components"
-    / "ef_powerocean_tcpmodbus"
+from pymodbus.client import ModbusTcpClient
+from utils import (
+    MANIFEST,
+    RegisterReader,
+    const,
+    models,
+    render_address,
+    report_device,
+    telemetry,
 )
-MANIFEST: Final = INTEGRATION / "manifest.json"
-PACKAGE: Final = "ef_powerocean_registers"
-
-
-def load_integration() -> tuple[types.ModuleType, ...]:
-    """Custom import of the register map, to not import the whole of Home Assistant."""
-    try:
-        import homeassistant.const  # noqa: F401
-    except ImportError:
-        stub = types.ModuleType("homeassistant.const")
-        stub.__getattr__ = lambda _name: type("Any", (), {"__getattr__": str})()
-        sys.modules.setdefault("homeassistant", types.ModuleType("homeassistant"))
-        sys.modules["homeassistant.const"] = stub
-
-    package = types.ModuleType(PACKAGE)
-    package.__path__ = [str(INTEGRATION)]
-    sys.modules[PACKAGE] = package
-    return tuple(
-        importlib.import_module(f"{PACKAGE}.{module}")
-        for module in ("const", "models", "telemetry")
-    )
-
-
-const, models, telemetry = load_integration()
-
-from pymodbus.client import ModbusTcpClient  # noqa: E402
 
 DEFAULT_SCAN: Final = ["40000-40700", "42000-42300"]
 
@@ -83,14 +59,6 @@ SIGNATURES: Final[tuple[tuple[str, float, float], ...]] = (
     ("power or energy", 1000.0, 100_000.0),
 )
 
-EXCEPTION_MEANINGS: Final[dict[int, str]] = {
-    1: "illegal function",
-    2: "illegal data address",
-    3: "illegal data value",
-    4: "device failure",
-    6: "device busy",
-}
-
 NOT_POLLED: Final[dict[int, str]] = {
     const.CONTROL_COMMAND_REGISTER: "the integration's control command, write-only",
     const.HEARTBEAT_REGISTER: "the integration's heartbeat register",
@@ -108,10 +76,6 @@ FLOAT_CEILING: Final = 1_000_000.0
 # a third sample makes a coincidence harder still.
 SAMPLE_COUNT: Final = 3
 SAMPLE_GAP_S: Final = 30
-
-
-def render_address(address: int) -> str:
-    return f"{address} (0x{address:04X})"
 
 
 def render_span(first: int, last: int) -> str:
@@ -143,106 +107,6 @@ def plausibility_note(key: str, value: float | None) -> str:
     if bounds and not bounds[0] <= value <= bounds[1]:
         return "out of range"
     return "ok"
-
-
-class RegisterReader:
-    """Interface to read a register from the inverter."""
-
-    def __init__(self, client: ModbusTcpClient, slave: int) -> None:
-        self._client = client
-        self._slave = slave
-        # Set once the model is known, because the three-phase Ocean 2 publishes
-        # 32-bit values high word first and every other model the other way round.
-        self.high_word_first = False
-        self.reads = 0
-
-    def read(self, start: int, count: int) -> tuple[list[int] | None, str]:
-        """Return the words, or None and the reason the device gave."""
-        self.reads += 1
-        try:
-            response = self._client.read_holding_registers(
-                address=start, count=count, device_id=self._slave
-            )
-        except Exception as error:  # a dropped connection rather than a refusal
-            return None, str(error)
-
-        if response.isError():
-            code = getattr(response, "exception_code", None)
-            if not code:
-                return None, str(response)
-            return None, f"exception code {code}, {EXCEPTION_MEANINGS.get(code, '?')}"
-        return response.registers, ""
-
-    def read_value(self, register: models.RegisterDef) -> tuple[float | None, str]:
-        """Read one register on its own and decode it. The reason is empty when
-        the read worked, so a value of None then means it did not decode."""
-        words, reason = self.read(register.address, register.size)
-        if words is None:
-            return None, reason
-        return self.decode(words, register), ""
-
-    def read_mapped(self, block: models.RegisterBlock) -> dict[str, float | None]:
-        """Read a whole block and decode every register it carries."""
-        words, _ = self.read(block.start, block.count)
-        if words is None:
-            return {}
-        return {
-            register.key: self.decode(block.registers_for(words, register), register)
-            for register in block.registers
-        }
-
-    def decode(self, words: list[int], register: models.RegisterDef) -> float | None:
-        return telemetry.decode_register(
-            words, register.data_type, self.high_word_first
-        )
-
-
-def report_device(
-    reader: RegisterReader, show_serial: bool
-) -> models.InverterModel | None:
-    """Print what the device says about itself, and the model that implies."""
-    print("== Device ==")
-    block = const.DEVICE_INFO_BLOCK
-    words, reason = reader.read(block.start, block.count)
-    if words is None:
-        print(f"  device info at {render_address(block.start)}: FAILED ({reason})")
-        print("  Pass --model to carry on against a specific address map.\n")
-        return None
-
-    def words_for(register: models.RegisterDef) -> list[int]:
-        return block.registers_for(words, register)
-
-    serial = telemetry.decode_serial_number(words_for(const.SERIAL_NUMBER)) or "unknown"
-    number = words_for(const.PRODUCT_NUMBER)[0]
-    category = words_for(const.PRODUCT_CATEGORY)[0]
-    detected = models.InverterModel.from_product_info(number, category)
-    firmware = telemetry.decode_firmware_version(
-        words_for(const.FIRMWARE_VERSION),
-        detected.traits.high_word_first if detected else False,
-    )
-    protocol, protocol_reason = reader.read_value(const.PROTOCOL_VERSION)
-    address, address_reason = reader.read_value(const.DEVICE_ADDRESS)
-
-    print(f"  serial number     {serial if show_serial else serial[:4] + '****'}")
-    print(f"  firmware          {firmware}")
-    print(
-        f"  protocol version  {int(protocol) if protocol is not None else 'unknown'}"
-        + (f" [unreadable: {protocol_reason}]" if protocol is None else "")
-    )
-    print(f"  product number    {number}")
-    print(f"  product category  {category}")
-    print(
-        f"  device address    {int(address) if address is not None else 'unknown'}"
-        + (f" [unreadable: {address_reason}]" if address is None else "")
-    )
-    name = detected.traits.display_name if detected else "UNKNOWN"
-    print(f"  detected model    {name}")
-    if detected is None:
-        print("    -> no model matches these product registers, so the default map")
-        print("       is used. Quote the two numbers above in the issue: they are")
-        print("       what teaches the integration to recognise this model.")
-    print()
-    return detected
 
 
 def report_block_reads(
