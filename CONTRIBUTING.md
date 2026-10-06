@@ -116,6 +116,8 @@ uv run python scripts/control_feature_scan.py <inverter_ip>
 
 It takes 5 to 10 minutes. `--power` sets the test power (default 1500 W), `--skip-manual` leaves out the app checks and `--no-handback-wait` skips the final 80 s. A method counts as followed once the measurement has stayed within the integration's tolerance for three samples in a row, so the verdicts match what the Control Status sensor would show.
 
+`--reserve-probe` runs a different path for one question: does writing the backup reserve (40536) do what changing it in the app does? In the app, a reserve above the SOC makes the inverter charge from the grid up to it; on the PowerOcean Plus the register takes the write but the inverter keeps enforcing the app's value. The probe raises the register 10% above the SOC under four control states, without a session, in a session on the default method, with the control word re-sent after the write, and under a battery hold, watching two minutes each for grid charging, and puts the reserve back after each. It ends by writing the reserve in a session and reading it back once the session has ended, to see whether the value survives. Whichever state charges, if any, is the one the integration has to write the reserve in.
+
 ### Writable Registers and Battery Control
 
 Writable changes require confirmation against real hardware. A write response or register readback alone is not proof that firmware applied a command; describe the observed physical or application behavior, inverter model, and firmware version in the pull request.

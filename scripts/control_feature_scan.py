@@ -10,6 +10,15 @@ saver and the settings are confirmed by you there.
 
 It takes 5 to 10 minutes. The battery charges and discharges briefly at the test
 power and the inverter is handed back to the EcoFlow app at the end.
+
+    uv run python scripts/control_feature_scan.py <inverter_ip> --reserve-probe
+
+Instead tests the backup reserve: the app's reserve, raised above the SOC, makes
+the inverter charge from the grid up to it, while a write to its register (40536)
+has been seen to be stored and ignored. The probe raises the register 10% above
+the SOC under each control state (no session, a session on the default method,
+with the control word re-sent, and under a battery hold) and watches whether grid
+charging starts, so the state the firmware acts in, if any, is found.
 """
 
 from __future__ import annotations
@@ -89,6 +98,22 @@ BUSY_RETRIES: Final = 3
 # will refuse it again. Anything else, device busy above all, is worth retrying.
 PERMANENT_CODES: Final = frozenset({1, 2, 3})
 
+# The backup reserve probe (--reserve-probe). Raising the app's reserve above the
+# SOC makes the inverter charge from the grid up to it; this asks whether a write
+# to the register does the same, and under which control state.
+RESERVE_RAISE_PCT: Final = 10
+# Grid charging to the reserve started within a minute in the app; this leaves
+# margin for a setting read on a slower schedule.
+RESERVE_SETTLE_S: Final = 120
+# After the reserve goes back, how long to wait for the charging to stop.
+RESERVE_RELEASE_S: Final = 60
+# The battery and the grid both have to rise this much above their baseline, so
+# the charge is from the grid, not solar that happened to come out.
+RESERVE_CHARGE_W: Final = 300.0
+# Unmapped on every model; it held the same value as 40536 in an Ocean 2 Plus scan,
+# so it may be the copy the firmware enforces. Read alongside, never written.
+RESERVE_SHADOW_ADDRESS: Final = 40518
+
 
 class Aborted(Exception):
     """Stop the scan when its preconditions are not met."""
@@ -150,6 +175,40 @@ CORE_TESTS: Final = (
 )
 
 
+@dataclass(frozen=True)
+class ReserveCase:
+    """One control state to write the backup reserve under."""
+
+    name: str
+    # Whether the heartbeat runs and a control word is written first.
+    session: bool
+    method: models.ControlMode = ControlMode.DEFAULT
+    # Write the control word again after the reserve, in case the firmware only
+    # reads its settings on a command.
+    resend_control_word: bool = False
+    # Send the hold the integration's Hold battery sends, to see whether a manual
+    # battery command takes precedence over the reserve.
+    hold: bool = False
+
+
+# Ordered so the heartbeat starts only once the no-session case is done.
+RESERVE_CASES: Final = (
+    ReserveCase("no session, as the integration writes settings", session=False),
+    ReserveCase("session, default method", session=True),
+    ReserveCase(
+        "session, default method, control word re-sent after the write",
+        session=True,
+        resend_control_word=True,
+    ),
+    ReserveCase(
+        "session, battery hold (method 3, +1 W)",
+        session=True,
+        method=ControlMode.BATTERY_LIMITS,
+        hold=True,
+    ),
+)
+
+
 @dataclass
 class ControlResult:
     test: CoreTest
@@ -179,6 +238,8 @@ class Report:
     handback: str = "not tested"
     manual: dict[str, ManualResult | str] = field(default_factory=dict)
     controls: list[ControlResult] = field(default_factory=list)
+    # --reserve-probe: case name -> what the inverter did.
+    reserve: dict[str, str] = field(default_factory=dict)
 
 
 def refusal_code(reason: str) -> int | None:
@@ -558,7 +619,7 @@ def render_setting(key: str, value: int | None) -> str:
     if key == "grid_feed_mode" and value is not None:
         return f"{value} ({FEED_MODE_NAMES.get(value, '?')})"
     unit = {"device_led_brightness": " %", "min_soc_limit": " %"}.get(key, " W")
-    return f"{value}{unit}"
+    return f"{value if value is None else int(value)}{unit}"
 
 
 def test_settings(inverter: Inverter, report: Report, manual: bool) -> None:
@@ -1056,6 +1117,218 @@ def test_grid_feed(
     print(f"  Result: {report.grid_feed}\n")
 
 
+def read_shadow(inverter: Inverter) -> str:
+    """Read the unmapped word beside the reserve, if the model answers for it."""
+    words, _ = inverter.read_words_reason(RESERVE_SHADOW_ADDRESS, 1)
+    return (
+        "" if words is None else f"{render_address(RESERVE_SHADOW_ADDRESS)}={words[0]}"
+    )
+
+
+def reserve_target(raw: dict) -> tuple[int | None, str]:
+    """Return the reserve to write, RESERVE_RAISE_PCT above the SOC, or why not."""
+    soc = raw.get("battery_soc")
+    if soc is None:
+        return None, "the SOC is unreadable"
+    target = int(soc) + RESERVE_RAISE_PCT
+    if target > models.BATTERY_FULL_SOC - SOC_MARGIN:
+        return None, f"battery at {soc:.0f}%, no room to raise the reserve above it"
+    return target, ""
+
+
+def watch_charging(
+    inverter: Inverter, baseline: dict, seconds: float, charging: bool
+) -> tuple[float | None, dict]:
+    """Wait for grid charging to start (or stop); return elapsed seconds and the last sample."""
+    base_battery = float(baseline.get("battery_power") or 0)
+    base_grid = float(baseline.get("grid_power") or 0)
+    start = time.monotonic()
+    streak, raw = 0, {}
+    inverter.wait(SAMPLE_GAP_S)
+    while time.monotonic() - start < seconds:
+        raw, derived = inverter.sample()
+        battery, grid = raw.get("battery_power"), raw.get("grid_power")
+        rose = (
+            battery is not None
+            and grid is not None
+            and float(battery) - base_battery >= RESERVE_CHARGE_W
+            and float(grid) - base_grid >= RESERVE_CHARGE_W
+        )
+        passed = rose if charging else not rose
+        note = " ".join(
+            filter(
+                None,
+                (
+                    f"reserve {render_setting('min_soc_limit', reserve)}"
+                    if (reserve := raw.get("min_soc_limit")) is not None
+                    else "",
+                    read_shadow(inverter),
+                    "charging from grid" if rose else "",
+                ),
+            )
+        )
+        print(sample_line(inverter, raw, derived, note))
+        streak = streak + 1 if passed else 0
+        if streak >= const.CONTROL_STATUS_DAMPING_POLLS:
+            return time.monotonic() - start, raw
+        inverter.wait(SAMPLE_GAP_S)
+    return None, raw
+
+
+def enter_case(inverter: Inverter, case: ReserveCase, saver: bool) -> str:
+    """Put the inverter in the case's control state; return a failure reason."""
+    if not case.session:
+        return ""
+    inverter.ensure_fresh()
+    if case.hold:
+        ok, reason, _ = inverter.write_value(
+            "battery_power_setpoint", int(const.HOLD_SETPOINT_W)
+        )
+        if not ok:
+            return f"hold setpoint refused ({reason})"
+    ok, reason, _ = inverter.write_control_word(
+        compose_control_word(case.method, saver)
+    )
+    return "" if ok else f"control word refused ({reason})"
+
+
+def probe_reserve_case(
+    inverter: Inverter, report: Report, case: ReserveCase, original: int, saver: bool
+) -> None:
+    key = "min_soc_limit"
+    print(f"== Backup reserve: {case.name} ==")
+    if failure := enter_case(inverter, case, saver):
+        report.reserve[case.name] = failure
+        print(f"  {failure}\n")
+        return
+    if case.session:
+        inverter.wait(RETURN_SETTLE_S)
+    baseline, derived = inverter.sample()
+    print(sample_line(inverter, baseline, derived, "before"))
+    target, why = reserve_target(baseline)
+    if target is None:
+        report.reserve[case.name] = f"skipped, {why}"
+        print(f"  Skipped: {why}.\n")
+        return
+
+    inverter.pending_settings[key] = original
+    ok, reason, _ = inverter.write_value(key, target)
+    if not ok:
+        del inverter.pending_settings[key]
+        report.reserve[case.name] = f"write refused ({reason})"
+        print(f"  Write refused: {reason}\n")
+        return
+    if case.resend_control_word:
+        inverter.ensure_fresh()
+        inverter.write_control_word(compose_control_word(case.method, saver))
+    readback = inverter.read_int(key)
+    print(
+        f"  Reserve {original}% -> {target}% (SOC + {RESERVE_RAISE_PCT}), "
+        f"reads back {readback}%; watching {RESERVE_SETTLE_S}s for grid charging"
+    )
+    took, last = watch_charging(inverter, baseline, RESERVE_SETTLE_S, charging=True)
+    if took is not None:
+        verdict = (
+            f"CHARGED from the grid after {took:.0f}s, battery "
+            f"{fmt_power(last.get('battery_power')).strip()} W"
+        )
+    else:
+        verdict = (
+            f"NOT acted on within {RESERVE_SETTLE_S}s, battery "
+            f"{fmt_power(last.get('battery_power')).strip()} W, grid "
+            f"{fmt_power(last.get('grid_power')).strip()} W"
+        )
+    if readback != target:
+        verdict += f"; register read back {readback}%, not {target}%"
+    report.reserve[case.name] = verdict
+    print(f"  Result: {verdict}")
+
+    ok, _, _ = inverter.write_value(key, original)
+    if ok:
+        del inverter.pending_settings[key]
+    if case.session:
+        return_to_default(inverter, saver)
+    print(f"  Reserve put back to {original}%")
+    if took is not None:
+        stopped, _ = watch_charging(
+            inverter, baseline, RESERVE_RELEASE_S, charging=False
+        )
+        if stopped is not None:
+            print(f"  Charging stopped after {stopped:.0f}s")
+        else:
+            print(f"  Charging still going {RESERVE_RELEASE_S}s later")
+    print()
+
+
+def probe_reserve_persistence(
+    inverter: Inverter, report: Report, original: int, saver: bool
+) -> None:
+    """Write the reserve in a session and see what the register holds after it ends."""
+    key = "min_soc_limit"
+    label = "written value after the session ends"
+    print(f"== Backup reserve: {label} ==")
+    if not inverter.heartbeat_running:
+        report.reserve[label] = "skipped, no session"
+        print("  Skipped: no session.\n")
+        return
+    probe = original + 1 if original < 99 else original - 1
+    inverter.ensure_fresh()
+    inverter.pending_settings[key] = original
+    ok, reason, _ = inverter.write_value(key, probe)
+    if not ok:
+        del inverter.pending_settings[key]
+        report.reserve[label] = f"write refused ({reason})"
+        print(f"  Write refused: {reason}\n")
+        return
+    print(f"  Wrote {probe}% in the session; ending it (no more heartbeats)")
+    return_to_default(inverter, saver)
+    inverter.heartbeat_running = False
+    took = wait_for(
+        inverter, lambda d: d.get("device_modbus_control") is False, HANDBACK_WAIT_S
+    )
+    after = inverter.read_int(key)
+    if after == probe:
+        held = f"still holds our {probe}%"
+    elif after == original:
+        held = f"reverted to the app's {original}%"
+    else:
+        held = f"reads {after}%"
+    ended = (
+        f"bit 11 cleared after {took:.0f}s"
+        if took is not None
+        else f"bit 11 still set after {HANDBACK_WAIT_S}s"
+    )
+    report.reserve[label] = f"{held} ({ended})"
+    report.handback = ended
+    print(f"  Result: {report.reserve[label]}")
+    ok, _, _ = inverter.write_value(key, original)
+    if ok:
+        del inverter.pending_settings[key]
+    print(f"  Reserve put back to {original}%\n")
+
+
+def run_reserve_probe(inverter: Inverter, report: Report, saver: bool) -> None:
+    """Raise the reserve above the SOC under each control state, watching for charging."""
+    original = inverter.read_int("min_soc_limit")
+    if original is None:
+        raise Aborted("The backup reserve (40536) is unreadable.")
+    raw, _ = inverter.sample()
+    if why := reserve_target(raw)[1]:
+        raise Aborted(f"Cannot probe the reserve: {why}.")
+    print(f"Backup reserve reads {original}%; each case raises it {RESERVE_RAISE_PCT}%")
+    print("above the SOC, watches for grid charging, then puts it back.\n")
+
+    session_ok: bool | None = None
+    for case in RESERVE_CASES:
+        if case.session and session_ok is None:
+            session_ok = take_control(inverter, report)
+        if case.session and not session_ok:
+            report.reserve[case.name] = "skipped, the heartbeat was refused"
+            continue
+        probe_reserve_case(inverter, report, case, original, saver)
+    probe_reserve_persistence(inverter, report, original, saver)
+
+
 def hand_back(inverter: Inverter, report: Report, saver: bool, wait: bool) -> None:
     print("== Handing back to the EcoFlow app ==")
     return_to_default(inverter, saver)
@@ -1109,7 +1382,9 @@ def print_summary(inverter: Inverter, report: Report) -> None:
         if result.mode_report:
             line += f"; status {result.mode_report}"
         rows.append((result.test.name, line))
-    rows.append(("grid feed switch", report.grid_feed))
+    rows += [(f"reserve: {case}", result) for case, result in report.reserve.items()]
+    if report.grid_feed != "not tested":
+        rows.append(("grid feed switch", report.grid_feed))
     rows.append(("hand back", report.handback))
 
     print("== Summary ==")
@@ -1137,6 +1412,13 @@ def parse_arguments() -> argparse.Namespace:
         metavar="WATTS",
         help=f"power to test each control method at. Default "
         f"{DEFAULT_TEST_POWER_W}, between {MIN_TEST_POWER_W} and {MAX_TEST_POWER_W}.",
+    )
+    parser.add_argument(
+        "--reserve-probe",
+        action="store_true",
+        help="instead of the control methods, test whether writing the backup "
+        f"reserve (40536) {RESERVE_RAISE_PCT}%% above the SOC makes the inverter "
+        "charge from the grid, as the app's reserve does, under each control state",
     )
     parser.add_argument(
         "--yes", action="store_true", help="start without asking for confirmation"
@@ -1168,6 +1450,30 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def confirm(arguments: argparse.Namespace, manual: bool) -> bool:
+    if arguments.reserve_probe:
+        cases = len(RESERVE_CASES)
+        print(
+            f"This probe writes to the inverter. It takes about {cases * 3 + 3} "
+            "minutes:"
+        )
+        print("  - write a battery setpoint to check the 32-bit word order,")
+        print(
+            f"  - raise the backup reserve (40536) {RESERVE_RAISE_PCT}% above the "
+            f"SOC under {cases} control states, {RESERVE_SETTLE_S}s each, watching "
+            "for grid charging, and put it back after each,"
+        )
+        print("  - check whether a value written in a session survives its end,")
+        print("  - return control to the EcoFlow app.")
+        print("The battery may charge briefly from the grid. Turn off Modbus Control")
+        print(
+            "in Home Assistant first. Ctrl+C stops the probe and restores the reserve."
+        )
+        if arguments.yes:
+            return True
+        try:
+            return input("Type yes to start: ").strip().lower() == "yes"
+        except EOFError:
+            return False
     print("This test writes to the inverter. It takes about 5 to 10 minutes:")
     print("  - write a battery setpoint to check the 32-bit word order,")
     if manual:
@@ -1239,22 +1545,28 @@ def main() -> int:
 
         needs_cleanup = True
         test_write_order(inverter, report)
-        if manual:
-            print("Have the EcoFlow app open on this inverter for the next part.\n")
-            test_battery_saver(inverter, report, saver, manual)
-            test_settings(inverter, report, manual)
+        if arguments.reserve_probe:
+            report.manual["battery saver and settings"] = "skipped (--reserve-probe)"
+            run_reserve_probe(inverter, report, saver)
+            if inverter.heartbeat_running:
+                hand_back(inverter, report, saver, not arguments.no_handback_wait)
         else:
-            reason = (
-                "skipped (--skip-manual)"
-                if arguments.skip_manual
-                else "skipped, no terminal to answer in"
-            )
-            report.manual["battery saver and settings"] = reason
-        if take_control(inverter, report):
-            for test in CORE_TESTS:
-                test_control(inverter, report, test, arguments.power, saver)
-            test_grid_feed(inverter, report, arguments.power, saver)
-            hand_back(inverter, report, saver, not arguments.no_handback_wait)
+            if manual:
+                print("Have the EcoFlow app open on this inverter for the next part.\n")
+                test_battery_saver(inverter, report, saver, manual)
+                test_settings(inverter, report, manual)
+            else:
+                reason = (
+                    "skipped (--skip-manual)"
+                    if arguments.skip_manual
+                    else "skipped, no terminal to answer in"
+                )
+                report.manual["battery saver and settings"] = reason
+            if take_control(inverter, report):
+                for test in CORE_TESTS:
+                    test_control(inverter, report, test, arguments.power, saver)
+                test_grid_feed(inverter, report, arguments.power, saver)
+                hand_back(inverter, report, saver, not arguments.no_handback_wait)
         restore_originals(inverter, originals)
         needs_cleanup = False
     except KeyboardInterrupt:
