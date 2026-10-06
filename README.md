@@ -92,7 +92,7 @@ To add it manually instead:
 | Inverter model             | PowerOcean Three Phase |                                                                                                                                                                  |
 | Number of Batteries        | 0                      | Number of installed battery modules (0–12); required for safe battery-control power limits                                                                       |
 | Maximum solar power        | 12 kW                  | Installed solar power (1–60 kW)                                                                                                                                  |
-| Maximum grid power         | 15 kW                  | Expected maximum grid power used to reject implausible readings (1–60 kW)                                                                                        |
+| Maximum grid power         | 15 kW                  | Your grid connection (main fuse), not the inverter rating. Rejects implausible readings and caps Import from Grid (1–60 kW)                                      |
 | Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
 | Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
 

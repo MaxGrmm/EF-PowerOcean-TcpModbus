@@ -5,6 +5,7 @@
 ### Changed
 
 - Import from Grid is capped by the configured maximum grid power instead of the inverter's rating, since the house counts towards it.
+- Maximum grid power is no longer pre-filled from the inverter's rating during setup, as it is the grid connection's limit.
 
 ## [2.8.1] - 2026-10-05
 

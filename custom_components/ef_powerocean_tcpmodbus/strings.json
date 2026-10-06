@@ -28,7 +28,7 @@
           "inverter_model": "Select the inverter model.",
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
-          "grid_power_max": "Maximum grid power",
+          "grid_power_max": "Most your grid connection can import or export, set by your main fuse. Not the inverter rating: the house alone can draw more than that.",
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
         }
@@ -74,7 +74,7 @@
           "inverter_model": "Select the inverter model.",
           "battery_count": "Count of your battery modules.",
           "solar_power_max": "Maximum solar power",
-          "grid_power_max": "Maximum grid power",
+          "grid_power_max": "Most your grid connection can import or export, set by your main fuse. Not the inverter rating: the house alone can draw more than that.",
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
         }
