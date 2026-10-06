@@ -48,15 +48,12 @@ MIN_CONFIG_POWER: Final = 1000
 MAX_CONFIG_POWER: Final = 60000
 
 # Config key -> register that suggests it, and the range a suggestion must fall in.
+# Maximum grid power is left out: it is the grid connection, which the house alone
+# can take beyond the inverter's rating, and no register reports it reliably.
 DEVICE_SUGGESTED_SETTINGS: Final = {
     CONF_BATTERY_COUNT: (REGISTERS_BY_KEY["battery_count"], 1, MAX_BATTERY_COUNT),
     CONF_MAX_SOLAR_POWER: (
         REGISTERS_BY_KEY["limit_inv_power"],
-        MIN_CONFIG_POWER,
-        MAX_CONFIG_POWER,
-    ),
-    CONF_MAX_GRID_POWER: (
-        REGISTERS_BY_KEY["inverter_rated_power"],
         MIN_CONFIG_POWER,
         MAX_CONFIG_POWER,
     ),

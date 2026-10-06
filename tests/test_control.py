@@ -1391,6 +1391,30 @@ def test_discharge_and_export_are_capped_by_the_inverter_capacity(control) -> No
     assert control.feature_power_max(Feature.CHARGE_BATTERY) == 10000.0
 
 
+def test_import_from_grid_is_capped_by_the_grid_connection_not_the_inverter(
+    control,
+) -> None:
+    """The house counts towards a meter target, so it can exceed the AC rating."""
+    control._limits[const.CONF_MAX_GRID_POWER] = 15_000
+    control._data = {
+        const.INVERTER_CAPACITY_KEY: 6850.0,
+        const.RECTIFIER_CAPACITY_KEY: 5000.0,
+        "inverter_rated_power": 8000.0,
+    }
+
+    assert control.feature_power_max(Feature.IMPORT_FROM_GRID) == 15_000.0
+    asyncio.run(control.async_set_feature_power(Feature.IMPORT_FROM_GRID, 12_000))
+    assert control.feature_power(Feature.IMPORT_FROM_GRID) == 12_000.0
+    # Export still has to pass the inverter, so its capacity keeps capping it.
+    assert control.feature_power_max(Feature.EXPORT_TO_GRID) == 6850.0
+
+    # An unconfigured grid connection bounds nothing.
+    control._limits[const.CONF_MAX_GRID_POWER] = 0
+    assert control.feature_power_max(Feature.IMPORT_FROM_GRID) == float(
+        const.CONTROL_POWER_FALLBACK_MAX
+    )
+
+
 def test_an_unreported_inverter_capacity_bounds_nothing(control) -> None:
     control._limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] = 25_000
     control._data = {const.INVERTER_CAPACITY_KEY: 0.0, "inverter_rated_power": 10000.0}

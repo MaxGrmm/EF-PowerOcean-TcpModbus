@@ -63,6 +63,7 @@ def test_feature_keys_all_resolve(feature: ControlFeature) -> None:
         assert definition.config_limit_key in {
             const.CONF_MAX_BATTERY_CHARGED_POWER,
             const.CONF_MAX_BATTERY_DISCHARGED_POWER,
+            const.CONF_MAX_GRID_POWER,
         }
 
 

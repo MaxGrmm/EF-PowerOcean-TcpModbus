@@ -28,7 +28,7 @@
           "inverter_model": "Wählen Sie das Wechselrichtermodell.",
           "battery_count": "Die Anzahl wird zur Berechnung der max. Lade- und Entladeleistung verwendet.",
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
-          "grid_power_max": "Die max. Netz-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
+          "grid_power_max": "Die max. Leistung Ihres Netzanschlusses, begrenzt durch die Hauptsicherung. Nicht die Wechselrichterleistung: das Haus allein kann mehr beziehen.",
           "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
           "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
         }
@@ -74,7 +74,7 @@
           "inverter_model": "Wählen Sie das Wechselrichtermodell.",
           "battery_count": "Die Anzahl wird zur Berechnung der max. Lade- und Entladeleistung verwendet.",
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
-          "grid_power_max": "Die max. Netz-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
+          "grid_power_max": "Die max. Leistung Ihres Netzanschlusses, begrenzt durch die Hauptsicherung. Nicht die Wechselrichterleistung: das Haus allein kann mehr beziehen.",
           "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
           "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
         }
