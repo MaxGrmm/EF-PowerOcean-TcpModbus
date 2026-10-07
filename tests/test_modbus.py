@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from homeassistant.const import MAJOR_VERSION, MINOR_VERSION
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -14,7 +15,9 @@ from custom_components.ef_powerocean_tcpmodbus import const
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
 
-if modbus_module.SHARED_CONNECTION:
+SHARED = (MAJOR_VERSION, MINOR_VERSION) >= (2026, 9)
+
+if SHARED:
     from modbus_connection import (
         IllegalDataAddressError,
         ModbusConnectionError,
@@ -23,9 +26,23 @@ if modbus_module.SHARED_CONNECTION:
     from modbus_connection.mock import MockModbusConnection
 
 shared_only = pytest.mark.skipif(
-    not modbus_module.SHARED_CONNECTION,
+    not SHARED,
     reason="Home Assistant before 2026.9 has no shared Modbus connection",
 )
+
+
+@pytest.fixture(autouse=True)
+def shared_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand in for modbus_prepare where Home Assistant can share a connection."""
+    if SHARED:
+        import modbus_connection
+        from homeassistant.components import modbus as ha_modbus
+
+        monkeypatch.setattr(
+            modbus_module,
+            "_shared",
+            SimpleNamespace(ha=ha_modbus, mc=modbus_connection),
+        )
 
 
 @pytest.fixture
