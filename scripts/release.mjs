@@ -118,11 +118,55 @@ function publishRelease() {
   setOutput("prerelease", version.includes("-"));
 }
 
+function publishPrerelease(version) {
+  assertVersion(version);
+  if (!version.includes("-")) {
+    throw new Error(
+      `${version} is not a pre-release version. Use a suffix such as ${version}-beta.1; real releases go through Prepare Release.`,
+    );
+  }
+
+  const tag = `v${version}`;
+  try {
+    execFileSync("git", [
+      "show-ref",
+      "--verify",
+      "--quiet",
+      `refs/tags/${tag}`,
+    ]);
+    throw new Error(`${tag} already exists.`);
+  } catch (error) {
+    if (error.status !== 1) {
+      throw error;
+    }
+  }
+
+  // Only the packaged copy carries the pre-release version; nothing is committed.
+  const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
+  manifest.version = version;
+  writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const changelog = readFileSync(CHANGELOG_PATH, "utf8");
+  const start = changelog.indexOf("## Unreleased\n");
+  let notes = "";
+  if (start !== -1) {
+    const from = start + "## Unreleased\n".length;
+    const end = changelog.indexOf("\n## ", from);
+    notes = changelog.slice(from, end === -1 ? undefined : end).trim();
+  }
+  writeFileSync("RELEASE_NOTES.md", `${notes || "Pre-release build."}\n`);
+  setOutput("tag", tag);
+}
+
 const [command, version] = process.argv.slice(2);
 if (command === "prepare") {
   prepareRelease(version);
 } else if (command === "publish") {
   publishRelease();
+} else if (command === "prerelease") {
+  publishPrerelease(version);
 } else {
-  throw new Error("Usage: node scripts/release.mjs <prepare VERSION|publish>");
+  throw new Error(
+    "Usage: node scripts/release.mjs <prepare VERSION|publish|prerelease VERSION>",
+  );
 }
