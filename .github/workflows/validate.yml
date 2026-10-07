@@ -6,6 +6,9 @@ on:
       - main
   pull_request:
     types: [opened, synchronize, reopened]
+  schedule:
+    - cron: "0 6 * * 1" # Weekly, to catch new Home Assistant releases
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,6 +17,7 @@ concurrency:
 jobs:
   lint:
     name: Lint and format
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -53,7 +57,11 @@ jobs:
           # The oldest release hacs.json allows; below this, our tests fail
           - ha: "2025.12.0"
             python: "3.13"
-            requirement: "pytest-homeassistant-custom-component==0.13.298 'pymodbus>=3.9,<4' 'pycares<5'"
+            requirement: "pytest-homeassistant-custom-component==0.13.298 'pycares<5'"
+          # Newest Home Assistant, unpinned; an early warning for coming releases
+          - ha: latest
+            python: "3.14"
+            requirement: "pytest-homeassistant-custom-component"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -61,6 +69,45 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install test dependencies
         run: python -m pip install ${{ matrix.requirement }}
+      - name: Install our requirements the way Home Assistant does
+        run: |
+          python .github/scripts/ha_requirements.py
+          python -m pip install $(python .github/scripts/ha_requirements.py) \
+            --constraint "$(python .github/scripts/ha_requirements.py --constraints)"
+          python -m pip check
+      - name: Run unit tests
+        run: python -m pytest
+
+  # Newest Home Assistant beta, forced over the harness, about a week before each
+  # release; the same as latest when no beta is out. Scheduled runs only.
+  unit-tests-beta:
+    name: Unit tests (Home Assistant beta)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install the newest Home Assistant beta
+        run: |
+          python -m pip install pytest-homeassistant-custom-component uv
+          VERSION=$(python .github/scripts/ha_newest_version.py)
+          echo "Home Assistant $VERSION"
+          echo "homeassistant==$VERSION" > "$RUNNER_TEMP/overrides.txt"
+          uv pip install --python "$(which python)" --prerelease=allow \
+            --override "$RUNNER_TEMP/overrides.txt" pytest-homeassistant-custom-component
+      - name: Install our requirements the way Home Assistant does
+        run: |
+          python .github/scripts/ha_requirements.py
+          python -m pip install $(python .github/scripts/ha_requirements.py) \
+            --constraint "$(python .github/scripts/ha_requirements.py --constraints)"
+          # The harness pins an older Home Assistant than the beta we forced; that
+          # mismatch is the point. Fail on any other incompatibility.
+          PROBLEMS=$(python -m pip check | grep -v \
+            -e "^pytest-homeassistant-custom-component " \
+            -e "^No broken requirements found" || true)
+          if [ -n "$PROBLEMS" ]; then echo "$PROBLEMS"; exit 1; fi
       - name: Run unit tests
         run: python -m pytest
 
