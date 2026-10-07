@@ -2,10 +2,16 @@
 
 ## Unreleased
 
+## [2.8.2] - 2026-10-07
+
 ### Changed
 
 - Import from Grid is capped by the configured maximum grid power instead of the inverter's rating, since the house counts towards it.
 - Maximum grid power is no longer pre-filled from the inverter's rating during setup, as it is the grid connection's limit.
+
+## Fixed
+
+- integration shows up properly in the new Modbus menu introduced in home assistant 2026.10.
 
 ## [2.8.1] - 2026-10-05
 
