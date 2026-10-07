@@ -69,10 +69,12 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install test dependencies
         run: python -m pip install ${{ matrix.requirement }}
-      - name: Install the requirements Home Assistant ships for us
+      - name: Install our requirements the way Home Assistant does
         run: |
           python .github/scripts/ha_requirements.py
-          python -m pip install $(python .github/scripts/ha_requirements.py)
+          python -m pip install $(python .github/scripts/ha_requirements.py) \
+            --constraint "$(python .github/scripts/ha_requirements.py --constraints)"
+          python -m pip check
       - name: Run unit tests
         run: python -m pytest
 
@@ -95,10 +97,17 @@ jobs:
           echo "homeassistant==$VERSION" > "$RUNNER_TEMP/overrides.txt"
           uv pip install --python "$(which python)" --prerelease=allow \
             --override "$RUNNER_TEMP/overrides.txt" pytest-homeassistant-custom-component
-      - name: Install the requirements Home Assistant ships for us
+      - name: Install our requirements the way Home Assistant does
         run: |
           python .github/scripts/ha_requirements.py
-          python -m pip install $(python .github/scripts/ha_requirements.py)
+          python -m pip install $(python .github/scripts/ha_requirements.py) \
+            --constraint "$(python .github/scripts/ha_requirements.py --constraints)"
+          # The harness pins an older Home Assistant than the beta we forced; that
+          # mismatch is the point. Fail on any other incompatibility.
+          PROBLEMS=$(python -m pip check | grep -v \
+            -e "^pytest-homeassistant-custom-component " \
+            -e "^No broken requirements found" || true)
+          if [ -n "$PROBLEMS" ]; then echo "$PROBLEMS"; exit 1; fi
       - name: Run unit tests
         run: python -m pytest
 

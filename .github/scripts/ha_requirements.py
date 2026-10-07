@@ -6,6 +6,9 @@ Tests should run against exactly those versions, so CI installs this output
 rather than pins of our own.
 
 Usage: python -m pip install $(python .github/scripts/ha_requirements.py)
+
+With --constraints it prints the constraints file Home Assistant installs
+requirements under instead, so CI can hit the same clashes users would.
 """
 
 from __future__ import annotations
@@ -19,17 +22,17 @@ ROOT = Path(__file__).resolve().parents[2]
 OWN_MANIFEST = ROOT / "custom_components" / "ef_powerocean_tcpmodbus" / "manifest.json"
 
 
-def _components_dir() -> Path:
+def _package_dir(name: str) -> Path:
     # Locate without importing: importing a component needs the very
     # requirements we are about to install.
-    spec = importlib.util.find_spec("homeassistant.components")
+    spec = importlib.util.find_spec(name)
     if spec is None or not spec.submodule_search_locations:
         sys.exit("Home Assistant is not installed")
     return Path(spec.submodule_search_locations[0])
 
 
 def collect() -> list[str]:
-    components = _components_dir()
+    components = _package_dir("homeassistant.components")
     own = json.loads(OWN_MANIFEST.read_text())
     requirements: list[str] = list(own.get("requirements", []))
 
@@ -52,4 +55,7 @@ def collect() -> list[str]:
 
 
 if __name__ == "__main__":
-    print("\n".join(collect()))
+    if "--constraints" in sys.argv[1:]:
+        print(_package_dir("homeassistant") / "package_constraints.txt")
+    else:
+        print("\n".join(collect()))
