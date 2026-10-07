@@ -5,7 +5,7 @@ the integrations we depend on (pymodbus and modbus-connection via modbus, today)
 Tests should run against exactly those versions, so CI installs this output
 rather than pins of our own.
 
-Usage: python -m pip install $(python scripts/ha_requirements.py)
+Usage: python -m pip install $(python .github/scripts/ha_requirements.py)
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 OWN_MANIFEST = ROOT / "custom_components" / "ef_powerocean_tcpmodbus" / "manifest.json"
 
 
