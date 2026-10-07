@@ -382,7 +382,5 @@ async def async_temporary_client(
         return
 
     params = _shared.mc.ModbusTcpParams(host=host, port=port)
-    async with _shared.ha.async_get_temporary_unit(
-        hass, params, DEFAULT_SLAVE
-    ) as unit:
+    async with _shared.ha.async_get_temporary_unit(hass, params, DEFAULT_SLAVE) as unit:
         yield ModbusClient(SharedLink(unit))
