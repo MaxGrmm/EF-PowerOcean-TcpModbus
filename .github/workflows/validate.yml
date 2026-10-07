@@ -47,8 +47,6 @@ jobs:
   unit-tests:
     name: Unit tests (Home Assistant ${{ matrix.ha }})
     runs-on: ubuntu-latest
-    # A broken beta is a warning, not a reason to block a pull request
-    continue-on-error: ${{ matrix.ha == 'beta' }}
     strategy:
       fail-fast: false
       matrix:
@@ -64,11 +62,6 @@ jobs:
           - ha: latest
             python: "3.14"
             requirement: "pytest-homeassistant-custom-component"
-          # Newest Home Assistant beta, forced over the harness, about a week
-          # before each release; the same as latest when no beta is out
-          - ha: beta
-            python: "3.14"
-            requirement: "pytest-homeassistant-custom-component uv"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -76,9 +69,27 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install test dependencies
         run: python -m pip install ${{ matrix.requirement }}
-      - name: Install the newest Home Assistant beta
-        if: matrix.ha == 'beta'
+      - name: Install the requirements Home Assistant ships for us
         run: |
+          python .github/scripts/ha_requirements.py
+          python -m pip install $(python .github/scripts/ha_requirements.py)
+      - name: Run unit tests
+        run: python -m pytest
+
+  # Newest Home Assistant beta, forced over the harness, about a week before each
+  # release; the same as latest when no beta is out. Scheduled runs only.
+  unit-tests-beta:
+    name: Unit tests (Home Assistant beta)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install the newest Home Assistant beta
+        run: |
+          python -m pip install pytest-homeassistant-custom-component uv
           VERSION=$(python .github/scripts/ha_newest_version.py)
           echo "Home Assistant $VERSION"
           echo "homeassistant==$VERSION" > "$RUNNER_TEMP/overrides.txt"
