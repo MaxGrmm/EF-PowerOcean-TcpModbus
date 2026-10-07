@@ -15,6 +15,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
 from .coordinator import EcoflowCoordinator
+from .modbus import async_prepare
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ async def _async_show_modbus_warning(
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up EF-PowerOcean-TcpModbus from a config entry."""
 
+    await async_prepare(hass)
     coordinator = EcoflowCoordinator(
         hass,
         config_entry=entry,

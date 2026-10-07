@@ -12,37 +12,61 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
+from types import SimpleNamespace
 from typing import Any, Final, Protocol
 
+from awesomeversion import AwesomeVersion
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.setup import async_setup_component
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from .const import DEFAULT_SLAVE, DEVICE_INFO_BLOCK, SLEEP_TIME_AFTER_RECONNECT_S
 
-try:
-    from homeassistant.components.modbus import (
-        async_get_temporary_unit,
-        async_get_unit,
-    )
-    from modbus_connection import (
-        ModbusError,
-        ModbusExceptionError,
-        ModbusTcpParams,
-        ModbusUnit,
-    )
-except ImportError as err:  # Home Assistant before 2026.9 cannot share a connection.
-    SHARED_CONNECTION = False
-    _UNSHARED_REASON = str(err)
-else:
-    SHARED_CONNECTION = True
-
 _LOGGER = logging.getLogger(__name__)
+
+# The .dev0 makes betas of 2026.9 count.
+SHARED_MIN_VERSION: Final = AwesomeVersion("2026.9.0.dev0")
+
+_shared: SimpleNamespace | None = None
+_unshared_reason = "Home Assistant older than 2026.9"
 
 RECONNECT_DELAYS_S: Final = (0, 5, 30, 120)
 TRANSPORT_ERRORS: Final = (ModbusException, ConnectionError, asyncio.TimeoutError)
+
+
+def is_shared() -> bool:
+    """Return whether this Home Assistant shares its Modbus connection with us."""
+    return _shared is not None
+
+
+async def async_prepare(hass: HomeAssistant) -> bool:
+    """Set the modbus integration up if it can be shared, and report whether it is.
+
+    Setting it up is what registers its connections panel and installs its
+    requirements, so this has to run before anything asks for a unit.
+    """
+    global _shared, _unshared_reason  # noqa: PLW0603
+    if _shared is not None:
+        return True
+    if AwesomeVersion(HA_VERSION) < SHARED_MIN_VERSION:
+        return False
+    if not await async_setup_component(hass, "modbus", {}):
+        _unshared_reason = "the modbus integration did not set up"
+        return False
+    try:
+        import modbus_connection  # noqa: PLC0415
+        from homeassistant.components import modbus as ha_modbus  # noqa: PLC0415
+
+        ha_modbus.async_get_unit  # noqa: B018
+    except (ImportError, AttributeError) as err:
+        _unshared_reason = str(err)
+        return False
+    _shared = SimpleNamespace(ha=ha_modbus, mc=modbus_connection)
+    return True
 
 
 class ModbusRejected(HomeAssistantError):
@@ -176,9 +200,9 @@ def _translated_errors() -> Iterator[None]:
     """Raise the modbus_connection errors as the ones every link raises."""
     try:
         yield
-    except ModbusExceptionError as err:
+    except _shared.mc.ModbusExceptionError as err:
         raise DeviceRefused(int(err.exception_code), err) from err
-    except ModbusError as err:
+    except _shared.mc.ModbusError as err:
         raise ModbusException(str(err)) from err
 
 
@@ -190,7 +214,7 @@ class SharedLink:
     config entry holding a unit on it unloads, so this link never closes it.
     """
 
-    def __init__(self, unit: ModbusUnit) -> None:
+    def __init__(self, unit: Any) -> None:
         self._unit = unit
 
     @property
@@ -204,9 +228,9 @@ class SharedLink:
         """
         try:
             await self._unit.read_holding_registers(DEVICE_INFO_BLOCK.start, 1)
-        except ModbusExceptionError:
+        except _shared.mc.ModbusExceptionError:
             return True
-        except ModbusError as err:
+        except _shared.mc.ModbusError as err:
             _LOGGER.debug("Modbus probe failed: %s", err)
             return False
         return True
@@ -327,19 +351,19 @@ def create_client(
     hass: HomeAssistant, entry: ConfigEntry, host: str, port: int
 ) -> ModbusClient:
     """Return the client for *entry*; a shared hold on the link ends when it unloads."""
-    if not SHARED_CONNECTION:
+    if _shared is None:
         _LOGGER.info(
             "Using an own Modbus connection to %s:%s (%s)",
             host,
             port,
-            _UNSHARED_REASON,
+            _unshared_reason,
         )
         return ModbusClient(PymodbusLink(host, port))
     _LOGGER.info(
         "Using the Modbus connection Home Assistant shares to %s:%s", host, port
     )
-    params = ModbusTcpParams(host=host, port=port)
-    unit = async_get_unit(hass, entry, params, DEFAULT_SLAVE)
+    params = _shared.mc.ModbusTcpParams(host=host, port=port)
+    unit = _shared.ha.async_get_unit(hass, entry, params, DEFAULT_SLAVE)
     return ModbusClient(SharedLink(unit))
 
 
@@ -348,7 +372,8 @@ async def async_temporary_client(
     hass: HomeAssistant, host: str, port: int
 ) -> AsyncIterator[ModbusClient]:
     """Hold a client for the context, for a config flow that has no entry yet."""
-    if not SHARED_CONNECTION:
+    await async_prepare(hass)
+    if _shared is None:
         client = ModbusClient(PymodbusLink(host, port, timeout=5))
         try:
             yield client
@@ -356,6 +381,6 @@ async def async_temporary_client(
             client.close()
         return
 
-    params = ModbusTcpParams(host=host, port=port)
-    async with async_get_temporary_unit(hass, params, DEFAULT_SLAVE) as unit:
+    params = _shared.mc.ModbusTcpParams(host=host, port=port)
+    async with _shared.ha.async_get_temporary_unit(hass, params, DEFAULT_SLAVE) as unit:
         yield ModbusClient(SharedLink(unit))
