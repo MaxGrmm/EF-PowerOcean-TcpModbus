@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.8.2] - 2026-10-07
+
 ### Changed
 
 - Import from Grid is capped by the configured maximum grid power instead of the inverter's rating, since the house counts towards it.
