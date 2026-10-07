@@ -6,6 +6,9 @@ on:
       - main
   pull_request:
     types: [opened, synchronize, reopened]
+  schedule:
+    - cron: "0 6 * * 1" # Weekly, to catch new Home Assistant releases
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,6 +17,7 @@ concurrency:
 jobs:
   lint:
     name: Lint and format
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -53,7 +57,11 @@ jobs:
           # The oldest release hacs.json allows; below this, our tests fail
           - ha: "2025.12.0"
             python: "3.13"
-            requirement: "pytest-homeassistant-custom-component==0.13.298 'pymodbus>=3.9,<4' 'pycares<5'"
+            requirement: "pytest-homeassistant-custom-component==0.13.298 'pycares<5'"
+          # Newest Home Assistant, unpinned; an early warning for coming releases
+          - ha: latest
+            python: "3.14"
+            requirement: "pytest-homeassistant-custom-component"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -61,6 +69,10 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install test dependencies
         run: python -m pip install ${{ matrix.requirement }}
+      - name: Install the requirements Home Assistant ships for us
+        run: |
+          python scripts/ha_requirements.py
+          python -m pip install $(python scripts/ha_requirements.py)
       - name: Run unit tests
         run: python -m pytest
 
