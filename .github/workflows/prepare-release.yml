@@ -25,7 +25,7 @@ jobs:
         run: node scripts/release.mjs prepare "$VERSION"
 
       - name: Create release pull request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: release/v${{ inputs.version }}
           delete-branch: true
