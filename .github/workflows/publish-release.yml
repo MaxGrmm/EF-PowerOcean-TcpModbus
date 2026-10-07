@@ -6,6 +6,12 @@ on:
       - main
     paths:
       - custom_components/ef_powerocean_tcpmodbus/manifest.json
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Pre-release version without the v prefix, with a suffix such as 2.9.0-beta.1
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,6 +19,7 @@ permissions:
 jobs:
   publish:
     name: Create GitHub release
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -38,3 +45,34 @@ jobs:
           files: ${{ runner.temp }}/ef_powerocean_tcpmodbus.zip
           generate_release_notes: true
           prerelease: ${{ steps.notes.outputs.prerelease }}
+
+  prerelease:
+    name: Create GitHub pre-release
+    # Manual runs can only make pre-releases; real releases come from Prepare Release.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Prepare pre-release
+        id: notes
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node scripts/release.mjs prerelease "$VERSION"
+
+      - name: Package integration
+        working-directory: custom_components/ef_powerocean_tcpmodbus
+        run: zip -r "$RUNNER_TEMP/ef_powerocean_tcpmodbus.zip" . -x "__pycache__/*" "*/__pycache__/*"
+
+      - name: Create GitHub pre-release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.notes.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.notes.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          files: ${{ runner.temp }}/ef_powerocean_tcpmodbus.zip
+          generate_release_notes: true
+          prerelease: true
