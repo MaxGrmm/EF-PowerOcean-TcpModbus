@@ -90,10 +90,9 @@ async def test_uses_the_shared_connection_where_home_assistant_has_one(
     hass: HomeAssistant,
 ) -> None:
     """The fallback to an own connection must not hide a broken shared one."""
-    assert await modbus_module.async_prepare(hass) is (
-        (MAJOR_VERSION, MINOR_VERSION) >= (2026, 9)
-    )
-    assert modbus_module.is_shared() is (MAJOR_VERSION, MINOR_VERSION) >= (2026, 9)
+    expected = (MAJOR_VERSION, MINOR_VERSION) >= (2026, 9)
+    assert await modbus_module.async_prepare(hass) is expected
+    assert modbus_module.is_shared() is expected
 
 
 async def test_starts_and_unloads(
