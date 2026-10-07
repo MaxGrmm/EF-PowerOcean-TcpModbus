@@ -30,7 +30,7 @@ jobs:
 
       - name: Create GitHub release
         if: steps.notes.outputs.tag != ''
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.notes.outputs.tag }}
           name: ${{ steps.notes.outputs.tag }}
