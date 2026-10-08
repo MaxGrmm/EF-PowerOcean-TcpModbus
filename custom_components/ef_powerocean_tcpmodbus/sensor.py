@@ -20,6 +20,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    BATTERY_RESERVE_REGISTER_KEY,
     BATTERY_SOC_KEYS,
     CONF_BATTERY_COUNT,
     CONTROL_STATUS_SENSOR,
@@ -66,6 +67,10 @@ async def async_setup_entry(
         for number_def in WRITABLE_NUMBERS_MAP
         if coordinator.inverter_model not in number_def.unsupported_models
     }
+    # A native Battery Reserve is that register, so the App Backup Reserve would
+    # repeat it.
+    if coordinator.control.reserve_native:
+        controlled_keys.add(BATTERY_RESERVE_REGISTER_KEY)
 
     for sensor in SENSOR_MAP:
         if (

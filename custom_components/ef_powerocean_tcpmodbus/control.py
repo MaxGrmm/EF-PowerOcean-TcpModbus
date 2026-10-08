@@ -18,6 +18,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt
 
 from .const import (
+    BATTERY_RESERVE_REGISTER_KEY,
     CONTROL_COMMAND_BATTERY_SAVER_BIT,
     CONTROL_COMMAND_METHOD_MASK,
     CONTROL_COMMAND_METHOD_SHIFT,
@@ -57,6 +58,7 @@ from .models import (
     InverterModel,
     RegisterDef,
     RegisterType,
+    ReserveSupport,
     deviation_state,
     encode_register,
 )
@@ -211,6 +213,7 @@ class ControlManager:
         write_setting: WriteSetting,
         on_command_expired: CommandExpired,
         heartbeat: Heartbeat | None = None,
+        battery_reserve: ReserveSupport = ReserveSupport.EMULATED,
     ) -> None:
         self._modbus_client = modbus_client
         self._registers_by_key = registers_by_key
@@ -220,6 +223,9 @@ class ControlManager:
         self._on_refresh = on_refresh
         self._write_setting = write_setting
         self._on_command_expired = on_command_expired
+        # Where the reserve is native, the inverter keeps it and _battery_reserve_soc
+        # mirrors its register; otherwise the reserve guard keeps it.
+        self._reserve_native = battery_reserve is ReserveSupport.NATIVE
 
         self._enabled = enabled
         # One beating on another clock can be passed in, as for a simulation.
@@ -347,6 +353,11 @@ class ControlManager:
     @property
     def battery_reserve_soc(self) -> float:
         return self._battery_reserve_soc
+
+    @property
+    def reserve_native(self) -> bool:
+        """Return whether the inverter keeps the Battery Reserve itself."""
+        return self._reserve_native
 
     @property
     def reserve_charge(self) -> bool:
@@ -602,7 +613,18 @@ class ControlManager:
             await self.async_apply(force=True)
 
     async def async_set_battery_reserve_soc(self, soc: float) -> None:
-        """Set the state of charge below which the battery must not be drained."""
+        """Set the state of charge below which the battery must not be drained.
+
+        A native reserve is written to the inverter, which keeps it whatever runs
+        it, and needs no Modbus control for that, like any other setting.
+        """
+        if self._reserve_native:
+            # The register holds whole percent, which is then the reserve.
+            soc = round(max(0.0, min(100.0, soc)))
+            await self._write_setting(
+                self._registers_by_key[BATTERY_RESERVE_REGISTER_KEY], soc
+            )
+            self._data = {**self._data, BATTERY_RESERVE_REGISTER_KEY: soc}
         if self._update_limits(self._charge_limit_soc, soc):
             await self.async_apply(force=True)
 
@@ -800,11 +822,28 @@ class ControlManager:
 
         # Charging stops at the reserve itself, where the reserve guard's floor
         # takes over, as the app does. The Charge Limit outranks it.
+        # A native reserve charges up to itself in the inverter, as the app's does.
         self._reserve_charging = (
             self._reserve_charge
+            and not self._reserve_native
             and not self._charge_guard
             and soc < self._battery_reserve_soc
         )
+
+    def _follow_native_reserve(self, data: dict[str, Any]) -> None:
+        """Take a native reserve from the inverter, where the app may also change it."""
+        if not self._reserve_native:
+            return
+        if (reserve := data.get(BATTERY_RESERVE_REGISTER_KEY)) is None:
+            return
+        if float(reserve) == self._battery_reserve_soc:
+            return
+        _LOGGER.debug(
+            "Battery Reserve follows the inverter's: %s%% -> %s%%",
+            self._battery_reserve_soc,
+            reserve,
+        )
+        self._update_limits(self._charge_limit_soc, float(reserve))
 
     def _natural_battery_power(self, data: dict[str, Any]) -> float | None:
         """Estimate the battery power the inverter would reach without us.
@@ -1069,7 +1108,7 @@ class ControlManager:
         """Send *step*, holding the battery wherever it would move a forbidden way."""
         command = step.command
         forbidden = self._forbidden_ways(step)
-        guard = self._engaged_guard()
+        guard = self._engaged_guard(step)
 
         if command is ControlFeature.AUTOMATIC and guard is not None:
             # The inverter has no Automatic that only goes one way, so under a guard
@@ -1124,9 +1163,21 @@ class ControlManager:
             forbidden[step.never] = step.status
         if self._charge_guard:
             forbidden[CHARGE] = ControlStatus.CHARGE_LIMIT_REACHED
-        if self._reserve_guard:
+        if self._reserve_guards(step):
             forbidden[DISCHARGE] = ControlStatus.RESERVE_REACHED
         return forbidden
+
+    def _reserve_guards(self, step: Step) -> bool:
+        """Return whether the reserve guard has to hold *step* back.
+
+        A native reserve is the inverter's to keep while it runs itself, which it
+        does faster and even with Home Assistant down. A manual command outranks it
+        there, as a hold outranks the reserve on the PowerOcean Plus, so the guard
+        still keeps it under one.
+        """
+        if not self._reserve_guard:
+            return False
+        return not (self._reserve_native and step.command is ControlFeature.AUTOMATIC)
 
     def _grid_cannot_take(self, data: dict[str, Any], surplus: float | None) -> bool:
         """Return whether holding the battery would export more than the device lets
@@ -1148,11 +1199,11 @@ class ControlManager:
             return self._clamp_power(self.feature_power(self._feature), self._feature)
         return None
 
-    def _engaged_guard(self) -> ControlStatus | None:
-        """Return the guard that is on, the Charge Limit first if both are."""
+    def _engaged_guard(self, step: Step) -> ControlStatus | None:
+        """Return the guard that is on for *step*, the Charge Limit first."""
         if self._charge_guard:
             return ControlStatus.CHARGE_LIMIT_REACHED
-        if self._reserve_guard:
+        if self._reserve_guards(step):
             return ControlStatus.RESERVE_REACHED
         return None
 
@@ -1226,7 +1277,7 @@ class ControlManager:
             if definition.measure_key is not None
             else None
         )
-        inverter_floor = float(data.get("min_soc_limit") or 0.0)
+        inverter_floor = float(data.get(BATTERY_RESERVE_REGISTER_KEY) or 0.0)
         state = deviation_state(
             signed_target=self._commanded_power * definition.sign,
             measured=None if measured is None else float(measured),
@@ -1274,6 +1325,7 @@ class ControlManager:
             self._data = data
         data = self._data
         self._expire_command()
+        self._follow_native_reserve(data)
         self._update_guards(data)
 
         # A lapsed window hands the inverter back to its app settings, so the command

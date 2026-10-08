@@ -135,16 +135,31 @@ Automatic, the battery can still power the house under the Charge Limit, and sti
 charge from solar under the Battery Reserve. A guard releases once the charge has moved
 5 % back. Both are off by default.
 
-Turn on **Charge to Battery Reserve** to also charge from the grid up to the Battery
-Reserve, as the backup reserve in the EcoFlow app does. Below the reserve the battery
-then charges at the Charge Battery power, whatever mode is selected, and the reserve
-holds it from there. The Charge Limit still applies, and a Charge Battery power of 0 W
-leaves the reserve a floor only. This is the integration's own reserve: the app's backup
-reserve can't be set over Modbus on the PowerOcean Plus, whose register takes the write
-but keeps acting on the app's value.
+The Battery Reserve is **native** or **emulated**, shown in its `implementation`
+attribute:
 
-Turn off Min SOC and schedules in the EcoFlow app, since the inverter follows them
-whenever it runs on its own.
+- **Native** (PowerOcean Three Phase): it is the backup reserve in the EcoFlow app,
+  written to the inverter, which keeps it whatever runs it, even with Home Assistant
+  down. A change in the app shows here too, and it can be set with Modbus Control off.
+  The integration still holds the battery at it under a manual command, which outranks
+  the inverter's own reserve.
+- **Emulated** (every other model): the integration keeps it while Modbus Control is
+  on. The PowerOcean Plus takes a write to its reserve register but keeps acting on the
+  app's value, and the other models are unproven. The app's own reserve still applies
+  whenever the integration is not in control, and shows as _App Backup Reserve_.
+
+The model decides which; the integration options can override it to test a model, and
+`scripts/control_feature_scan.py --reserve-probe` shows whether one acts on a written
+reserve.
+
+With an emulated reserve, turn on **Charge to Battery Reserve** to also charge from the
+grid up to it, as the app's backup reserve does. Below the reserve the battery then
+charges at the Charge Battery power, whatever mode is selected, and the reserve holds it
+from there. The Charge Limit still applies, and a Charge Battery power of 0 W leaves the
+reserve a floor only. A native reserve does this in the inverter.
+
+Turn off schedules in the EcoFlow app, since the inverter follows them whenever it runs
+on its own.
 
 <details>
 <summary>How the guards work</summary>
@@ -241,12 +256,12 @@ Run one controller at a time; the action doesn't arbitrate between them.
 | Battery Nominal Capacity          | Wh   | Nominal pack capacity reported by the device                     |
 | Available Battery Charge Power    | W    | Charge power limit reported from the EcoFlow app (diagnostic)    |
 | Available Battery Discharge Power | W    | Discharge power limit reported from the EcoFlow app (diagnostic) |
-| Min SOC Limit                     | %    | Backup reserve configured in the EcoFlow app                     |
+| App Backup Reserve                | %    | Backup reserve set in the EcoFlow app (emulated reserve only)    |
 
 > ⚠️ _Available Battery Charge/Discharge Power_ reflect limits configured in the
-> EcoFlow app, but **battery control over Modbus ignores those limits**, as it does
-> _Min SOC Limit_. For example, a 500 W app limit will not stop a Modbus charge command
-> from running at the configured battery-control ceiling.
+> EcoFlow app, but **battery control over Modbus ignores those limits**. For example,
+> a 500 W app limit will not stop a Modbus charge command from running at the
+> configured battery-control ceiling.
 
 ### Solar
 

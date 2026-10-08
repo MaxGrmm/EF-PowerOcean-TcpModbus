@@ -17,7 +17,9 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    BATTERY_RESERVE_AUTO,
     CONF_BATTERY_COUNT,
+    CONF_BATTERY_RESERVE,
     CONF_CALC_SOLAR_POWER,
     CONF_HOST,
     CONF_INVERTER_MODEL,
@@ -39,7 +41,7 @@ from .const import (
     REGISTERS_BY_KEY,
 )
 from .modbus import TRANSPORT_ERRORS, ModbusClient, async_temporary_client
-from .models import InverterModel
+from .models import InverterModel, ReserveSupport
 from .telemetry import decode_register
 
 _LOGGER = logging.getLogger(__name__)
@@ -321,6 +323,21 @@ class EcoflowOptionsFlow(OptionsFlow):
                             CONF_CALC_SOLAR_POWER, False
                         ),
                     ): BooleanSelector({}),
+                    vol.Required(
+                        CONF_BATTERY_RESERVE,
+                        default=self._config_entry.data.get(
+                            CONF_BATTERY_RESERVE, BATTERY_RESERVE_AUTO
+                        ),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                BATTERY_RESERVE_AUTO,
+                                *(support.value for support in ReserveSupport),
+                            ],
+                            translation_key=CONF_BATTERY_RESERVE,
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                 }
             ),
             errors=errors,

@@ -56,6 +56,17 @@ class ProductId(NamedTuple):
     category: ProductCategory | None = None
 
 
+class ReserveSupport(StrEnum):
+    """Who keeps the Battery Reserve."""
+
+    # The integration's guard, by holding the battery while it is in control. For
+    # models whose reserve register takes a write but is not acted on, or is unproven.
+    EMULATED = "emulated"
+    # The inverter, from its reserve register (40536), whatever is running it: the
+    # backup reserve the EcoFlow app sets.
+    NATIVE = "native"
+
+
 @dataclass(frozen=True, slots=True)
 class ModelTraits:
     """What sets one model apart from the rest of the family.
@@ -88,6 +99,9 @@ class ModelTraits:
     # hands back to the inverter's own self-consumption whenever power flows the
     # way the guard allows.
     guard_tracks_setpoints: bool = True
+    # Who keeps the Battery Reserve. Native only once --reserve-probe has shown the
+    # inverter acting on a written reserve; the PowerOcean Plus does not (issue #144).
+    battery_reserve: ReserveSupport = ReserveSupport.EMULATED
     # Raised when a fix changes how energy counters are read, which resets using the
     # inverters own energy state.
     energy_state_revision: int = 0
@@ -156,6 +170,7 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         "PowerOcean Three Phase",
         startup_voltage=160,
         product_ids=(ProductId(1, ProductCategory.THREE_PHASE),),
+        battery_reserve=ReserveSupport.NATIVE,
     ),
     # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1754035729875/PowerOcean%20Plus%20(three-phase)_Brochure_20241223_EN.pdf
     InverterModel.POWEROCEAN_PLUS: ModelTraits(
@@ -207,6 +222,13 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         energy_state_revision=1,
     ),
 }
+
+
+def battery_reserve_for(model: InverterModel, option: str) -> ReserveSupport:
+    """Return who keeps the Battery Reserve: the model's choice, or the user's."""
+    if option in tuple(ReserveSupport):
+        return ReserveSupport(option)
+    return model.traits.battery_reserve
 
 
 @dataclass(slots=True)

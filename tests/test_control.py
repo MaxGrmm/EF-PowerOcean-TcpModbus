@@ -1745,3 +1745,100 @@ def test_charge_to_reserve_survives_a_restart(control) -> None:
     control.load_state(stored)
 
     assert control.reserve_charge is True
+
+
+@pytest.fixture
+def native_control(control):
+    """A manager on a model whose inverter keeps the Battery Reserve itself."""
+    control._reserve_native = True
+    return control
+
+
+def test_only_the_three_phase_keeps_its_own_reserve_unless_overridden() -> None:
+    native = [
+        model
+        for model in models.InverterModel
+        if model.traits.battery_reserve is models.ReserveSupport.NATIVE
+    ]
+    assert native == [models.InverterModel.POWEROCEAN_THREE_PHASE]
+
+    plus = models.InverterModel.POWEROCEAN_PLUS
+    assert models.battery_reserve_for(plus, "auto") is models.ReserveSupport.EMULATED
+    assert models.battery_reserve_for(plus, "native") is models.ReserveSupport.NATIVE
+
+
+def test_a_native_reserve_is_written_to_the_inverter_without_control(
+    native_control,
+) -> None:
+    """A setting, so it applies with Modbus Control off, as the app's does."""
+    native_control._enabled = False
+
+    asyncio.run(native_control.async_set_battery_reserve_soc(30.4))
+
+    native_control._write_setting.assert_awaited_once()
+    register, value = native_control._write_setting.await_args.args
+    assert register.key == const.BATTERY_RESERVE_REGISTER_KEY
+    assert value == 30
+    assert native_control.battery_reserve_soc == 30.0
+
+
+def test_a_native_reserve_follows_a_change_made_in_the_app(
+    native_control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allow_writes(native_control, monkeypatch)
+
+    asyncio.run(
+        native_control.async_apply(
+            {"battery_soc": 60.0, const.BATTERY_RESERVE_REGISTER_KEY: 40}
+        )
+    )
+
+    assert native_control.battery_reserve_soc == 40.0
+
+
+def test_a_native_reserve_is_left_to_the_inverter_in_automatic_only(
+    native_control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The inverter keeps it while it runs itself; a manual command outranks it."""
+    allow_writes(native_control, monkeypatch)
+    below = {
+        "battery_soc": 20.0,
+        const.BATTERY_RESERVE_REGISTER_KEY: 30,
+        "solar_power": 0.0,
+        "house_power": 900.0,
+        "grid_power": 0.0,
+        "battery_power": -900.0,
+    }
+
+    asyncio.run(native_control.async_apply(below))
+    assert native_control.status is Status.AUTOMATIC
+    assert native_control._commanded_feature is Feature.AUTOMATIC
+
+    asyncio.run(
+        native_control.async_set_command(Feature.DISCHARGE_BATTERY, power=2000.0)
+    )
+    asyncio.run(native_control.async_apply(below))
+    assert native_control.status is Status.RESERVE_REACHED
+    assert native_control._commanded_feature is not Feature.DISCHARGE_BATTERY
+
+
+def test_a_native_reserve_never_charges_in_the_integration(
+    native_control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The inverter charges up to its own reserve, as it does for the app's."""
+    allow_writes(native_control, monkeypatch)
+    asyncio.run(native_control.async_set_reserve_charge(True))
+
+    asyncio.run(
+        native_control.async_apply(
+            {
+                "battery_soc": 20.0,
+                const.BATTERY_RESERVE_REGISTER_KEY: 50,
+                "solar_power": 0.0,
+                "house_power": 900.0,
+            }
+        )
+    )
+
+    assert native_control.status is not Status.CHARGING_TO_RESERVE
+    assert native_control._commanded_feature is not Feature.CHARGE_BATTERY

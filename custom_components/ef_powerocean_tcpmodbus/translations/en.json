@@ -68,7 +68,8 @@
           "solar_power_max": "Maximum solar power [W]",
           "grid_power_max": "Maximum grid power [W]",
           "scan_interval": "Poll Interval [s]",
-          "calc_solar_power": "Calculation of solar power"
+          "calc_solar_power": "Calculation of solar power",
+          "battery_reserve": "Battery Reserve"
         },
         "data_description": {
           "inverter_model": "Select the inverter model.",
@@ -76,7 +77,8 @@
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Most your grid connection can import or export, set by your main fuse. Not the inverter rating: the house alone can draw more than that.",
           "scan_interval": "How often values are polled (2-30 seconds)",
-          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
+          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
+          "battery_reserve": "Who keeps the Battery Reserve. Automatic takes the model's: native where the inverter acts on its own reserve register, emulated where the integration holds the battery instead. Override only to test a model."
         }
       }
     },
@@ -94,6 +96,13 @@
         "ocean_2": "Ocean 2 Three Phase",
         "ocean_2_single_phase": "Ocean 2 Single Phase",
         "ocean_2_plus_single_phase": "Ocean 2 Plus Single Phase"
+      }
+    },
+    "battery_reserve": {
+      "options": {
+        "auto": "Automatic (by model)",
+        "native": "Native (inverter)",
+        "emulated": "Emulated (integration)"
       }
     }
   },
@@ -172,7 +181,7 @@
         "name": "Battery Nominal Capacity"
       },
       "min_soc_limit": {
-        "name": "Min SOC Limit"
+        "name": "App Backup Reserve"
       },
       "solar_power": {
         "name": "Solar Power"
@@ -475,9 +484,6 @@
       },
       "battery_reserve_soc": {
         "name": "Battery Reserve"
-      },
-      "min_soc_limit_control": {
-        "name": "Minimum SOC Limit"
       },
       "device_led_brightness_control": {
         "name": "LED Brightness"

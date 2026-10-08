@@ -869,6 +869,14 @@ BATTERY_RESERVE_SOC_NUMBER: Final = ControlEntityDef(
     icon="mdi:battery-lock",
     availability=requires_modbus_control,
 )
+# The inverter's own reserve, the backup reserve the EcoFlow app sets. Written by the
+# Battery Reserve on models that act on it, shown as the App Backup Reserve on the rest.
+BATTERY_RESERVE_REGISTER_KEY: Final = "min_soc_limit"
+# The number that wrote it before the Battery Reserve took over, removed on setup.
+RETIRED_MIN_SOC_NUMBER_KEY: Final = "min_soc_limit_control"
+# Options: which Battery Reserve to use, "auto" taking the model's.
+CONF_BATTERY_RESERVE: Final = "battery_reserve"
+BATTERY_RESERVE_AUTO: Final = "auto"
 DEFAULT_CHARGE_LIMIT_SOC: Final = 100.0
 DEFAULT_BATTERY_RESERVE_SOC: Final = 0.0
 
@@ -908,20 +916,6 @@ CONTROL_POWER_FALLBACK_MAX: Final = DEFAULT_MAX_POWER
 
 # Map of all modbus registers available for writing operations.
 WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
-    NumberWritableDef(
-        key="min_soc_limit_control",
-        read_key="min_soc_limit",
-        name="Minimum SOC Limit",
-        register=REGISTERS_BY_KEY["min_soc_limit"].address,
-        min_value=0.0,
-        max_value=100.0,
-        step=1.0,
-        unit=UNIT_OF_RATIO,
-        device_class="battery",
-        # The Plus stores this and never acts on it; writing would leave the sensor
-        # reporting our value while the device keeps enforcing the app's.
-        unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
-    ),
     NumberWritableDef(
         key="device_led_brightness_control",
         read_key="device_led_brightness",

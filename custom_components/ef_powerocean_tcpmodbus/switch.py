@@ -83,7 +83,12 @@ async def async_setup_entry(
     coordinator: EcoflowCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     async_add_entities(
-        EcoFlowSwitch(coordinator, entry, definition) for definition in SWITCHES
+        EcoFlowSwitch(coordinator, entry, definition)
+        for definition in SWITCHES
+        # A native reserve charges up to itself in the inverter.
+        if not (
+            definition is RESERVE_CHARGE_SWITCH and coordinator.control.reserve_native
+        )
     )
 
 

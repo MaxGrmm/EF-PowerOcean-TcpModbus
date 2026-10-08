@@ -7,6 +7,11 @@
 - Control Status shows Limited by inverter when the battery goes the other way from the command, or past it, instead of Ramping indefinitely.
 - Charge to Battery Reserve: below the Battery Reserve, the battery charges from the grid up to it at the Charge Battery power, as the app's backup reserve does.
 
+### Changed
+
+- The Battery Reserve is the one reserve control: native on the PowerOcean Three Phase, where it writes the inverter's own reserve, and emulated by the integration on the other models. Its `implementation` attribute says which, and the integration options can override it.
+- The Minimum SOC Limit number is removed. The inverter's reserve shows as the App Backup Reserve sensor on models with an emulated reserve.
+
 ## [2.8.2] - 2026-10-07
 
 ### Changed
