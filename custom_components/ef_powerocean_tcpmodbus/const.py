@@ -900,6 +900,10 @@ GUARD_HANDBACK_S: Final = 60.0
 GUARD_HANDBACK_MAX_S: Final = 900.0
 MIN_CONTROL_DWELL_S: Final = 60.0
 CONTROL_STATUS_DAMPING_POLLS: Final = 3
+# How long the inverter gets to report a command it was sent, and how often it is
+# sent again when it does not, before the status says it is not accepted.
+FOLLOW_GRACE_S: Final = 15.0
+FOLLOW_RESENDS: Final = 2
 # 0 means "no limit" to the inverter and not "hold at zero", so we therefore set the lowest power to hold.
 HOLD_SETPOINT_W: Final = 1.0
 

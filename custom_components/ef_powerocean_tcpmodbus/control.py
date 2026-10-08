@@ -31,6 +31,8 @@ from .const import (
     DEFAULT_CHARGE_LIMIT_SOC,
     FEED_IN_POWER_MAX_KEY,
     FEED_IN_POWER_MAX_SETTING_KEY,
+    FOLLOW_GRACE_S,
+    FOLLOW_RESENDS,
     GUARD_DIRECT_HANDBACK_W,
     GUARD_HANDBACK_MAX_S,
     GUARD_HANDBACK_S,
@@ -54,6 +56,7 @@ from .models import (
     ControlFeature,
     ControlMode,
     ControlStatus,
+    DeviceReport,
     GridFeedMode,
     InverterModel,
     RegisterDef,
@@ -65,6 +68,9 @@ from .models import (
 from .plans import CHARGE, DISCHARGE, Mode, ModeState, Step, Way, battery_power
 
 _LOGGER = logging.getLogger(__name__)
+
+# Device states in which control steps aside and leaves the inverter to itself.
+_STEPPED_ASIDE = frozenset({ControlStatus.OFF_GRID, ControlStatus.BATTERY_DISCONNECTED})
 
 # The statuses of the state-of-charge guards, as opposed to a mode's own.
 _GUARDS = frozenset(
@@ -268,6 +274,14 @@ class ControlManager:
         self._commanded_power = 0.0
         # The setpoint that the latest small correction replaced.
         self._retuned_from: float | None = None
+        # What the inverter reports about itself, and whether it follows the command.
+        self._report: DeviceReport | None = None
+        # A battery is only missing once one has been seen, as a model that never
+        # sets the BMS bit would otherwise never be controlled.
+        self._bms_seen = False
+        self._not_followed_polls = 0
+        self._resends = 0
+        self._not_accepted = False
         # When the inverter was last told to do something new, so a battery still
         # turning around is not mistaken for one the inverter is overruling.
         self._retargeted_at: datetime | None = None
@@ -439,6 +453,12 @@ class ControlManager:
             if self.handing_back:
                 return ControlStatus.HANDING_BACK
             return ControlStatus.NO_MODBUS_CONTROL
+        if self._command_status in _STEPPED_ASIDE:
+            return self._command_status
+        if self._report is not None and self._report.fault:
+            return ControlStatus.INVERTER_FAULT
+        if self._not_accepted:
+            return ControlStatus.NOT_ACCEPTED
         if self._command_status is not None:
             if self._deviation is not ControlStatus.ACTIVE:
                 return self._deviation
@@ -1025,6 +1045,57 @@ class ControlManager:
                     return False
                 return True
 
+    def _stepped_aside(self) -> ControlStatus | None:
+        """Return why control leaves the inverter to itself now, if it does.
+
+        Off-grid the inverter powers the house during an outage, and without its
+        battery no battery command can work; either way it knows best.
+        """
+        report = self._report
+        if report is None:
+            return None
+        if report.off_grid:
+            return ControlStatus.OFF_GRID
+        if self._bms_seen and not report.bms_connected:
+            return ControlStatus.BATTERY_DISCONNECTED
+        return None
+
+    def _check_followed(self) -> None:
+        """Send the command again if the inverter does not report following it.
+
+        A restart, a firmware hiccup or Modbus mode toggled in the installer app
+        leaves the inverter in its default self-consumption without telling us,
+        while the heartbeat writes keep succeeding.
+        """
+        report = self._report
+        followed = (
+            report is None
+            or not self.in_control
+            or (report.manual and report.method is self.method)
+        )
+        if followed or self._control_written_within(FOLLOW_GRACE_S):
+            if followed:
+                self._not_followed_polls = 0
+                self._resends = 0
+                self._not_accepted = False
+            return
+        self._not_followed_polls += 1
+        if self._not_followed_polls < CONTROL_STATUS_DAMPING_POLLS:
+            return
+        self._not_followed_polls = 0
+        if self._resends < FOLLOW_RESENDS:
+            self._resends += 1
+            _LOGGER.info(
+                "The inverter reports method %s and Modbus mode %s instead of %s; "
+                "sending the command again",
+                report.method if report else None,
+                report.manual if report else None,
+                self.method,
+            )
+            self._control_stale = True
+            return
+        self._not_accepted = True
+
     def _charge_to_reserve(self) -> Decision | None:
         """Charge from the grid towards the reserve, whatever mode is selected.
 
@@ -1070,6 +1141,8 @@ class ControlManager:
             self._stopped = None
         if not self._enabled:
             return Decision(ControlFeature.AUTOMATIC, 0.0)
+        if (aside := self._stepped_aside()) is not None:
+            return Decision(ControlFeature.AUTOMATIC, 0.0, aside, bypass_dwell=True)
         if self._reserve_charging and (decision := self._charge_to_reserve()):
             return decision
 
@@ -1328,6 +1401,9 @@ class ControlManager:
             self._data = data
         data = self._data
         self._expire_command()
+        self._report = DeviceReport.from_data(data)
+        if self._report is not None and self._report.bms_connected:
+            self._bms_seen = True
         self._follow_native_reserve(data)
         self._update_guards(data)
 
@@ -1366,6 +1442,9 @@ class ControlManager:
             retargeted = feature is not self._commanded_feature
             if retargeted:
                 self._retargeted_at = dt.now()
+                # A new command gets its own resends.
+                self._resends = 0
+                self._not_accepted = False
             if changed:
                 self._retuned_from = None if retargeted else self._commanded_power
             self._commanded_feature = feature
@@ -1376,6 +1455,7 @@ class ControlManager:
             if retargeted or (changed and decision.status is None):
                 self._reset_deviation()
             self._update_deviation(data)
+            self._check_followed()
         finally:
             if notify:
                 self._on_update()

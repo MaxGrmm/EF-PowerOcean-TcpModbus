@@ -438,7 +438,11 @@
           "ramping": "Fährt hoch",
           "limited_by_inverter": "Vom Wechselrichter begrenzt",
           "unreachable_battery_full": "Batterie voll, Ziel nicht erreichbar",
-          "unreachable_battery_empty": "Batterie leer, Ziel nicht erreichbar"
+          "unreachable_battery_empty": "Batterie leer, Ziel nicht erreichbar",
+          "not_accepted": "Vom Wechselrichter nicht übernommen",
+          "off_grid": "Inselbetrieb",
+          "battery_disconnected": "Akku getrennt",
+          "inverter_fault": "Wechselrichterfehler"
         }
       }
     },
