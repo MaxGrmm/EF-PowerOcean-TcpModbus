@@ -1842,3 +1842,29 @@ def test_a_native_reserve_never_charges_in_the_integration(
 
     assert native_control.status is not Status.CHARGING_TO_RESERVE
     assert native_control._commanded_feature is not Feature.CHARGE_BATTERY
+
+
+def test_turning_charge_to_reserve_off_mid_charge_is_not_an_empty_battery(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Below a raised reserve, a battery still winding down a charge is not empty."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_feature_power(Feature.CHARGE_BATTERY, 2500.0))
+    asyncio.run(control.async_set_battery_reserve_soc(50))
+    asyncio.run(control.async_set_reserve_charge(True))
+    charging = {
+        "battery_soc": 40.0,
+        "battery_power": 2500.0,
+        "grid_power": 3400.0,
+        "solar_power": 0.0,
+        "house_power": 900.0,
+    }
+    asyncio.run(control.async_apply(charging))
+    assert control.status is Status.CHARGING_TO_RESERVE
+
+    asyncio.run(control.async_set_reserve_charge(False))
+    for _ in range(const.CONTROL_STATUS_DAMPING_POLLS + 1):
+        asyncio.run(control.async_apply(charging))
+
+    # The reserve now only holds the floor, and the charge is still winding down.
+    assert control.status in (Status.RESERVE_REACHED, Status.RAMPING)

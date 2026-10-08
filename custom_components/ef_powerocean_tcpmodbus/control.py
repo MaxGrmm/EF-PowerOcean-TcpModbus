@@ -1283,6 +1283,9 @@ class ControlManager:
             measured=None if measured is None else float(measured),
             soc=None if (soc := data.get("battery_soc")) is None else float(soc),
             min_soc=max(inverter_floor, self._battery_reserve_soc),
+            battery=None
+            if (battery := data.get("battery_power")) is None
+            else float(battery),
         )
 
         if state is ControlStatus.ACTIVE:

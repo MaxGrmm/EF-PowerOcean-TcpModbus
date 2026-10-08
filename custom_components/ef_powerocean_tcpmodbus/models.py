@@ -445,6 +445,7 @@ def deviation_state(
     measured: float | None,
     soc: float | None,
     min_soc: float,
+    battery: float | None = None,
 ) -> ControlStatus:
     """Compare the deviation between what control we command and what the inverter reports."""
     if measured is None:
@@ -455,10 +456,15 @@ def deviation_state(
     if abs(error) <= tolerance:
         return ControlStatus.ACTIVE
 
+    # A full battery only explains a shortfall while it is not discharging, and an
+    # empty one while it is not charging: one still charging under a hold, below a
+    # raised reserve, is winding down, not empty.
     if soc is not None:
-        if error > 0 and soc >= BATTERY_FULL_SOC:
+        not_discharging = battery is None or battery >= -tolerance
+        not_charging = battery is None or battery <= tolerance
+        if error > 0 and not_discharging and soc >= BATTERY_FULL_SOC:
             return ControlStatus.UNREACHABLE_BATTERY_FULL
-        if error < 0 and soc <= min_soc + BATTERY_EMPTY_MARGIN_SOC:
+        if error < 0 and not_charging and soc <= min_soc + BATTERY_EMPTY_MARGIN_SOC:
             return ControlStatus.UNREACHABLE_BATTERY_EMPTY
 
     # Ramping lies between zero and the target. Going the other way, or past the

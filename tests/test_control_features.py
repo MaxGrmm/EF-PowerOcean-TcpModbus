@@ -245,3 +245,36 @@ def test_an_empty_battery_still_explains_a_discharge_it_cannot_give() -> None:
     )
 
     assert state is ControlStatus.UNREACHABLE_BATTERY_EMPTY
+
+
+@pytest.mark.parametrize(
+    ("target", "measured", "soc"),
+    [
+        # A hold met by a charge still winding down, under a raised reserve.
+        (const.HOLD_SETPOINT_W, 2500.0, 40.0),
+        # A hold met by a discharge on a full battery.
+        (const.HOLD_SETPOINT_W, -2500.0, 100.0),
+    ],
+)
+def test_a_full_or_empty_battery_only_explains_its_own_direction(
+    target: float, measured: float, soc: float
+) -> None:
+    state = deviation_state(
+        signed_target=target, measured=measured, soc=soc, min_soc=50.0, battery=measured
+    )
+
+    assert state not in (
+        ControlStatus.UNREACHABLE_BATTERY_EMPTY,
+        ControlStatus.UNREACHABLE_BATTERY_FULL,
+    )
+
+
+def test_the_app_backup_reserve_is_not_a_battery_level() -> None:
+    """Home Assistant would otherwise show it as the battery's charge."""
+    sensor = next(
+        sensor
+        for sensor in const.SENSOR_MAP
+        if sensor.key == const.BATTERY_RESERVE_REGISTER_KEY
+    )
+
+    assert sensor.device_class != "battery"

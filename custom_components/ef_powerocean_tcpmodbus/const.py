@@ -304,11 +304,13 @@ SENSOR_MAP: list[SensorDef] = [
         device_class="battery",
         state_class="measurement",
     ),
+    # A setting, not a battery level: as a battery sensor, Home Assistant would show
+    # it as the battery's charge wherever it picks the device's first one.
     SensorDef(
         key="min_soc_limit",
         unit=UNIT_OF_RATIO,
-        device_class="battery",
         state_class="measurement",
+        icon="mdi:battery-lock",
     ),
     SensorDef(
         key="battery_charge_power_limit",

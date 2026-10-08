@@ -846,6 +846,9 @@ def observe(
             measured=value,
             soc=None if soc is None else float(soc),
             min_soc=reserve,
+            battery=None
+            if (battery := raw.get("battery_power")) is None
+            else float(battery),
         )
         modes.append(
             (time.monotonic() - start, str(derived.get("active_control_mode")))
