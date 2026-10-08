@@ -64,8 +64,14 @@ from .plans import CHARGE, DISCHARGE, Mode, ModeState, Step, Way, battery_power
 
 _LOGGER = logging.getLogger(__name__)
 
-# The statuses of the two state-of-charge guards, as opposed to a mode's own.
-_GUARDS = frozenset({ControlStatus.CHARGE_LIMIT_REACHED, ControlStatus.RESERVE_REACHED})
+# The statuses of the state-of-charge guards, as opposed to a mode's own.
+_GUARDS = frozenset(
+    {
+        ControlStatus.CHARGE_LIMIT_REACHED,
+        ControlStatus.RESERVE_REACHED,
+        ControlStatus.CHARGING_TO_RESERVE,
+    }
+)
 
 
 class NotifyListeners(Protocol):
@@ -234,6 +240,10 @@ class ControlManager:
         self._battery_reserve_soc = DEFAULT_BATTERY_RESERVE_SOC
         self._charge_guard = False
         self._reserve_guard = False
+        # Whether the Battery Reserve also charges from the grid up to it, as the
+        # app's backup reserve does, and whether it is doing so now.
+        self._reserve_charge = False
+        self._reserve_charging = False
         # When a command sent with an expiry returns to automatic, unless renewed.
         self._expires_at: datetime | None = None
         # Which guard, if any, is forcing the current command.
@@ -252,6 +262,9 @@ class ControlManager:
         self._commanded_power = 0.0
         # The setpoint that the latest small correction replaced.
         self._retuned_from: float | None = None
+        # When the inverter was last told to do something new, so a battery still
+        # turning around is not mistaken for one the inverter is overruling.
+        self._retargeted_at: datetime | None = None
         self._battery_saver = False
         # The export settings to put back, taken from the device itself whenever it
         # allows an export at all.
@@ -334,6 +347,11 @@ class ControlManager:
     @property
     def battery_reserve_soc(self) -> float:
         return self._battery_reserve_soc
+
+    @property
+    def reserve_charge(self) -> bool:
+        """Return whether the Battery Reserve charges from the grid up to itself."""
+        return self._reserve_charge
 
     @property
     def battery_saver_commanded(self) -> bool:
@@ -433,6 +451,7 @@ class ControlManager:
             },
             "charge_limit_soc": self._charge_limit_soc,
             "battery_reserve_soc": self._battery_reserve_soc,
+            "reserve_charge": self._reserve_charge,
             "battery_saver": self._battery_saver,
             "grid_feed_restore": self._grid_feed_restore,
             "grid_feed_stopped": self._grid_feed_stopped,
@@ -452,6 +471,7 @@ class ControlManager:
             self._charge_limit_soc = float(charge)
         if (reserve := stored.get("battery_reserve_soc")) is not None:
             self._battery_reserve_soc = float(reserve)
+        self._reserve_charge = bool(stored.get("reserve_charge"))
         # A restart does not turn battery saver off on the inverter, so reporting it
         # off would be a lie until the user toggled it twice.
         if (saver := stored.get("battery_saver")) is not None:
@@ -585,6 +605,19 @@ class ControlManager:
         """Set the state of charge below which the battery must not be drained."""
         if self._update_limits(self._charge_limit_soc, soc):
             await self.async_apply(force=True)
+
+    async def async_set_reserve_charge(self, enabled: bool) -> None:
+        """Set whether a Battery Reserve above the SOC charges from the grid to it.
+
+        Like the backup reserve in the EcoFlow app, which on the PowerOcean Plus
+        cannot be set over Modbus: its register takes a write but the inverter
+        keeps acting on the app's value.
+        """
+        if enabled == self._reserve_charge:
+            return
+        self._reserve_charge = enabled
+        self._handback = GuardHandback()
+        await self.async_apply(force=True)
 
     def _update_limits(
         self, charge_limit_soc: float, battery_reserve_soc: float
@@ -764,6 +797,14 @@ class ControlManager:
             self._reserve_guard = True
         elif soc >= self._battery_reserve_soc + GUARD_SOC_HYSTERESIS:
             self._reserve_guard = False
+
+        # Charging stops at the reserve itself, where the reserve guard's floor
+        # takes over, as the app does. The Charge Limit outranks it.
+        self._reserve_charging = (
+            self._reserve_charge
+            and not self._charge_guard
+            and soc < self._battery_reserve_soc
+        )
 
     def _natural_battery_power(self, data: dict[str, Any]) -> float | None:
         """Estimate the battery power the inverter would reach without us.
@@ -945,6 +986,21 @@ class ControlManager:
                     return False
                 return True
 
+    def _charge_to_reserve(self) -> Decision | None:
+        """Charge from the grid towards the reserve, whatever mode is selected.
+
+        At the Charge Battery power, so that power is prepared in one place. None
+        when it is zero, which leaves the reserve as a floor only.
+        """
+        feature = ControlFeature.CHARGE_BATTERY
+        power = self._clamp_power(self.feature_power(feature), feature)
+        if power <= 0.0:
+            return None
+        self._stopped = None
+        return Decision(
+            feature, power, ControlStatus.CHARGING_TO_RESERVE, bypass_dwell=True
+        )
+
     def _hold(self, data: dict[str, Any], blocked: ControlStatus | None) -> Decision:
         """Hold the battery, unless holding it could only limit solar.
 
@@ -975,6 +1031,8 @@ class ControlManager:
             self._stopped = None
         if not self._enabled:
             return Decision(ControlFeature.AUTOMATIC, 0.0)
+        if self._reserve_charging and (decision := self._charge_to_reserve()):
+            return decision
 
         mode = self._mode_state.mode
         power = self._mode_power(data)
@@ -1179,12 +1237,22 @@ class ControlManager:
         if state is ControlStatus.ACTIVE:
             self._reset_deviation()
             return
+        if state is ControlStatus.LIMITED_BY_INVERTER and self._turning_around():
+            # A battery reversing direction passes through the far side of zero.
+            state = ControlStatus.RAMPING
         if state is not self._deviation_candidate:
             self._deviation_candidate = state
             self._deviation_polls = 0
         self._deviation_polls += 1
         if self._deviation_polls >= CONTROL_STATUS_DAMPING_POLLS:
             self._deviation = state
+
+    def _turning_around(self) -> bool:
+        """Return whether the current command is too new to call it overruled."""
+        if self._retargeted_at is None:
+            return False
+        age = (dt.now() - self._retargeted_at).total_seconds()
+        return age < GUARD_SETTLE_S
 
     async def async_poll(self, data: dict[str, Any]) -> None:
         """Run from a poll, where a write failure must not stop the read."""
@@ -1241,6 +1309,8 @@ class ControlManager:
             # Committed only once the inverter has been told: recording a command the
             # write never delivered would look settled and never be retried.
             retargeted = feature is not self._commanded_feature
+            if retargeted:
+                self._retargeted_at = dt.now()
             if changed:
                 self._retuned_from = None if retargeted else self._commanded_power
             self._commanded_feature = feature

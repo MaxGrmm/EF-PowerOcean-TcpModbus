@@ -214,3 +214,34 @@ def test_full_is_judged_below_a_hundred_percent() -> None:
     )
 
     assert state is ControlStatus.UNREACHABLE_BATTERY_FULL
+
+
+@pytest.mark.parametrize(
+    ("target", "measured"),
+    [
+        # Issue #144, Ocean 2 Plus under a ~3.3 kW import ceiling: asked to charge,
+        # the battery discharged; asked to discharge 1.5 kW, it gave 2.9 kW; asked
+        # to hold, it discharged.
+        (1500.0, -2847.0),
+        (-1500.0, -2930.0),
+        (const.HOLD_SETPOINT_W, -2000.0),
+    ],
+)
+def test_going_the_other_way_or_past_the_target_is_limited_by_the_inverter(
+    target: float, measured: float
+) -> None:
+    """Ramping lies between zero and the target; anything else is the inverter."""
+    state = deviation_state(
+        signed_target=target, measured=measured, soc=45.0, min_soc=4.0
+    )
+
+    assert state is ControlStatus.LIMITED_BY_INVERTER
+
+
+def test_an_empty_battery_still_explains_a_discharge_it_cannot_give() -> None:
+    """The battery limits come first, as the clearer reason."""
+    state = deviation_state(
+        signed_target=-3000.0, measured=500.0, soc=10.0, min_soc=10.0
+    )
+
+    assert state is ControlStatus.UNREACHABLE_BATTERY_EMPTY

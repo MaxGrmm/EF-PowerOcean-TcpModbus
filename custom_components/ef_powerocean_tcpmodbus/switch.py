@@ -56,7 +56,22 @@ GRID_FEED_SWITCH: Final = SwitchDef(
     # and act on them while Modbus control is on (issue #89).
 )
 
-SWITCHES: Final = (MODBUS_CONTROL_SWITCH, BATTERY_SAVER_SWITCH, GRID_FEED_SWITCH)
+RESERVE_CHARGE_SWITCH: Final = SwitchDef(
+    key="battery_reserve_charge",
+    icon="mdi:battery-arrow-up",
+    # A Battery Reserve above the SOC then charges from the grid up to it, at the
+    # Charge Battery power, as the app's backup reserve does.
+    is_on=lambda coordinator: coordinator.control.reserve_charge,
+    turn=ControlManager.async_set_reserve_charge,
+    available=lambda coordinator: requires_modbus_control(coordinator.control.status),
+)
+
+SWITCHES: Final = (
+    MODBUS_CONTROL_SWITCH,
+    BATTERY_SAVER_SWITCH,
+    GRID_FEED_SWITCH,
+    RESERVE_CHARGE_SWITCH,
+)
 
 
 async def async_setup_entry(

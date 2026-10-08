@@ -135,6 +135,14 @@ Automatic, the battery can still power the house under the Charge Limit, and sti
 charge from solar under the Battery Reserve. A guard releases once the charge has moved
 5 % back. Both are off by default.
 
+Turn on **Charge to Battery Reserve** to also charge from the grid up to the Battery
+Reserve, as the backup reserve in the EcoFlow app does. Below the reserve the battery
+then charges at the Charge Battery power, whatever mode is selected, and the reserve
+holds it from there. The Charge Limit still applies, and a Charge Battery power of 0 W
+leaves the reserve a floor only. This is the integration's own reserve: the app's backup
+reserve can't be set over Modbus on the PowerOcean Plus, whose register takes the write
+but keeps acting on the app's value.
+
 Turn off Min SOC and schedules in the EcoFlow app, since the inverter follows them
 whenever it runs on its own.
 
@@ -156,21 +164,28 @@ doesn't expose a hard power limit over Modbus. See
 
 ### Control Status
 
-| Control Status             | Meaning                                                   |
-| -------------------------- | --------------------------------------------------------- |
-| No Modbus control          | Modbus Control is off, or control was lost                |
-| Handing back to the app    | Modbus Control was turned off; the app takes over         |
-| Automatic                  | The inverter runs normal self-consumption                 |
-| Active                     | The selected mode is working                              |
-| Ramping                    | The inverter hasn't reached the target yet                |
-| Charge limit reached       | The Charge Limit is stopping the battery                  |
-| Reserve reached            | The Battery Reserve is stopping the battery               |
-| Below solar export limit   | Export solar first is exporting the whole surplus         |
-| Unreachable: battery full  | The target needs the battery to charge, but it's full     |
-| Unreachable: battery empty | The target needs the battery to discharge, but it's empty |
+| Control Status              | Meaning                                                   |
+| --------------------------- | --------------------------------------------------------- |
+| No Modbus control           | Modbus Control is off, or control was lost                |
+| Handing back to the app     | Modbus Control was turned off; the app takes over         |
+| Automatic                   | The inverter runs normal self-consumption                 |
+| Active                      | The selected mode is working                              |
+| Ramping                     | The inverter hasn't reached the target yet                |
+| Limited by inverter         | The inverter goes the other way or past the target        |
+| Charge limit reached        | The Charge Limit is stopping the battery                  |
+| Reserve reached             | The Battery Reserve is stopping the battery               |
+| Charging to battery reserve | Charge to Battery Reserve is charging up to it            |
+| Below solar export limit    | Export solar first is exporting the whole surplus         |
+| Unreachable: battery full   | The target needs the battery to charge, but it's full     |
+| Unreachable: battery empty  | The target needs the battery to discharge, but it's empty |
 
 If the inverter misses a guard's target, the status shows Ramping or Unreachable; the
 guard is still in the `guard` attribute.
+
+**Limited by inverter** means something in the inverter outranks the command, such as a
+firmware limit or its own protection: asked to charge, the battery discharges, or it
+discharges more than asked. A command is given 30 seconds to turn the battery around
+before it counts.
 
 ### Commanding the battery from automations
 

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+
+- Control Status shows Limited by inverter when the battery goes the other way from the command, or past it, instead of Ramping indefinitely.
+- Charge to Battery Reserve: below the Battery Reserve, the battery charges from the grid up to it at the Charge Battery power, as the app's backup reserve does.
+
 ## [2.8.2] - 2026-10-07
 
 ### Changed

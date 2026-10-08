@@ -1658,3 +1658,90 @@ def test_single_phase_guard_handback_deadband_hysteresis(
         )
     )
     assert sp_control._commanded_feature is Feature.HOLD_BATTERY
+
+
+def test_a_battery_overruled_by_the_inverter_is_reported_once_settled(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A charge met with a discharge is a firmware limit, not slow ramping."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_command(Feature.CHARGE_BATTERY, power=1500.0))
+    overruled = {"battery_soc": 45.0, "battery_power": -2847.0, "grid_power": 3270.0}
+
+    # Turning around from a discharge passes the far side of zero, so a new
+    # command is given time first.
+    for _ in range(const.CONTROL_STATUS_DAMPING_POLLS):
+        asyncio.run(control.async_apply(overruled))
+    assert control.status is Status.RAMPING
+
+    advance(control, monkeypatch, const.GUARD_SETTLE_S + 1)
+    for _ in range(const.CONTROL_STATUS_DAMPING_POLLS):
+        asyncio.run(control.async_apply(overruled))
+    assert control.status is Status.LIMITED_BY_INVERTER
+
+
+def test_charge_to_reserve_charges_from_the_grid_then_holds_the_floor(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Like the app's backup reserve: up to it from the grid, then never below."""
+    write = allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_feature_power(Feature.CHARGE_BATTERY, 2500.0))
+    asyncio.run(control.async_set_battery_reserve_soc(50))
+    asyncio.run(control.async_set_reserve_charge(True))
+    drawing = {"solar_power": 0.0, "house_power": 900.0, "grid_power": 900.0}
+
+    asyncio.run(control.async_apply({"battery_soc": 40.0, **drawing}))
+    assert control.status is Status.CHARGING_TO_RESERVE
+    assert control._commanded_feature is Feature.CHARGE_BATTERY
+    assert control._commanded_power == 2500.0
+    assert control.active_guard is Status.CHARGING_TO_RESERVE
+    assert write.await_count > 0
+
+    advance(control, monkeypatch, const.MIN_CONTROL_DWELL_S + 1)
+    asyncio.run(control.async_apply({"battery_soc": 50.0, **drawing}))
+    assert control.status is Status.RESERVE_REACHED
+    assert control._commanded_feature is not Feature.CHARGE_BATTERY
+
+
+def test_charge_to_reserve_leaves_the_reserve_a_floor_when_off_or_without_power(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_battery_reserve_soc(50))
+    drawing = {"solar_power": 0.0, "house_power": 900.0, "grid_power": 900.0}
+
+    asyncio.run(control.async_apply({"battery_soc": 40.0, **drawing}))
+    assert control.status is Status.RESERVE_REACHED
+
+    asyncio.run(control.async_set_feature_power(Feature.CHARGE_BATTERY, 0.0))
+    asyncio.run(control.async_set_reserve_charge(True))
+    asyncio.run(control.async_apply({"battery_soc": 40.0, **drawing}))
+    assert control.status is Status.RESERVE_REACHED
+
+
+def test_the_charge_limit_outranks_charging_to_the_reserve(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A limit the user set against charging is never charged through."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_charge_limit_soc(30))
+    asyncio.run(control.async_set_battery_reserve_soc(50))
+    asyncio.run(control.async_set_reserve_charge(True))
+
+    asyncio.run(
+        control.async_apply(
+            {"battery_soc": 40.0, "solar_power": 0.0, "house_power": 900.0}
+        )
+    )
+    assert control._commanded_feature is not Feature.CHARGE_BATTERY
+    assert control.status is not Status.CHARGING_TO_RESERVE
+
+
+def test_charge_to_reserve_survives_a_restart(control) -> None:
+    control._reserve_charge = True
+    stored = control.dump_state()
+    control._reserve_charge = False
+
+    control.load_state(stored)
+
+    assert control.reserve_charge is True

@@ -347,11 +347,16 @@ class ControlStatus(StrEnum):
     AUTOMATIC = "automatic"
     CHARGE_LIMIT_REACHED = "charge_limit_reached"
     RESERVE_REACHED = "reserve_reached"
+    # Below the Battery Reserve with Charge to Reserve on, charging up to it.
+    CHARGING_TO_RESERVE = "charging_to_reserve"
     # Export Solar First with no surplus above its limit, so the battery takes none.
     BELOW_SOLAR_EXPORT_LIMIT = "below_solar_export_limit"
     HOLD_NOT_NEEDED = "hold_not_needed"
     ACTIVE = "active"
     RAMPING = "ramping"
+    # The battery goes the other way, or past the target: something in the inverter
+    # outranks the command, such as a firmware limit or its own protection.
+    LIMITED_BY_INVERTER = "limited_by_inverter"
     UNREACHABLE_BATTERY_FULL = "unreachable_battery_full"
     UNREACHABLE_BATTERY_EMPTY = "unreachable_battery_empty"
 
@@ -434,6 +439,15 @@ def deviation_state(
         if error < 0 and soc <= min_soc + BATTERY_EMPTY_MARGIN_SOC:
             return ControlStatus.UNREACHABLE_BATTERY_EMPTY
 
+    # Ramping lies between zero and the target. Going the other way, or past the
+    # target, is not the battery getting there but the inverter doing something
+    # else, so the command is outranked rather than slow.
+    wrong_way = measured < -tolerance if signed_target >= 0 else measured > tolerance
+    overshoot = abs(measured) > abs(signed_target) + tolerance and (
+        measured * signed_target > 0
+    )
+    if wrong_way or overshoot:
+        return ControlStatus.LIMITED_BY_INVERTER
     return ControlStatus.RAMPING
 
 

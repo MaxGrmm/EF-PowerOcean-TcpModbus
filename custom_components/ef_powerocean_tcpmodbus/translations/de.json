@@ -423,10 +423,12 @@
           "automatic": "Automatisch",
           "charge_limit_reached": "Ladegrenze erreicht",
           "reserve_reached": "Batteriereserve erreicht",
+          "charging_to_reserve": "Lädt bis zur Batteriereserve",
           "below_solar_export_limit": "Unter der Solar-Einspeisegrenze",
           "hold_not_needed": "Batterie voll, Halten nicht nötig",
           "active": "Aktiv",
           "ramping": "Fährt hoch",
+          "limited_by_inverter": "Vom Wechselrichter begrenzt",
           "unreachable_battery_full": "Batterie voll, Ziel nicht erreichbar",
           "unreachable_battery_empty": "Batterie leer, Ziel nicht erreichbar"
         }
@@ -515,6 +517,9 @@
       },
       "grid_feed": {
         "name": "Netzeinspeisung"
+      },
+      "battery_reserve_charge": {
+        "name": "Bis zur Batteriereserve laden"
       }
     }
   },
