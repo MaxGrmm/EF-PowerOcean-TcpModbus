@@ -5,6 +5,14 @@ To run it:
 
     uv pip install -r requirements-development.txt
     uv run python scripts/register_scan.py <inverter_ip>
+
+To find where a setting in the EcoFlow app lives instead, watch for changes:
+
+    uv run python scripts/register_scan.py <inverter_ip> --watch
+
+It reads everything a few times to learn which registers move by themselves, then
+asks you to change one thing in the app at a time and lists the registers that
+followed. Nothing is written.
 """
 
 from __future__ import annotations
@@ -76,6 +84,15 @@ FLOAT_CEILING: Final = 1_000_000.0
 # a third sample makes a coincidence harder still.
 SAMPLE_COUNT: Final = 3
 SAMPLE_GAP_S: Final = 30
+
+# --watch: baseline reads that teach which registers move by themselves, and how
+# long an app change takes to reach Modbus. The app goes through the cloud, so a
+# change can take several seconds to land.
+WATCH_BASELINE_READS: Final = 4
+WATCH_BASELINE_GAP_S: Final = 5
+WATCH_SETTLE_S: Final = 20
+# Read this many words per request, well inside the Modbus limit of 125.
+WATCH_CHUNK: Final = 64
 
 
 def render_span(first: int, last: int) -> str:
@@ -508,6 +525,149 @@ def report_summary(
     print()
 
 
+def snapshot(reader: RegisterReader, addresses: list[int]) -> dict[int, int]:
+    """Read every address, in chunks, one at a time only where a chunk is refused."""
+    words: dict[int, int] = {}
+    for first, last in contiguous_spans(addresses):
+        for base in range(first, last + 1, WATCH_CHUNK):
+            count = min(WATCH_CHUNK, last - base + 1)
+            chunk, _ = reader.read(base, count)
+            if chunk is not None:
+                words.update(zip(range(base, base + count), chunk))
+                continue
+            for address in range(base, base + count):
+                word, _ = reader.read(address, 1)
+                if word is not None:
+                    words[address] = word[0]
+    return words
+
+
+def register_names(model: models.InverterModel) -> dict[int, str]:
+    """Map each address the integration knows to its key, both words of a pair."""
+    names: dict[int, str] = {}
+    for key, register in const.REGISTERS_BY_KEY.items():
+        address = register.for_model(model).address
+        names[address] = key
+        if register.data_type is not models.RegisterType.UINT16:
+            names.setdefault(address + 1, f"{key} (2nd word)")
+    return names
+
+
+def render_change(
+    address: int,
+    before: dict[int, int],
+    after: dict[int, int],
+    names: dict[int, str],
+    high_word_first: bool,
+) -> str:
+    """One line for a changed address: its words, and a 32-bit reading if the pair moved."""
+    old, new = before.get(address), after.get(address)
+    signed = new - 0x10000 if new is not None and new >= 0x8000 else new
+    line = f"    {render_address(address):<16} {old!s:>6} -> {new!s:<6}"
+    if signed is not None and signed != new:
+        line += f" (int16 {signed})"
+    nxt = address + 1
+    if nxt in after and before.get(nxt) != after.get(nxt):
+        pair = [after[address], after[nxt]]
+        wide = telemetry.decode_register(
+            pair, models.RegisterType.INT32, high_word_first
+        )
+        real = believable_float(pair[0], pair[1], high_word_first)
+        line += f"  with next as int32 {wide:.0f}"
+        if real is not None:
+            line += f", float {real:.2f}"
+    if address in names:
+        line += f"  [{names[address]}]"
+    return line
+
+
+def watch_changes(
+    reader: RegisterReader,
+    model: models.InverterModel,
+    ranges: list[tuple[int, int]],
+    settle_s: int,
+) -> None:
+    """Ask for one app change at a time and list the registers that followed it."""
+    if not sys.stdin.isatty():
+        print("--watch asks you questions, so it needs a terminal.")
+        return
+    found, _ = report_readable_addresses(reader, ranges)
+    addresses = sorted(found)
+    names = register_names(model)
+
+    print(f"== Learning what moves by itself ({WATCH_BASELINE_READS} reads) ==")
+    print("  Change nothing in the app yet.")
+    baseline = snapshot(reader, addresses)
+    live: set[int] = set()
+    for _ in range(WATCH_BASELINE_READS - 1):
+        time.sleep(WATCH_BASELINE_GAP_S)
+        again = snapshot(reader, addresses)
+        live |= {a for a in addresses if again.get(a) != baseline.get(a)}
+        baseline = again
+    print(f"  {len(live)} of {len(addresses)} addresses move by themselves; these")
+    print("  are measurements and are left out of the changes below.\n")
+
+    history: list[tuple[str, dict[int, int]]] = [("start", baseline)]
+    step = 0
+    while True:
+        try:
+            label = input(
+                "  Make ONE change in the app, then describe it here (e.g. "
+                "'reserve 5 to 50') and press Enter. Empty to finish: "
+            ).strip()
+        except EOFError:
+            break
+        if not label:
+            break
+        step += 1
+        print(f"  Waiting {settle_s}s for the change to reach Modbus ...")
+        time.sleep(settle_s)
+        after = snapshot(reader, addresses)
+        time.sleep(WATCH_BASELINE_GAP_S)
+        confirm = snapshot(reader, addresses)
+        # Moving between the two reads after the change means it is live, not a
+        # setting, even if the baseline happened to miss it.
+        live |= {a for a in addresses if confirm.get(a) != after.get(a)}
+        before = history[-1][1]
+        changed = [
+            a for a in addresses if a not in live and after.get(a) != before.get(a)
+        ]
+        print(f"\n== Step {step}: {label} ==")
+        if changed:
+            for address in changed:
+                print(
+                    render_change(address, before, after, names, reader.high_word_first)
+                )
+        else:
+            print("    no setting-like register changed")
+        print()
+        history.append((label, confirm))
+
+    if step == 0:
+        return
+    moved = sorted(
+        {
+            a
+            for (_, previous), (_, current) in zip(history, history[1:])
+            for a in addresses
+            if a not in live and previous.get(a) != current.get(a)
+        }
+    )
+    print("== Summary: every register that changed, after each step ==")
+    if not moved:
+        print("  none\n")
+        return
+    labels = [label for label, _ in history]
+    width = max(len(label) for label in labels)
+    header = "".join(f"{render_address(a):>18}" for a in moved)
+    print(f"  {'':<{width}}{header}")
+    for label, words in history:
+        cells = "".join(f"{words.get(a, '-')!s:>18}" for a in moved)
+        print(f"  {label:<{width}}{cells}")
+    tags = "".join(f"{names.get(a, ''):>18.17}" for a in moved)
+    print(f"  {'':<{width}}{tags}\n")
+
+
 def parse_address_range(text: str) -> tuple[int, int]:
     low, _, high = text.partition("-")
     return int(low), int(high)
@@ -532,6 +692,20 @@ def parse_arguments() -> argparse.Namespace:
         f"Default {' and '.join(DEFAULT_SCAN)}.",
     )
     parser.add_argument("--no-scan", action="store_true", help="skip that search")
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="instead of the report, ask for one change in the EcoFlow app at a "
+        "time and list the registers that followed it. Read-only.",
+    )
+    parser.add_argument(
+        "--settle",
+        type=int,
+        default=WATCH_SETTLE_S,
+        metavar="SECONDS",
+        help=f"with --watch, how long to wait after each change. Default "
+        f"{WATCH_SETTLE_S}.",
+    )
     parser.add_argument(
         "--samples",
         type=int,
@@ -589,6 +763,11 @@ def main() -> int:
             key=lambda register: register.address,
         )
         ranges = [parse_address_range(text) for text in arguments.scan or DEFAULT_SCAN]
+
+        if arguments.watch:
+            watch_changes(reader, model, ranges, arguments.settle)
+            print(f"{reader.reads} reads issued. Nothing was written.")
+            return 0
 
         report_block_reads(reader, blocks)
         missing, suspect, values = report_mapped_registers(reader, registers)
