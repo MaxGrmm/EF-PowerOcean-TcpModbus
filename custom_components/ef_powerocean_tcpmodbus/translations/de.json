@@ -68,7 +68,8 @@
           "solar_power_max": "Maximale Solar-Leistung [W]",
           "grid_power_max": "Maximale Netz-Leistung [W]",
           "scan_interval": "Abfrageintervall [s]",
-          "calc_solar_power": "Berechnung der Solarleistung"
+          "calc_solar_power": "Berechnung der Solarleistung",
+          "battery_reserve": "Batteriereserve"
         },
         "data_description": {
           "inverter_model": "Wählen Sie das Wechselrichtermodell.",
@@ -76,7 +77,8 @@
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "grid_power_max": "Die max. Leistung Ihres Netzanschlusses, begrenzt durch die Hauptsicherung. Nicht die Wechselrichterleistung: das Haus allein kann mehr beziehen.",
           "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
-          "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
+          "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden.",
+          "battery_reserve": "Nativ: Der Wechselrichter hält die Reserve selbst, wie die in der EcoFlow-App eingestellte, aber nicht jedes Modell übernimmt eine Änderung über Modbus. Emuliert: Die Integration bildet die Reserve der App mit eigener Logik nach, solange die Modbus-Steuerung an ist. Für dein Modell voreingestellt; nur ändern, um ein Modell zu testen."
         }
       }
     },
@@ -94,6 +96,12 @@
         "ocean_2": "Ocean 2 3-phasig",
         "ocean_2_single_phase": "Ocean 2 1-phasig",
         "ocean_2_plus_single_phase": "Ocean 2 Plus 1-phasig"
+      }
+    },
+    "battery_reserve": {
+      "options": {
+        "native": "Nativ",
+        "emulated": "Emuliert"
       }
     }
   },
@@ -172,7 +180,7 @@
         "name": "Gesamt Batteriekapazität"
       },
       "min_soc_limit": {
-        "name": "Batterie Backup-Reserve"
+        "name": "App-Backup-Reserve"
       },
       "solar_power": {
         "name": "Solarleistung"
@@ -423,10 +431,12 @@
           "automatic": "Automatisch",
           "charge_limit_reached": "Ladegrenze erreicht",
           "reserve_reached": "Batteriereserve erreicht",
+          "charging_to_reserve": "Lädt bis zur Batteriereserve",
           "below_solar_export_limit": "Unter der Solar-Einspeisegrenze",
           "hold_not_needed": "Batterie voll, Halten nicht nötig",
           "active": "Aktiv",
           "ramping": "Fährt hoch",
+          "limited_by_inverter": "Vom Wechselrichter begrenzt",
           "unreachable_battery_full": "Batterie voll, Ziel nicht erreichbar",
           "unreachable_battery_empty": "Batterie leer, Ziel nicht erreichbar"
         }
@@ -485,9 +495,6 @@
       "battery_reserve_soc": {
         "name": "Batteriereserve"
       },
-      "min_soc_limit_control": {
-        "name": "Minimale Batterie-Reserve"
-      },
       "device_led_brightness_control": {
         "name": "Helligkeit LED-Geräteanzeige"
       }
@@ -515,6 +522,9 @@
       },
       "grid_feed": {
         "name": "Netzeinspeisung"
+      },
+      "battery_reserve_charge": {
+        "name": "Bis zur Batteriereserve laden"
       }
     }
   },

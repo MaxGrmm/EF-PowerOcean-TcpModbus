@@ -56,6 +56,17 @@ class ProductId(NamedTuple):
     category: ProductCategory | None = None
 
 
+class ReserveSupport(StrEnum):
+    """Whether the inverter or the integration enforces the Battery Reserve."""
+
+    # The integration's guard, by holding the battery while it is in control. For
+    # models whose reserve register takes a write but is not acted on, or is unproven.
+    EMULATED = "emulated"
+    # The inverter, from its reserve register (40536), whatever is running it: the
+    # backup reserve the EcoFlow app sets.
+    NATIVE = "native"
+
+
 @dataclass(frozen=True, slots=True)
 class ModelTraits:
     """What sets one model apart from the rest of the family.
@@ -88,6 +99,9 @@ class ModelTraits:
     # hands back to the inverter's own self-consumption whenever power flows the
     # way the guard allows.
     guard_tracks_setpoints: bool = True
+    # Whether the Battery Reserve is native. Only once --reserve-probe has shown the
+    # inverter acting on a written reserve; the PowerOcean Plus does not (issue #144).
+    battery_reserve: ReserveSupport = ReserveSupport.EMULATED
     # Raised when a fix changes how energy counters are read, which resets using the
     # inverters own energy state.
     energy_state_revision: int = 0
@@ -156,6 +170,7 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         "PowerOcean Three Phase",
         startup_voltage=160,
         product_ids=(ProductId(1, ProductCategory.THREE_PHASE),),
+        battery_reserve=ReserveSupport.NATIVE,
     ),
     # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1754035729875/PowerOcean%20Plus%20(three-phase)_Brochure_20241223_EN.pdf
     InverterModel.POWEROCEAN_PLUS: ModelTraits(
@@ -207,6 +222,13 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
         energy_state_revision=1,
     ),
 }
+
+
+def battery_reserve_for(model: InverterModel, option: str | None) -> ReserveSupport:
+    """Return the Battery Reserve set in the options, else the model's."""
+    if option in tuple(ReserveSupport):
+        return ReserveSupport(option)
+    return model.traits.battery_reserve
 
 
 @dataclass(slots=True)
@@ -347,11 +369,16 @@ class ControlStatus(StrEnum):
     AUTOMATIC = "automatic"
     CHARGE_LIMIT_REACHED = "charge_limit_reached"
     RESERVE_REACHED = "reserve_reached"
+    # Below the Battery Reserve with Charge to Reserve on, charging up to it.
+    CHARGING_TO_RESERVE = "charging_to_reserve"
     # Export Solar First with no surplus above its limit, so the battery takes none.
     BELOW_SOLAR_EXPORT_LIMIT = "below_solar_export_limit"
     HOLD_NOT_NEEDED = "hold_not_needed"
     ACTIVE = "active"
     RAMPING = "ramping"
+    # The battery goes the other way, or past the target: something in the inverter
+    # outranks the command, such as a firmware limit or its own protection.
+    LIMITED_BY_INVERTER = "limited_by_inverter"
     UNREACHABLE_BATTERY_FULL = "unreachable_battery_full"
     UNREACHABLE_BATTERY_EMPTY = "unreachable_battery_empty"
 
@@ -418,6 +445,7 @@ def deviation_state(
     measured: float | None,
     soc: float | None,
     min_soc: float,
+    battery: float | None = None,
 ) -> ControlStatus:
     """Compare the deviation between what control we command and what the inverter reports."""
     if measured is None:
@@ -428,12 +456,26 @@ def deviation_state(
     if abs(error) <= tolerance:
         return ControlStatus.ACTIVE
 
+    # A full battery only explains a shortfall while it is not discharging, and an
+    # empty one while it is not charging: one still charging under a hold, below a
+    # raised reserve, is winding down, not empty.
     if soc is not None:
-        if error > 0 and soc >= BATTERY_FULL_SOC:
+        not_discharging = battery is None or battery >= -tolerance
+        not_charging = battery is None or battery <= tolerance
+        if error > 0 and not_discharging and soc >= BATTERY_FULL_SOC:
             return ControlStatus.UNREACHABLE_BATTERY_FULL
-        if error < 0 and soc <= min_soc + BATTERY_EMPTY_MARGIN_SOC:
+        if error < 0 and not_charging and soc <= min_soc + BATTERY_EMPTY_MARGIN_SOC:
             return ControlStatus.UNREACHABLE_BATTERY_EMPTY
 
+    # Ramping lies between zero and the target. Going the other way, or past the
+    # target, is not the battery getting there but the inverter doing something
+    # else, so the command is outranked rather than slow.
+    wrong_way = measured < -tolerance if signed_target >= 0 else measured > tolerance
+    overshoot = abs(measured) > abs(signed_target) + tolerance and (
+        measured * signed_target > 0
+    )
+    if wrong_way or overshoot:
+        return ControlStatus.LIMITED_BY_INVERTER
     return ControlStatus.RAMPING
 
 

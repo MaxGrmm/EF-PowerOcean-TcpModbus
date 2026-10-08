@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
+from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfPower
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -16,6 +19,7 @@ from .const import (
     CHARGE_LIMIT_SOC_NUMBER,
     CONTROL_FEATURES,
     DOMAIN,
+    RETIRED_MIN_SOC_NUMBER_KEY,
     UNIT_OF_RATIO,
     WRITABLE_NUMBERS_MAP,
 )
@@ -56,15 +60,26 @@ async def async_setup_entry(
             lambda: coordinator.control.charge_limit_soc,
         )
     )
+    native = coordinator.control.reserve_native
     entities.append(
         EcoFlowSocLimitNumber(
             coordinator,
             entry,
-            BATTERY_RESERVE_SOC_NUMBER,
+            # The inverter keeps a native reserve without us, so it needs no control.
+            replace(BATTERY_RESERVE_SOC_NUMBER, availability=None)
+            if native
+            else BATTERY_RESERVE_SOC_NUMBER,
             coordinator.control.async_set_battery_reserve_soc,
             lambda: coordinator.control.battery_reserve_soc,
+            attributes=lambda: {"implementation": "native" if native else "emulated"},
         )
     )
+    # The Battery Reserve took over the number that wrote the reserve register.
+    registry = er.async_get(hass)
+    if retired := registry.async_get_entity_id(
+        "number", DOMAIN, f"{entry.entry_id}_{RETIRED_MIN_SOC_NUMBER_KEY}"
+    ):
+        registry.async_remove(retired)
     entities.extend(
         EcoFlowGenericNumber(coordinator, entry, number_def)
         for number_def in WRITABLE_NUMBERS_MAP
@@ -142,10 +157,12 @@ class EcoFlowSocLimitNumber(EcoFlowBaseEntity, NumberEntity):
         definition: ControlEntityDef,
         setter: Callable[[float], Awaitable[None]],
         getter: Callable[[], float],
+        attributes: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         super().__init__(coordinator, entry, definition)
         self._setter = setter
         self._getter = getter
+        self._attributes = attributes
         self._attr_entity_category = definition.entity_category
         if definition.icon:
             self._attr_icon = definition.icon
@@ -153,6 +170,10 @@ class EcoFlowSocLimitNumber(EcoFlowBaseEntity, NumberEntity):
     @property
     def native_value(self) -> float:
         return self._getter()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        return self._attributes() if self._attributes else None
 
     async def async_set_native_value(self, value: float) -> None:
         await self._setter(value)

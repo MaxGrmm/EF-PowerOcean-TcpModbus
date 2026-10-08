@@ -22,6 +22,7 @@ from .const import (
     ATTR_MODE,
     BATTERY_MODE_SELECT,
     CONF_BATTERY_COUNT,
+    CONF_BATTERY_RESERVE,
     CONF_CALC_SOLAR_POWER,
     CONF_HOST,
     CONF_INVERTER_MODEL,
@@ -65,6 +66,7 @@ from .models import (
     NumberWritableDef,
     RegisterBlock,
     RegisterDef,
+    battery_reserve_for,
     encode_register,
 )
 from .telemetry import (
@@ -151,6 +153,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             on_refresh=self.async_refresh,
             write_setting=self._async_write_register,
             on_command_expired=self._command_expired,
+            battery_reserve=battery_reserve_for(
+                self.inverter_model,
+                config_entry.data.get(CONF_BATTERY_RESERVE),
+            ),
         )
         # Context of the last expiry event, taken once by the Battery Mode select so its
         # change to automatic shows the expiry as the cause.

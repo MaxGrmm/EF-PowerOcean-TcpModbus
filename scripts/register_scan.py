@@ -582,6 +582,7 @@ class WatchMap:
 
 def watch_map(model: models.InverterModel) -> WatchMap:
     settings = {definition.read_key for definition in const.WRITABLE_NUMBERS_MAP}
+    settings.add(const.BATTERY_RESERVE_REGISTER_KEY)
     names: dict[int, str] = {}
     measurements: set[int] = set()
     groups: list[tuple[int, ...]] = []
