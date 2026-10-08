@@ -274,14 +274,23 @@ class ControlManager:
         self._commanded_power = 0.0
         # The setpoint that the latest small correction replaced.
         self._retuned_from: float | None = None
-        # What the inverter reports about itself, and whether it follows the command.
+        # What the inverter reports about itself, judged only once it has proven to
+        # report it: a model that never sets a bit must behave as before this check.
         self._report: DeviceReport | None = None
-        # A battery is only missing once one has been seen, as a model that never
-        # sets the BMS bit would otherwise never be controlled.
+        # A battery is only missing once one has been seen.
         self._bms_seen = False
+        # The report is only trusted to say a command is not followed once it has
+        # shown one being followed.
+        self._follow_proven = False
         self._not_followed_polls = 0
         self._resends = 0
         self._not_accepted = False
+        # Device states take effect after this many polls in a row, so one odd read
+        # neither interrupts the mode nor flickers the status.
+        self._aside_candidate: ControlStatus | None = None
+        self._aside_polls = 0
+        self._aside: ControlStatus | None = None
+        self._fault_polls = 0
         # When the inverter was last told to do something new, so a battery still
         # turning around is not mistaken for one the inverter is overruling.
         self._retargeted_at: datetime | None = None
@@ -455,7 +464,7 @@ class ControlManager:
             return ControlStatus.NO_MODBUS_CONTROL
         if self._command_status in _STEPPED_ASIDE:
             return self._command_status
-        if self._report is not None and self._report.fault:
+        if self._fault_polls >= CONTROL_STATUS_DAMPING_POLLS:
             return ControlStatus.INVERTER_FAULT
         if self._not_accepted:
             return ControlStatus.NOT_ACCEPTED
@@ -1045,20 +1054,38 @@ class ControlManager:
                     return False
                 return True
 
-    def _stepped_aside(self) -> ControlStatus | None:
-        """Return why control leaves the inverter to itself now, if it does.
-
-        Off-grid the inverter powers the house during an outage, and without its
-        battery no battery command can work; either way it knows best.
-        """
-        report = self._report
+    def _observe_device(self, data: dict[str, Any]) -> None:
+        """Take in what the inverter reports about itself, once per poll."""
+        report = self._report = DeviceReport.from_data(data)
         if report is None:
-            return None
+            # Nothing reported, so nothing changes: no state is assumed or kept.
+            self._aside_candidate, self._aside_polls, self._aside = None, 0, None
+            self._fault_polls = 0
+            return
+        if report.bms_connected:
+            self._bms_seen = True
+        self._fault_polls = self._fault_polls + 1 if report.fault else 0
+
+        # Off-grid the inverter powers the house during an outage, and without its
+        # battery no battery command can work; either way it knows best.
+        reason = None
         if report.off_grid:
-            return ControlStatus.OFF_GRID
-        if self._bms_seen and not report.bms_connected:
-            return ControlStatus.BATTERY_DISCONNECTED
-        return None
+            reason = ControlStatus.OFF_GRID
+        elif self._bms_seen and not report.bms_connected:
+            reason = ControlStatus.BATTERY_DISCONNECTED
+        if reason is None:
+            self._aside_candidate, self._aside_polls, self._aside = None, 0, None
+            return
+        if reason is self._aside_candidate:
+            self._aside_polls += 1
+        else:
+            self._aside_candidate, self._aside_polls = reason, 1
+        if self._aside_polls >= CONTROL_STATUS_DAMPING_POLLS:
+            self._aside = reason
+
+    def _stepped_aside(self) -> ControlStatus | None:
+        """Return why control leaves the inverter to itself now, if it does."""
+        return self._aside
 
     def _check_followed(self) -> None:
         """Send the command again if the inverter does not report following it.
@@ -1068,11 +1095,13 @@ class ControlManager:
         while the heartbeat writes keep succeeding.
         """
         report = self._report
-        followed = (
-            report is None
-            or not self.in_control
-            or (report.manual and report.method is self.method)
-        )
+        if report is None or not self.in_control:
+            return
+        followed = report.manual and report.method is self.method
+        if followed:
+            self._follow_proven = True
+        if not self._follow_proven:
+            return
         if followed or self._control_written_within(FOLLOW_GRACE_S):
             if followed:
                 self._not_followed_polls = 0
@@ -1397,13 +1426,14 @@ class ControlManager:
         force: bool = False,
     ) -> None:
         """Send what the mode and guards add up to, if it differs from the last send."""
+        # Only a poll brings data; a user action re-applies the last poll's.
+        polled = data is not None
         if data is not None:
             self._data = data
         data = self._data
         self._expire_command()
-        self._report = DeviceReport.from_data(data)
-        if self._report is not None and self._report.bms_connected:
-            self._bms_seen = True
+        if polled:
+            self._observe_device(data)
         self._follow_native_reserve(data)
         self._update_guards(data)
 
@@ -1455,7 +1485,8 @@ class ControlManager:
             if retargeted or (changed and decision.status is None):
                 self._reset_deviation()
             self._update_deviation(data)
-            self._check_followed()
+            if polled:
+                self._check_followed()
         finally:
             if notify:
                 self._on_update()

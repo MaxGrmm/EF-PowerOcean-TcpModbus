@@ -206,11 +206,12 @@ firmware limit or its own protection: asked to charge, the battery discharges, o
 discharges more than asked. A command is given 30 seconds to turn the battery around
 before it counts.
 
-The inverter reports which control method it follows. If that doesn't match the command
-for three polls, the command is sent again, which recovers from an inverter restart or
-Modbus mode being toggled in the installer app. After two resends the status shows
-**Not accepted by inverter**. Off-grid and with the battery disconnected, control hands
-the inverter its own self-consumption and resumes the selected mode once it's back.
+The inverter reports which control method it follows. Once it has shown that it does,
+a mismatch for three polls sends the command again, which recovers from an inverter
+restart or Modbus mode being toggled in the installer app. After two resends the status
+shows **Not accepted by inverter**. Off-grid and with the battery disconnected for three
+polls, control hands the inverter its own self-consumption and resumes the selected mode
+once it's back. A model that doesn't report these is controlled as before.
 
 ### Commanding the battery from automations
 

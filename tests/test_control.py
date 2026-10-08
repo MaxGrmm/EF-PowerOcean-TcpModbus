@@ -1908,6 +1908,10 @@ def test_a_command_the_inverter_does_not_report_is_sent_again_then_flagged(
     """Heartbeats keep succeeding after an inverter restart forgot the command."""
     write = allow_writes(control, monkeypatch)
     asyncio.run(control.async_set_command(Feature.CHARGE_BATTERY, power=1500.0))
+    # The inverter first shows it reports what it follows, then forgets it.
+    asyncio.run(
+        control.async_apply({"battery_soc": 50.0, "system_modes": status_word(3)})
+    )
     forgotten = {"battery_soc": 50.0, "system_modes": status_word(0)}
 
     elapsed = const.FOLLOW_GRACE_S + 1
@@ -1938,6 +1942,9 @@ def test_control_steps_aside_off_grid_and_comes_back_with_the_grid(
 
     outage = {"battery_soc": 50.0, "system_modes": status_word(3, off_grid=True)}
     asyncio.run(control.async_apply(outage))
+    assert control._commanded_feature is Feature.CHARGE_BATTERY, "one read is enough"
+    for _ in range(const.CONTROL_STATUS_DAMPING_POLLS - 1):
+        asyncio.run(control.async_apply(outage))
     assert control.status is Status.OFF_GRID
     assert control._commanded_feature is Feature.AUTOMATIC
 
@@ -1962,7 +1969,8 @@ def test_a_battery_is_only_missing_once_one_has_been_seen(
     asyncio.run(
         control.async_apply({"battery_soc": 50.0, "system_modes": status_word(3)})
     )
-    asyncio.run(control.async_apply(no_bit))
+    for _ in range(const.CONTROL_STATUS_DAMPING_POLLS):
+        asyncio.run(control.async_apply(no_bit))
     assert control.status is Status.BATTERY_DISCONNECTED
     assert control._commanded_feature is Feature.AUTOMATIC
 
@@ -1973,15 +1981,61 @@ def test_an_inverter_fault_is_named_without_changing_the_command(
     allow_writes(control, monkeypatch)
     asyncio.run(control.async_set_command(Feature.CHARGE_BATTERY, power=1500.0))
 
-    asyncio.run(
-        control.async_apply(
-            {
-                "battery_soc": 50.0,
-                "system_modes": status_word(3),
-                "system_state_2": 1 << 10,  # PCS failure
-            }
-        )
-    )
+    failed = {
+        "battery_soc": 50.0,
+        "system_modes": status_word(3),
+        "system_state_2": 1 << 10,  # PCS failure
+    }
+    for _ in range(const.CONTROL_STATUS_DAMPING_POLLS):
+        asyncio.run(control.async_apply(failed))
 
     assert control.status is Status.INVERTER_FAULT
     assert control._commanded_feature is Feature.CHARGE_BATTERY
+
+
+def test_a_model_that_never_reports_following_is_left_alone(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without bit 11 or the method bits, nothing is resent and nothing is flagged."""
+    write = allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_command(Feature.CHARGE_BATTERY, power=1500.0))
+    silent = {"battery_soc": 50.0, "system_modes": status_word(0, manual=False)}
+
+    advance(control, monkeypatch, const.FOLLOW_GRACE_S + 1)
+    sent = write.await_count
+    for _ in range(4 * const.CONTROL_STATUS_DAMPING_POLLS):
+        asyncio.run(control.async_apply(silent))
+
+    assert write.await_count == sent
+    assert control.status is not Status.NOT_ACCEPTED
+
+
+def test_user_actions_do_not_count_as_polls(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pressing buttons must not hurry a device state past its damping."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(
+        control.async_apply(
+            {"battery_soc": 50.0, "system_modes": status_word(0, off_grid=True)}
+        )
+    )
+    for _ in range(const.CONTROL_STATUS_DAMPING_POLLS):
+        asyncio.run(control.async_set_command(Feature.CHARGE_BATTERY, power=1500.0))
+
+    assert control.status is not Status.OFF_GRID
+    assert control._commanded_feature is Feature.CHARGE_BATTERY
+
+
+def test_a_flicker_of_a_device_state_does_not_interrupt_the_mode(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_command(Feature.CHARGE_BATTERY, power=1500.0))
+    normal = {"battery_soc": 50.0, "system_modes": status_word(3)}
+    glitch = {"battery_soc": 50.0, "system_modes": status_word(3, off_grid=True)}
+
+    for data in (normal, glitch, glitch, normal, glitch, normal):
+        asyncio.run(control.async_apply(data))
+        assert control._commanded_feature is Feature.CHARGE_BATTERY
+    assert control.status is not Status.OFF_GRID
