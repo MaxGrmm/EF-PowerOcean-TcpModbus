@@ -21,6 +21,7 @@ import argparse
 import json
 import sys
 import time
+from dataclasses import dataclass
 from typing import Final
 
 from pymodbus.client import ModbusTcpClient
@@ -93,6 +94,29 @@ WATCH_BASELINE_GAP_S: Final = 5
 WATCH_SETTLE_S: Final = 20
 # Read this many words per request, well inside the Modbus limit of 125.
 WATCH_CHUNK: Final = 64
+# Mapped registers of these classes are measurements: a change in one is the
+# inverter reacting, not a setting, so it is shown apart from the setting changes.
+MEASUREMENT_CLASSES: Final = frozenset(
+    {
+        "battery",
+        "current",
+        "energy",
+        "energy_storage",
+        "frequency",
+        "power",
+        "temperature",
+        "voltage",
+    }
+)
+# What the inverter is doing, shown decoded after every change, so the effect of
+# a setting is visible next to the registers it touched.
+WATCH_EFFECT_KEYS: Final = (
+    "battery_power",
+    "grid_power",
+    "inverter_output_power",
+    "house_power",
+    "system_modes",
+)
 
 
 def render_span(first: int, last: int) -> str:
@@ -542,15 +566,98 @@ def snapshot(reader: RegisterReader, addresses: list[int]) -> dict[int, int]:
     return words
 
 
-def register_names(model: models.InverterModel) -> dict[int, str]:
-    """Map each address the integration knows to its key, both words of a pair."""
+@dataclass(frozen=True)
+class WatchMap:
+    """What the integration knows about the addresses the watch reads."""
+
+    names: dict[int, str]
+    # Every word of a mapped measurement.
+    measurements: frozenset[int]
+    # The words of each mapped multi-word register, to share liveness: a 32-bit
+    # value whose low word moves is live, even if its high word only flips with
+    # the sign.
+    groups: tuple[tuple[int, ...], ...]
+    effects: tuple[models.RegisterDef, ...]
+
+
+def watch_map(model: models.InverterModel) -> WatchMap:
+    settings = {definition.read_key for definition in const.WRITABLE_NUMBERS_MAP}
     names: dict[int, str] = {}
-    for key, register in const.REGISTERS_BY_KEY.items():
-        address = register.for_model(model).address
-        names[address] = key
-        if register.data_type is not models.RegisterType.UINT16:
-            names.setdefault(address + 1, f"{key} (2nd word)")
-    return names
+    measurements: set[int] = set()
+    groups: list[tuple[int, ...]] = []
+    for key, definition in const.REGISTERS_BY_KEY.items():
+        register = definition.for_model(model)
+        words = tuple(range(register.address, register.address + register.size))
+        names[register.address] = key
+        for extra in words[1:]:
+            names.setdefault(extra, f"{key} (word {extra - register.address + 1})")
+        if len(words) > 1:
+            groups.append(words)
+        if DEVICE_CLASS_BY_KEY.get(key) in MEASUREMENT_CLASSES and key not in settings:
+            measurements.update(words)
+    effects = tuple(
+        const.REGISTERS_BY_KEY[key].for_model(model)
+        for key in WATCH_EFFECT_KEYS
+        if key in const.REGISTERS_BY_KEY
+    )
+    return WatchMap(names, frozenset(measurements), tuple(groups), effects)
+
+
+def spread_liveness(live: set[int], groups: tuple[tuple[int, ...], ...]) -> set[int]:
+    """Mark every word of a multi-word register live when any word of it is."""
+    spread = set(live)
+    for words in groups:
+        if spread.intersection(words):
+            spread.update(words)
+    return spread
+
+
+def decode_effect(
+    reader: RegisterReader, register: models.RegisterDef, words: dict[int, int]
+) -> float | None:
+    raw = [words.get(register.address + i) for i in range(register.size)]
+    if any(word is None for word in raw):
+        return None
+    return reader.decode([int(word) for word in raw if word is not None], register)
+
+
+def render_effect(register: models.RegisterDef, value: float | None) -> str:
+    if value is None:
+        return "-"
+    if register.key == "system_modes":
+        word = int(value)
+        method = (word >> 7) & 0xF
+        control = "modbus" if word & (1 << 11) else "app"
+        return f"0x{word:04X} m{method} {control}"
+    return f"{value:+.0f} W"
+
+
+def report_effects(
+    reader: RegisterReader,
+    watch: WatchMap,
+    before: dict[int, int],
+    after: dict[int, int],
+) -> None:
+    print("  What the inverter is doing:")
+    for register in watch.effects:
+        old = decode_effect(reader, register, before)
+        new = decode_effect(reader, register, after)
+        note = ""
+        if (
+            register.key == "inverter_output_power"
+            and old is not None
+            and new is not None
+            and (old > 0) != (new > 0)
+        ):
+            note = (
+                "  now rectifying, charging from AC" if new > 0 else "  now inverting"
+            )
+        if register.key == "system_modes" and old != new:
+            note = "  changed"
+        print(
+            f"    {register.key:<24} {render_effect(register, old):>20} -> "
+            f"{render_effect(register, new)}{note}"
+        )
 
 
 def render_change(
@@ -593,7 +700,8 @@ def watch_changes(
         return
     found, _ = report_readable_addresses(reader, ranges)
     addresses = sorted(found)
-    names = register_names(model)
+    watch = watch_map(model)
+    mapped_measurements = watch.measurements & set(addresses)
 
     print(f"== Learning what moves by itself ({WATCH_BASELINE_READS} reads) ==")
     print("  Change nothing in the app yet.")
@@ -604,11 +712,15 @@ def watch_changes(
         again = snapshot(reader, addresses)
         live |= {a for a in addresses if again.get(a) != baseline.get(a)}
         baseline = again
-    print(f"  {len(live)} of {len(addresses)} addresses move by themselves; these")
-    print("  are measurements and are left out of the changes below.\n")
+    live = spread_liveness(live, watch.groups)
+    print(
+        f"  {len(live)} of {len(addresses)} addresses move by themselves and "
+        f"{len(mapped_measurements - live)} more are mapped measurements that"
+    )
+    print("  drift slowly. Both are left out of the register changes below; the")
+    print("  measurements that matter are shown decoded instead.\n")
 
     history: list[tuple[str, dict[int, int]]] = [("start", baseline)]
-    step = 0
     while True:
         try:
             label = input(
@@ -619,7 +731,6 @@ def watch_changes(
             break
         if not label:
             break
-        step += 1
         print(f"  Waiting {settle_s}s for the change to reach Modbus ...")
         time.sleep(settle_s)
         after = snapshot(reader, addresses)
@@ -627,45 +738,73 @@ def watch_changes(
         confirm = snapshot(reader, addresses)
         # Moving between the two reads after the change means it is live, not a
         # setting, even if the baseline happened to miss it.
-        live |= {a for a in addresses if confirm.get(a) != after.get(a)}
+        live = spread_liveness(
+            live | {a for a in addresses if confirm.get(a) != after.get(a)},
+            watch.groups,
+        )
+        quiet = live | mapped_measurements
         before = history[-1][1]
         changed = [
-            a for a in addresses if a not in live and after.get(a) != before.get(a)
+            a for a in addresses if a not in quiet and after.get(a) != before.get(a)
         ]
-        print(f"\n== Step {step}: {label} ==")
-        if changed:
-            for address in changed:
-                print(
-                    render_change(address, before, after, names, reader.high_word_first)
+        print(f"\n== Step {len(history)}: {label} ==")
+        print("  Registers that changed:")
+        for address in changed:
+            print(
+                render_change(
+                    address, before, after, watch.names, reader.high_word_first
                 )
-        else:
-            print("    no setting-like register changed")
+            )
+        if not changed:
+            print("    none besides measurements")
+        report_effects(reader, watch, before, confirm)
         print()
         history.append((label, confirm))
 
-    if step == 0:
-        return
+    if len(history) > 1:
+        report_watch_summary(reader, watch, history, live | mapped_measurements)
+
+
+def report_watch_summary(
+    reader: RegisterReader,
+    watch: WatchMap,
+    history: list[tuple[str, dict[int, int]]],
+    quiet: set[int],
+) -> None:
+    """Tabulate the changed registers, then what the inverter did, after each step."""
     moved = sorted(
         {
-            a
+            address
             for (_, previous), (_, current) in zip(history, history[1:])
-            for a in addresses
-            if a not in live and previous.get(a) != current.get(a)
+            for address in current
+            if address not in quiet and previous.get(address) != current.get(address)
         }
     )
+    width = max(len(label) for label, _ in history)
+
     print("== Summary: every register that changed, after each step ==")
-    if not moved:
-        print("  none\n")
-        return
-    labels = [label for label, _ in history]
-    width = max(len(label) for label in labels)
-    header = "".join(f"{render_address(a):>18}" for a in moved)
+    if moved:
+        header = "".join(f"{render_address(a):>18}" for a in moved)
+        print(f"  {'':<{width}}{header}")
+        for label, words in history:
+            cells = "".join(f"{words.get(a, '-')!s:>18}" for a in moved)
+            print(f"  {label:<{width}}{cells}")
+        tags = "".join(f"{watch.names.get(a, ''):>18.17}" for a in moved)
+        print(f"  {'':<{width}}{tags}")
+    else:
+        print("  none besides measurements")
+    print()
+
+    print("== Summary: what the inverter was doing after each step ==")
+    header = "".join(f"{register.key:>24.23}" for register in watch.effects)
     print(f"  {'':<{width}}{header}")
     for label, words in history:
-        cells = "".join(f"{words.get(a, '-')!s:>18}" for a in moved)
+        cells = "".join(
+            f"{render_effect(register, decode_effect(reader, register, words)):>24}"
+            for register in watch.effects
+        )
         print(f"  {label:<{width}}{cells}")
-    tags = "".join(f"{names.get(a, ''):>18.17}" for a in moved)
-    print(f"  {'':<{width}}{tags}\n")
+    print()
 
 
 def parse_address_range(text: str) -> tuple[int, int]:
