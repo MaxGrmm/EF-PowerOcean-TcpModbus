@@ -12,11 +12,6 @@
 - The Battery Reserve is the one reserve control: native on the PowerOcean Three Phase, where it writes the inverter's own reserve, and emulated by the integration on the other models. Its `implementation` attribute says which, and the integration options can override it.
 - The Minimum SOC Limit number is removed. The inverter's reserve shows as the App Backup Reserve sensor on models with an emulated reserve.
 
-### Fixed
-
-- Control Status no longer shows Battery empty or Battery full when the battery is going the other way, such as a charge still winding down below a raised Battery Reserve.
-- The App Backup Reserve is no longer a battery-class sensor, so Home Assistant no longer shows it as the battery's charge.
-
 ## [2.8.2] - 2026-10-07
 
 ### Changed
