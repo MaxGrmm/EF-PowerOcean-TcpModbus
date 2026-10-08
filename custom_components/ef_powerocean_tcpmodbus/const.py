@@ -876,9 +876,8 @@ BATTERY_RESERVE_SOC_NUMBER: Final = ControlEntityDef(
 BATTERY_RESERVE_REGISTER_KEY: Final = "min_soc_limit"
 # The number that wrote it before the Battery Reserve took over, removed on setup.
 RETIRED_MIN_SOC_NUMBER_KEY: Final = "min_soc_limit_control"
-# Options: which Battery Reserve to use, "auto" taking the model's.
+# Options: native or emulated Battery Reserve, prefilled with the model's.
 CONF_BATTERY_RESERVE: Final = "battery_reserve"
-BATTERY_RESERVE_AUTO: Final = "auto"
 DEFAULT_CHARGE_LIMIT_SOC: Final = 100.0
 DEFAULT_BATTERY_RESERVE_SOC: Final = 0.0
 

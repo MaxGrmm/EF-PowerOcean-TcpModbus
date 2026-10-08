@@ -148,7 +148,7 @@ attribute:
   app's value, and the other models are unproven. The app's own reserve still applies
   whenever the integration is not in control, and shows as _App Backup Reserve_.
 
-The model decides which; the integration options can override it to test a model, and
+The integration options are set to the model's; change them only to test a model, and
 `scripts/control_feature_scan.py --reserve-probe` shows whether one acts on a written
 reserve.
 

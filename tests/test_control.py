@@ -1763,7 +1763,7 @@ def test_only_the_three_phase_keeps_its_own_reserve_unless_overridden() -> None:
     assert native == [models.InverterModel.POWEROCEAN_THREE_PHASE]
 
     plus = models.InverterModel.POWEROCEAN_PLUS
-    assert models.battery_reserve_for(plus, "auto") is models.ReserveSupport.EMULATED
+    assert models.battery_reserve_for(plus, None) is models.ReserveSupport.EMULATED
     assert models.battery_reserve_for(plus, "native") is models.ReserveSupport.NATIVE
 
 

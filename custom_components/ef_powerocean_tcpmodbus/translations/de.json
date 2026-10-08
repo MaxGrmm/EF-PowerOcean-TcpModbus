@@ -78,7 +78,7 @@
           "grid_power_max": "Die max. Leistung Ihres Netzanschlusses, begrenzt durch die Hauptsicherung. Nicht die Wechselrichterleistung: das Haus allein kann mehr beziehen.",
           "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
           "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden.",
-          "battery_reserve": "Wer die Batteriereserve hält. Automatisch nimmt die des Modells: nativ, wo der Wechselrichter sein eigenes Reserve-Register umsetzt, emuliert, wo die Integration den Akku stattdessen hält. Nur zum Testen eines Modells ändern."
+          "battery_reserve": "Nativ: Der Wechselrichter hält die Reserve selbst, auch wenn die Integration nicht steuert. Emuliert: Die Integration hält den Akku dort, solange die Modbus-Steuerung an ist. Für dein Modell voreingestellt; nur ändern, um zu testen, ob ein Modell nativ unterstützt."
         }
       }
     },
@@ -100,9 +100,8 @@
     },
     "battery_reserve": {
       "options": {
-        "auto": "Automatisch (nach Modell)",
-        "native": "Nativ (Wechselrichter)",
-        "emulated": "Emuliert (Integration)"
+        "native": "Nativ",
+        "emulated": "Emuliert"
       }
     }
   },

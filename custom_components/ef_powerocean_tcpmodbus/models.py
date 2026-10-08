@@ -57,7 +57,7 @@ class ProductId(NamedTuple):
 
 
 class ReserveSupport(StrEnum):
-    """Who keeps the Battery Reserve."""
+    """Whether the inverter or the integration enforces the Battery Reserve."""
 
     # The integration's guard, by holding the battery while it is in control. For
     # models whose reserve register takes a write but is not acted on, or is unproven.
@@ -99,7 +99,7 @@ class ModelTraits:
     # hands back to the inverter's own self-consumption whenever power flows the
     # way the guard allows.
     guard_tracks_setpoints: bool = True
-    # Who keeps the Battery Reserve. Native only once --reserve-probe has shown the
+    # Whether the Battery Reserve is native. Only once --reserve-probe has shown the
     # inverter acting on a written reserve; the PowerOcean Plus does not (issue #144).
     battery_reserve: ReserveSupport = ReserveSupport.EMULATED
     # Raised when a fix changes how energy counters are read, which resets using the
@@ -224,8 +224,8 @@ MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
 }
 
 
-def battery_reserve_for(model: InverterModel, option: str) -> ReserveSupport:
-    """Return who keeps the Battery Reserve: the model's choice, or the user's."""
+def battery_reserve_for(model: InverterModel, option: str | None) -> ReserveSupport:
+    """Return the Battery Reserve set in the options, else the model's."""
     if option in tuple(ReserveSupport):
         return ReserveSupport(option)
     return model.traits.battery_reserve

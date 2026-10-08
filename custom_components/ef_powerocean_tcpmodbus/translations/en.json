@@ -78,7 +78,7 @@
           "grid_power_max": "Most your grid connection can import or export, set by your main fuse. Not the inverter rating: the house alone can draw more than that.",
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
-          "battery_reserve": "Who keeps the Battery Reserve. Automatic takes the model's: native where the inverter acts on its own reserve register, emulated where the integration holds the battery instead. Override only to test a model."
+          "battery_reserve": "Native: the inverter enforces the reserve itself, also when the integration is not in control. Emulated: the integration holds the battery at it while Modbus Control is on. Set for your model; change it only to test whether a model supports native."
         }
       }
     },
@@ -100,9 +100,8 @@
     },
     "battery_reserve": {
       "options": {
-        "auto": "Automatic (by model)",
-        "native": "Native (inverter)",
-        "emulated": "Emulated (integration)"
+        "native": "Native",
+        "emulated": "Emulated"
       }
     }
   },

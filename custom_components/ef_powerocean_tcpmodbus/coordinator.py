@@ -21,7 +21,6 @@ from pymodbus.exceptions import ModbusException
 from .const import (
     ATTR_MODE,
     BATTERY_MODE_SELECT,
-    BATTERY_RESERVE_AUTO,
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
     CONF_CALC_SOLAR_POWER,
@@ -156,7 +155,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             on_command_expired=self._command_expired,
             battery_reserve=battery_reserve_for(
                 self.inverter_model,
-                config_entry.data.get(CONF_BATTERY_RESERVE, BATTERY_RESERVE_AUTO),
+                config_entry.data.get(CONF_BATTERY_RESERVE),
             ),
         )
         # Context of the last expiry event, taken once by the Battery Mode select so its
