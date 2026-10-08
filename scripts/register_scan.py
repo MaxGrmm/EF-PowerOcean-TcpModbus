@@ -5,50 +5,35 @@ To run it:
 
     uv pip install -r requirements-development.txt
     uv run python scripts/register_scan.py <inverter_ip>
+
+To find where a setting in the EcoFlow app lives instead, watch for changes:
+
+    uv run python scripts/register_scan.py <inverter_ip> --watch
+
+It reads everything a few times to learn which registers move by themselves, then
+asks you to change one thing in the app at a time and lists the registers that
+followed. Nothing is written.
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import sys
 import time
-import types
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Final
 
-INTEGRATION: Final = (
-    Path(__file__).resolve().parents[1]
-    / "custom_components"
-    / "ef_powerocean_tcpmodbus"
+from pymodbus.client import ModbusTcpClient
+from utils import (
+    MANIFEST,
+    RegisterReader,
+    const,
+    models,
+    render_address,
+    report_device,
+    telemetry,
 )
-MANIFEST: Final = INTEGRATION / "manifest.json"
-PACKAGE: Final = "ef_powerocean_registers"
-
-
-def load_integration() -> tuple[types.ModuleType, ...]:
-    """Custom import of the register map, to not import the whole of Home Assistant."""
-    try:
-        import homeassistant.const  # noqa: F401
-    except ImportError:
-        stub = types.ModuleType("homeassistant.const")
-        stub.__getattr__ = lambda _name: type("Any", (), {"__getattr__": str})()
-        sys.modules.setdefault("homeassistant", types.ModuleType("homeassistant"))
-        sys.modules["homeassistant.const"] = stub
-
-    package = types.ModuleType(PACKAGE)
-    package.__path__ = [str(INTEGRATION)]
-    sys.modules[PACKAGE] = package
-    return tuple(
-        importlib.import_module(f"{PACKAGE}.{module}")
-        for module in ("const", "models", "telemetry")
-    )
-
-
-const, models, telemetry = load_integration()
-
-from pymodbus.client import ModbusTcpClient  # noqa: E402
 
 DEFAULT_SCAN: Final = ["40000-40700", "42000-42300"]
 
@@ -83,14 +68,6 @@ SIGNATURES: Final[tuple[tuple[str, float, float], ...]] = (
     ("power or energy", 1000.0, 100_000.0),
 )
 
-EXCEPTION_MEANINGS: Final[dict[int, str]] = {
-    1: "illegal function",
-    2: "illegal data address",
-    3: "illegal data value",
-    4: "device failure",
-    6: "device busy",
-}
-
 NOT_POLLED: Final[dict[int, str]] = {
     const.CONTROL_COMMAND_REGISTER: "the integration's control command, write-only",
     const.HEARTBEAT_REGISTER: "the integration's heartbeat register",
@@ -109,9 +86,37 @@ FLOAT_CEILING: Final = 1_000_000.0
 SAMPLE_COUNT: Final = 3
 SAMPLE_GAP_S: Final = 30
 
-
-def render_address(address: int) -> str:
-    return f"{address} (0x{address:04X})"
+# --watch: baseline reads that teach which registers move by themselves, and how
+# long an app change takes to reach Modbus. The app goes through the cloud, so a
+# change can take several seconds to land.
+WATCH_BASELINE_READS: Final = 4
+WATCH_BASELINE_GAP_S: Final = 5
+WATCH_SETTLE_S: Final = 20
+# Read this many words per request, well inside the Modbus limit of 125.
+WATCH_CHUNK: Final = 64
+# Mapped registers of these classes are measurements: a change in one is the
+# inverter reacting, not a setting, so it is shown apart from the setting changes.
+MEASUREMENT_CLASSES: Final = frozenset(
+    {
+        "battery",
+        "current",
+        "energy",
+        "energy_storage",
+        "frequency",
+        "power",
+        "temperature",
+        "voltage",
+    }
+)
+# What the inverter is doing, shown decoded after every change, so the effect of
+# a setting is visible next to the registers it touched.
+WATCH_EFFECT_KEYS: Final = (
+    "battery_power",
+    "grid_power",
+    "inverter_output_power",
+    "house_power",
+    "system_modes",
+)
 
 
 def render_span(first: int, last: int) -> str:
@@ -143,106 +148,6 @@ def plausibility_note(key: str, value: float | None) -> str:
     if bounds and not bounds[0] <= value <= bounds[1]:
         return "out of range"
     return "ok"
-
-
-class RegisterReader:
-    """Interface to read a register from the inverter."""
-
-    def __init__(self, client: ModbusTcpClient, slave: int) -> None:
-        self._client = client
-        self._slave = slave
-        # Set once the model is known, because the three-phase Ocean 2 publishes
-        # 32-bit values high word first and every other model the other way round.
-        self.high_word_first = False
-        self.reads = 0
-
-    def read(self, start: int, count: int) -> tuple[list[int] | None, str]:
-        """Return the words, or None and the reason the device gave."""
-        self.reads += 1
-        try:
-            response = self._client.read_holding_registers(
-                address=start, count=count, device_id=self._slave
-            )
-        except Exception as error:  # a dropped connection rather than a refusal
-            return None, str(error)
-
-        if response.isError():
-            code = getattr(response, "exception_code", None)
-            if not code:
-                return None, str(response)
-            return None, f"exception code {code}, {EXCEPTION_MEANINGS.get(code, '?')}"
-        return response.registers, ""
-
-    def read_value(self, register: models.RegisterDef) -> tuple[float | None, str]:
-        """Read one register on its own and decode it. The reason is empty when
-        the read worked, so a value of None then means it did not decode."""
-        words, reason = self.read(register.address, register.size)
-        if words is None:
-            return None, reason
-        return self.decode(words, register), ""
-
-    def read_mapped(self, block: models.RegisterBlock) -> dict[str, float | None]:
-        """Read a whole block and decode every register it carries."""
-        words, _ = self.read(block.start, block.count)
-        if words is None:
-            return {}
-        return {
-            register.key: self.decode(block.registers_for(words, register), register)
-            for register in block.registers
-        }
-
-    def decode(self, words: list[int], register: models.RegisterDef) -> float | None:
-        return telemetry.decode_register(
-            words, register.data_type, self.high_word_first
-        )
-
-
-def report_device(
-    reader: RegisterReader, show_serial: bool
-) -> models.InverterModel | None:
-    """Print what the device says about itself, and the model that implies."""
-    print("== Device ==")
-    block = const.DEVICE_INFO_BLOCK
-    words, reason = reader.read(block.start, block.count)
-    if words is None:
-        print(f"  device info at {render_address(block.start)}: FAILED ({reason})")
-        print("  Pass --model to carry on against a specific address map.\n")
-        return None
-
-    def words_for(register: models.RegisterDef) -> list[int]:
-        return block.registers_for(words, register)
-
-    serial = telemetry.decode_serial_number(words_for(const.SERIAL_NUMBER)) or "unknown"
-    number = words_for(const.PRODUCT_NUMBER)[0]
-    category = words_for(const.PRODUCT_CATEGORY)[0]
-    detected = models.InverterModel.from_product_info(number, category)
-    firmware = telemetry.decode_firmware_version(
-        words_for(const.FIRMWARE_VERSION),
-        detected.traits.high_word_first if detected else False,
-    )
-    protocol, protocol_reason = reader.read_value(const.PROTOCOL_VERSION)
-    address, address_reason = reader.read_value(const.DEVICE_ADDRESS)
-
-    print(f"  serial number     {serial if show_serial else serial[:4] + '****'}")
-    print(f"  firmware          {firmware}")
-    print(
-        f"  protocol version  {int(protocol) if protocol is not None else 'unknown'}"
-        + (f" [unreadable: {protocol_reason}]" if protocol is None else "")
-    )
-    print(f"  product number    {number}")
-    print(f"  product category  {category}")
-    print(
-        f"  device address    {int(address) if address is not None else 'unknown'}"
-        + (f" [unreadable: {address_reason}]" if address is None else "")
-    )
-    name = detected.traits.display_name if detected else "UNKNOWN"
-    print(f"  detected model    {name}")
-    if detected is None:
-        print("    -> no model matches these product registers, so the default map")
-        print("       is used. Quote the two numbers above in the issue: they are")
-        print("       what teaches the integration to recognise this model.")
-    print()
-    return detected
 
 
 def report_block_reads(
@@ -644,6 +549,264 @@ def report_summary(
     print()
 
 
+def snapshot(reader: RegisterReader, addresses: list[int]) -> dict[int, int]:
+    """Read every address, in chunks, one at a time only where a chunk is refused."""
+    words: dict[int, int] = {}
+    for first, last in contiguous_spans(addresses):
+        for base in range(first, last + 1, WATCH_CHUNK):
+            count = min(WATCH_CHUNK, last - base + 1)
+            chunk, _ = reader.read(base, count)
+            if chunk is not None:
+                words.update(zip(range(base, base + count), chunk))
+                continue
+            for address in range(base, base + count):
+                word, _ = reader.read(address, 1)
+                if word is not None:
+                    words[address] = word[0]
+    return words
+
+
+@dataclass(frozen=True)
+class WatchMap:
+    """What the integration knows about the addresses the watch reads."""
+
+    names: dict[int, str]
+    # Every word of a mapped measurement.
+    measurements: frozenset[int]
+    # The words of each mapped multi-word register, to share liveness: a 32-bit
+    # value whose low word moves is live, even if its high word only flips with
+    # the sign.
+    groups: tuple[tuple[int, ...], ...]
+    effects: tuple[models.RegisterDef, ...]
+
+
+def watch_map(model: models.InverterModel) -> WatchMap:
+    settings = {definition.read_key for definition in const.WRITABLE_NUMBERS_MAP}
+    names: dict[int, str] = {}
+    measurements: set[int] = set()
+    groups: list[tuple[int, ...]] = []
+    for key, definition in const.REGISTERS_BY_KEY.items():
+        register = definition.for_model(model)
+        words = tuple(range(register.address, register.address + register.size))
+        names[register.address] = key
+        for extra in words[1:]:
+            names.setdefault(extra, f"{key} (word {extra - register.address + 1})")
+        if len(words) > 1:
+            groups.append(words)
+        if DEVICE_CLASS_BY_KEY.get(key) in MEASUREMENT_CLASSES and key not in settings:
+            measurements.update(words)
+    effects = tuple(
+        const.REGISTERS_BY_KEY[key].for_model(model)
+        for key in WATCH_EFFECT_KEYS
+        if key in const.REGISTERS_BY_KEY
+    )
+    return WatchMap(names, frozenset(measurements), tuple(groups), effects)
+
+
+def spread_liveness(live: set[int], groups: tuple[tuple[int, ...], ...]) -> set[int]:
+    """Mark every word of a multi-word register live when any word of it is."""
+    spread = set(live)
+    for words in groups:
+        if spread.intersection(words):
+            spread.update(words)
+    return spread
+
+
+def decode_effect(
+    reader: RegisterReader, register: models.RegisterDef, words: dict[int, int]
+) -> float | None:
+    raw = [words.get(register.address + i) for i in range(register.size)]
+    if any(word is None for word in raw):
+        return None
+    return reader.decode([int(word) for word in raw if word is not None], register)
+
+
+def render_effect(register: models.RegisterDef, value: float | None) -> str:
+    if value is None:
+        return "-"
+    if register.key == "system_modes":
+        word = int(value)
+        method = (word >> 7) & 0xF
+        control = "modbus" if word & (1 << 11) else "app"
+        return f"0x{word:04X} m{method} {control}"
+    return f"{value:+.0f} W"
+
+
+def report_effects(
+    reader: RegisterReader,
+    watch: WatchMap,
+    before: dict[int, int],
+    after: dict[int, int],
+) -> None:
+    print("  What the inverter is doing:")
+    for register in watch.effects:
+        old = decode_effect(reader, register, before)
+        new = decode_effect(reader, register, after)
+        note = ""
+        if (
+            register.key == "inverter_output_power"
+            and old is not None
+            and new is not None
+            and (old > 0) != (new > 0)
+        ):
+            note = (
+                "  now rectifying, charging from AC" if new > 0 else "  now inverting"
+            )
+        if register.key == "system_modes" and old != new:
+            note = "  changed"
+        print(
+            f"    {register.key:<24} {render_effect(register, old):>20} -> "
+            f"{render_effect(register, new)}{note}"
+        )
+
+
+def render_change(
+    address: int,
+    before: dict[int, int],
+    after: dict[int, int],
+    names: dict[int, str],
+    high_word_first: bool,
+) -> str:
+    """One line for a changed address: its words, and a 32-bit reading if the pair moved."""
+    old, new = before.get(address), after.get(address)
+    signed = new - 0x10000 if new is not None and new >= 0x8000 else new
+    line = f"    {render_address(address):<16} {old!s:>6} -> {new!s:<6}"
+    if signed is not None and signed != new:
+        line += f" (int16 {signed})"
+    nxt = address + 1
+    if nxt in after and before.get(nxt) != after.get(nxt):
+        pair = [after[address], after[nxt]]
+        wide = telemetry.decode_register(
+            pair, models.RegisterType.INT32, high_word_first
+        )
+        real = believable_float(pair[0], pair[1], high_word_first)
+        line += f"  with next as int32 {wide:.0f}"
+        if real is not None:
+            line += f", float {real:.2f}"
+    if address in names:
+        line += f"  [{names[address]}]"
+    return line
+
+
+def watch_changes(
+    reader: RegisterReader,
+    model: models.InverterModel,
+    ranges: list[tuple[int, int]],
+    settle_s: int,
+) -> None:
+    """Ask for one app change at a time and list the registers that followed it."""
+    if not sys.stdin.isatty():
+        print("--watch asks you questions, so it needs a terminal.")
+        return
+    found, _ = report_readable_addresses(reader, ranges)
+    addresses = sorted(found)
+    watch = watch_map(model)
+    mapped_measurements = watch.measurements & set(addresses)
+
+    print(f"== Learning what moves by itself ({WATCH_BASELINE_READS} reads) ==")
+    print("  Change nothing in the app yet.")
+    baseline = snapshot(reader, addresses)
+    live: set[int] = set()
+    for _ in range(WATCH_BASELINE_READS - 1):
+        time.sleep(WATCH_BASELINE_GAP_S)
+        again = snapshot(reader, addresses)
+        live |= {a for a in addresses if again.get(a) != baseline.get(a)}
+        baseline = again
+    live = spread_liveness(live, watch.groups)
+    print(
+        f"  {len(live)} of {len(addresses)} addresses move by themselves and "
+        f"{len(mapped_measurements - live)} more are mapped measurements that"
+    )
+    print("  drift slowly. Both are left out of the register changes below; the")
+    print("  measurements that matter are shown decoded instead.\n")
+
+    history: list[tuple[str, dict[int, int]]] = [("start", baseline)]
+    while True:
+        try:
+            label = input(
+                "  Make ONE change in the app, then describe it here (e.g. "
+                "'reserve 5 to 50') and press Enter. Empty to finish: "
+            ).strip()
+        except EOFError:
+            break
+        if not label:
+            break
+        print(f"  Waiting {settle_s}s for the change to reach Modbus ...")
+        time.sleep(settle_s)
+        after = snapshot(reader, addresses)
+        time.sleep(WATCH_BASELINE_GAP_S)
+        confirm = snapshot(reader, addresses)
+        # Moving between the two reads after the change means it is live, not a
+        # setting, even if the baseline happened to miss it.
+        live = spread_liveness(
+            live | {a for a in addresses if confirm.get(a) != after.get(a)},
+            watch.groups,
+        )
+        quiet = live | mapped_measurements
+        before = history[-1][1]
+        changed = [
+            a for a in addresses if a not in quiet and after.get(a) != before.get(a)
+        ]
+        print(f"\n== Step {len(history)}: {label} ==")
+        print("  Registers that changed:")
+        for address in changed:
+            print(
+                render_change(
+                    address, before, after, watch.names, reader.high_word_first
+                )
+            )
+        if not changed:
+            print("    none besides measurements")
+        report_effects(reader, watch, before, confirm)
+        print()
+        history.append((label, confirm))
+
+    if len(history) > 1:
+        report_watch_summary(reader, watch, history, live | mapped_measurements)
+
+
+def report_watch_summary(
+    reader: RegisterReader,
+    watch: WatchMap,
+    history: list[tuple[str, dict[int, int]]],
+    quiet: set[int],
+) -> None:
+    """Tabulate the changed registers, then what the inverter did, after each step."""
+    moved = sorted(
+        {
+            address
+            for (_, previous), (_, current) in zip(history, history[1:])
+            for address in current
+            if address not in quiet and previous.get(address) != current.get(address)
+        }
+    )
+    width = max(len(label) for label, _ in history)
+
+    print("== Summary: every register that changed, after each step ==")
+    if moved:
+        header = "".join(f"{render_address(a):>18}" for a in moved)
+        print(f"  {'':<{width}}{header}")
+        for label, words in history:
+            cells = "".join(f"{words.get(a, '-')!s:>18}" for a in moved)
+            print(f"  {label:<{width}}{cells}")
+        tags = "".join(f"{watch.names.get(a, ''):>18.17}" for a in moved)
+        print(f"  {'':<{width}}{tags}")
+    else:
+        print("  none besides measurements")
+    print()
+
+    print("== Summary: what the inverter was doing after each step ==")
+    header = "".join(f"{register.key:>24.23}" for register in watch.effects)
+    print(f"  {'':<{width}}{header}")
+    for label, words in history:
+        cells = "".join(
+            f"{render_effect(register, decode_effect(reader, register, words)):>24}"
+            for register in watch.effects
+        )
+        print(f"  {label:<{width}}{cells}")
+    print()
+
+
 def parse_address_range(text: str) -> tuple[int, int]:
     low, _, high = text.partition("-")
     return int(low), int(high)
@@ -668,6 +831,20 @@ def parse_arguments() -> argparse.Namespace:
         f"Default {' and '.join(DEFAULT_SCAN)}.",
     )
     parser.add_argument("--no-scan", action="store_true", help="skip that search")
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="instead of the report, ask for one change in the EcoFlow app at a "
+        "time and list the registers that followed it. Read-only.",
+    )
+    parser.add_argument(
+        "--settle",
+        type=int,
+        default=WATCH_SETTLE_S,
+        metavar="SECONDS",
+        help=f"with --watch, how long to wait after each change. Default "
+        f"{WATCH_SETTLE_S}.",
+    )
     parser.add_argument(
         "--samples",
         type=int,
@@ -725,6 +902,11 @@ def main() -> int:
             key=lambda register: register.address,
         )
         ranges = [parse_address_range(text) for text in arguments.scan or DEFAULT_SCAN]
+
+        if arguments.watch:
+            watch_changes(reader, model, ranges, arguments.settle)
+            print(f"{reader.reads} reads issued. Nothing was written.")
+            return 0
 
         report_block_reads(reader, blocks)
         missing, suspect, values = report_mapped_registers(reader, registers)
