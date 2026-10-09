@@ -1,10 +1,12 @@
-"""The read plan follows the entities: a register is polled while one shows it."""
+"""A register is polled because something asks for it.
+
+Entities ask for the keys they show, the control loop for the fields of
+ControlInputs, and the coordinator for what its derived values and energy
+counters are made from.
+"""
 
 from __future__ import annotations
 
-import re
-from dataclasses import fields
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -13,50 +15,62 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const
+from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
+from custom_components.ef_powerocean_tcpmodbus.energy_processor import ENERGY_KEYS
 from custom_components.ef_powerocean_tcpmodbus.entity import EcoFlowBaseEntity
 from custom_components.ef_powerocean_tcpmodbus.models import (
     EnergySensorDef,
     SensorDef,
+    shown_keys,
 )
 from custom_components.ef_powerocean_tcpmodbus.telemetry import TelemetryData
 
-
-def test_control_reads_nothing_that_could_be_left_out_of_the_poll() -> None:
-    """control.py names the data keys it reads; each must be one that is always polled."""
-    source = Path(const.__file__).with_name("control.py").read_text(encoding="utf-8")
-    read = set(
-        re.findall(r"""(?:data|self\._data)\.get\(\s*"([a-z_0-9]+)"\s*[,)]""", source)
-    )
-    # Values the control loop keeps for itself, not ones taken from the poll.
-    read -= {"mode", "power", "feature_power", "grid_feed_restore", "grid_feed_stopped"}
-    read -= {
-        "battery_saver",
-        "charge_limit_soc",
-        "battery_reserve_soc",
-        "reserve_charge",
-    }
-
-    assert read
-    assert read <= const.CONTROL_READ_KEYS
-    assert not const.ON_DEMAND_REGISTER_KEYS & const.CONTROL_READ_KEYS
+REGISTERS = frozenset(const.REGISTERS_BY_KEY)
+OWN = (TelemetryData.keys(REGISTERS) | ENERGY_KEYS) & REGISTERS
 
 
-def test_on_demand_registers_are_those_only_an_entity_reads() -> None:
-    on_demand = const.ON_DEMAND_REGISTER_KEYS
-
-    assert on_demand
-    assert on_demand <= set(const.REGISTERS_BY_KEY)
-    assert not on_demand & {field.name for field in fields(TelemetryData)}
-    assert not on_demand & {
+def test_control_inputs_hold_every_key_the_features_read() -> None:
+    """A feature looks its values up by key, which must be an input field."""
+    keys = {
         key
-        for sensor in const.ENERGY_SENSOR_MAP
-        for key in (sensor.key, sensor.total_source)
+        for definition in const.CONTROL_FEATURES.values()
+        for key in (
+            definition.measure_key,
+            definition.limit_key,
+            definition.capacity_key,
+        )
+        if key is not None
+    } | {
+        const.BATTERY_RESERVE_REGISTER_KEY,
+        const.FEED_IN_POWER_MAX_KEY,
+        const.FEED_IN_POWER_MAX_SETTING_KEY,
     }
-    assert not on_demand & {f"fault_{n}" for n in range(1, const.MAX_FAULT_EVENTS + 1)}
-    # Taken from the definitions, so a sensor added for a register joins them.
-    assert {"frequency", "battery_voltage", "soc_battery_12"} <= on_demand
-    assert {"battery_soc", "house_power", "solar_total"}.isdisjoint(on_demand)
+    assert keys <= ControlInputs.keys()
+
+
+def test_telemetry_asks_for_the_fault_registers() -> None:
+    keys = TelemetryData.keys(REGISTERS)
+    assert {"fault_1", "fault_20", "inverter_rated_power", "limit_inv_max"} <= keys
+    assert "fault_count" not in keys
+    assert "fault_codes" not in keys
+
+
+def test_every_register_has_something_that_asks_for_it() -> None:
+    """A register nothing asks for is never read, so it should not be mapped."""
+    shown = frozenset().union(
+        *(
+            shown_keys(definition)
+            for definition in (
+                *const.SENSOR_MAP,
+                *const.ENERGY_SENSOR_MAP,
+                *const.DAILY_ENERGY_SENSORS_DEVICE_RAW,
+                *const.BINARY_SENSOR_MAP,
+                *const.WRITABLE_NUMBERS_MAP,
+            )
+        )
+    )
+    assert REGISTERS - OWN - ControlInputs.keys() - shown == set()
 
 
 @pytest.fixture
@@ -69,7 +83,7 @@ async def coordinator(hass: HomeAssistant) -> EcoflowCoordinator:
     return EcoflowCoordinator(hass, config_entry=entry)
 
 
-def _all_registers(coordinator: EcoflowCoordinator) -> frozenset[str]:
+def _model_registers(coordinator: EcoflowCoordinator) -> frozenset[str]:
     return frozenset(
         register.key
         for block in const.register_blocks_for(coordinator.inverter_model)
@@ -77,42 +91,45 @@ def _all_registers(coordinator: EcoflowCoordinator) -> frozenset[str]:
     )
 
 
-async def test_reads_everything_until_the_entities_have_said(coordinator) -> None:
+async def test_reads_everything_until_something_has_asked(coordinator) -> None:
     """The first poll runs before the entities exist, and they all need a value."""
-    assert coordinator.polled_registers == _all_registers(coordinator)
+    assert coordinator.polled_registers == _model_registers(coordinator)
 
 
-async def test_polls_an_on_demand_register_while_an_entity_wants_it(
-    coordinator,
-) -> None:
-    everything = _all_registers(coordinator)
-    always = everything - const.ON_DEMAND_REGISTER_KEYS
+async def test_without_entities_reads_what_the_coordinator_needs(coordinator) -> None:
+    remove = coordinator.async_add_listener(lambda: None)
+    assert coordinator.polled_registers == OWN & _model_registers(coordinator)
+    remove()
+
+
+async def test_the_control_loop_keeps_its_inputs_polled(coordinator) -> None:
+    remove = coordinator.async_require(ControlInputs.keys())
+    polled = coordinator.polled_registers
+    assert ControlInputs.keys() & REGISTERS <= polled
+    assert "frequency" not in polled
+    remove()
+
+
+async def test_polls_a_register_while_an_entity_shows_it(coordinator) -> None:
+    base = OWN & _model_registers(coordinator)
 
     remove_voltage = coordinator.async_add_listener(
         lambda: None, frozenset({"battery_voltage", "house_power"})
     )
-    assert coordinator.polled_registers == always | {"battery_voltage"}
+    assert coordinator.polled_registers == base | {"battery_voltage", "house_power"}
 
     remove_soc = coordinator.async_add_listener(lambda: None, {"soc_battery_3"})
-    assert coordinator.polled_registers == always | {"battery_voltage", "soc_battery_3"}
+    assert "soc_battery_3" in coordinator.polled_registers
 
     remove_voltage()
-    assert coordinator.polled_registers == always | {"soc_battery_3"}
+    assert "battery_voltage" not in coordinator.polled_registers
+    assert "soc_battery_3" in coordinator.polled_registers
 
     remove_soc()
-    assert coordinator.polled_registers == always
+    assert coordinator.polled_registers == base
 
 
-async def test_a_listener_without_keys_wants_no_register(coordinator) -> None:
-    """The entry's own listener, and a control entity, carry no register keys."""
-    remove = coordinator.async_add_listener(lambda: None)
-    assert coordinator.polled_registers == (
-        _all_registers(coordinator) - const.ON_DEMAND_REGISTER_KEYS
-    )
-    remove()
-
-
-async def test_a_register_wanted_after_the_first_poll_is_fetched_at_once(
+async def test_a_key_asked_for_after_the_first_poll_is_fetched_at_once(
     hass: HomeAssistant, coordinator
 ) -> None:
     """An entity enabled later would otherwise wait a whole interval for a value."""
@@ -128,9 +145,7 @@ async def test_a_register_wanted_after_the_first_poll_is_fetched_at_once(
     remove_second()
 
 
-async def test_a_refused_register_stays_out_whatever_the_entities_want(
-    coordinator,
-) -> None:
+async def test_a_refused_register_stays_out_whatever_is_asked(coordinator) -> None:
     coordinator._unsupported_keys = frozenset({"breaker_capacity"})
     remove = coordinator.async_add_listener(
         lambda: None, {"breaker_capacity", "frequency"}

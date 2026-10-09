@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Collection
-from dataclasses import fields
 from typing import Final
 
 from homeassistant.const import (
@@ -37,9 +36,7 @@ from .models import (
     SensorDef,
     plan_blocks_for_model,
     requires_modbus_control,
-    shown_keys,
 )
-from .telemetry import TelemetryData
 
 DOMAIN: Final = "ef_powerocean_tcpmodbus"
 EVENT_COMMAND_EXPIRED: Final = f"{DOMAIN}_command_expired"
@@ -936,69 +933,3 @@ WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
         icon="mdi:led-on",
     ),
 ]
-
-
-# What the integration reads from a poll for its own purposes, whatever entities are
-# enabled: the values the control loop acts on (control.py), the Modbus-disabled
-# check, the energy counters and everything derived from TelemetryData. A register
-# not in here and shown only by an entity is polled while that entity is enabled.
-# test_read_plan checks that control.py reads no key that is missing from this.
-CONTROL_READ_KEYS: Final = frozenset(
-    {
-        "battery_power",
-        "battery_soc",
-        "feed_in_power_max_percent",
-        "grid_feed_mode",
-        "grid_power",
-        "house_power",
-        "inverter_rated_power",
-        "solar_power",
-        BATTERY_RESERVE_REGISTER_KEY,
-        FEED_IN_POWER_MAX_KEY,
-        FEED_IN_POWER_MAX_SETTING_KEY,
-        FEED_IN_POWER_MAX_EFFECTIVE_KEY,
-        INVERTER_CAPACITY_KEY,
-        RECTIFIER_CAPACITY_KEY,
-        *(
-            key
-            for definition in CONTROL_FEATURES.values()
-            for key in (
-                definition.setpoint_key,
-                definition.measure_key,
-                definition.limit_key,
-                definition.capacity_key,
-            )
-            if key is not None
-        ),
-    }
-)
-
-_INTERNAL_KEYS: Final = (
-    CONTROL_READ_KEYS
-    | {field.name for field in fields(TelemetryData)}
-    | {f"fault_{number}" for number in range(1, MAX_FAULT_EVENTS + 1)}
-    | {
-        key
-        for energy_sensor in ENERGY_SENSOR_MAP
-        for key in (energy_sensor.key, energy_sensor.total_source)
-        if key is not None
-    }
-)
-
-_SHOWN_KEYS: Final = frozenset().union(
-    *(
-        shown_keys(definition)
-        for definition in (
-            *SENSOR_MAP,
-            *ENERGY_SENSOR_MAP,
-            *DAILY_ENERGY_SENSORS_DEVICE_RAW,
-            *BINARY_SENSOR_MAP,
-            *WRITABLE_NUMBERS_MAP,
-        )
-    )
-)
-
-# The registers only an entity reads, polled while one of those is enabled.
-ON_DEMAND_REGISTER_KEYS: Final = (
-    _SHOWN_KEYS & REGISTERS_BY_KEY.keys()
-) - _INTERNAL_KEYS

@@ -232,3 +232,31 @@ async def test_a_device_registered_as_a_service_becomes_a_device(
 
     await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_a_disabled_sensor_is_not_read(
+    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+) -> None:
+    """Only what an enabled entity, the control loop or the coordinator needs."""
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+    er.async_get(hass).async_get_or_create(
+        "sensor",
+        const.DOMAIN,
+        f"{entry.entry_id}_frequency",
+        config_entry=entry,
+        disabled_by=er.RegistryEntryDisabler.USER,
+    )
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    polled = entry.runtime_data.polled_registers
+    assert "frequency" not in polled
+    assert {"voltage_l1", "battery_soc", "solar_total", "grid_feed_mode"} <= polled
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()

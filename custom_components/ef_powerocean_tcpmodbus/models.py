@@ -410,10 +410,17 @@ class DeviceReport:
 
     @classmethod
     def from_data(cls, data: Mapping[str, Any]) -> DeviceReport | None:
-        if (modes := data.get("system_modes")) is None:
+        return cls.from_words(data.get("system_modes"), data.get("system_state_2"))
+
+    @classmethod
+    def from_words(
+        cls, system_modes: float | None, system_state_2: float | None
+    ) -> DeviceReport | None:
+        """Decode System Status (40530) and System State 2 (40532)."""
+        if system_modes is None:
             return None
-        modes = int(modes)
-        state_2 = int(data.get("system_state_2") or 0)
+        modes = int(system_modes)
+        state_2 = int(system_state_2 or 0)
         return cls(
             method=ControlMode.from_status((modes >> 7) & 0xF),
             manual=bool(modes >> 11 & 1),

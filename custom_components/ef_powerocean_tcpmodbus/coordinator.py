@@ -49,16 +49,16 @@ from .const import (
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MODBUS_DISABLED_READ_THRESHOLD,
-    ON_DEMAND_REGISTER_KEYS,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
+    REGISTERS_BY_KEY,
     SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
     register_blocks_for,
 )
 from .control import ControlManager
-from .energy_processor import EnergyProcessor
+from .energy_processor import ENERGY_KEYS, EnergyProcessor
 from .modbus import ModbusReadRejected, create_client
 from .models import (
     ControlFeature,
@@ -89,9 +89,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     # Optional registers the device refused to read, which are no longer polled.
     _unsupported_keys: frozenset[str] = frozenset()
-    # The on-demand registers some entity wants. Everything until the entities
-    # have said, so the first poll reads it all and they all start with a value.
-    _wanted_keys: frozenset[str] = ON_DEMAND_REGISTER_KEYS
+    # The data keys something asks for, which decide the registers polled. None
+    # reads everything, as the first poll does, so every entity starts with a value.
+    _wanted_keys: frozenset[str] | None = None
 
     def __init__(
         self,
@@ -374,10 +374,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             for register_block in tuple(self._register_blocks):
                 await self._async_read_block(register_block, data)
 
+            telemetry = TelemetryData.from_mapping(data)
             if is_modbus_disabled(
                 self.identity.serial_number,
-                data.get("inverter_rated_power"),
-                data.get("limit_inv_max"),
+                telemetry.inverter_rated_power,
+                telemetry.limit_inv_max,
             ):
                 self._consecutive_modbus_disabled_reads += 1
             else:
@@ -407,25 +408,31 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         )
 
     # ── Demand-driven reads ───────────────────────────────────────────────────
+    #
+    # A register is polled because something asks for it. Each listener's context
+    # is the set of data keys it needs: an entity the keys it shows, the control
+    # loop the fields of ControlInputs. The coordinator adds what it needs itself,
+    # the derived values and the energy counters.
+
+    @property
+    def _own_keys(self) -> frozenset[str]:
+        """Return the keys the coordinator's own processing reads."""
+        return TelemetryData.keys(REGISTERS_BY_KEY) | ENERGY_KEYS
 
     def _plan_reads(self) -> None:
-        """Group the registers to read, leaving out what nothing needs."""
+        """Group the registers to read, leaving out what nothing asks for."""
+        exclude = set(self._unsupported_keys)
+        if self._wanted_keys is not None:
+            exclude |= REGISTERS_BY_KEY.keys() - self._wanted_keys
         self._register_blocks = register_blocks_for(
-            self.inverter_model,
-            exclude=self._unsupported_keys
-            | (ON_DEMAND_REGISTER_KEYS - self._wanted_keys),
+            self.inverter_model, exclude=exclude
         )
 
     @callback
     def async_add_listener(
         self, update_callback: Callable[[], None], context: Any = None
     ) -> Callable[[], None]:
-        """Track the registers the listeners want, as well as the listeners.
-
-        An entity's context is the set of keys it shows. The read plan follows the
-        union of them, so a register is on the wire only while an entity enabled
-        in Home Assistant wants it.
-        """
+        """Track the keys the listeners ask for, as well as the listeners."""
         remove_listener = super().async_add_listener(update_callback, context)
         self._async_track_wanted_keys()
 
@@ -437,24 +444,27 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         return remove
 
     @callback
+    def async_require(self, keys: frozenset[str]) -> Callable[[], None]:
+        """Keep *keys* polled for something that is not an entity, until removed."""
+        return self.async_add_listener(lambda: None, keys)
+
+    @callback
     def _async_track_wanted_keys(self) -> None:
-        wanted = (
-            frozenset(
-                key
+        wanted = self._own_keys.union(
+            *(
+                context
                 for context in self.async_contexts()
                 if isinstance(context, (set, frozenset))
-                for key in context
             )
-            & ON_DEMAND_REGISTER_KEYS
         )
         if wanted == self._wanted_keys:
             return
-        added = wanted - self._wanted_keys
+        previous = self._wanted_keys
         self._wanted_keys = wanted
         self._plan_reads()
-        # An entity enabled after the poll started would otherwise show nothing
-        # until the next interval.
-        if added and self.data is not None:
+        # Something that starts asking after the first poll would otherwise show
+        # nothing until the next interval.
+        if previous is not None and wanted - previous and self.data is not None:
             self.hass.async_create_task(self.async_request_refresh())
 
     async def _async_read_block(

@@ -14,6 +14,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
+from .control import ControlInputs
 from .coordinator import EcoflowCoordinator
 from .modbus import async_prepare
 from .services import async_setup_services
@@ -123,6 +124,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
     _async_claim_serial_number(hass, entry, coordinator)
     await coordinator.async_config_entry_first_refresh()
 
+    # The control loop reads its inputs whatever entities are enabled.
+    entry.async_on_unload(coordinator.async_require(ControlInputs.keys()))
     _async_update_modbus_disabled_issue(hass, entry, coordinator)
     entry.async_on_unload(
         coordinator.async_add_listener(

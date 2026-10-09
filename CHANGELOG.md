@@ -8,7 +8,7 @@
 - Control steps aside while off-grid or with the battery disconnected, and Control Status shows Off-grid, Battery disconnected or Inverter fault.
 - Control Status shows Limited by inverter when the battery goes the other way from the command, or past it, instead of Ramping indefinitely.
 - Charge to Battery Reserve: below the Battery Reserve, the battery charges from the grid up to it at the Charge Battery power, as the app's backup reserve does.
-- A register nothing reads but one entity, such as a phase voltage or a module's state of charge, is polled only while that entity is enabled. On the Ocean 2, which reads registers one at a time, this takes the reads of disabled entities off the poll.
+- Each poll reads only the registers an enabled entity, the battery control or the energy counters need, so a disabled sensor no longer costs a read. On the Ocean 2, which reads registers one at a time, this takes them off the poll.
 - The inverter's serial number is the config entry's unique id. An entry keyed by host and port takes the serial number the first time it reads it, and adding an inverter that has moved on the network updates its entry's address instead of making a second one.
 
 ### Changed

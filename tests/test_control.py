@@ -198,7 +198,7 @@ def test_a_mode_writes_its_setpoint_then_its_method_word(
     """A setpoint without the method nibble is stored and ignored by the device."""
     write = allow_writes(control, monkeypatch)
     control._battery_saver = True
-    control._data = {"battery_soc": 50.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 50.0})
     asyncio.run(control.async_set_feature_power(Feature.CHARGE_BATTERY, 2500))
 
     asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
@@ -216,7 +216,7 @@ def test_discharge_sends_the_magnitude_as_a_negative_setpoint(
 ) -> None:
     """One number in the UI; the sign belongs to the mode."""
     write = allow_writes(control, monkeypatch)
-    control._data = {"battery_soc": 50.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 50.0})
     asyncio.run(control.async_select_feature(Feature.DISCHARGE_BATTERY))
 
     asyncio.run(control.async_set_feature_power(Feature.DISCHARGE_BATTERY, 1500))
@@ -234,7 +234,7 @@ def test_holding_the_battery_commands_one_watt_not_zero(
 ) -> None:
     """Zero reads as 'no limit' on this device, so it would resume self-consumption."""
     write = allow_writes(control, monkeypatch)
-    control._data = {"battery_soc": 50.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 50.0})
 
     asyncio.run(control.async_select_feature(Feature.HOLD_BATTERY))
 
@@ -249,7 +249,9 @@ def test_a_full_battery_is_held_against_the_house_but_not_against_the_sun(
     """A full battery cannot charge, so a limit set against a surplus only curtails."""
     write = allow_writes(control, monkeypatch)
     setpoint = const.REGISTERS_BY_KEY["battery_power_setpoint"].address
-    control._data = {"battery_soc": 100.0, "solar_power": 100.0, "house_power": 900.0}
+    control._inputs = control_module.ControlInputs.from_mapping(
+        {"battery_soc": 100.0, "solar_power": 100.0, "house_power": 900.0}
+    )
 
     asyncio.run(control.async_select_feature(Feature.HOLD_BATTERY))
 
@@ -288,19 +290,23 @@ def test_a_full_battery_is_held_against_the_house_but_not_against_the_sun(
 
 def test_power_is_clamped_to_the_lowest_ceiling_that_applies(control) -> None:
     """The app's battery limit is ignored by Modbus control, so it must not cap us."""
-    control._data = {"battery_charge_power_limit": 500.0}
+    control._inputs = control_module.ControlInputs.from_mapping(
+        {"battery_charge_power_limit": 500.0}
+    )
     asyncio.run(control.async_set_feature_power(Feature.CHARGE_BATTERY, 9999))
     assert control.feature_power(Feature.CHARGE_BATTERY) == 5000.0
 
     # A limit the firmware publishes is real, and so is the inverter's AC rating.
     control._limits[const.CONF_MAX_BATTERY_CHARGED_POWER] = 25_000
-    control._data = {"feed_in_power_max": 9000.0, "inverter_rated_power": 11000.0}
+    control._inputs = control_module.ControlInputs.from_mapping(
+        {"feed_in_power_max": 9000.0, "inverter_rated_power": 11000.0}
+    )
     assert control.feature_power_max(Feature.EXPORT_TO_GRID) == 9000.0
     assert control.feature_power_max(Feature.CHARGE_BATTERY) == 11000.0
 
     # A battery count of zero bounds nothing, so the slider keeps a sane maximum.
     control._limits[const.CONF_MAX_BATTERY_CHARGED_POWER] = 0
-    control._data = {}
+    control._inputs = control_module.ControlInputs.from_mapping({})
     assert control.feature_power_max(Feature.CHARGE_BATTERY) == float(
         const.CONTROL_POWER_FALLBACK_MAX
     )
@@ -311,7 +317,7 @@ def test_a_mode_cannot_be_selected_without_modbus_control(
 ) -> None:
     write = allow_writes(control, monkeypatch)
     control._enabled = False
-    control._data = {"battery_soc": 50.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 50.0})
 
     with pytest.raises(control_module.HomeAssistantError):
         asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
@@ -325,7 +331,7 @@ def test_selecting_automatic_returns_control_to_the_device(
 ) -> None:
     """The default method alone leaves the device holding the setpoint we wrote."""
     write = allow_writes(control, monkeypatch)
-    control._data = {"battery_soc": 50.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 50.0})
     asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
 
     asyncio.run(control.async_select_feature(Feature.AUTOMATIC))
@@ -342,7 +348,9 @@ def test_import_from_grid_pins_the_meter_at_a_draw(
 ) -> None:
     """The system setpoint with a positive sign, under the system feed method."""
     write = allow_writes(control, monkeypatch)
-    control._data = {"battery_soc": 50.0, "grid_power": 400.0}
+    control._inputs = control_module.ControlInputs.from_mapping(
+        {"battery_soc": 50.0, "grid_power": 400.0}
+    )
 
     asyncio.run(control.async_select_feature(Feature.IMPORT_FROM_GRID))
 
@@ -358,7 +366,9 @@ def test_import_from_grid_holds_once_the_charge_limit_is_reached(
 ) -> None:
     allow_writes(control, monkeypatch)
     control._charge_limit_soc = 80.0
-    control._data = {"battery_soc": 80.0, "grid_power": 400.0}
+    control._inputs = control_module.ControlInputs.from_mapping(
+        {"battery_soc": 80.0, "grid_power": 400.0}
+    )
 
     asyncio.run(control.async_select_feature(Feature.IMPORT_FROM_GRID))
 
@@ -409,11 +419,14 @@ def test_import_from_grid_holds_once_the_charge_limit_is_reached(
 def test_export_solar_first_holds_the_meter_at_its_limit_under_the_cap(
     control, frame, limit, expected
 ) -> None:
-    control._data = frame
+    control._inputs = control_module.ControlInputs.from_mapping(frame)
     if limit is not None:
         control._feature_power[Feature.EXPORT_SOLAR_FIRST] = limit
 
-    assert control._solar_export_target(frame) == expected
+    assert (
+        control._solar_export_target(control_module.ControlInputs.from_mapping(frame))
+        == expected
+    )
 
 
 @pytest.mark.parametrize(
@@ -457,7 +470,7 @@ def test_the_solar_export_limit_goes_up_to_the_cap_itself(
 ) -> None:
     """The number ends where users expect: at the export cap, or at the inverter's
     maximum without one. Left alone it reads that maximum."""
-    control._data = frame
+    control._inputs = control_module.ControlInputs.from_mapping(frame)
 
     assert control.feature_power_max(Feature.EXPORT_SOLAR_FIRST) == maximum
     assert (
@@ -472,11 +485,13 @@ def test_the_solar_export_limit_goes_up_to_the_cap_itself(
 def test_the_solar_export_limit_survives_the_export_off(control) -> None:
     """A value set while the Grid Feed-in switch holds the export off is kept for when
     it comes back, rather than cut to nothing."""
-    control._data = {
-        "grid_feed_mode": Feed.LIMITED,
-        "feed_in_power_max": 0.0,
-        "inverter_rated_power": 10_000.0,
-    }
+    control._inputs = control_module.ControlInputs.from_mapping(
+        {
+            "grid_feed_mode": Feed.LIMITED,
+            "feed_in_power_max": 0.0,
+            "inverter_rated_power": 10_000.0,
+        }
+    )
     asyncio.run(control.async_set_feature_power(Feature.EXPORT_SOLAR_FIRST, 3000.0))
 
     assert control.feature_power(Feature.EXPORT_SOLAR_FIRST) == 3000.0
@@ -576,7 +591,7 @@ def test_a_guard_holds_a_chosen_mode_rather_than_turning_it_around(
     """Tracking the house is only right for the inverter's own mode. Asked to charge,
     the most a guard may do is refuse; draining the battery was never requested."""
     allow_writes(control, monkeypatch)
-    control._data = {"battery_soc": 80.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 80.0})
     asyncio.run(control.async_set_charge_limit_soc(80))
     asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
 
@@ -889,7 +904,7 @@ def test_a_command_sets_its_limit_before_its_mode_reaches_the_inverter(
     """Choosing charge and then lowering the Charge Limit would charge for one write
     past the new limit. A command sets both before anything is sent."""
     write = allow_writes(control, monkeypatch)
-    control._data = {"battery_soc": 85.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 85.0})
 
     asyncio.run(
         control.async_set_command(
@@ -912,7 +927,7 @@ def test_repeating_a_command_only_moves_its_expiry(
 ) -> None:
     """A planner sends its command again every few minutes, which must cost no write."""
     write = allow_writes(control, monkeypatch)
-    control._data = {"battery_soc": 50.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 50.0})
     command = control.async_set_command
     asyncio.run(command(Feature.DISCHARGE_BATTERY, power=2000.0, expire_in_s=900))
     write.reset_mock()
@@ -930,7 +945,7 @@ def test_a_command_not_renewed_returns_to_automatic_and_keeps_its_limit(
     """Only the mode is undone. The limit stays where it was set."""
     allow_writes(control, monkeypatch)
     frame = {"battery_soc": 50.0}
-    control._data = frame
+    control._inputs = control_module.ControlInputs.from_mapping(frame)
     asyncio.run(
         control.async_set_command(
             Feature.CHARGE_BATTERY, power=2000.0, charge_limit_soc=80.0, expire_in_s=600
@@ -956,7 +971,7 @@ def test_automatic_has_nothing_to_expire(
     a return to automatic that never happened."""
     allow_writes(control, monkeypatch)
     frame = {"battery_soc": 50.0}
-    control._data = frame
+    control._inputs = control_module.ControlInputs.from_mapping(frame)
     asyncio.run(control.async_set_command(Feature.AUTOMATIC, expire_in_s=60))
 
     advance(control, monkeypatch, 61)
@@ -970,7 +985,7 @@ def test_choosing_a_mode_by_hand_cancels_a_commands_expiry(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     allow_writes(control, monkeypatch)
-    control._data = {"battery_soc": 50.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 50.0})
     asyncio.run(
         control.async_set_command(Feature.CHARGE_BATTERY, power=2000.0, expire_in_s=60)
     )
@@ -1076,7 +1091,7 @@ def test_switching_modbus_control_off_hands_back_and_on_takes_control_again(
 ) -> None:
     """Letting the heartbeat lapse is the hand-back, so nothing is written for it."""
     write = allow_writes(control, monkeypatch)
-    control._data = {"battery_soc": 50.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 50.0})
     asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
     write.reset_mock()
 
@@ -1130,7 +1145,7 @@ def test_a_command_is_re_sent_only_once_authority_has_lapsed(
     """40532 reads 0 on a PowerOcean Plus, so polling must never second-guess us,
     but a lapse hands the device back to the app and loses the setpoint too."""
     write = allow_writes(control, monkeypatch)
-    control._data = {"battery_soc": 50.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 50.0})
     asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
     write.reset_mock()
 
@@ -1174,7 +1189,7 @@ def test_a_brief_excursion_leaves_the_control_status_alone(
 ) -> None:
     """A load step pulls the measurement wide until the battery absorbs it."""
     allow_writes(control, monkeypatch)
-    control._data = {"battery_soc": 50.0}
+    control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 50.0})
     asyncio.run(control.async_select_feature(Feature.EXPORT_TO_GRID))
     settled = {"battery_soc": 50.0, "grid_power": -3000.0}
     excursion = {"battery_soc": 50.0, "grid_power": -2100.0}
@@ -1281,8 +1296,12 @@ def test_the_grid_feed_switch_stops_the_export_and_restores_it_exactly(
             "grid_feed_mode": mode,
             "feed_in_power_max_setting": power,
         }
-        control._data = switch.coordinator.data
-        control._track_grid_feed_restore(switch.coordinator.data)
+        control._inputs = control_module.ControlInputs.from_mapping(
+            switch.coordinator.data
+        )
+        control._track_grid_feed_restore(
+            control_module.ControlInputs.from_mapping(switch.coordinator.data)
+        )
 
     poll(mode, power)
     assert switch.is_on
@@ -1306,12 +1325,14 @@ def test_the_restore_keeps_the_configured_cap_not_the_effective_one(
     """A derated effective cap written back would lower the configured one for good."""
     allow_writes(control, monkeypatch)
     control._track_grid_feed_restore(
-        {
-            "grid_feed_mode": Feed.LIMITED,
-            "feed_in_power_max_setting": 10000.0,
-            "feed_in_power_max_effective": 4000.0,
-            "feed_in_power_max": 4000.0,
-        }
+        control_module.ControlInputs.from_mapping(
+            {
+                "grid_feed_mode": Feed.LIMITED,
+                "feed_in_power_max_setting": 10000.0,
+                "feed_in_power_max_effective": 4000.0,
+                "feed_in_power_max": 4000.0,
+            }
+        )
     )
 
     assert control.grid_feed_restore == {"mode": 0, "power": 10000}
@@ -1327,8 +1348,8 @@ def test_the_percentage_mode_is_never_adopted_or_switched(
         "feed_in_power_max_setting": 10000.0,
         "feed_in_power_max_percent": 70.0,
     }
-    control._data = frame
-    control._track_grid_feed_restore(frame)
+    control._inputs = control_module.ControlInputs.from_mapping(frame)
+    control._track_grid_feed_restore(control_module.ControlInputs.from_mapping(frame))
 
     assert control.grid_feed_restore is None
     assert control.grid_feed_allowed(frame) is True
@@ -1344,10 +1365,14 @@ def test_the_percentage_mode_is_never_adopted_or_switched(
 def test_an_export_limit_raised_on_the_device_is_adopted(control) -> None:
     """An installer lifting the limit should not need the entry to be set up again."""
     control._track_grid_feed_restore(
-        {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max_setting": 9000.0}
+        control_module.ControlInputs.from_mapping(
+            {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max_setting": 9000.0}
+        )
     )
     control._track_grid_feed_restore(
-        {"grid_feed_mode": Feed.UNLIMITED, "feed_in_power_max_setting": 15000.0}
+        control_module.ControlInputs.from_mapping(
+            {"grid_feed_mode": Feed.UNLIMITED, "feed_in_power_max_setting": 15000.0}
+        )
     )
 
     assert control.grid_feed_restore == {"mode": 1, "power": 15000}
@@ -1367,7 +1392,7 @@ def test_the_grid_feed_switch_refuses_without_a_restore_or_modbus_control(
 ) -> None:
     allow_writes(control, monkeypatch)
     control._enabled = enabled
-    control._track_grid_feed_restore(restore)
+    control._track_grid_feed_restore(control_module.ControlInputs.from_mapping(restore))
 
     with pytest.raises(control_module.HomeAssistantError):
         asyncio.run(control.async_set_grid_feed(False))
@@ -1378,12 +1403,14 @@ def test_discharge_and_export_are_capped_by_the_inverter_capacity(control) -> No
     """40546 is the most the inverter turns from DC into AC."""
     control._limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] = 25_000
     control._limits[const.CONF_MAX_BATTERY_CHARGED_POWER] = 25_000
-    control._data = {
-        const.INVERTER_CAPACITY_KEY: 8000.0,
-        const.RECTIFIER_CAPACITY_KEY: 4000.0,
-        "feed_in_power_max": 12000.0,
-        "inverter_rated_power": 10000.0,
-    }
+    control._inputs = control_module.ControlInputs.from_mapping(
+        {
+            const.INVERTER_CAPACITY_KEY: 8000.0,
+            const.RECTIFIER_CAPACITY_KEY: 4000.0,
+            "feed_in_power_max": 12000.0,
+            "inverter_rated_power": 10000.0,
+        }
+    )
 
     assert control.feature_power_max(Feature.DISCHARGE_BATTERY) == 8000.0
     assert control.feature_power_max(Feature.EXPORT_TO_GRID) == 8000.0
@@ -1396,11 +1423,13 @@ def test_import_from_grid_is_capped_by_the_grid_connection_not_the_inverter(
 ) -> None:
     """The house counts towards a meter target, so it can exceed the AC rating."""
     control._limits[const.CONF_MAX_GRID_POWER] = 15_000
-    control._data = {
-        const.INVERTER_CAPACITY_KEY: 6850.0,
-        const.RECTIFIER_CAPACITY_KEY: 5000.0,
-        "inverter_rated_power": 8000.0,
-    }
+    control._inputs = control_module.ControlInputs.from_mapping(
+        {
+            const.INVERTER_CAPACITY_KEY: 6850.0,
+            const.RECTIFIER_CAPACITY_KEY: 5000.0,
+            "inverter_rated_power": 8000.0,
+        }
+    )
 
     assert control.feature_power_max(Feature.IMPORT_FROM_GRID) == 15_000.0
     asyncio.run(control.async_set_feature_power(Feature.IMPORT_FROM_GRID, 12_000))
@@ -1417,7 +1446,9 @@ def test_import_from_grid_is_capped_by_the_grid_connection_not_the_inverter(
 
 def test_an_unreported_inverter_capacity_bounds_nothing(control) -> None:
     control._limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] = 25_000
-    control._data = {const.INVERTER_CAPACITY_KEY: 0.0, "inverter_rated_power": 10000.0}
+    control._inputs = control_module.ControlInputs.from_mapping(
+        {const.INVERTER_CAPACITY_KEY: 0.0, "inverter_rated_power": 10000.0}
+    )
 
     assert control.feature_power_max(Feature.DISCHARGE_BATTERY) == 10000.0
 
@@ -1427,7 +1458,9 @@ def test_the_effective_cap_alone_is_never_remembered_for_a_restore(
 ) -> None:
     """Without the configured cap there is nothing safe to write back."""
     control._track_grid_feed_restore(
-        {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 4000.0}
+        control_module.ControlInputs.from_mapping(
+            {"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 4000.0}
+        )
     )
 
     assert control.grid_feed_restore is None
@@ -1562,9 +1595,20 @@ def test_natural_from_grid_side_and_solar_side(control) -> None:
         "solar_power": 1375.0,
         "house_power": 1381.0,
     }
-    assert control._natural_from_grid_side(data) == 110.0
-    assert control._natural_from_solar_side(data) == -6.0
-    assert control._natural_battery_power(data) == 110.0
+    assert (
+        control._natural_from_grid_side(control_module.ControlInputs.from_mapping(data))
+        == 110.0
+    )
+    assert (
+        control._natural_from_solar_side(
+            control_module.ControlInputs.from_mapping(data)
+        )
+        == -6.0
+    )
+    assert (
+        control._natural_battery_power(control_module.ControlInputs.from_mapping(data))
+        == 110.0
+    )
 
 
 def test_single_phase_guarded_command_uses_minimum_surplus(
