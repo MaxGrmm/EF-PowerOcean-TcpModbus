@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import fields
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -19,50 +21,42 @@ from custom_components.ef_powerocean_tcpmodbus.models import (
 )
 from custom_components.ef_powerocean_tcpmodbus.telemetry import TelemetryData
 
-# Every key the control loop takes from a poll, from control.py.
-CONTROL_DATA_KEYS = frozenset(
-    {
-        "battery_power",
-        "battery_soc",
-        "feed_in_power_max_percent",
-        "grid_feed_mode",
-        "grid_power",
-        "house_power",
-        "inverter_rated_power",
-        const.BATTERY_RESERVE_REGISTER_KEY,
-        const.FEED_IN_POWER_MAX_KEY,
-        const.FEED_IN_POWER_MAX_SETTING_KEY,
-        const.FEED_IN_POWER_MAX_EFFECTIVE_KEY,
-        const.INVERTER_CAPACITY_KEY,
-        const.RECTIFIER_CAPACITY_KEY,
-        *(
-            key
-            for definition in const.CONTROL_FEATURES.values()
-            for key in (
-                definition.setpoint_key,
-                definition.measure_key,
-                definition.limit_key,
-                definition.capacity_key,
-            )
-            if key is not None
-        ),
+
+def test_control_reads_nothing_that_could_be_left_out_of_the_poll() -> None:
+    """control.py names the data keys it reads; each must be one that is always polled."""
+    source = Path(const.__file__).with_name("control.py").read_text(encoding="utf-8")
+    read = set(
+        re.findall(r"""(?:data|self\._data)\.get\(\s*"([a-z_0-9]+)"\s*[,)]""", source)
+    )
+    # Values the control loop keeps for itself, not ones taken from the poll.
+    read -= {"mode", "power", "feature_power", "grid_feed_restore", "grid_feed_stopped"}
+    read -= {
+        "battery_saver",
+        "charge_limit_soc",
+        "battery_reserve_soc",
+        "reserve_charge",
     }
-)
+
+    assert read
+    assert read <= const.CONTROL_READ_KEYS
+    assert not const.ON_DEMAND_REGISTER_KEYS & const.CONTROL_READ_KEYS
 
 
-def test_on_demand_registers_feed_nothing_but_their_entities() -> None:
-    """A register the integration consumes itself must be read every poll."""
+def test_on_demand_registers_are_those_only_an_entity_reads() -> None:
     on_demand = const.ON_DEMAND_REGISTER_KEYS
 
+    assert on_demand
     assert on_demand <= set(const.REGISTERS_BY_KEY)
     assert not on_demand & {field.name for field in fields(TelemetryData)}
-    energy_keys = {sensor.key for sensor in const.ENERGY_SENSOR_MAP} | {
-        sensor.total_source for sensor in const.ENERGY_SENSOR_MAP if sensor.total_source
+    assert not on_demand & {
+        key
+        for sensor in const.ENERGY_SENSOR_MAP
+        for key in (sensor.key, sensor.total_source)
     }
-    assert not on_demand & energy_keys
-    assert not on_demand & CONTROL_DATA_KEYS
-    # The faults are decoded together, so they stay together.
     assert not on_demand & {f"fault_{n}" for n in range(1, const.MAX_FAULT_EVENTS + 1)}
+    # Taken from the definitions, so a sensor added for a register joins them.
+    assert {"frequency", "battery_voltage", "soc_battery_12"} <= on_demand
+    assert {"battery_soc", "house_power", "solar_total"}.isdisjoint(on_demand)
 
 
 @pytest.fixture

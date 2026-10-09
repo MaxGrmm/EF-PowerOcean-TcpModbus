@@ -778,3 +778,14 @@ class NumberWritableDef:
     def size(self) -> int:
         """Return how many 16-bit words the write occupies."""
         return REGISTER_SIZES[self.data_type]
+
+
+def shown_keys(definition: object) -> frozenset[str]:
+    """Return the data keys an entity made from *definition* shows."""
+    keys = {definition.key}  # type: ignore[attr-defined]
+    keys.update(getattr(definition, "attribute_keys", ()))
+    if read_key := getattr(definition, "read_key", None):
+        keys.add(read_key)
+    if total_source := getattr(definition, "total_source", None):
+        keys.add(total_source)
+    return frozenset(keys)
