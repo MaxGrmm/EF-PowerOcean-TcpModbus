@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any
@@ -48,6 +49,7 @@ from .const import (
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MODBUS_DISABLED_READ_THRESHOLD,
+    ON_DEMAND_REGISTER_KEYS,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
     SERIAL_NUMBER,
@@ -87,6 +89,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     # Optional registers the device refused to read, which are no longer polled.
     _unsupported_keys: frozenset[str] = frozenset()
+    # The on-demand registers some entity wants. Everything until the entities
+    # have said, so the first poll reads it all and they all start with a value.
+    _wanted_keys: frozenset[str] = ON_DEMAND_REGISTER_KEYS
 
     def __init__(
         self,
@@ -153,6 +158,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             on_refresh=self.async_refresh,
             write_setting=self._async_write_register,
             on_command_expired=self._command_expired,
+            # A background task of Home Assistant's: cancelled on shutdown and not
+            # waited for at startup, unlike a bare asyncio task.
+            start_task=hass.async_create_background_task,
             battery_reserve=battery_reserve_for(
                 self.inverter_model,
                 config_entry.data.get(CONF_BATTERY_RESERVE),
@@ -389,6 +397,66 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         """Return the optional registers the device refused, which are not polled."""
         return self._unsupported_keys
 
+    @property
+    def polled_registers(self) -> frozenset[str]:
+        """Return the keys of the registers the poll reads."""
+        return frozenset(
+            register.key
+            for block in self._register_blocks
+            for register in block.registers
+        )
+
+    # ── Demand-driven reads ───────────────────────────────────────────────────
+
+    def _plan_reads(self) -> None:
+        """Group the registers to read, leaving out what nothing needs."""
+        self._register_blocks = register_blocks_for(
+            self.inverter_model,
+            exclude=self._unsupported_keys
+            | (ON_DEMAND_REGISTER_KEYS - self._wanted_keys),
+        )
+
+    @callback
+    def async_add_listener(
+        self, update_callback: Callable[[], None], context: Any = None
+    ) -> Callable[[], None]:
+        """Track the registers the listeners want, as well as the listeners.
+
+        An entity's context is the set of keys it shows. The read plan follows the
+        union of them, so a register is on the wire only while an entity enabled
+        in Home Assistant wants it.
+        """
+        remove_listener = super().async_add_listener(update_callback, context)
+        self._async_track_wanted_keys()
+
+        @callback
+        def remove() -> None:
+            remove_listener()
+            self._async_track_wanted_keys()
+
+        return remove
+
+    @callback
+    def _async_track_wanted_keys(self) -> None:
+        wanted = (
+            frozenset(
+                key
+                for context in self.async_contexts()
+                if isinstance(context, (set, frozenset))
+                for key in context
+            )
+            & ON_DEMAND_REGISTER_KEYS
+        )
+        if wanted == self._wanted_keys:
+            return
+        added = wanted - self._wanted_keys
+        self._wanted_keys = wanted
+        self._plan_reads()
+        # An entity enabled after the poll started would otherwise show nothing
+        # until the next interval.
+        if added and self.data is not None:
+            self.hass.async_create_task(self.async_request_refresh())
+
     async def _async_read_block(
         self, register_block: RegisterBlock, data: dict[str, Any]
     ) -> None:
@@ -440,9 +508,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 ", ".join(sorted(refused)),
             )
             self._unsupported_keys = self._unsupported_keys | refused
-            self._register_blocks = register_blocks_for(
-                self.inverter_model, exclude=self._unsupported_keys
-            )
+            self._plan_reads()
 
     def _decode(self, words: list[int], register: RegisterDef) -> float | None:
         traits = self.inverter_model.traits

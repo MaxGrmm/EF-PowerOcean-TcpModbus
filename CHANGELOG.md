@@ -8,8 +8,13 @@
 - Control steps aside while off-grid or with the battery disconnected, and Control Status shows Off-grid, Battery disconnected or Inverter fault.
 - Control Status shows Limited by inverter when the battery goes the other way from the command, or past it, instead of Ramping indefinitely.
 - Charge to Battery Reserve: below the Battery Reserve, the battery charges from the grid up to it at the Charge Battery power, as the app's backup reserve does.
+- A register nothing reads but one entity, such as a phase voltage or a module's state of charge, is polled only while that entity is enabled. On the Ocean 2, which reads registers one at a time, this takes the reads of disabled entities off the poll.
+- The inverter's serial number is the config entry's unique id. An entry keyed by host and port takes the serial number the first time it reads it, and adding an inverter that has moved on the network updates its entry's address instead of making a second one.
 
 ### Changed
+
+- "Modbus is disabled" is a repairs issue under Settings → Repairs rather than a persistent notification.
+- The inverter is a device in its own right rather than a service.
 
 - The Battery Reserve is the one reserve control: native on the PowerOcean Three Phase, where it writes the inverter's own reserve, and emulated by the integration on the other models. Its `implementation` attribute says which, and the integration options can switch it to test a model.
 - The Minimum SOC Limit number is removed. The inverter's reserve shows as the App Backup Reserve sensor on models with an emulated reserve.

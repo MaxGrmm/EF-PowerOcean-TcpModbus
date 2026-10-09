@@ -47,7 +47,7 @@ from .const import (
     MIN_CONTROL_DWELL_S,
     SOLAR_EXPORT_CAP_MARGIN_W,
 )
-from .heartbeat import Heartbeat
+from .heartbeat import Heartbeat, StartTask
 from .modbus import ModbusClient
 from .models import (
     BATTERY_FULL_SOC,
@@ -219,6 +219,7 @@ class ControlManager:
         write_setting: WriteSetting,
         on_command_expired: CommandExpired,
         heartbeat: Heartbeat | None = None,
+        start_task: StartTask | None = None,
         battery_reserve: ReserveSupport = ReserveSupport.EMULATED,
     ) -> None:
         self._modbus_client = modbus_client
@@ -236,7 +237,7 @@ class ControlManager:
         self._enabled = enabled
         # One beating on another clock can be passed in, as for a simulation.
         self._heartbeat = heartbeat or Heartbeat(
-            modbus_client, scan_interval_s=scan_interval_s
+            modbus_client, scan_interval_s=scan_interval_s, start_task=start_task
         )
 
         # A restart stops the heartbeat, so the inverter has already handed control

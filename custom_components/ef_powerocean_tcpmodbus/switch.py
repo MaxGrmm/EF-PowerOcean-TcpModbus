@@ -9,7 +9,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
 from .control import ControlManager
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
@@ -80,7 +79,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up EcoFlow switches from a config entry."""
-    coordinator: EcoflowCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: EcoflowCoordinator = entry.runtime_data
 
     async_add_entities(
         EcoFlowSwitch(coordinator, entry, definition)

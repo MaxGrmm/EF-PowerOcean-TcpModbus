@@ -240,6 +240,41 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
 
 REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTERS}
 
+# Registers nothing reads but the entity that shows them. They are polled only
+# while such an entity is enabled; every other register is read each poll, since
+# the derived values, the energy counters, the control loop or the Modbus-disabled
+# check consume it whatever the user has enabled. On a model that reads registers
+# one at a time, each of these is a round trip the poll can do without.
+ON_DEMAND_REGISTER_KEYS: Final = frozenset(
+    {
+        "breaker_capacity",
+        "device_led_brightness",
+        "inverter_output_power",
+        "battery_discharge_power_limit",
+        "battery_charge_power_limit",
+        "grid_current_l1",
+        "grid_current_l2",
+        "grid_current_l3",
+        "grid_voltage_l1",
+        "grid_voltage_l2",
+        "grid_voltage_l3",
+        "battery_voltage",
+        "battery_current",
+        "battery_temperature",
+        "voltage_l1",
+        "voltage_l2",
+        "voltage_l3",
+        "current_l1",
+        "current_l2",
+        "current_l3",
+        "inverter_temperature",
+        "frequency",
+        "fault_count",
+        "battery_count",
+        *BATTERY_SOC_KEYS,
+    }
+)
+
 
 def register_blocks_for(
     inverter_model: InverterModel, *, exclude: Collection[str] = ()

@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import BATTERY_MODE_SELECT, DOMAIN
+from .const import BATTERY_MODE_SELECT
 from .coordinator import EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .models import ControlEntityDef, ControlFeature
@@ -21,7 +21,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up EcoFlow selects from a config entry."""
-    coordinator: EcoflowCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: EcoflowCoordinator = entry.runtime_data
 
     async_add_entities(
         [EcoFlowBatteryModeSelect(coordinator, entry, BATTERY_MODE_SELECT)]

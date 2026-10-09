@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 import voluptuous as vol
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
@@ -22,13 +23,13 @@ from custom_components.ef_powerocean_tcpmodbus.models import ControlFeature
 @pytest.fixture
 def inverter(hass: HomeAssistant) -> SimpleNamespace:
     """An inverter set up in the integration, with its control stubbed."""
-    entry = MockConfigEntry(domain=DOMAIN)
+    entry = MockConfigEntry(domain=DOMAIN, state=ConfigEntryState.LOADED)
     entry.add_to_hass(hass)
     device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, identifiers={(DOMAIN, "HJ31")}
     )
     control = SimpleNamespace(enabled=True, async_set_command=AsyncMock())
-    hass.data[DOMAIN] = {entry.entry_id: SimpleNamespace(control=control)}
+    entry.runtime_data = SimpleNamespace(control=control)
     services.async_setup_services(hass)
     return SimpleNamespace(device_id=device.id, control=control)
 

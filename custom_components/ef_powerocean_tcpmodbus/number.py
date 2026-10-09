@@ -44,7 +44,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Automatically set up number entities from the WRITABLE_NUMBERS_MAP configuration list."""
-    coordinator: EcoflowCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: EcoflowCoordinator = entry.runtime_data
 
     entities: list[NumberEntity] = [
         EcoFlowFeaturePowerNumber(coordinator, entry, feature)

@@ -29,9 +29,7 @@ def fake_coordinator(*, native: bool) -> SimpleNamespace:
 async def set_up(hass, *, native: bool) -> list:
     entry = MockConfigEntry(domain=const.DOMAIN, entry_id="entry")
     entry.add_to_hass(hass)
-    hass.data.setdefault(const.DOMAIN, {})[entry.entry_id] = fake_coordinator(
-        native=native
-    )
+    entry.runtime_data = fake_coordinator(native=native)
     added: list = []
     await number.async_setup_entry(hass, entry, added.extend)
     return added

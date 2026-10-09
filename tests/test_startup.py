@@ -18,7 +18,9 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import MAJOR_VERSION, MINOR_VERSION
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const
@@ -117,3 +119,116 @@ async def test_starts_and_unloads(
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.NOT_LOADED
+
+
+SERIAL = "HJ31ZAS2TEST0001"
+
+
+def _serve_serial(inverter: FakeInverter, serial: str) -> None:
+    """Put a serial number in the device information block, two characters a word."""
+    padded = serial.ljust(const.SERIAL_NUMBER.size * 2, "\x00")
+    for word, offset in enumerate(range(0, len(padded), 2)):
+        inverter.registers[const.SERIAL_NUMBER.address + word] = (
+            ord(padded[offset]) << 8
+        ) | ord(padded[offset + 1])
+
+
+async def test_an_entry_keyed_by_address_takes_the_serial_number(
+    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+) -> None:
+    """Entries made before the serial was read are keyed by host and port."""
+    _serve_serial(inverter, SERIAL)
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        unique_id=f"{HOST}:{inverter.port}",
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.unique_id == SERIAL
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_a_serial_number_another_entry_has_is_left_to_it(
+    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+) -> None:
+    _serve_serial(inverter, SERIAL)
+    MockConfigEntry(domain=const.DOMAIN, unique_id=SERIAL).add_to_hass(hass)
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        unique_id=f"{HOST}:{inverter.port}",
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.unique_id == f"{HOST}:{inverter.port}"
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_raises_a_repairs_issue_while_modbus_is_disabled(
+    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+) -> None:
+    """The inverter answers, with a serial number, but every value reads zero."""
+    _serve_serial(inverter, SERIAL)
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    registry = ir.async_get(hass)
+    issue_id = f"modbus_disabled_{entry.entry_id}"
+    assert registry.async_get_issue(const.DOMAIN, issue_id) is None
+
+    coordinator = entry.runtime_data
+    for _ in range(const.MODBUS_DISABLED_READ_THRESHOLD):
+        await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    issue = registry.async_get_issue(const.DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_placeholders == {"host": HOST}
+
+    inverter.registers[const.REGISTERS_BY_KEY["inverter_rated_power"].address] = 1
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert registry.async_get_issue(const.DOMAIN, issue_id) is None
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_a_device_registered_as_a_service_becomes_a_device(
+    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+) -> None:
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+    registry = dr.async_get(hass)
+    device = registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(const.DOMAIN, entry.entry_id)},
+        entry_type=dr.DeviceEntryType.SERVICE,
+    )
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert registry.async_get(device.id).entry_type is None
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()

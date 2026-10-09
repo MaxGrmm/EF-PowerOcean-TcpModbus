@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 import voluptuous as vol
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_DEVICE_ID
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
@@ -85,11 +86,15 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
 def _coordinator_for(hass: HomeAssistant, device_id: str) -> EcoflowCoordinator:
     """Return the coordinator of a device this integration has set up."""
-    coordinators = hass.data.get(DOMAIN, {})
     if device := dr.async_get(hass).async_get(device_id):
         for entry_id in device.config_entries:
-            if entry_id in coordinators:
-                return coordinators[entry_id]
+            entry = hass.config_entries.async_get_entry(entry_id)
+            if (
+                entry is not None
+                and entry.domain == DOMAIN
+                and entry.state is ConfigEntryState.LOADED
+            ):
+                return entry.runtime_data
     raise ServiceValidationError(
         translation_domain=DOMAIN,
         translation_key="unknown_device",
