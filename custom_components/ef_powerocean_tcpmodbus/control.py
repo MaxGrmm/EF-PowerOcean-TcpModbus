@@ -30,7 +30,6 @@ from .const import (
     CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
-    FEED_IN_POWER_MAX_KEY,
     FEED_IN_POWER_MAX_SETTING_KEY,
     FOLLOW_GRACE_S,
     FOLLOW_RESENDS,
@@ -149,7 +148,7 @@ class ControlInputs:
         return frozenset(field.name for field in fields(cls))
 
     def value(self, key: str) -> Any:
-        """Return the value under a key held in a constant or a feature definition."""
+        """Return the value under a key a feature definition names."""
         return getattr(self, key)
 
 
@@ -178,7 +177,7 @@ def _device_export_limit(inputs: ControlInputs) -> float | None:
     if mode is GridFeedMode.UNLIMITED:
         return math.inf
     if mode is GridFeedMode.LIMITED:
-        limit = inputs.value(FEED_IN_POWER_MAX_KEY)
+        limit = inputs.feed_in_power_max
         return None if limit is None else float(limit)
     if mode is GridFeedMode.LIMITED_PERCENT:
         percent = inputs.feed_in_power_max_percent
@@ -196,7 +195,7 @@ def _configured_feed_cap(inputs: ControlInputs) -> float | None:
     the internal safety rules, and writing that back would lower the configured cap
     for good.
     """
-    return inputs.value(FEED_IN_POWER_MAX_SETTING_KEY)
+    return inputs.feed_in_power_max_setting
 
 
 class HandbackPhase(Enum):
@@ -696,7 +695,7 @@ class ControlManager:
             await self._write_setting(
                 self._registers_by_key[BATTERY_RESERVE_REGISTER_KEY], soc
             )
-            self._inputs = replace(self._inputs, **{BATTERY_RESERVE_REGISTER_KEY: soc})
+            self._inputs = replace(self._inputs, min_soc_limit=soc)
         if self._update_limits(self._charge_limit_soc, soc):
             await self.async_apply(force=True)
 
@@ -906,7 +905,7 @@ class ControlManager:
         """Take a native reserve from the inverter, where the app may also change it."""
         if not self._reserve_native:
             return
-        if (reserve := inputs.value(BATTERY_RESERVE_REGISTER_KEY)) is None:
+        if (reserve := inputs.min_soc_limit) is None:
             return
         if float(reserve) == self._battery_reserve_soc:
             return
@@ -1425,7 +1424,7 @@ class ControlManager:
             if definition.measure_key is not None
             else None
         )
-        inverter_floor = float(inputs.value(BATTERY_RESERVE_REGISTER_KEY) or 0.0)
+        inverter_floor = float(inputs.min_soc_limit or 0.0)
         state = deviation_state(
             signed_target=self._commanded_power * definition.sign,
             measured=None if measured is None else float(measured),
