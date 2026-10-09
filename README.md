@@ -179,20 +179,24 @@ doesn't expose a hard power limit over Modbus. See
 
 ### Control Status
 
-| Control Status              | Meaning                                                   |
-| --------------------------- | --------------------------------------------------------- |
-| No Modbus control           | Modbus Control is off, or control was lost                |
-| Handing back to the app     | Modbus Control was turned off; the app takes over         |
-| Automatic                   | The inverter runs normal self-consumption                 |
-| Active                      | The selected mode is working                              |
-| Ramping                     | The inverter hasn't reached the target yet                |
-| Limited by inverter         | The inverter goes the other way or past the target        |
-| Charge limit reached        | The Charge Limit is stopping the battery                  |
-| Reserve reached             | The Battery Reserve is stopping the battery               |
-| Charging to battery reserve | Charge to Battery Reserve is charging up to it            |
-| Below solar export limit    | Export solar first is exporting the whole surplus         |
-| Unreachable: battery full   | The target needs the battery to charge, but it's full     |
-| Unreachable: battery empty  | The target needs the battery to discharge, but it's empty |
+| Control Status              | Meaning                                                          |
+| --------------------------- | ---------------------------------------------------------------- |
+| No Modbus control           | Modbus Control is off, or control was lost                       |
+| Handing back to the app     | Modbus Control was turned off; the app takes over                |
+| Automatic                   | The inverter runs normal self-consumption                        |
+| Active                      | The selected mode is working                                     |
+| Ramping                     | The inverter hasn't reached the target yet                       |
+| Limited by inverter         | The inverter goes the other way or past the target               |
+| Charge limit reached        | The Charge Limit is stopping the battery                         |
+| Reserve reached             | The Battery Reserve is stopping the battery                      |
+| Charging to battery reserve | Charge to Battery Reserve is charging up to it                   |
+| Below solar export limit    | Export solar first is exporting the whole surplus                |
+| Unreachable: battery full   | The target needs the battery to charge, but it's full            |
+| Unreachable: battery empty  | The target needs the battery to discharge, but it's empty        |
+| Not accepted by inverter    | The inverter doesn't report the command, even after resending it |
+| Off-grid                    | Grid outage; control steps aside until the grid is back          |
+| Battery disconnected        | The battery dropped off; control steps aside until it's back     |
+| Inverter fault              | The inverter reports a fault or a stop                           |
 
 If the inverter misses a guard's target, the status shows Ramping or Unreachable; the
 guard is still in the `guard` attribute.
@@ -201,6 +205,13 @@ guard is still in the `guard` attribute.
 firmware limit or its own protection: asked to charge, the battery discharges, or it
 discharges more than asked. A command is given 30 seconds to turn the battery around
 before it counts.
+
+The inverter reports which control method it follows. Once it has shown that it does,
+a mismatch for three polls sends the command again, which recovers from an inverter
+restart or Modbus mode being toggled in the installer app. After two resends the status
+shows **Not accepted by inverter**. Off-grid and with the battery disconnected for three
+polls, control hands the inverter its own self-consumption and resumes the selected mode
+once it's back. A model that doesn't report these is controlled as before.
 
 ### Commanding the battery from automations
 

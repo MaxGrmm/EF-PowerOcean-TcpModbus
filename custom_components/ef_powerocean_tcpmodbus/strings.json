@@ -435,7 +435,11 @@
           "ramping": "Ramping",
           "limited_by_inverter": "Limited by inverter",
           "unreachable_battery_full": "Battery full, target unreachable",
-          "unreachable_battery_empty": "Battery empty, target unreachable"
+          "unreachable_battery_empty": "Battery empty, target unreachable",
+          "not_accepted": "Not accepted by inverter",
+          "off_grid": "Off-grid",
+          "battery_disconnected": "Battery disconnected",
+          "inverter_fault": "Inverter fault"
         }
       }
     },

@@ -4,6 +4,8 @@
 
 ### Added
 
+- Control sends the command again when the inverter doesn't report following it, as after an inverter restart, and shows Not accepted by inverter if that doesn't help.
+- Control steps aside while off-grid or with the battery disconnected, and Control Status shows Off-grid, Battery disconnected or Inverter fault.
 - Control Status shows Limited by inverter when the battery goes the other way from the command, or past it, instead of Ramping indefinitely.
 - Charge to Battery Reserve: below the Battery Reserve, the battery charges from the grid up to it at the Charge Battery power, as the app's backup reserve does.
 

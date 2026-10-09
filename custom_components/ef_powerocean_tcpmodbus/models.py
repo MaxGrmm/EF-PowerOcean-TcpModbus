@@ -381,6 +381,46 @@ class ControlStatus(StrEnum):
     LIMITED_BY_INVERTER = "limited_by_inverter"
     UNREACHABLE_BATTERY_FULL = "unreachable_battery_full"
     UNREACHABLE_BATTERY_EMPTY = "unreachable_battery_empty"
+    # The inverter does not report the commanded method, even after re-sending it.
+    NOT_ACCEPTED = "not_accepted"
+    # Running off-grid during an outage; control steps aside until the grid is back.
+    OFF_GRID = "off_grid"
+    # The battery dropped off; control steps aside until it is back.
+    BATTERY_DISCONNECTED = "battery_disconnected"
+    # The inverter reports a fault or a stop, so it may not act on anything.
+    INVERTER_FAULT = "inverter_fault"
+
+
+# System State 2 (40532) flags under which the inverter stops acting: shutdown,
+# upgrade shutdown, emergency power off, system failure, battery pack disconnected,
+# PCS timeout and PCS failure.
+_STOP_FLAGS_MASK: Final = sum(1 << bit for bit in (0, 1, 2, 5, 7, 9, 10))
+
+
+@dataclass(frozen=True)
+class DeviceReport:
+    """What the inverter reports about itself in the System Status words."""
+
+    method: ControlMode | None
+    # Bit 11: the inverter is following Modbus rather than the app.
+    manual: bool
+    off_grid: bool
+    bms_connected: bool
+    fault: bool
+
+    @classmethod
+    def from_data(cls, data: Mapping[str, Any]) -> DeviceReport | None:
+        if (modes := data.get("system_modes")) is None:
+            return None
+        modes = int(modes)
+        state_2 = int(data.get("system_state_2") or 0)
+        return cls(
+            method=ControlMode.from_status((modes >> 7) & 0xF),
+            manual=bool(modes >> 11 & 1),
+            off_grid=bool(modes & 1),
+            bms_connected=bool(modes >> 12 & 1),
+            fault=bool(modes >> 1 & 1) or bool(state_2 & _STOP_FLAGS_MASK),
+        )
 
 
 def requires_modbus_control(status: ControlStatus) -> bool:

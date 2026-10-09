@@ -31,6 +31,8 @@ from .const import (
     DEFAULT_CHARGE_LIMIT_SOC,
     FEED_IN_POWER_MAX_KEY,
     FEED_IN_POWER_MAX_SETTING_KEY,
+    FOLLOW_GRACE_S,
+    FOLLOW_RESENDS,
     GUARD_DIRECT_HANDBACK_W,
     GUARD_HANDBACK_MAX_S,
     GUARD_HANDBACK_S,
@@ -54,6 +56,7 @@ from .models import (
     ControlFeature,
     ControlMode,
     ControlStatus,
+    DeviceReport,
     GridFeedMode,
     InverterModel,
     RegisterDef,
@@ -65,6 +68,9 @@ from .models import (
 from .plans import CHARGE, DISCHARGE, Mode, ModeState, Step, Way, battery_power
 
 _LOGGER = logging.getLogger(__name__)
+
+# Device states in which control steps aside and leaves the inverter to itself.
+_STEPPED_ASIDE = frozenset({ControlStatus.OFF_GRID, ControlStatus.BATTERY_DISCONNECTED})
 
 # The statuses of the state-of-charge guards, as opposed to a mode's own.
 _GUARDS = frozenset(
@@ -268,6 +274,23 @@ class ControlManager:
         self._commanded_power = 0.0
         # The setpoint that the latest small correction replaced.
         self._retuned_from: float | None = None
+        # What the inverter reports about itself, judged only once it has proven to
+        # report it: a model that never sets a bit must behave as before this check.
+        self._report: DeviceReport | None = None
+        # A battery is only missing once one has been seen.
+        self._bms_seen = False
+        # The report is only trusted to say a command is not followed once it has
+        # shown one being followed.
+        self._follow_proven = False
+        self._not_followed_polls = 0
+        self._resends = 0
+        self._not_accepted = False
+        # Device states take effect after this many polls in a row, so one odd read
+        # neither interrupts the mode nor flickers the status.
+        self._aside_candidate: ControlStatus | None = None
+        self._aside_polls = 0
+        self._aside: ControlStatus | None = None
+        self._fault_polls = 0
         # When the inverter was last told to do something new, so a battery still
         # turning around is not mistaken for one the inverter is overruling.
         self._retargeted_at: datetime | None = None
@@ -439,6 +462,12 @@ class ControlManager:
             if self.handing_back:
                 return ControlStatus.HANDING_BACK
             return ControlStatus.NO_MODBUS_CONTROL
+        if self._command_status in _STEPPED_ASIDE:
+            return self._command_status
+        if self._fault_polls >= CONTROL_STATUS_DAMPING_POLLS:
+            return ControlStatus.INVERTER_FAULT
+        if self._not_accepted:
+            return ControlStatus.NOT_ACCEPTED
         if self._command_status is not None:
             if self._deviation is not ControlStatus.ACTIVE:
                 return self._deviation
@@ -1025,6 +1054,77 @@ class ControlManager:
                     return False
                 return True
 
+    def _observe_device(self, data: dict[str, Any]) -> None:
+        """Take in what the inverter reports about itself, once per poll."""
+        report = self._report = DeviceReport.from_data(data)
+        if report is None:
+            # Nothing reported, so nothing changes: no state is assumed or kept.
+            self._aside_candidate, self._aside_polls, self._aside = None, 0, None
+            self._fault_polls = 0
+            return
+        if report.bms_connected:
+            self._bms_seen = True
+        self._fault_polls = self._fault_polls + 1 if report.fault else 0
+
+        # Off-grid the inverter powers the house during an outage, and without its
+        # battery no battery command can work; either way it knows best.
+        reason = None
+        if report.off_grid:
+            reason = ControlStatus.OFF_GRID
+        elif self._bms_seen and not report.bms_connected:
+            reason = ControlStatus.BATTERY_DISCONNECTED
+        if reason is None:
+            self._aside_candidate, self._aside_polls, self._aside = None, 0, None
+            return
+        if reason is self._aside_candidate:
+            self._aside_polls += 1
+        else:
+            self._aside_candidate, self._aside_polls = reason, 1
+        if self._aside_polls >= CONTROL_STATUS_DAMPING_POLLS:
+            self._aside = reason
+
+    def _stepped_aside(self) -> ControlStatus | None:
+        """Return why control leaves the inverter to itself now, if it does."""
+        return self._aside
+
+    def _check_followed(self) -> None:
+        """Send the command again if the inverter does not report following it.
+
+        A restart, a firmware hiccup or Modbus mode toggled in the installer app
+        leaves the inverter in its default self-consumption without telling us,
+        while the heartbeat writes keep succeeding.
+        """
+        report = self._report
+        if report is None or not self.in_control:
+            return
+        followed = report.manual and report.method is self.method
+        if followed:
+            self._follow_proven = True
+        if not self._follow_proven:
+            return
+        if followed or self._control_written_within(FOLLOW_GRACE_S):
+            if followed:
+                self._not_followed_polls = 0
+                self._resends = 0
+                self._not_accepted = False
+            return
+        self._not_followed_polls += 1
+        if self._not_followed_polls < CONTROL_STATUS_DAMPING_POLLS:
+            return
+        self._not_followed_polls = 0
+        if self._resends < FOLLOW_RESENDS:
+            self._resends += 1
+            _LOGGER.info(
+                "The inverter reports method %s and Modbus mode %s instead of %s; "
+                "sending the command again",
+                report.method if report else None,
+                report.manual if report else None,
+                self.method,
+            )
+            self._control_stale = True
+            return
+        self._not_accepted = True
+
     def _charge_to_reserve(self) -> Decision | None:
         """Charge from the grid towards the reserve, whatever mode is selected.
 
@@ -1070,6 +1170,8 @@ class ControlManager:
             self._stopped = None
         if not self._enabled:
             return Decision(ControlFeature.AUTOMATIC, 0.0)
+        if (aside := self._stepped_aside()) is not None:
+            return Decision(ControlFeature.AUTOMATIC, 0.0, aside, bypass_dwell=True)
         if self._reserve_charging and (decision := self._charge_to_reserve()):
             return decision
 
@@ -1324,10 +1426,14 @@ class ControlManager:
         force: bool = False,
     ) -> None:
         """Send what the mode and guards add up to, if it differs from the last send."""
+        # Only a poll brings data; a user action re-applies the last poll's.
+        polled = data is not None
         if data is not None:
             self._data = data
         data = self._data
         self._expire_command()
+        if polled:
+            self._observe_device(data)
         self._follow_native_reserve(data)
         self._update_guards(data)
 
@@ -1366,6 +1472,9 @@ class ControlManager:
             retargeted = feature is not self._commanded_feature
             if retargeted:
                 self._retargeted_at = dt.now()
+                # A new command gets its own resends.
+                self._resends = 0
+                self._not_accepted = False
             if changed:
                 self._retuned_from = None if retargeted else self._commanded_power
             self._commanded_feature = feature
@@ -1376,6 +1485,8 @@ class ControlManager:
             if retargeted or (changed and decision.status is None):
                 self._reset_deviation()
             self._update_deviation(data)
+            if polled:
+                self._check_followed()
         finally:
             if notify:
                 self._on_update()
