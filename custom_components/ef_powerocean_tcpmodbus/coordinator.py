@@ -58,8 +58,9 @@ from .const import (
     register_blocks_for,
 )
 from .control import ControlManager
+from .control_test import ControlTest
 from .energy_processor import ENERGY_KEYS, EnergyProcessor
-from .modbus import ModbusReadRejected, create_client
+from .modbus import ModbusClient, ModbusReadRejected, create_client
 from .models import (
     ControlFeature,
     CoordinatorStatus,
@@ -168,6 +169,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 config_entry.data.get(CONF_BATTERY_RESERVE),
             ),
         )
+        self.control_test = ControlTest(self)
         # Context of the last expiry event, taken once by the Battery Mode select so its
         # change to automatic shows the expiry as the cause.
         self._command_expired_context: Context | None = None
@@ -182,6 +184,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     @property
     def connected(self) -> bool:
         return self._modbus_client.connected
+
+    @property
+    def modbus_client(self) -> ModbusClient:
+        return self._modbus_client
+
+    @property
+    def registers_by_key(self) -> dict[str, RegisterDef]:
+        """Return the registers this model polls, by key."""
+        return self._registers_by_key
 
     @property
     def status(self) -> CoordinatorStatus | None:
@@ -262,6 +273,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     async def async_client_shutdown(self) -> None:
         """Integration-Shutdown, closing connection"""
         _LOGGER.info("PowerOcean Shutdown. Closing Connection!")
+        # First, while the connection is still open to hand control back.
+        await self.control_test.async_cancel()
         if self._store is not None:
             await self._store.async_save(self._persisted_state())
         await self.control.async_stop()

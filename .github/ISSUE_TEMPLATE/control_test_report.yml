@@ -1,0 +1,72 @@
+name: Control Test Report
+description: Share the result of the Run control test action, for example after a firmware update
+labels: ["control test"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing. The report shows which control methods your inverter's firmware follows, and it is compared against earlier reports for the same model to find what a firmware update changed. See [Testing the controls after a firmware update](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus#testing-the-controls-after-a-firmware-update) for how to run it.
+
+  - type: dropdown
+    id: device_type
+    attributes:
+      label: Device Type
+      options:
+        - PowerOcean Single Phase
+        - PowerOcean Three Phase
+        - PowerOcean Plus
+        - PowerOcean DC Fit
+        - Ocean 2
+    validations:
+      required: true
+
+  - type: input
+    id: device_firmware
+    attributes:
+      label: Device Firmware Version
+      description: As shown in the report and on the device page.
+      placeholder: "e.g. V3.0.20.54"
+    validations:
+      required: true
+
+  - type: input
+    id: previous_firmware
+    attributes:
+      label: Previous Firmware Version
+      description: The firmware you ran before, if this report follows an update.
+      placeholder: "e.g. V3.0.19.19"
+    validations:
+      required: false
+
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration Version
+      placeholder: "e.g. 2.9.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Report
+      description: |
+        Drag in the file named in the Control Test sensor's `report_file` attribute, or the diagnostics download from the device page. The serial number is masked in both.
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What Changed
+      description: Anything you noticed after the update, such as a battery mode that stopped working. Optional.
+    validations:
+      required: false
+
+  - type: textarea
+    id: conditions
+    attributes:
+      label: Conditions
+      description: Anything unusual during the run, such as clouds passing or another device drawing a lot of power. Optional.
+    validations:
+      required: false

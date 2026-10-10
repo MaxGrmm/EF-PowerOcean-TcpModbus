@@ -446,6 +446,16 @@
           "battery_disconnected": "Akku getrennt",
           "inverter_fault": "Wechselrichterfehler"
         }
+      },
+      "control_test": {
+        "name": "Steuerungstest",
+        "state": {
+          "idle": "Bereit",
+          "running": "Läuft",
+          "done": "Fertig",
+          "aborted": "Abgebrochen",
+          "failed": "Fehlgeschlagen"
+        }
       }
     },
     "binary_sensor": {
@@ -560,6 +570,34 @@
           "description": "Sekunden, bis der Modus zu Automatisch zurückkehrt. Erneutes Senden des Befehls startet die Zählung neu. Ohne Angabe bleibt der Modus, bis er geändert wird."
         }
       }
+    },
+    "run_control_test": {
+      "name": "Steuerungstest ausführen",
+      "description": "Prüft, welchen Steuerungsmethoden die Firmware dieses Wechselrichters folgt, wie scripts/control_feature_scan.py, und schreibt einen Bericht, der an ein GitHub-Issue angehängt werden kann. Vorher Modbus-Steuerung ausschalten. Die Batterie lädt und entlädt kurz mit der Testleistung, am Ende wird der Wechselrichter an die EcoFlow-App zurückgegeben. Dauert etwa 10 Minuten; mit Antwort wartet die Aktion auf den Bericht, sonst zeigt der Sensor Steuerungstest den Fortschritt.",
+      "fields": {
+        "device_id": {
+          "name": "Wechselrichter",
+          "description": "Der zu testende Wechselrichter."
+        },
+        "confirm": {
+          "name": "Bestätigen",
+          "description": "Muss eingeschaltet sein. Der Test schreibt Steuerbefehle, die Batterie lädt und entlädt, und für einige Minuten fließt Leistung ins und aus dem Netz."
+        },
+        "power": {
+          "name": "Testleistung",
+          "description": "Leistung für jede Methode, 600 bis 3000 W. Wird reduziert, wo die Einspeisebegrenzung weniger erlaubt."
+        }
+      }
+    },
+    "cancel_control_test": {
+      "name": "Steuerungstest abbrechen",
+      "description": "Bricht einen laufenden Steuerungstest ab. Der Wechselrichter wird auf die Standardmethode gesetzt und an die EcoFlow-App zurückgegeben.",
+      "fields": {
+        "device_id": {
+          "name": "Wechselrichter",
+          "description": "Der Wechselrichter, dessen Test abgebrochen wird."
+        }
+      }
     }
   },
   "exceptions": {
@@ -574,6 +612,24 @@
     },
     "unknown_device": {
       "message": "Das Gerät {device_id} ist kein in dieser Integration eingerichteter Wechselrichter."
+    },
+    "control_test_not_confirmed": {
+      "message": "Bestätigen einschalten, um den Steuerungstest zu starten. Es wurde nichts geschrieben."
+    },
+    "control_test_running": {
+      "message": "Auf diesem Wechselrichter läuft bereits ein Steuerungstest."
+    },
+    "control_test_modbus_control_on": {
+      "message": "Modbus-Steuerung ausschalten und eine Minute warten, bis der Wechselrichter an die EcoFlow-App zurückgegeben ist, dann den Steuerungstest starten. Es wurde nichts geschrieben."
+    },
+    "control_test_no_data": {
+      "message": "Der Wechselrichter ist nicht verbunden oder wurde noch nicht gelesen. Es wurde nichts geschrieben."
+    },
+    "control_test_no_status": {
+      "message": "Der Systemstatus (40530) ist nicht lesbar oder Modbus TCP scheint in der EcoFlow-App deaktiviert, daher könnte der Test nicht sehen, was der Wechselrichter tut. Es wurde nichts geschrieben."
+    },
+    "control_test_other_controller": {
+      "message": "Der Wechselrichter meldet eine andere Modbus-Steuerung. Diese beenden, eine Minute warten und erneut versuchen. Es wurde nichts geschrieben."
     }
   }
 }

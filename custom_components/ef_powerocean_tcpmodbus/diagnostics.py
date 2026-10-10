@@ -71,6 +71,11 @@ async def async_get_config_entry_diagnostics(
             "control_power": coordinator.control.power,
             "control_command": f"0x{coordinator.control.command:08X}",
             "unsupported_registers": sorted(coordinator.unsupported_registers),
+            # The last control test run here, the report to attach to an issue.
+            "control_test": {
+                "state": str(coordinator.control_test.state),
+                "last_report": coordinator.control_test.last_report,
+            },
             "protocol_report": {
                 key: (coordinator.data or {}).get(key) for key in PROTOCOL_REPORT_KEYS
             },

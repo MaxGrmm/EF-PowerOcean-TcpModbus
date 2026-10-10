@@ -13,7 +13,15 @@ from homeassistant.components.logbook import (
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import Event, HomeAssistant, callback
 
-from .const import ATTR_MODE, DOMAIN, EVENT_COMMAND_EXPIRED
+from .const import (
+    ATTR_MODE,
+    DOMAIN,
+    EVENT_COMMAND_EXPIRED,
+    EVENT_CONTROL_TEST_FINISHED,
+    EVENT_CONTROL_TEST_STARTED,
+)
+
+CONTROL_TEST_NAME = "Control test"
 
 
 @callback
@@ -36,3 +44,32 @@ def async_describe_events(
         return described
 
     async_describe_event(DOMAIN, EVENT_COMMAND_EXPIRED, async_describe_command_expired)
+
+    @callback
+    def async_describe_control_test_started(event: Event) -> dict[str, Any]:
+        return {
+            LOGBOOK_ENTRY_NAME: CONTROL_TEST_NAME,
+            LOGBOOK_ENTRY_MESSAGE: f"started at {event.data.get('power', 0):.0f} W",
+        }
+
+    @callback
+    def async_describe_control_test_finished(event: Event) -> dict[str, Any]:
+        data = event.data
+        if data.get("outcome") != "done":
+            message = f"{data.get('outcome')}: {data.get('abort_reason')}"
+        else:
+            counts: dict[str, int] = {}
+            for verdict in (data.get("verdicts") or {}).values():
+                counts[verdict] = counts.get(verdict, 0) + 1
+            message = "finished: " + ", ".join(
+                f"{count} {verdict.replace('_', ' ')}"
+                for verdict, count in sorted(counts.items())
+            )
+        return {LOGBOOK_ENTRY_NAME: CONTROL_TEST_NAME, LOGBOOK_ENTRY_MESSAGE: message}
+
+    async_describe_event(
+        DOMAIN, EVENT_CONTROL_TEST_STARTED, async_describe_control_test_started
+    )
+    async_describe_event(
+        DOMAIN, EVENT_CONTROL_TEST_FINISHED, async_describe_control_test_finished
+    )

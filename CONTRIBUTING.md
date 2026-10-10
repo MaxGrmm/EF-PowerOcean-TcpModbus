@@ -120,9 +120,23 @@ uv pip install -r requirements-development.txt
 uv run python scripts/control_feature_scan.py <inverter_ip>
 ```
 
-It takes 5 to 10 minutes. `--power` sets the test power (default 1500 W), `--skip-manual` leaves out the app checks and `--no-handback-wait` skips the final 80 s. A method counts as followed once the measurement has stayed within the integration's tolerance for three samples in a row, so the verdicts match what the Control Status sensor would show.
+It takes 5 to 10 minutes. `--power` sets the test power (default 1500 W), `--skip-manual` leaves out the app checks, `--no-handback-wait` skips the final 80 s and `--json <path>` also writes the report as JSON. A method counts as followed once the measurement has stayed within the integration's tolerance for three samples in a row, so the verdicts match what the Control Status sensor would show.
 
 `--reserve-probe` runs a different path for one question: does writing the backup reserve (40536) do what setting it in the app does? Set in the app, a reserve above the SOC makes the inverter charge from the grid up to it, and one at the SOC stops it discharging. The probe tests both effects by writing the register under each control state: without a session, in a session on the default method, with the control word re-sent after the write, and under a battery hold. Before and after the register cases it asks you to set the reserve in the app, without and with a session, as the reference the register is judged against, and it ends by checking whether a value written in a session survives its end. Each case watches for two minutes and puts the reserve back. Run it while the battery is covering the house, as the floor cases are skipped otherwise; `--skip-manual` leaves out the app cases. A model whose register floor case passes can have its `battery_reserve` trait set to native, which makes the Battery Reserve write the inverter's own reserve.
+
+The control methods can also be tested from Home Assistant with the `run_control_test` action, which is what users run after a firmware update (see the README). Both run the tests in [control_test_core.py](custom_components/ef_powerocean_tcpmodbus/control_test_core.py): the same plans, the same verdicts and the same JSON report. The action covers the control methods and the hand-back only; the write order, the app checks, the grid feed switch and the reserve probe stay in the script and show as `not_tested` in its reports. A verdict is one of `followed`, `not_followed`, `unreachable` (battery full or at its reserve), `inconclusive` (already at the target before the command), `skipped`, `write_refused` and `not_tested`.
+
+### Comparing Firmware
+
+[scripts/compare_reports.py](scripts/compare_reports.py) lists what changed between two control test reports, typically one per firmware version of the same model:
+
+```shell
+uv run python scripts/compare_reports.py <old report> <new report>
+```
+
+It reads the action's saved JSON, a diagnostics download, the action's response pasted from Developer Tools, or the script's `--json` output. Lines marked `!` are likely the firmware: a method that stopped being followed or reported, or a ramp that became much slower. Lines marked `~` are likely the conditions, such as a test skipped for a full battery; ask for a run in other conditions before concluding anything. It exits 1 when anything significant changed.
+
+Changing what a report field means needs `REPORT_SCHEMA_VERSION` raised in `control_test_core.py`; adding a field does not.
 
 ### Writable Registers and Battery Control
 

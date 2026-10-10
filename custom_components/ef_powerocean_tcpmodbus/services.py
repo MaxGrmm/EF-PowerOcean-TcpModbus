@@ -7,16 +7,25 @@ from typing import Final
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_DEVICE_ID
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+)
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
 from .const import ATTR_MODE, CONTROL_FEATURES, DOMAIN
+from .control_test_core import DEFAULT_TEST_POWER_W, MAX_TEST_POWER_W, MIN_TEST_POWER_W
 from .coordinator import EcoflowCoordinator
 from .models import ControlFeature
 
 SERVICE_SET_BATTERY_COMMAND: Final = "set_battery_command"
+SERVICE_RUN_CONTROL_TEST: Final = "run_control_test"
+SERVICE_CANCEL_CONTROL_TEST: Final = "cancel_control_test"
+ATTR_CONFIRM: Final = "confirm"
 ATTR_POWER: Final = "power"
 ATTR_CHARGE_LIMIT_SOC: Final = "charge_limit_soc"
 ATTR_EXPIRE_IN: Final = "expire_in"
@@ -35,6 +44,23 @@ SET_BATTERY_COMMAND_SCHEMA: Final = vol.Schema(
             vol.Coerce(float), vol.Range(min=60, max=86_400)
         ),
     }
+)
+
+
+# The confirmation is a field of its own, and required, so the action is never
+# started by leaving a default in place.
+RUN_CONTROL_TEST_SCHEMA: Final = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): cv.string,
+        vol.Required(ATTR_CONFIRM): cv.boolean,
+        vol.Optional(ATTR_POWER, default=DEFAULT_TEST_POWER_W): vol.All(
+            vol.Coerce(float), vol.Range(min=MIN_TEST_POWER_W, max=MAX_TEST_POWER_W)
+        ),
+    }
+)
+
+CANCEL_CONTROL_TEST_SCHEMA: Final = vol.Schema(
+    {vol.Required(ATTR_DEVICE_ID): cv.string}
 )
 
 
@@ -81,6 +107,42 @@ def async_setup_services(hass: HomeAssistant) -> None:
         SERVICE_SET_BATTERY_COMMAND,
         async_set_battery_command,
         schema=SET_BATTERY_COMMAND_SCHEMA,
+    )
+
+    async def async_run_control_test(call: ServiceCall) -> ServiceResponse:
+        """Start the control test; with a response asked for, wait for its report.
+
+        Without one the action returns at once and the Control Test sensor follows
+        the run, so an automation is not held up for the ten minutes it takes.
+        """
+        if not call.data[ATTR_CONFIRM]:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="control_test_not_confirmed"
+            )
+        control_test = _coordinator_for(hass, call.data[ATTR_DEVICE_ID]).control_test
+        power = call.data[ATTR_POWER]
+        if call.return_response:
+            return await control_test.async_run(power)
+        control_test.async_start(power)
+        return None
+
+    async def async_cancel_control_test(call: ServiceCall) -> None:
+        await _coordinator_for(
+            hass, call.data[ATTR_DEVICE_ID]
+        ).control_test.async_cancel()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RUN_CONTROL_TEST,
+        async_run_control_test,
+        schema=RUN_CONTROL_TEST_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CANCEL_CONTROL_TEST,
+        async_cancel_control_test,
+        schema=CANCEL_CONTROL_TEST_SCHEMA,
     )
 
 

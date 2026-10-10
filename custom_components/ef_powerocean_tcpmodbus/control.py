@@ -353,6 +353,33 @@ class ControlManager:
         self._deviation_polls = 0
         # The last frame read, so a ceiling can be quoted between polls.
         self._inputs = ControlInputs()
+        # While the control test drives the inverter itself, nothing here writes.
+        self._test_running = False
+
+    @property
+    def test_running(self) -> bool:
+        """Return whether the control test owns the inverter right now."""
+        return self._test_running
+
+    def begin_test(self) -> None:
+        """Stand aside for the control test: refuse commands and write nothing.
+
+        The test only starts with Modbus Control off, so there is no command of ours
+        to interrupt; this keeps one from being started while it runs.
+        """
+        self._test_running = True
+        self._on_update()
+
+    def end_test(self) -> None:
+        self._test_running = False
+        self._on_update()
+
+    def _require_no_test(self) -> None:
+        if self._test_running:
+            raise HomeAssistantError(
+                "A control test is running and has the inverter. Wait for it to "
+                "finish, or cancel it; nothing was written."
+            )
 
     @property
     def enabled(self) -> bool:
@@ -577,6 +604,8 @@ class ControlManager:
         """
         if enabled == self._enabled:
             return
+        if enabled:
+            self._require_no_test()
         self._enabled = enabled
         if enabled:
             # We cannot know what the inverter follows now, so the next poll re-sends.
@@ -610,6 +639,7 @@ class ControlManager:
 
     def _require_modbus_control(self) -> None:
         """Refuse a command the inverter would store and ignore."""
+        self._require_no_test()
         if not self._enabled:
             raise HomeAssistantError(
                 "Modbus control is off. Turn on the Modbus Control switch to "
@@ -744,6 +774,8 @@ class ControlManager:
 
     async def async_set_battery_saver(self, enabled: bool) -> None:
         """Command battery saver mode without disturbing the control intent."""
+        # It writes the control word, which the test is using.
+        self._require_no_test()
         previous = self._battery_saver
         self._battery_saver = enabled
         try:
@@ -1471,6 +1503,10 @@ class ControlManager:
         force: bool = False,
     ) -> None:
         """Send what the mode and guards add up to, if it differs from the last send."""
+        if self._test_running:
+            if notify:
+                self._on_update()
+            return
         # Only a poll brings data; a user action re-applies the last poll's.
         polled = data is not None
         if data is not None:

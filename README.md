@@ -240,6 +240,43 @@ data:
 
 Run one controller at a time; the action doesn't arbitrate between them.
 
+### Testing the controls after a firmware update
+
+EcoFlow firmware updates can change which control methods the inverter follows. The
+**Run control test** action checks each method in both directions and writes a report
+you can attach to an issue, so a change in behaviour shows up before it surprises an
+automation.
+
+1. Turn off **Modbus Control** and wait a minute for the inverter to return to the
+   EcoFlow app. The test refuses to start otherwise; nothing is written until it does.
+2. Run the action, with **Confirm** on:
+
+   ```yaml
+   action: ef_powerocean_tcpmodbus.run_control_test
+   data:
+     device_id: <your inverter's device id>
+     confirm: true
+     power: 1500
+   ```
+
+3. Follow the **Control Test** sensor (diagnostic). It takes about 10 minutes. The
+   battery charges and discharges briefly at the test power and power flows to and
+   from the grid; at the end the inverter is handed back to the EcoFlow app.
+4. When it shows **Done**, open a
+   [Control test report](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues/new?template=control_test_report.yml) issue and
+   attach the report: either **Download diagnostics** on the device page, or the file
+   named in the sensor's `report_file` attribute, under
+   `config/ef_powerocean_tcpmodbus/`.
+
+While it runs, battery modes, the Modbus Control switch and Battery Saver are refused.
+**Cancel control test** stops it and hands control back. Run in Developer Tools with
+**Return response** ticked, the action waits and shows the report there instead.
+
+A run is most useful with the battery well above its reserve and below 94 %: a test
+the battery cannot take part in is reported as skipped rather than failed. The checks
+that need the EcoFlow app open, or that change device settings, are left to
+[scripts/control_feature_scan.py](CONTRIBUTING.md#control-test).
+
 ---
 
 ## Available Sensors
@@ -293,16 +330,17 @@ Run one controller at a time; the action doesn't arbitrate between them.
 
 ### Status
 
-| Sensor            | Values                          | Description                                 |
-| ----------------- | ------------------------------- | ------------------------------------------- |
-| Grid Mode         | Grid-connected / Islanded       | On-grid or off-grid operation               |
-| Operating Mode    | Standby / Self-consumption / AI | Working mode reported by the inverter       |
-| Self-powered Mode | Active / Inactive               | Self-consumption mode                       |
-| Intelligent Mode  | Active / Inactive               | AI mode                                     |
-| System Fault      |                                 | Device reports an abnormal system state     |
-| System Powered On |                                 | Device is powered on (diagnostic)           |
-| Modbus Control    |                                 | The device is accepting our commands        |
-| Control Status    |                                 | What the selected battery mode is achieving |
+| Sensor            | Values                          | Description                                   |
+| ----------------- | ------------------------------- | --------------------------------------------- |
+| Grid Mode         | Grid-connected / Islanded       | On-grid or off-grid operation                 |
+| Operating Mode    | Standby / Self-consumption / AI | Working mode reported by the inverter         |
+| Self-powered Mode | Active / Inactive               | Self-consumption mode                         |
+| Intelligent Mode  | Active / Inactive               | AI mode                                       |
+| System Fault      |                                 | Device reports an abnormal system state       |
+| System Powered On |                                 | Device is powered on (diagnostic)             |
+| Modbus Control    |                                 | The device is accepting our commands          |
+| Control Status    |                                 | What the selected battery mode is achieving   |
+| Control Test      | Idle / Running / Done / Aborted | The last run of the control test (diagnostic) |
 
 ### Faults (Diagnostic)
 

@@ -40,6 +40,8 @@ from .models import (
 
 DOMAIN: Final = "ef_powerocean_tcpmodbus"
 EVENT_COMMAND_EXPIRED: Final = f"{DOMAIN}_command_expired"
+EVENT_CONTROL_TEST_STARTED: Final = f"{DOMAIN}_control_test_started"
+EVENT_CONTROL_TEST_FINISHED: Final = f"{DOMAIN}_control_test_finished"
 ATTR_MODE: Final = "mode"
 DEFAULT_PORT: Final = 502
 DEFAULT_SLAVE: Final = 1
@@ -913,6 +915,16 @@ CONTROL_STATUS_SENSOR: Final = SensorDef(
     device_class="enum",
     options=tuple(str(status) for status in ControlStatus),
     icon="mdi:robot",
+)
+
+# The control test the run_control_test action starts; its states are those of
+# control_test.ControlTestState.
+CONTROL_TEST_SENSOR: Final = SensorDef(
+    key="control_test",
+    device_class="enum",
+    entity_category=EntityCategory.DIAGNOSTIC,
+    options=("idle", "running", "done", "aborted", "failed"),
+    icon="mdi:test-tube",
 )
 
 # Ceiling for a mode whose limit registers are all missing or read zero.
