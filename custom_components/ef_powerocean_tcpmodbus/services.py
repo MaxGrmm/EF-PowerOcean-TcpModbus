@@ -13,10 +13,14 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
 from .const import ATTR_MODE, CONTROL_FEATURES, DOMAIN
+from .control_test_core import DEFAULT_TEST_POWER_W, MAX_TEST_POWER_W, MIN_TEST_POWER_W
 from .coordinator import EcoflowCoordinator
 from .models import ControlFeature
 
 SERVICE_SET_BATTERY_COMMAND: Final = "set_battery_command"
+SERVICE_RUN_CONTROL_TEST: Final = "run_control_test"
+SERVICE_CANCEL_CONTROL_TEST: Final = "cancel_control_test"
+ATTR_CONFIRM: Final = "confirm"
 ATTR_POWER: Final = "power"
 ATTR_CHARGE_LIMIT_SOC: Final = "charge_limit_soc"
 ATTR_EXPIRE_IN: Final = "expire_in"
@@ -35,6 +39,23 @@ SET_BATTERY_COMMAND_SCHEMA: Final = vol.Schema(
             vol.Coerce(float), vol.Range(min=60, max=86_400)
         ),
     }
+)
+
+
+# The confirmation is a field of its own, and required, so the action is never
+# started by leaving a default in place.
+RUN_CONTROL_TEST_SCHEMA: Final = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): cv.string,
+        vol.Required(ATTR_CONFIRM): cv.boolean,
+        vol.Optional(ATTR_POWER, default=DEFAULT_TEST_POWER_W): vol.All(
+            vol.Coerce(float), vol.Range(min=MIN_TEST_POWER_W, max=MAX_TEST_POWER_W)
+        ),
+    }
+)
+
+CANCEL_CONTROL_TEST_SCHEMA: Final = vol.Schema(
+    {vol.Required(ATTR_DEVICE_ID): cv.string}
 )
 
 
@@ -83,11 +104,56 @@ def async_setup_services(hass: HomeAssistant) -> None:
         schema=SET_BATTERY_COMMAND_SCHEMA,
     )
 
+    async def async_run_control_test(call: ServiceCall) -> None:
+        """Start the control test and return at once.
+
+        The run takes about ten minutes. Waiting for it here would tie it to the
+        caller: the app's connection drops when the phone locks, and Developer
+        Tools then shows an error for a test that is in fact still running. The
+        Control Test sensor follows the run, and a notification says when the
+        report is ready.
+        """
+        if not call.data[ATTR_CONFIRM]:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="control_test_not_confirmed"
+            )
+        control_test = _coordinator_for(hass, call.data[ATTR_DEVICE_ID]).control_test
+        control_test.async_start(call.data[ATTR_POWER])
+
+    async def async_cancel_control_test(call: ServiceCall) -> None:
+        await _coordinator_for(
+            hass, call.data[ATTR_DEVICE_ID]
+        ).control_test.async_cancel()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RUN_CONTROL_TEST,
+        async_run_control_test,
+        schema=RUN_CONTROL_TEST_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CANCEL_CONTROL_TEST,
+        async_cancel_control_test,
+        schema=CANCEL_CONTROL_TEST_SCHEMA,
+    )
+
+
+def _entry_ids(device: dr.DeviceEntry) -> set[str]:
+    """Return the config entries of a device.
+
+    Home Assistant 2026.10 gives a device a single config_entry_id and deprecates
+    config_entries, which older versions still need.
+    """
+    if hasattr(device, "config_entry_id"):
+        return {device.config_entry_id} if device.config_entry_id else set()
+    return set(device.config_entries)
+
 
 def _coordinator_for(hass: HomeAssistant, device_id: str) -> EcoflowCoordinator:
     """Return the coordinator of a device this integration has set up."""
     if device := dr.async_get(hass).async_get(device_id):
-        for entry_id in device.config_entries:
+        for entry_id in _entry_ids(device):
             entry = hass.config_entries.async_get_entry(entry_id)
             if (
                 entry is not None

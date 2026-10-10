@@ -7,6 +7,8 @@
 - Control sends the command again when the inverter doesn't report following it, as after an inverter restart, and shows Not accepted by inverter if that doesn't help.
 - Control steps aside while off-grid or with the battery disconnected, and Control Status shows Off-grid, Battery disconnected or Inverter fault.
 - Control Status shows Limited by inverter when the battery goes the other way from the command, or past it, instead of Ramping indefinitely.
+- Run control test action: checks which control methods the inverter's firmware follows and writes a report to attach to an issue, followed by the new Control Test sensor. The action returns as soon as the test has started, and a notification says when the report is ready. It can start with Modbus Control on: the selected battery mode pauses, Control Status shows Control test, and the mode resumes afterwards. Cancel control test stops it. The last report is included in the diagnostics.
+- `scripts/compare_reports.py` lists what changed between two control test reports, such as before and after a firmware update, and `scripts/control_feature_scan.py --json` writes the same report.
 - Charge to Battery Reserve: below the Battery Reserve, the battery charges from the grid up to it at the Charge Battery power, as the app's backup reserve does.
 - Each poll reads only the registers an enabled entity, the battery control or the energy counters need, so a disabled sensor no longer costs a read. On the Ocean 2, which reads registers one at a time, this takes them off the poll.
 - Registers the inverter refused are tried again once its firmware version changes, rather than only after a restart of Home Assistant or a reload, and the device page shows the new version straight away.
@@ -19,6 +21,10 @@
 
 - The Battery Reserve is the one reserve control: native on the PowerOcean Three Phase, where it writes the inverter's own reserve, and emulated by the integration on the other models. Its `implementation` attribute says which, and the integration options can switch it to test a model.
 - The Minimum SOC Limit number is removed. The inverter's reserve shows as the App Backup Reserve sensor on models with an emulated reserve.
+
+### Fixed
+
+- The battery command actions no longer log a deprecation warning on Home Assistant 2026.10 for looking up the device's config entry.
 
 ## [2.8.2] - 2026-10-07
 

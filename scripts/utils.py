@@ -32,11 +32,11 @@ def load_integration() -> tuple[types.ModuleType, ...]:
     sys.modules[PACKAGE] = package
     return tuple(
         importlib.import_module(f"{PACKAGE}.{module}")
-        for module in ("const", "models", "telemetry")
+        for module in ("const", "models", "telemetry", "control_test_core")
     )
 
 
-const, models, telemetry = load_integration()
+const, models, telemetry, core = load_integration()
 
 from pymodbus.client import ModbusTcpClient  # noqa: E402
 
@@ -104,9 +104,12 @@ class RegisterReader:
 
 
 def report_device(
-    reader: RegisterReader, show_serial: bool
+    reader: RegisterReader, show_serial: bool, identity: dict | None = None
 ) -> models.InverterModel | None:
-    """Print the device identity and return its detected model, if known."""
+    """Print the device identity and return its detected model, if known.
+
+    *identity*, if given, is filled with the firmware and protocol version.
+    """
     print("== Device ==")
     block = const.DEVICE_INFO_BLOCK
     words, reason = reader.read(block.start, block.count)
@@ -141,6 +144,9 @@ def report_device(
         f"  Device address:    {int(address) if address is not None else 'unknown'}"
         + (f" [unreadable: {address_reason}]" if address is None else "")
     )
+    if identity is not None:
+        identity["firmware_version"] = firmware
+        identity["protocol_version"] = int(protocol) if protocol is not None else None
     name = detected.traits.display_name if detected else "UNKNOWN"
     print(f"  Detected model:    {name}")
     if detected is None:

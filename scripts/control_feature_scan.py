@@ -25,14 +25,15 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import statistics
 import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Final
 
 from pymodbus.client import ModbusTcpClient
@@ -41,6 +42,7 @@ from utils import (
     MANIFEST,
     RegisterReader,
     const,
+    core,
     models,
     render_address,
     report_device,
@@ -51,11 +53,7 @@ ControlMode = models.ControlMode
 Feature = models.ControlFeature
 RegisterType = models.RegisterType
 
-SETPOINT_KEYS: Final = (
-    "battery_power_setpoint",
-    "system_power_setpoint",
-    "inverter_power_setpoint",
-)
+SETPOINT_KEYS: Final = core.SETPOINT_KEYS
 
 # The registers sampled while testing; a small set, so a sample takes a second.
 WATCHED_KEYS: Final = (
@@ -74,23 +72,22 @@ WATCHED_KEYS: Final = (
     *SETPOINT_KEYS,
 )
 
-DEFAULT_TEST_POWER_W: Final = 1500
-MIN_TEST_POWER_W: Final = 600
-MAX_TEST_POWER_W: Final = 3000
+# The control tests, their judgement and the report are shared with the
+# integration's run_control_test action, so both reach the same verdicts.
+DEFAULT_TEST_POWER_W: Final = core.DEFAULT_TEST_POWER_W
+MIN_TEST_POWER_W: Final = core.MIN_TEST_POWER_W
+MAX_TEST_POWER_W: Final = core.MAX_TEST_POWER_W
 PROBE_SETPOINT_W: Final = 500
 # A 32-bit write is echoed as sent and only republished in read order a few
 # seconds later, so the word order is judged on the reading after this.
 WRITE_ORDER_SETTLE_S: Final = 15
 SAMPLE_GAP_S: Final = 3
-# The PowerOcean Plus took up to 30s to ramp to 1500 W, so this leaves margin.
-CONTROL_SETTLE_S: Final = 60
-RETURN_SETTLE_S: Final = 9
-STATUS_BIT_WAIT_S: Final = 15
-HANDBACK_WAIT_S: Final = const.HEARTBEAT_WINDOW_S + 20
-# Room left above the inverter's own floor before discharging, and below full
-# before charging, so the battery can actually move the way the test asks.
-SOC_MARGIN: Final = 5.0
-MIN_ACHIEVABLE_W: Final = 300.0
+CONTROL_SETTLE_S: Final = core.CONTROL_SETTLE_S
+RETURN_SETTLE_S: Final = core.RETURN_SETTLE_S
+STATUS_BIT_WAIT_S: Final = core.STATUS_BIT_WAIT_S
+HANDBACK_WAIT_S: Final = core.HANDBACK_WAIT_S
+SOC_MARGIN: Final = core.SOC_MARGIN
+MIN_ACHIEVABLE_W: Final = core.MIN_ACHIEVABLE_W
 # The grid power above which the export counts as stopped. The inverter holds a
 # zero-export limit to within a few tens of watts, not exactly.
 EXPORT_STOPPED_W: Final = const.GUARD_POWER_DEADBAND_W
@@ -127,58 +124,9 @@ class Aborted(Exception):
     pass
 
 
-@dataclass(frozen=True)
-class CoreTest:
-    """One signed test of a control method."""
-
-    name: str
-    method: models.ControlMode
-    setpoint_key: str
-    measure_key: str
-    # +1 draws into the battery or from the grid, -1 feeds out.
-    sign: int
-
-    @property
-    def charges(self) -> bool:
-        return self.sign > 0
-
-
-def from_feature(name: str, feature: models.ControlFeature) -> CoreTest:
-    """Build a test from the integration's feature definition."""
-    definition = const.CONTROL_FEATURES[feature]
-    return CoreTest(
-        name,
-        definition.method,
-        definition.setpoint_key,
-        definition.measure_key,
-        definition.sign,
-    )
-
-
-# Test each protocol control method in both directions.
-CORE_TESTS: Final = (
-    from_feature("battery charge", Feature.CHARGE_BATTERY),
-    from_feature("battery discharge", Feature.DISCHARGE_BATTERY),
-    from_feature("grid draw", Feature.IMPORT_FROM_GRID),
-    from_feature("grid feed", Feature.EXPORT_TO_GRID),
-    # Not an integration feature yet, so declared here against the protocol:
-    # 40544 Inverter Power Draw/Feed Setting, positive draws from the grid, and
-    # 40550 Inverter Output Power, rectification positive.
-    CoreTest(
-        "inverter draw",
-        ControlMode.INVERTER_FEED,
-        "inverter_power_setpoint",
-        "inverter_output_power",
-        1,
-    ),
-    CoreTest(
-        "inverter feed",
-        ControlMode.INVERTER_FEED,
-        "inverter_power_setpoint",
-        "inverter_output_power",
-        -1,
-    ),
-)
+CoreTest = core.CoreTest
+CORE_TESTS: Final = core.CORE_TESTS
+Verdict = core.Verdict
 
 
 class ReserveEffect(StrEnum):
@@ -240,15 +188,6 @@ RESERVE_CASES: Final = (
 
 
 @dataclass
-class ControlResult:
-    test: CoreTest
-    verdict: str
-    detail: str = ""
-    settle_s: float | None = None
-    mode_report: str = ""
-
-
-@dataclass
 class ManualResult:
     """Write result and optional app confirmation."""
 
@@ -264,10 +203,12 @@ class Report:
     write_order: str = "not tested"
     heartbeat: str = "not tested"
     manual_mode_bit: str = "not tested"
+    manual_mode_bit_s: float | None = None
     grid_feed: str = "not tested"
     handback: str = "not tested"
+    handback_s: float | None = None
     manual: dict[str, ManualResult | str] = field(default_factory=dict)
-    controls: list[ControlResult] = field(default_factory=list)
+    controls: list[core.FeatureResult] = field(default_factory=list)
     # --reserve-probe: case name -> what the inverter did.
     reserve: dict[str, str] = field(default_factory=dict)
 
@@ -434,14 +375,7 @@ class Inverter:
         return f"{seconds // 60}:{seconds % 60:02d}"
 
 
-def compose_control_word(method: models.ControlMode, battery_saver: bool) -> int:
-    """Build a control word from the method and battery-saver state."""
-    word = (
-        method.command_value & const.CONTROL_COMMAND_METHOD_MASK
-    ) << const.CONTROL_COMMAND_METHOD_SHIFT
-    if battery_saver:
-        word |= 1 << const.CONTROL_COMMAND_BATTERY_SAVER_BIT
-    return word
+compose_control_word = core.compose_control_word
 
 
 def fmt_power(value: Any) -> str:
@@ -738,6 +672,7 @@ def take_control(inverter: Inverter, report: Report) -> bool:
     took = wait_for(
         inverter, lambda d: d.get("device_modbus_control"), STATUS_BIT_WAIT_S
     )
+    report.manual_mode_bit_s = None if took is None else round(took, 1)
     report.manual_mode_bit = (
         f"set {took:.0f}s after the first heartbeat"
         if took is not None
@@ -772,73 +707,40 @@ def return_to_default(inverter: Inverter, saver: bool) -> None:
     inverter.write_control_word(compose_control_word(ControlMode.DEFAULT, saver))
 
 
-def measure(test: CoreTest, raw: dict) -> tuple[float | None, bool]:
-    """Return the measured value, deriving inverter output if its register is unreadable."""
-    value = raw.get(test.measure_key)
-    if value is not None:
-        return float(value), False
-    if test.measure_key == "inverter_output_power":
-        battery, solar = raw.get("battery_power"), raw.get("solar_power")
-        if battery is not None and solar is not None:
-            # Battery power includes solar; subtract it to get inverter output.
-            return float(battery) - float(solar), True
-    return None, False
-
-
-def export_limit(derived: dict) -> float | None:
-    """Return the watt cap when feed-in mode is limited."""
-    if derived.get("grid_feed_mode") is not models.GridFeedMode.LIMITED:
-        return None
-    return derived.get(const.FEED_IN_POWER_MAX_KEY)
+measure = core.measure
+skip_reason = core.skip_reason
+judge_modes = core.judge_modes
+tolerance = core.tolerance
 
 
 def achievable_power(test: CoreTest, raw: dict, derived: dict) -> float | None:
-    """Return the largest feed target allowed by the export cap.
-
-    Inverter feed can use house load plus unused export capacity. Grid feed is
-    limited by the cap alone.
-    """
-    if test.charges:
-        return None
-    cap = export_limit(derived)
-    configured = raw.get(const.FEED_IN_POWER_MAX_SETTING_KEY)
-    # Some models read 0 for the effective cap whatever the setting.
-    if cap is not None and cap < MIN_ACHIEVABLE_W and configured:
-        cap = configured
-    if cap is None:
-        return None
-    if test.method is ControlMode.SYSTEM_FEED:
-        return cap
-    house = float(raw.get("house_power") or 0)
-    solar = float(raw.get("solar_power") or 0)
-    return max(0.0, house + cap - solar)
-
-
-def skip_reason(test: CoreTest, raw: dict) -> str:
-    soc = raw.get("battery_soc")
-    floor = float(raw.get("min_soc_limit") or 0)
-    if soc is None:
-        return ""
-    if test.charges and soc >= models.BATTERY_FULL_SOC - SOC_MARGIN:
-        return f"battery at {soc:.0f}%, too full to take a charge"
-    if not test.charges and soc <= floor + SOC_MARGIN:
-        return f"battery at {soc:.0f}%, too close to its {floor:.0f}% reserve"
-    return ""
+    """Return the largest feed target the export cap allows, if it caps one."""
+    return core.achievable_power(test, {**raw, **derived})
 
 
 def observe(
     inverter: Inverter, test: CoreTest, signed_target: float, reserve: float
 ) -> tuple[
-    float | None, list[float], models.ControlStatus | None, list[tuple[float, str]]
+    float | None,
+    list[float],
+    models.ControlStatus | None,
+    list[tuple[float, str]],
+    list[dict[str, Any]],
 ]:
-    """Sample until active for three polls; return elapsed time, readings, and status."""
+    """Sample until active for three polls.
+
+    Return the time that took, the readings, the last status, the methods reported
+    and the trace the report keeps.
+    """
     start = time.monotonic()
     measured: list[float] = []
     modes: list[tuple[float, str]] = []
+    samples: list[dict[str, Any]] = []
     streak, state = 0, None
     inverter.wait(SAMPLE_GAP_S)
     while time.monotonic() - start < CONTROL_SETTLE_S:
         raw, derived = inverter.sample()
+        elapsed = time.monotonic() - start
         value, _ = measure(test, raw)
         soc = raw.get("battery_soc")
         state = models.deviation_state(
@@ -850,135 +752,80 @@ def observe(
             if (battery := raw.get("battery_power")) is None
             else float(battery),
         )
-        modes.append(
-            (time.monotonic() - start, str(derived.get("active_control_mode")))
-        )
+        modes.append((elapsed, str(derived.get("active_control_mode"))))
+        samples.append(core.trace_sample(elapsed, {**raw, **derived}))
         if value is not None:
             measured.append(value)
         print(sample_line(inverter, raw, derived, str(state)))
         streak = streak + 1 if state is models.ControlStatus.ACTIVE else 0
         if streak >= const.CONTROL_STATUS_DAMPING_POLLS:
-            return time.monotonic() - start, measured, state, modes
+            return time.monotonic() - start, measured, state, modes, samples
         inverter.wait(SAMPLE_GAP_S)
-    return None, measured, state, modes
-
-
-def judge_modes(expected: str, modes: list[tuple[float, str]]) -> str:
-    """Check recent status samples for the requested method; status can lag a poll."""
-    tail = [mode for _, mode in modes[-const.CONTROL_STATUS_DAMPING_POLLS :]]
-    if tail and all(mode == expected for mode in tail):
-        first = next(at for at, mode in modes if mode == expected)
-        return f"reports {expected} within {first:.0f}s"
-    seen = ", ".join(dict.fromkeys(tail)) or "nothing"
-    return f"reports {seen}, NOT {expected}"
-
-
-def is_decisive(test: CoreTest, power: float, baseline: float) -> bool:
-    """Return whether the target differs from baseline beyond tolerance."""
-    target = power * test.sign
-    return abs(target - baseline) > tolerance(target)
-
-
-def pick_decisive_power(
-    test: CoreTest, power: float, baseline: float, limit: float | None
-) -> float | None:
-    """Choose the nearest test power that differs clearly from baseline."""
-    ceiling = min(MAX_TEST_POWER_W, limit) if limit is not None else MAX_TEST_POWER_W
-    candidates = sorted(
-        range(MIN_TEST_POWER_W, int(ceiling) + 1, 100),
-        key=lambda candidate: abs(candidate - power),
-    )
-    return next((float(c) for c in candidates if is_decisive(test, c, baseline)), None)
-
-
-def tolerance(target: float) -> float:
-    return max(models.POWER_TOLERANCE_W, abs(target) * models.POWER_TOLERANCE_FRACTION)
+    return None, measured, state, modes, samples
 
 
 def test_control(
     inverter: Inverter, report: Report, test: CoreTest, power: float, saver: bool
 ) -> None:
     print(f"== {test.name}: method {test.method}, {test.setpoint_key} ==")
-    raw, _derived = inverter.sample()
-    if reason := skip_reason(test, raw):
-        report.controls.append(ControlResult(test, "skipped", reason))
+    raw, derived = inverter.sample()
+    plan, reason = core.plan_test(test, {**raw, **derived}, power)
+    if plan is None:
+        report.controls.append(
+            core.FeatureResult.for_test(test, Verdict.SKIPPED, reason)
+        )
         print(f"  Skipped: {reason}.\n")
         return
-
-    notes: list[str] = []
-    limit = achievable_power(test, raw, _derived)
-    if limit is not None and limit < MIN_ACHIEVABLE_W:
-        reason = f"the export cap leaves only {limit:.0f} W to feed"
-        report.controls.append(ControlResult(test, "skipped", reason))
-        print(f"  Skipped: {reason}.\n")
-        return
-    if limit is not None and limit < power:
-        notes.append(f"tested at {limit:.0f} W, the most the export cap allows")
-        power = limit
-
-    baseline, derived_measure = measure(test, raw)
-    if derived_measure:
-        notes.append(f"{test.measure_key} unreadable, used battery minus solar")
-    if baseline is not None and not is_decisive(test, power, baseline):
-        decisive_power = pick_decisive_power(test, power, baseline, limit)
-        if decisive_power is not None:
-            notes.append(
-                f"tested at {decisive_power:.0f} W, as {power:.0f} W was already "
-                "flowing before the command"
-            )
-            power = decisive_power
-    signed_target = power * test.sign
-    decisive = baseline is None or is_decisive(test, power, baseline)
+    signed_target = plan.signed_target(test)
     print(
         f"  Target: {test.measure_key} {signed_target:+.0f} W "
-        f"(before: {fmt_power(baseline).strip()} W)"
+        f"(before: {fmt_power(plan.baseline).strip()} W)"
     )
 
-    if failure := send(inverter, test, power, saver):
-        report.controls.append(ControlResult(test, "write refused", failure))
+    if failure := send(inverter, test, plan.power, saver):
+        report.controls.append(
+            core.FeatureResult.for_test(test, Verdict.WRITE_REFUSED, failure)
+        )
         print(f"  Write refused: {failure}\n")
         return_to_default(inverter, saver)
         return
 
     reserve = float(raw.get("min_soc_limit") or 0)
-    took, measured, state, modes = observe(inverter, test, signed_target, reserve)
-    tail = statistics.fmean(measured[-3:]) if measured else None
-    if took is not None and decisive:
-        result = ControlResult(test, "FOLLOWED", settle_s=took)
-    elif took is not None:
-        result = ControlResult(
-            test,
-            "inconclusive",
-            f"{test.measure_key} was already near the target before the command",
-        )
-    elif state in (
-        models.ControlStatus.UNREACHABLE_BATTERY_FULL,
-        models.ControlStatus.UNREACHABLE_BATTERY_EMPTY,
-    ):
-        result = ControlResult(test, "unreachable", str(state))
-    else:
-        result = ControlResult(
-            test,
-            "NOT FOLLOWED",
-            f"{test.measure_key} averaged {fmt_power(tail).strip()} W "
-            f"against {signed_target:+.0f} W",
-        )
-    result.mode_report = judge_modes(str(test.method), modes)
-    if notes:
-        result.detail = "; ".join(filter(None, (result.detail, *notes)))
+    took, measured, state, modes, samples = observe(
+        inverter, test, signed_target, reserve
+    )
+    verdict, detail, achieved = core.judge(test, plan, took, state, measured)
+    method_ok, mode_report = judge_modes(str(test.method), modes)
+    result = core.FeatureResult(
+        test.name,
+        str(test.method),
+        test.setpoint_key,
+        test.measure_key,
+        verdict,
+        detail,
+        target_w=signed_target,
+        baseline_w=plan.baseline,
+        achieved_w=None if achieved is None else round(achieved, 1),
+        settle_s=None if took is None else round(took, 1),
+        method_reported=method_ok,
+        status_report=mode_report,
+        samples=samples,
+    )
     print(
-        f"  Result: {result.verdict}"
+        f"  Result: {result.verdict.label}"
         + (f" after {took:.0f}s" if result.settle_s is not None else "")
         + (f", {result.detail}" if result.detail else "")
     )
-    print(f"  Status: {result.mode_report}")
+    print(f"  Status: {result.status_report}")
 
     return_to_default(inverter, saver)
     inverter.wait(RETURN_SETTLE_S)
     _, derived = inverter.sample()
     back = str(derived.get("active_control_mode"))
     if back != str(ControlMode.DEFAULT):
-        result.mode_report += f"; still reports {back} {RETURN_SETTLE_S}s after default"
+        result.status_report += (
+            f"; still reports {back} {RETURN_SETTLE_S}s after default"
+        )
     print(f"  Default method restored; status: {back}\n")
     report.controls.append(result)
 
@@ -1492,6 +1339,7 @@ def hand_back(inverter: Inverter, report: Report, saver: bool, wait: bool) -> No
         inverter, lambda d: d.get("device_modbus_control") is False, HANDBACK_WAIT_S
     )
     since = time.monotonic() - (inverter.last_heartbeat or time.monotonic())
+    report.handback_s = round(since, 1) if took is not None else None
     report.handback = (
         f"bit 11 cleared {since:.0f}s after the last heartbeat"
         if took is not None
@@ -1524,14 +1372,14 @@ def print_summary(inverter: Inverter, report: Report) -> None:
         ("manual mode status bit", report.manual_mode_bit),
     ]
     for result in report.controls:
-        line = result.verdict
+        line = result.verdict.label
         if result.settle_s is not None:
             line += f" in {result.settle_s:.0f}s"
         if result.detail:
             line += f" ({result.detail})"
-        if result.mode_report:
-            line += f"; status {result.mode_report}"
-        rows.append((result.test.name, line))
+        if result.status_report:
+            line += f"; status {result.status_report}"
+        rows.append((result.name, line))
     rows += [(f"reserve: {case}", result) for case, result in report.reserve.items()]
     if report.grid_feed != "not tested":
         rows.append(("grid feed switch", report.grid_feed))
@@ -1592,12 +1440,70 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--show-serial", action="store_true", help="the serial is masked by default"
     )
+    parser.add_argument(
+        "--json",
+        metavar="PATH",
+        help="also write the report as JSON, the form the run_control_test action "
+        "saves, to attach to an issue or compare with scripts/compare_reports.py",
+    )
     arguments = parser.parse_args()
     if not MIN_TEST_POWER_W <= arguments.power <= MAX_TEST_POWER_W:
         parser.error(
             f"--power must be between {MIN_TEST_POWER_W} and {MAX_TEST_POWER_W}"
         )
     return arguments
+
+
+def build_report(
+    arguments: argparse.Namespace,
+    version: str,
+    identity: dict,
+    model: models.InverterModel | None,
+    conditions: dict,
+    report: Report,
+    outcome: str,
+    abort_reason: str | None,
+) -> core.ControlTestReport:
+    """Return the run in the form shared with the integration's action."""
+    now = datetime.now(timezone.utc).astimezone().isoformat()
+    return core.ControlTestReport(
+        source="script",
+        created_at=now,
+        finished_at=now,
+        integration_version=version,
+        model=str(model) if model else None,
+        firmware_version=identity.get("firmware_version"),
+        protocol_version=identity.get("protocol_version"),
+        parameters={
+            "power_w": arguments.power,
+            "settle_s": CONTROL_SETTLE_S,
+            "reserve_probe": arguments.reserve_probe,
+        },
+        conditions=conditions,
+        heartbeat=report.heartbeat,
+        manual_mode_bit=report.manual_mode_bit,
+        manual_mode_bit_s=report.manual_mode_bit_s,
+        features=report.controls,
+        handback=report.handback,
+        handback_s=report.handback_s,
+        extra={
+            "write_order": report.write_order,
+            "battery_saver_and_settings": {
+                key: str(value) for key, value in report.manual.items()
+            },
+            "grid_feed_switch": report.grid_feed,
+            "reserve_probe": report.reserve,
+        },
+        outcome=outcome,
+        abort_reason=abort_reason,
+    )
+
+
+def write_json(path: str, report: core.ControlTestReport) -> None:
+    Path(path).write_text(
+        json.dumps(report.to_dict(), indent=2, default=str) + "\n", encoding="utf-8"
+    )
+    print(f"Report written to {path}.")
 
 
 def confirm(arguments: argparse.Namespace, manual: bool) -> bool:
@@ -1671,6 +1577,10 @@ def main() -> int:
 
     reader = RegisterReader(client, arguments.slave)
     report = Report()
+    identity: dict = {}
+    model: models.InverterModel | None = None
+    conditions: dict = {}
+    abort_reason: str | None = None
     inverter: Inverter | None = None
     saver = False
     originals: dict[str, int | None] = {}
@@ -1679,7 +1589,7 @@ def main() -> int:
     needs_cleanup = False
     interrupted = False
     try:
-        detected = report_device(reader, arguments.show_serial)
+        detected = report_device(reader, arguments.show_serial, identity)
         if arguments.model:
             model = models.InverterModel(arguments.model)
         elif detected is not None:
@@ -1693,7 +1603,8 @@ def main() -> int:
         reader.high_word_first = model.traits.high_word_first
         inverter = Inverter(client, reader, arguments.slave, model)
 
-        _, derived = preflight(inverter, arguments.force)
+        raw, derived = preflight(inverter, arguments.force)
+        conditions = core.conditions_of({**raw, **derived})
         saver = bool(derived.get("battery_saver_mode_ena"))
         originals = {key: inverter.read_int(key) for key in SETPOINT_KEYS}
 
@@ -1725,8 +1636,10 @@ def main() -> int:
         needs_cleanup = False
     except KeyboardInterrupt:
         interrupted = True
+        abort_reason = "interrupted"
         print("\n\nInterrupted.")
     except Aborted as reason:
+        abort_reason = str(reason)
         print(f"Stopped: {reason}\n")
     finally:
         if inverter is not None and needs_cleanup:
@@ -1762,6 +1675,20 @@ def main() -> int:
             print_summary(inverter, report)
             print(f"{reader.reads} reads; {inverter.writes} writes.")
         client.close()
+        if arguments.json:
+            write_json(
+                arguments.json,
+                build_report(
+                    arguments,
+                    version,
+                    identity,
+                    model,
+                    conditions,
+                    report,
+                    "done" if abort_reason is None else "aborted",
+                    abort_reason,
+                ),
+            )
 
     if interrupted:
         print("The test was interrupted, so the summary is incomplete.")

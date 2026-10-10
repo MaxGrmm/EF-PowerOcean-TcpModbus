@@ -38,3 +38,30 @@ set_battery_command:
           max: 86400
           unit_of_measurement: s
           mode: box
+run_control_test:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: ef_powerocean_tcpmodbus
+    confirm:
+      required: true
+      selector:
+        boolean:
+    power:
+      default: 1500
+      selector:
+        number:
+          min: 600
+          max: 3000
+          step: 100
+          unit_of_measurement: W
+          mode: box
+cancel_control_test:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: ef_powerocean_tcpmodbus

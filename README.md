@@ -197,6 +197,7 @@ doesn't expose a hard power limit over Modbus. See
 | Off-grid                    | Grid outage; control steps aside until the grid is back          |
 | Battery disconnected        | The battery dropped off; control steps aside until it's back     |
 | Inverter fault              | The inverter reports a fault or a stop                           |
+| Control test                | The control test has the inverter; the mode resumes after it     |
 
 If the inverter misses a guard's target, the status shows Ramping or Unreachable; the
 guard is still in the `guard` attribute.
@@ -239,6 +240,49 @@ data:
 - Only `mode: automatic` works while Modbus Control is off.
 
 Run one controller at a time; the action doesn't arbitrate between them.
+
+### Testing the controls after a firmware update
+
+EcoFlow firmware updates can change which control methods the inverter follows. The
+**Run control test** action checks each method in both directions and writes a report
+you can attach to an issue, so a change in behaviour shows up before it surprises an
+automation.
+
+1. Run the action, with **Confirm** on:
+
+   ```yaml
+   action: ef_powerocean_tcpmodbus.run_control_test
+   data:
+     device_id: <your inverter's device id>
+     confirm: true
+     power: 1500
+   ```
+
+2. Follow the **Control Test** sensor (diagnostic), or wait for the notification. It
+   takes about 10 minutes. The
+   battery charges and discharges briefly at the test power and power flows to and
+   from the grid. At the end the inverter is handed back to the EcoFlow app for a
+   minute, which the report times, and then to Modbus Control if it was on.
+3. When it shows **Done**, open a
+   [Control test report](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues/new?template=control_test_report.yml) issue and
+   attach the report: either **Download diagnostics** on the device page, or the file
+   named in the sensor's `report_file` attribute, under
+   `config/ef_powerocean_tcpmodbus/`.
+
+Modbus Control can stay on: a selected battery mode pauses for the test, Control
+Status shows **Control test**, and the mode is sent again when the test ends. The
+test refuses to start only while another Modbus controller holds the inverter;
+nothing is written in that case. While it runs, battery modes, switching Modbus
+Control on and Battery Saver are refused.
+
+The action returns as soon as the test has started, so the page can be closed; a
+notification says when the report is ready. **Cancel control test** stops a run and
+hands control back.
+
+A run is most useful with the battery well above its reserve and below 94 %: a test
+the battery cannot take part in is reported as skipped rather than failed. The checks
+that need the EcoFlow app open, or that change device settings, are left to
+[scripts/control_feature_scan.py](CONTRIBUTING.md#control-test).
 
 ---
 
@@ -293,16 +337,17 @@ Run one controller at a time; the action doesn't arbitrate between them.
 
 ### Status
 
-| Sensor            | Values                          | Description                                 |
-| ----------------- | ------------------------------- | ------------------------------------------- |
-| Grid Mode         | Grid-connected / Islanded       | On-grid or off-grid operation               |
-| Operating Mode    | Standby / Self-consumption / AI | Working mode reported by the inverter       |
-| Self-powered Mode | Active / Inactive               | Self-consumption mode                       |
-| Intelligent Mode  | Active / Inactive               | AI mode                                     |
-| System Fault      |                                 | Device reports an abnormal system state     |
-| System Powered On |                                 | Device is powered on (diagnostic)           |
-| Modbus Control    |                                 | The device is accepting our commands        |
-| Control Status    |                                 | What the selected battery mode is achieving |
+| Sensor            | Values                          | Description                                   |
+| ----------------- | ------------------------------- | --------------------------------------------- |
+| Grid Mode         | Grid-connected / Islanded       | On-grid or off-grid operation                 |
+| Operating Mode    | Standby / Self-consumption / AI | Working mode reported by the inverter         |
+| Self-powered Mode | Active / Inactive               | Self-consumption mode                         |
+| Intelligent Mode  | Active / Inactive               | AI mode                                       |
+| System Fault      |                                 | Device reports an abnormal system state       |
+| System Powered On |                                 | Device is powered on (diagnostic)             |
+| Modbus Control    |                                 | The device is accepting our commands          |
+| Control Status    |                                 | What the selected battery mode is achieving   |
+| Control Test      | Idle / Running / Done / Aborted | The last run of the control test (diagnostic) |
 
 ### Faults (Diagnostic)
 

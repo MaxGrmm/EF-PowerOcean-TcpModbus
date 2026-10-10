@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import voluptuous as vol
@@ -29,9 +29,16 @@ def inverter(hass: HomeAssistant) -> SimpleNamespace:
         config_entry_id=entry.entry_id, identifiers={(DOMAIN, "HJ31")}
     )
     control = SimpleNamespace(enabled=True, async_set_command=AsyncMock())
-    entry.runtime_data = SimpleNamespace(control=control)
+    control_test = SimpleNamespace(
+        async_run=AsyncMock(),
+        async_start=Mock(),
+        async_cancel=AsyncMock(),
+    )
+    entry.runtime_data = SimpleNamespace(control=control, control_test=control_test)
     services.async_setup_services(hass)
-    return SimpleNamespace(device_id=device.id, control=control)
+    return SimpleNamespace(
+        device_id=device.id, control=control, control_test=control_test
+    )
 
 
 async def call(hass: HomeAssistant, **data) -> None:
@@ -53,6 +60,12 @@ async def test_setting_up_the_integration_offers_the_action(
     assert set(description["fields"]) == {
         str(key) for key in services.SET_BATTERY_COMMAND_SCHEMA.schema
     }
+    for name, schema in (
+        (services.SERVICE_RUN_CONTROL_TEST, services.RUN_CONTROL_TEST_SCHEMA),
+        (services.SERVICE_CANCEL_CONTROL_TEST, services.CANCEL_CONTROL_TEST_SCHEMA),
+    ):
+        fields = (await async_get_all_descriptions(hass))[DOMAIN][name]["fields"]
+        assert set(fields) == {str(key) for key in schema.schema}
 
 
 async def test_a_templated_command_reaches_the_inverter(
@@ -129,3 +142,80 @@ async def test_only_automatic_is_accepted_while_modbus_control_is_off(
     )
 
     assert inverter.control.async_set_command.await_count == 1
+
+
+async def test_the_control_test_needs_the_confirmation(
+    hass: HomeAssistant, inverter: SimpleNamespace
+) -> None:
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            services.SERVICE_RUN_CONTROL_TEST,
+            {"device_id": inverter.device_id, "confirm": False},
+            blocking=True,
+        )
+    with pytest.raises(vol.Invalid):
+        await hass.services.async_call(
+            DOMAIN,
+            services.SERVICE_RUN_CONTROL_TEST,
+            {"device_id": inverter.device_id},
+            blocking=True,
+        )
+
+    inverter.control_test.async_start.assert_not_called()
+    inverter.control_test.async_run.assert_not_awaited()
+
+
+async def test_the_control_test_returns_as_soon_as_it_has_started(
+    hass: HomeAssistant, inverter: SimpleNamespace
+) -> None:
+    """The run outlives the call: a dropped connection must not look like a failure."""
+    await hass.services.async_call(
+        DOMAIN,
+        services.SERVICE_RUN_CONTROL_TEST,
+        {"device_id": inverter.device_id, "confirm": True, "power": "1000"},
+        blocking=True,
+    )
+
+    inverter.control_test.async_start.assert_called_once_with(1000.0)
+    inverter.control_test.async_run.assert_not_awaited()
+
+
+async def test_a_control_test_power_out_of_range_is_refused(
+    hass: HomeAssistant, inverter: SimpleNamespace
+) -> None:
+    with pytest.raises(vol.Invalid):
+        await hass.services.async_call(
+            DOMAIN,
+            services.SERVICE_RUN_CONTROL_TEST,
+            {"device_id": inverter.device_id, "confirm": True, "power": 5000},
+            blocking=True,
+        )
+
+
+async def test_the_control_test_can_be_cancelled(
+    hass: HomeAssistant, inverter: SimpleNamespace
+) -> None:
+    await hass.services.async_call(
+        DOMAIN,
+        services.SERVICE_CANCEL_CONTROL_TEST,
+        {"device_id": inverter.device_id},
+        blocking=True,
+    )
+
+    inverter.control_test.async_cancel.assert_awaited_once()
+
+
+async def test_a_device_is_found_by_its_config_entry(
+    hass: HomeAssistant, inverter: SimpleNamespace, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Without the deprecated DeviceEntry.config_entries on Home Assistant 2026.10."""
+    await hass.services.async_call(
+        DOMAIN,
+        services.SERVICE_CANCEL_CONTROL_TEST,
+        {"device_id": inverter.device_id},
+        blocking=True,
+    )
+
+    inverter.control_test.async_cancel.assert_awaited_once()
+    assert "config_entries" not in caplog.text

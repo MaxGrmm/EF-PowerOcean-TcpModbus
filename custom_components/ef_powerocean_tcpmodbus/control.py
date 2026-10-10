@@ -353,6 +353,53 @@ class ControlManager:
         self._deviation_polls = 0
         # The last frame read, so a ceiling can be quoted between polls.
         self._inputs = ControlInputs()
+        # While the control test drives the inverter itself, nothing here writes.
+        self._test_running = False
+
+    @property
+    def test_running(self) -> bool:
+        """Return whether the control test owns the inverter right now."""
+        return self._test_running
+
+    @property
+    def holds_control(self) -> bool:
+        """Return whether our heartbeat is what holds the inverter, on or handing back.
+
+        Bit 11 of the System Status says only that some controller holds it; this
+        says the controller is us.
+        """
+        return self._heartbeat.in_control
+
+    async def async_begin_test(self) -> None:
+        """Stand aside for the control test: refuse commands and write nothing.
+
+        The heartbeat stops too, as the test beats on its own; it starts within the
+        inverter's window, so control is not handed back in between. The selected
+        mode, its power and its expiry stay as they are, to resume after the test.
+        """
+        self._test_running = True
+        await self._heartbeat.async_stop()
+        self._on_update()
+
+    def end_test(self) -> None:
+        """Take over again from the control test, if Modbus Control is still on.
+
+        The test leaves the inverter on the default method, so the next poll sends
+        the selected mode again, as after a restart.
+        """
+        self._test_running = False
+        if self._enabled:
+            self._control_stale = True
+            self._reset_deviation()
+            self._heartbeat.start()
+        self._on_update()
+
+    def _require_no_test(self) -> None:
+        if self._test_running:
+            raise HomeAssistantError(
+                "A control test is running and has the inverter. Wait for it to "
+                "finish, or cancel it; nothing was written."
+            )
 
     @property
     def enabled(self) -> bool:
@@ -500,6 +547,8 @@ class ControlManager:
     @property
     def status(self) -> ControlStatus:
         """Explain, in one word, what the selected mode is achieving."""
+        if self._test_running:
+            return ControlStatus.CONTROL_TEST
         if not self.in_control:
             if self.handing_back:
                 return ControlStatus.HANDING_BACK
@@ -577,6 +626,8 @@ class ControlManager:
         """
         if enabled == self._enabled:
             return
+        if enabled:
+            self._require_no_test()
         self._enabled = enabled
         if enabled:
             # We cannot know what the inverter follows now, so the next poll re-sends.
@@ -610,6 +661,7 @@ class ControlManager:
 
     def _require_modbus_control(self) -> None:
         """Refuse a command the inverter would store and ignore."""
+        self._require_no_test()
         if not self._enabled:
             raise HomeAssistantError(
                 "Modbus control is off. Turn on the Modbus Control switch to "
@@ -744,6 +796,8 @@ class ControlManager:
 
     async def async_set_battery_saver(self, enabled: bool) -> None:
         """Command battery saver mode without disturbing the control intent."""
+        # It writes the control word, which the test is using.
+        self._require_no_test()
         previous = self._battery_saver
         self._battery_saver = enabled
         try:
@@ -1471,6 +1525,10 @@ class ControlManager:
         force: bool = False,
     ) -> None:
         """Send what the mode and guards add up to, if it differs from the last send."""
+        if self._test_running:
+            if notify:
+                self._on_update()
+            return
         # Only a poll brings data; a user action re-applies the last poll's.
         polled = data is not None
         if data is not None:

@@ -24,6 +24,7 @@ from .const import (
     BATTERY_SOC_KEYS,
     CONF_BATTERY_COUNT,
     CONTROL_STATUS_SENSOR,
+    CONTROL_TEST_SENSOR,
     DAILY_ENERGY_SENSORS_DEVICE_RAW,
     ENERGY_SENSOR_MAP,
     SENSOR_MAP,
@@ -86,7 +87,13 @@ async def async_setup_entry(
     for sensor in DAILY_ENERGY_SENSORS_DEVICE_RAW:
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 
-    async_add_entities([*entities, EcoFlowControlStatusSensor(coordinator, entry)])
+    async_add_entities(
+        [
+            *entities,
+            EcoFlowControlStatusSensor(coordinator, entry),
+            EcoFlowControlTestSensor(coordinator, entry),
+        ]
+    )
 
 
 class EcoFlowControlStatusSensor(EcoFlowBaseEntity, SensorEntity):
@@ -126,6 +133,30 @@ class EcoFlowControlStatusSensor(EcoFlowBaseEntity, SensorEntity):
             "in_control": control.in_control,
             "expires_at": control.expires_at,
         }
+
+
+class EcoFlowControlTestSensor(EcoFlowBaseEntity, SensorEntity):
+    """Follows the control test the run_control_test action starts."""
+
+    def __init__(self, coordinator: EcoflowCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, CONTROL_TEST_SENSOR)
+        self._attr_device_class = CONTROL_TEST_SENSOR.device_class
+        self._attr_entity_category = CONTROL_TEST_SENSOR.entity_category
+        self._attr_options = list(CONTROL_TEST_SENSOR.options or ())
+        if CONTROL_TEST_SENSOR.icon:
+            self._attr_icon = CONTROL_TEST_SENSOR.icon
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def native_value(self) -> str:
+        return str(self.coordinator.control_test.state)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self.coordinator.control_test.attributes
 
 
 class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
