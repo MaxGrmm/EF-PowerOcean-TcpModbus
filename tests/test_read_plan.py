@@ -80,7 +80,9 @@ async def coordinator(hass: HomeAssistant) -> EcoflowCoordinator:
         data={const.CONF_HOST: "127.0.0.1", const.CONF_PORT: 5020},
     )
     entry.add_to_hass(hass)
-    return EcoflowCoordinator(hass, config_entry=entry)
+    coordinator = EcoflowCoordinator(hass, config_entry=entry)
+    coordinator.async_poll_on_demand()
+    return coordinator
 
 
 def _model_registers(coordinator: EcoflowCoordinator) -> frozenset[str]:
@@ -91,9 +93,24 @@ def _model_registers(coordinator: EcoflowCoordinator) -> frozenset[str]:
     )
 
 
-async def test_reads_everything_until_something_has_asked(coordinator) -> None:
-    """The first poll runs before the entities exist, and they all need a value."""
-    assert coordinator.polled_registers == _model_registers(coordinator)
+async def test_reads_everything_until_the_entities_have_all_asked(
+    hass: HomeAssistant,
+) -> None:
+    """A poll before the last entity is added would leave out what it shows."""
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: "127.0.0.1", const.CONF_PORT: 5020},
+    )
+    entry.add_to_hass(hass)
+    coordinator = EcoflowCoordinator(hass, config_entry=entry)
+    everything = _model_registers(coordinator)
+
+    remove = coordinator.async_add_listener(lambda: None, {"frequency"})
+    assert coordinator.polled_registers == everything
+
+    coordinator.async_poll_on_demand()
+    assert coordinator.polled_registers == OWN & everything | {"frequency"}
+    remove()
 
 
 async def test_without_entities_reads_what_the_coordinator_needs(coordinator) -> None:

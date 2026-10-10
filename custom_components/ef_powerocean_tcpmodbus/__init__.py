@@ -124,8 +124,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
     _async_claim_serial_number(hass, entry, coordinator)
     await coordinator.async_config_entry_first_refresh()
 
-    # The control loop reads its inputs whatever entities are enabled.
-    entry.async_on_unload(coordinator.async_require(ControlInputs.keys()))
     _async_update_modbus_disabled_issue(hass, entry, coordinator)
     entry.async_on_unload(
         coordinator.async_add_listener(
@@ -136,6 +134,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
     entry.runtime_data = coordinator
     _async_make_device_physical(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # The control loop reads its inputs whatever entities are enabled. With it and
+    # the entities all asking, the poll reads only what they ask for from here on.
+    entry.async_on_unload(coordinator.async_require(ControlInputs.keys()))
+    coordinator.async_poll_on_demand()
 
     # Reload integration when config entry data changes
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))

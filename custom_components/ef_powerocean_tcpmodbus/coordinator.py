@@ -90,8 +90,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     # Optional registers the device refused to read, which are no longer polled.
     _unsupported_keys: frozenset[str] = frozenset()
     # The data keys something asks for, which decide the registers polled. None
-    # reads everything, as the first poll does, so every entity starts with a value.
+    # reads everything, which the poll does until the entities have all been
+    # added: a poll in between would leave out what they have yet to ask for.
     _wanted_keys: frozenset[str] | None = None
+    _on_demand: bool = False
 
     def __init__(
         self,
@@ -449,7 +451,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         return self.async_add_listener(lambda: None, keys)
 
     @callback
+    def async_poll_on_demand(self) -> None:
+        """Stop reading everything, once everything that asks has been added."""
+        self._on_demand = True
+        self._async_track_wanted_keys()
+
+    @callback
     def _async_track_wanted_keys(self) -> None:
+        if not self._on_demand:
+            return
         wanted = self._own_keys.union(
             *(
                 context
