@@ -16,6 +16,7 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.util import dt
@@ -419,6 +420,18 @@ async def test_only_one_run_at_a_time(
 
     assert raised.value.translation_key == "control_test_running"
     await test.async_cancel()
+
+
+async def test_a_notification_says_the_report_is_ready(
+    hass: HomeAssistant, coordinator: FakeCoordinator
+) -> None:
+    await runner(coordinator).async_run(1500)
+
+    notifications = persistent_notification._async_get_or_create_notifications(hass)
+    (notification,) = notifications.values()
+    assert notification["title"] == "Control test finished"
+    assert "6 followed" in notification["message"]
+    assert "control_test_" in notification["message"]
 
 
 async def test_events_bracket_the_run(

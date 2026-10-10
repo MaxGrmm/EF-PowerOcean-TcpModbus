@@ -30,7 +30,7 @@ def inverter(hass: HomeAssistant) -> SimpleNamespace:
     )
     control = SimpleNamespace(enabled=True, async_set_command=AsyncMock())
     control_test = SimpleNamespace(
-        async_run=AsyncMock(return_value={"outcome": "done"}),
+        async_run=AsyncMock(),
         async_start=Mock(),
         async_cancel=AsyncMock(),
     )
@@ -166,33 +166,19 @@ async def test_the_control_test_needs_the_confirmation(
     inverter.control_test.async_run.assert_not_awaited()
 
 
-async def test_the_control_test_starts_in_the_background_without_a_response(
+async def test_the_control_test_returns_as_soon_as_it_has_started(
     hass: HomeAssistant, inverter: SimpleNamespace
 ) -> None:
+    """The run outlives the call: a dropped connection must not look like a failure."""
     await hass.services.async_call(
-        DOMAIN,
-        services.SERVICE_RUN_CONTROL_TEST,
-        {"device_id": inverter.device_id, "confirm": True},
-        blocking=True,
-    )
-
-    inverter.control_test.async_start.assert_called_once_with(1500.0)
-    inverter.control_test.async_run.assert_not_awaited()
-
-
-async def test_the_control_test_returns_its_report_when_asked(
-    hass: HomeAssistant, inverter: SimpleNamespace
-) -> None:
-    response = await hass.services.async_call(
         DOMAIN,
         services.SERVICE_RUN_CONTROL_TEST,
         {"device_id": inverter.device_id, "confirm": True, "power": "1000"},
         blocking=True,
-        return_response=True,
     )
 
-    assert response == {"outcome": "done"}
-    inverter.control_test.async_run.assert_awaited_once_with(1000.0)
+    inverter.control_test.async_start.assert_called_once_with(1000.0)
+    inverter.control_test.async_run.assert_not_awaited()
 
 
 async def test_a_control_test_power_out_of_range_is_refused(
@@ -218,3 +204,18 @@ async def test_the_control_test_can_be_cancelled(
     )
 
     inverter.control_test.async_cancel.assert_awaited_once()
+
+
+async def test_a_device_is_found_by_its_config_entry(
+    hass: HomeAssistant, inverter: SimpleNamespace, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Without the deprecated DeviceEntry.config_entries on Home Assistant 2026.10."""
+    await hass.services.async_call(
+        DOMAIN,
+        services.SERVICE_CANCEL_CONTROL_TEST,
+        {"device_id": inverter.device_id},
+        blocking=True,
+    )
+
+    inverter.control_test.async_cancel.assert_awaited_once()
+    assert "config_entries" not in caplog.text

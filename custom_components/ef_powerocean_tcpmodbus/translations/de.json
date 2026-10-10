@@ -574,7 +574,7 @@
     },
     "run_control_test": {
       "name": "Steuerungstest ausführen",
-      "description": "Prüft, welchen Steuerungsmethoden die Firmware dieses Wechselrichters folgt, wie scripts/control_feature_scan.py, und schreibt einen Bericht, der an ein GitHub-Issue angehängt werden kann. Ist die Modbus-Steuerung eingeschaltet, pausiert der gewählte Batteriemodus während des Tests und wird danach fortgesetzt. Die Batterie lädt und entlädt kurz mit der Testleistung, am Ende wird der Wechselrichter an die EcoFlow-App zurückgegeben. Dauert etwa 10 Minuten; mit Antwort wartet die Aktion auf den Bericht, sonst zeigt der Sensor Steuerungstest den Fortschritt.",
+      "description": "Prüft, welchen Steuerungsmethoden die Firmware dieses Wechselrichters folgt, wie scripts/control_feature_scan.py, und schreibt einen Bericht, der an ein GitHub-Issue angehängt werden kann. Ist die Modbus-Steuerung eingeschaltet, pausiert der gewählte Batteriemodus während des Tests und wird danach fortgesetzt. Die Batterie lädt und entlädt kurz mit der Testleistung, am Ende wird der Wechselrichter an die EcoFlow-App zurückgegeben. Dauert etwa 10 Minuten. Die Aktion kehrt sofort zurück; der Sensor Steuerungstest zeigt den Fortschritt, und eine Benachrichtigung meldet, wenn der Bericht bereit ist.",
       "fields": {
         "device_id": {
           "name": "Wechselrichter",

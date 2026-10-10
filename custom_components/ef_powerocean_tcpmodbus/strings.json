@@ -563,7 +563,7 @@
     },
     "run_control_test": {
       "name": "Run control test",
-      "description": "Checks which control methods this inverter's firmware follows, as scripts/control_feature_scan.py does, and writes a report to attach to a GitHub issue. If Modbus Control is on, the selected battery mode pauses for the test and resumes after it. The battery charges and discharges briefly at the test power, and the inverter is handed back to the EcoFlow app at the end. Takes about 10 minutes; ask for a response to wait for the report, or follow the Control Test sensor.",
+      "description": "Checks which control methods this inverter's firmware follows, as scripts/control_feature_scan.py does, and writes a report to attach to a GitHub issue. If Modbus Control is on, the selected battery mode pauses for the test and resumes after it. The battery charges and discharges briefly at the test power, and the inverter is handed back to the EcoFlow app at the end. Takes about 10 minutes. The action returns at once; the Control Test sensor follows the run, and a notification says when the report is ready.",
       "fields": {
         "device_id": {
           "name": "Inverter",

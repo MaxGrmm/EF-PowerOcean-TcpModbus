@@ -28,6 +28,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
+from homeassistant.components import persistent_notification
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import CALLBACK_TYPE, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -217,7 +218,7 @@ class ControlTest:
         )
 
     async def async_run(self, power: float = DEFAULT_TEST_POWER_W) -> dict[str, Any]:
-        """Run the test to its end and return the report."""
+        """Run the test to its end and return the report, for callers that wait."""
         self.async_start(power)
         assert self._task is not None
         return await asyncio.shield(self._task)
@@ -254,6 +255,7 @@ class ControlTest:
         # Polled for the run even with their entities disabled; the next poll
         # follows at once, and is the first one read below.
         release = coordinator.async_require(REQUIRED_KEYS)
+        persistent_notification.async_dismiss(coordinator.hass, self._notification_id())
         self._fire(EVENT_CONTROL_TEST_STARTED, {"power": power})
         try:
             frame = await self._next_frame()
@@ -310,6 +312,7 @@ class ControlTest:
         report.finished_at = self._finished_at.isoformat()
         self._set_step("")
         await self._save(report)
+        self._notify(report)
         self._fire(
             EVENT_CONTROL_TEST_FINISHED,
             {
@@ -633,6 +636,41 @@ class ControlTest:
         done, total = self._progress
         self._progress = (done + 1, total)
         self._coordinator.async_update_listeners()
+
+    def _notification_id(self) -> str:
+        return f"{DOMAIN}_control_test_{self._coordinator.config_entry.entry_id}"
+
+    def _notify(self, report: ControlTestReport) -> None:
+        """Say the run the user started has ended, as they may have left the page."""
+        counts: dict[str, int] = {}
+        for verdict in report.summary().values():
+            counts[verdict] = counts.get(verdict, 0) + 1
+        lines = [
+            f"Firmware {report.firmware_version}: "
+            + (
+                ", ".join(
+                    f"{count} {verdict.replace('_', ' ')}"
+                    for verdict, count in sorted(counts.items())
+                )
+                if report.outcome == ControlTestState.DONE
+                else f"{report.outcome}, {report.abort_reason}"
+            )
+            + "."
+        ]
+        if self._report_path:
+            lines.append(f"The report is saved as `{self._report_path}`.")
+        lines.append(
+            "To share it, download the diagnostics from the inverter's device page "
+            "and attach them to a "
+            "[Control test report](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus"
+            "/issues/new?template=control_test_report.yml) issue."
+        )
+        persistent_notification.async_create(
+            self._coordinator.hass,
+            "\n\n".join(lines),
+            title="Control test finished",
+            notification_id=self._notification_id(),
+        )
 
     def _fire(self, event: str, data: dict[str, Any]) -> None:
         coordinator = self._coordinator

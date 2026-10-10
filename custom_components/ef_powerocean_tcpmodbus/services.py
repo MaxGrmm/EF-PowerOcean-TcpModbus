@@ -7,12 +7,7 @@ from typing import Final
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_DEVICE_ID
-from homeassistant.core import (
-    HomeAssistant,
-    ServiceCall,
-    ServiceResponse,
-    SupportsResponse,
-)
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
@@ -109,22 +104,21 @@ def async_setup_services(hass: HomeAssistant) -> None:
         schema=SET_BATTERY_COMMAND_SCHEMA,
     )
 
-    async def async_run_control_test(call: ServiceCall) -> ServiceResponse:
-        """Start the control test; with a response asked for, wait for its report.
+    async def async_run_control_test(call: ServiceCall) -> None:
+        """Start the control test and return at once.
 
-        Without one the action returns at once and the Control Test sensor follows
-        the run, so an automation is not held up for the ten minutes it takes.
+        The run takes about ten minutes. Waiting for it here would tie it to the
+        caller: the app's connection drops when the phone locks, and Developer
+        Tools then shows an error for a test that is in fact still running. The
+        Control Test sensor follows the run, and a notification says when the
+        report is ready.
         """
         if not call.data[ATTR_CONFIRM]:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="control_test_not_confirmed"
             )
         control_test = _coordinator_for(hass, call.data[ATTR_DEVICE_ID]).control_test
-        power = call.data[ATTR_POWER]
-        if call.return_response:
-            return await control_test.async_run(power)
-        control_test.async_start(power)
-        return None
+        control_test.async_start(call.data[ATTR_POWER])
 
     async def async_cancel_control_test(call: ServiceCall) -> None:
         await _coordinator_for(
@@ -136,7 +130,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
         SERVICE_RUN_CONTROL_TEST,
         async_run_control_test,
         schema=RUN_CONTROL_TEST_SCHEMA,
-        supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
         DOMAIN,
@@ -146,10 +139,21 @@ def async_setup_services(hass: HomeAssistant) -> None:
     )
 
 
+def _entry_ids(device: dr.DeviceEntry) -> set[str]:
+    """Return the config entries of a device.
+
+    Home Assistant 2026.10 gives a device a single config_entry_id and deprecates
+    config_entries, which older versions still need.
+    """
+    if hasattr(device, "config_entry_id"):
+        return {device.config_entry_id} if device.config_entry_id else set()
+    return set(device.config_entries)
+
+
 def _coordinator_for(hass: HomeAssistant, device_id: str) -> EcoflowCoordinator:
     """Return the coordinator of a device this integration has set up."""
     if device := dr.async_get(hass).async_get(device_id):
-        for entry_id in device.config_entries:
+        for entry_id in _entry_ids(device):
             entry = hass.config_entries.async_get_entry(entry_id)
             if (
                 entry is not None

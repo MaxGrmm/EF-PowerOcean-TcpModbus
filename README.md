@@ -258,7 +258,8 @@ automation.
      power: 1500
    ```
 
-2. Follow the **Control Test** sensor (diagnostic). It takes about 10 minutes. The
+2. Follow the **Control Test** sensor (diagnostic), or wait for the notification. It
+   takes about 10 minutes. The
    battery charges and discharges briefly at the test power and power flows to and
    from the grid. At the end the inverter is handed back to the EcoFlow app for a
    minute, which the report times, and then to Modbus Control if it was on.
@@ -274,8 +275,9 @@ test refuses to start only while another Modbus controller holds the inverter;
 nothing is written in that case. While it runs, battery modes, switching Modbus
 Control on and Battery Saver are refused.
 
-**Cancel control test** stops it and hands control back. Run in Developer Tools with
-**Return response** ticked, the action waits and shows the report there instead.
+The action returns as soon as the test has started, so the page can be closed; a
+notification says when the report is ready. **Cancel control test** stops a run and
+hands control back.
 
 A run is most useful with the battery well above its reserve and below 94 %: a test
 the battery cannot take part in is reported as skipped rather than failed. The checks
