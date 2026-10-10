@@ -23,7 +23,9 @@ body:
         - PowerOcean Three Phase
         - PowerOcean Plus
         - PowerOcean DC Fit
-        - Ocean 2
+        - Ocean 2 Three Phase
+        - Ocean 2 Single Phase
+        - Ocean 2 Plus Single Phase
     validations:
       required: true
 
