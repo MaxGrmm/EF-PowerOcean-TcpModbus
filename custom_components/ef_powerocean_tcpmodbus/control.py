@@ -361,17 +361,37 @@ class ControlManager:
         """Return whether the control test owns the inverter right now."""
         return self._test_running
 
-    def begin_test(self) -> None:
+    @property
+    def holds_control(self) -> bool:
+        """Return whether our heartbeat is what holds the inverter, on or handing back.
+
+        Bit 11 of the System Status says only that some controller holds it; this
+        says the controller is us.
+        """
+        return self._heartbeat.in_control
+
+    async def async_begin_test(self) -> None:
         """Stand aside for the control test: refuse commands and write nothing.
 
-        The test only starts with Modbus Control off, so there is no command of ours
-        to interrupt; this keeps one from being started while it runs.
+        The heartbeat stops too, as the test beats on its own; it starts within the
+        inverter's window, so control is not handed back in between. The selected
+        mode, its power and its expiry stay as they are, to resume after the test.
         """
         self._test_running = True
+        await self._heartbeat.async_stop()
         self._on_update()
 
     def end_test(self) -> None:
+        """Take over again from the control test, if Modbus Control is still on.
+
+        The test leaves the inverter on the default method, so the next poll sends
+        the selected mode again, as after a restart.
+        """
         self._test_running = False
+        if self._enabled:
+            self._control_stale = True
+            self._reset_deviation()
+            self._heartbeat.start()
         self._on_update()
 
     def _require_no_test(self) -> None:
@@ -527,6 +547,8 @@ class ControlManager:
     @property
     def status(self) -> ControlStatus:
         """Explain, in one word, what the selected mode is achieving."""
+        if self._test_running:
+            return ControlStatus.CONTROL_TEST
         if not self.in_control:
             if self.handing_back:
                 return ControlStatus.HANDING_BACK

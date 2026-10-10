@@ -444,7 +444,8 @@
           "not_accepted": "Vom Wechselrichter nicht übernommen",
           "off_grid": "Inselbetrieb",
           "battery_disconnected": "Akku getrennt",
-          "inverter_fault": "Wechselrichterfehler"
+          "inverter_fault": "Wechselrichterfehler",
+          "control_test": "Steuerungstest"
         }
       },
       "control_test": {
@@ -573,7 +574,7 @@
     },
     "run_control_test": {
       "name": "Steuerungstest ausführen",
-      "description": "Prüft, welchen Steuerungsmethoden die Firmware dieses Wechselrichters folgt, wie scripts/control_feature_scan.py, und schreibt einen Bericht, der an ein GitHub-Issue angehängt werden kann. Vorher Modbus-Steuerung ausschalten. Die Batterie lädt und entlädt kurz mit der Testleistung, am Ende wird der Wechselrichter an die EcoFlow-App zurückgegeben. Dauert etwa 10 Minuten; mit Antwort wartet die Aktion auf den Bericht, sonst zeigt der Sensor Steuerungstest den Fortschritt.",
+      "description": "Prüft, welchen Steuerungsmethoden die Firmware dieses Wechselrichters folgt, wie scripts/control_feature_scan.py, und schreibt einen Bericht, der an ein GitHub-Issue angehängt werden kann. Ist die Modbus-Steuerung eingeschaltet, pausiert der gewählte Batteriemodus während des Tests und wird danach fortgesetzt. Die Batterie lädt und entlädt kurz mit der Testleistung, am Ende wird der Wechselrichter an die EcoFlow-App zurückgegeben. Dauert etwa 10 Minuten; mit Antwort wartet die Aktion auf den Bericht, sonst zeigt der Sensor Steuerungstest den Fortschritt.",
       "fields": {
         "device_id": {
           "name": "Wechselrichter",
@@ -581,7 +582,7 @@
         },
         "confirm": {
           "name": "Bestätigen",
-          "description": "Muss eingeschaltet sein. Der Test schreibt Steuerbefehle, die Batterie lädt und entlädt, und für einige Minuten fließt Leistung ins und aus dem Netz."
+          "description": "Muss eingeschaltet sein. Der Test schreibt Steuerbefehle und pausiert einen gewählten Batteriemodus, die Batterie lädt und entlädt, und für einige Minuten fließt Leistung ins und aus dem Netz."
         },
         "power": {
           "name": "Testleistung",
@@ -618,9 +619,6 @@
     },
     "control_test_running": {
       "message": "Auf diesem Wechselrichter läuft bereits ein Steuerungstest."
-    },
-    "control_test_modbus_control_on": {
-      "message": "Modbus-Steuerung ausschalten und eine Minute warten, bis der Wechselrichter an die EcoFlow-App zurückgegeben ist, dann den Steuerungstest starten. Es wurde nichts geschrieben."
     },
     "control_test_no_data": {
       "message": "Der Wechselrichter ist nicht verbunden oder wurde noch nicht gelesen. Es wurde nichts geschrieben."

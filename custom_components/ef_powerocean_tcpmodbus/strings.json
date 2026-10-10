@@ -441,7 +441,8 @@
           "not_accepted": "Not accepted by inverter",
           "off_grid": "Off-grid",
           "battery_disconnected": "Battery disconnected",
-          "inverter_fault": "Inverter fault"
+          "inverter_fault": "Inverter fault",
+          "control_test": "Control test"
         }
       },
       "control_test": {
@@ -562,7 +563,7 @@
     },
     "run_control_test": {
       "name": "Run control test",
-      "description": "Checks which control methods this inverter's firmware follows, as scripts/control_feature_scan.py does, and writes a report to attach to a GitHub issue. Turn off Modbus Control first. The battery charges and discharges briefly at the test power, and the inverter is handed back to the EcoFlow app at the end. Takes about 10 minutes; ask for a response to wait for the report, or follow the Control Test sensor.",
+      "description": "Checks which control methods this inverter's firmware follows, as scripts/control_feature_scan.py does, and writes a report to attach to a GitHub issue. If Modbus Control is on, the selected battery mode pauses for the test and resumes after it. The battery charges and discharges briefly at the test power, and the inverter is handed back to the EcoFlow app at the end. Takes about 10 minutes; ask for a response to wait for the report, or follow the Control Test sensor.",
       "fields": {
         "device_id": {
           "name": "Inverter",
@@ -570,7 +571,7 @@
         },
         "confirm": {
           "name": "Confirm",
-          "description": "Must be on. The test writes control commands, so the battery charges and discharges and power flows to and from the grid for a few minutes."
+          "description": "Must be on. The test writes control commands and pauses any selected battery mode, so the battery charges and discharges and power flows to and from the grid for a few minutes."
         },
         "power": {
           "name": "Test power",
@@ -607,9 +608,6 @@
     },
     "control_test_running": {
       "message": "A control test is already running on this inverter."
-    },
-    "control_test_modbus_control_on": {
-      "message": "Turn off Modbus Control and wait a minute for the inverter to return to the EcoFlow app, then start the control test. Nothing was written."
     },
     "control_test_no_data": {
       "message": "The inverter is not connected or has not been read yet. Nothing was written."

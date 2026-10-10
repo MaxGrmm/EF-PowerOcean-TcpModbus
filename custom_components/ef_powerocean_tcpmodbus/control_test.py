@@ -8,8 +8,9 @@ compared. The checks that need someone watching the EcoFlow app, and the ones th
 change device settings, stay in the script and show as not tested.
 
 Nothing happens unless the run_control_test action is called with the
-confirmation set. It starts only with Modbus Control off, so it never interrupts a
-command, and while it runs the control manager refuses every command.
+confirmation set. With Modbus Control on, the test takes over from the control manager,
+which refuses every command while it runs and sends the selected mode again after.
+It refuses to start only while another controller holds the inverter.
 
 The readings come from the coordinator's own polls, so the test adds writes but no
 reads of its own.
@@ -189,11 +190,6 @@ class ControlTest:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="control_test_running"
             )
-        if control.enabled or control.in_control:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="control_test_modbus_control_on",
-            )
         data = coordinator.data or {}
         if not coordinator.connected or not data:
             raise ServiceValidationError(
@@ -203,10 +199,11 @@ class ControlTest:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="control_test_no_status"
             )
-        if data.get("device_modbus_control") or data.get("active_control_mode") not in (
-            str(ControlMode.DEFAULT),
-            None,
-        ):
+        # Held by us, the test takes over; held by anything else, it would fight it.
+        held = bool(data.get("device_modbus_control")) or data.get(
+            "active_control_mode"
+        ) not in (str(ControlMode.DEFAULT), None)
+        if held and not control.holds_control:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="control_test_other_controller",
@@ -252,7 +249,8 @@ class ControlTest:
         saver = False
         originals: dict[str, int] = {}
 
-        coordinator.control.begin_test()
+        report.parameters["took_over_modbus_control"] = coordinator.control.enabled
+        await coordinator.control.async_begin_test()
         # Polled for the run even with their entities disabled; the next poll
         # follows at once, and is the first one read below.
         release = coordinator.async_require(REQUIRED_KEYS)

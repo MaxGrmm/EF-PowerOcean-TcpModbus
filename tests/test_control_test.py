@@ -32,6 +32,7 @@ from custom_components.ef_powerocean_tcpmodbus.modbus import ModbusRejected
 from custom_components.ef_powerocean_tcpmodbus.models import (
     ControlFeature,
     ControlMode,
+    ControlStatus,
     GridFeedMode,
 )
 
@@ -168,9 +169,9 @@ class FakeCoordinator:
         self.connected = True
         self.control = SimpleNamespace(
             enabled=False,
-            in_control=False,
+            holds_control=False,
             test_running=False,
-            begin_test=Mock(),
+            async_begin_test=AsyncMock(),
             end_test=Mock(),
         )
         self.data: dict[str, Any] | None = inverter.frame()
@@ -375,27 +376,23 @@ async def test_a_lost_connection_aborts_and_hands_back(
     assert not inverter.beating
 
 
-@pytest.mark.parametrize(
-    ("change", "reason"),
-    [
-        ({"enabled": True}, "control_test_modbus_control_on"),
-        ({"in_control": True}, "control_test_modbus_control_on"),
-    ],
-)
-async def test_it_does_not_start_while_modbus_control_is_on(
-    hass: HomeAssistant,
-    coordinator: FakeCoordinator,
-    inverter: FakeInverter,
-    change: dict[str, bool],
-    reason: str,
+async def test_it_takes_over_when_the_integration_holds_control(
+    hass: HomeAssistant, coordinator: FakeCoordinator, inverter: FakeInverter
 ) -> None:
-    vars(coordinator.control).update(change)
+    """No switching Modbus Control off and waiting: the confirmation is enough."""
+    inverter.beating = True
+    inverter.method = ControlMode.BATTERY_LIMITS
+    coordinator.data = inverter.frame()
+    coordinator.control.enabled = True
+    coordinator.control.holds_control = True
 
-    with pytest.raises(ServiceValidationError) as raised:
-        runner(coordinator).async_start(1500)
+    report = await runner(coordinator).async_run(1500)
 
-    assert raised.value.translation_key == reason
-    assert inverter.writes == []
+    assert report["outcome"] == "done"
+    assert report["parameters"]["took_over_modbus_control"] is True
+    assert set(verdicts(report).values()) == {"followed"}
+    coordinator.control.async_begin_test.assert_awaited_once()
+    coordinator.control.end_test.assert_called_once()
 
 
 async def test_it_does_not_start_while_another_controller_is_active(
@@ -468,7 +465,7 @@ def control_manager() -> control_module.ControlManager:
 
 async def test_modbus_control_cannot_be_switched_on_during_a_test() -> None:
     manager = control_manager()
-    manager.begin_test()
+    await manager.async_begin_test()
 
     with pytest.raises(HomeAssistantError, match="control test is running"):
         await manager.async_set_enabled(True)
@@ -478,7 +475,7 @@ async def test_modbus_control_cannot_be_switched_on_during_a_test() -> None:
 
 async def test_no_command_or_battery_saver_reaches_the_inverter_during_a_test() -> None:
     manager = control_manager()
-    manager.begin_test()
+    await manager.async_begin_test()
 
     with pytest.raises(HomeAssistantError, match="control test is running"):
         await manager.async_set_command(ControlFeature.CHARGE_BATTERY, power=1000)
@@ -489,9 +486,44 @@ async def test_no_command_or_battery_saver_reaches_the_inverter_during_a_test() 
     manager._modbus_client.async_write.assert_not_awaited()
 
 
+async def test_control_status_shows_the_test() -> None:
+    manager = control_manager()
+    await manager.async_begin_test()
+
+    assert manager.status is ControlStatus.CONTROL_TEST
+
+
+async def test_a_mode_selected_before_the_test_resumes_after_it() -> None:
+    manager = control_manager()
+    await manager.async_set_enabled(True)
+    await manager.async_set_command(ControlFeature.CHARGE_BATTERY, power=1000)
+    manager._heartbeat.async_stop = AsyncMock(wraps=manager._heartbeat.async_stop)
+    await manager.async_begin_test()
+    manager._heartbeat.async_stop.assert_awaited_once()
+    manager._heartbeat.start = Mock()
+
+    manager.end_test()
+
+    assert manager.selected_feature is ControlFeature.CHARGE_BATTERY
+    assert manager._control_stale
+    manager._heartbeat.start.assert_called_once()
+    await manager.async_stop()
+
+
+async def test_a_test_that_found_modbus_control_off_leaves_it_off() -> None:
+    manager = control_manager()
+    await manager.async_begin_test()
+    manager._heartbeat.start = Mock()
+
+    manager.end_test()
+
+    assert not manager.enabled
+    manager._heartbeat.start.assert_not_called()
+
+
 async def test_commands_are_accepted_again_after_the_test() -> None:
     manager = control_manager()
-    manager.begin_test()
+    await manager.async_begin_test()
     manager.end_test()
 
     await manager.async_set_enabled(True)

@@ -7,7 +7,7 @@
 - Control sends the command again when the inverter doesn't report following it, as after an inverter restart, and shows Not accepted by inverter if that doesn't help.
 - Control steps aside while off-grid or with the battery disconnected, and Control Status shows Off-grid, Battery disconnected or Inverter fault.
 - Control Status shows Limited by inverter when the battery goes the other way from the command, or past it, instead of Ramping indefinitely.
-- Run control test action: checks which control methods the inverter's firmware follows and writes a report to attach to an issue, followed by the new Control Test sensor. Cancel control test stops it. The last report is included in the diagnostics.
+- Run control test action: checks which control methods the inverter's firmware follows and writes a report to attach to an issue, followed by the new Control Test sensor. It can start with Modbus Control on: the selected battery mode pauses, Control Status shows Control test, and the mode resumes afterwards. Cancel control test stops it. The last report is included in the diagnostics.
 - `scripts/compare_reports.py` lists what changed between two control test reports, such as before and after a firmware update, and `scripts/control_feature_scan.py --json` writes the same report.
 - Charge to Battery Reserve: below the Battery Reserve, the battery charges from the grid up to it at the Charge Battery power, as the app's backup reserve does.
 - Each poll reads only the registers an enabled entity, the battery control or the energy counters need, so a disabled sensor no longer costs a read. On the Ocean 2, which reads registers one at a time, this takes them off the poll.

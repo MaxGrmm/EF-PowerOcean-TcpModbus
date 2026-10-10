@@ -197,6 +197,7 @@ doesn't expose a hard power limit over Modbus. See
 | Off-grid                    | Grid outage; control steps aside until the grid is back          |
 | Battery disconnected        | The battery dropped off; control steps aside until it's back     |
 | Inverter fault              | The inverter reports a fault or a stop                           |
+| Control test                | The control test has the inverter; the mode resumes after it     |
 
 If the inverter misses a guard's target, the status shows Ramping or Unreachable; the
 guard is still in the `guard` attribute.
@@ -247,9 +248,7 @@ EcoFlow firmware updates can change which control methods the inverter follows. 
 you can attach to an issue, so a change in behaviour shows up before it surprises an
 automation.
 
-1. Turn off **Modbus Control** and wait a minute for the inverter to return to the
-   EcoFlow app. The test refuses to start otherwise; nothing is written until it does.
-2. Run the action, with **Confirm** on:
+1. Run the action, with **Confirm** on:
 
    ```yaml
    action: ef_powerocean_tcpmodbus.run_control_test
@@ -259,16 +258,22 @@ automation.
      power: 1500
    ```
 
-3. Follow the **Control Test** sensor (diagnostic). It takes about 10 minutes. The
+2. Follow the **Control Test** sensor (diagnostic). It takes about 10 minutes. The
    battery charges and discharges briefly at the test power and power flows to and
-   from the grid; at the end the inverter is handed back to the EcoFlow app.
-4. When it shows **Done**, open a
+   from the grid. At the end the inverter is handed back to the EcoFlow app for a
+   minute, which the report times, and then to Modbus Control if it was on.
+3. When it shows **Done**, open a
    [Control test report](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues/new?template=control_test_report.yml) issue and
    attach the report: either **Download diagnostics** on the device page, or the file
    named in the sensor's `report_file` attribute, under
    `config/ef_powerocean_tcpmodbus/`.
 
-While it runs, battery modes, the Modbus Control switch and Battery Saver are refused.
+Modbus Control can stay on: a selected battery mode pauses for the test, Control
+Status shows **Control test**, and the mode is sent again when the test ends. The
+test refuses to start only while another Modbus controller holds the inverter;
+nothing is written in that case. While it runs, battery modes, switching Modbus
+Control on and Battery Saver are refused.
+
 **Cancel control test** stops it and hands control back. Run in Developer Tools with
 **Return response** ticked, the action waits and shows the report there instead.
 

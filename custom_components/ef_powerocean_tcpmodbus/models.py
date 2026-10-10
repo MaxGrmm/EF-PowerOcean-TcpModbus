@@ -389,6 +389,8 @@ class ControlStatus(StrEnum):
     BATTERY_DISCONNECTED = "battery_disconnected"
     # The inverter reports a fault or a stop, so it may not act on anything.
     INVERTER_FAULT = "inverter_fault"
+    # The control test has the inverter; the selected mode resumes after it.
+    CONTROL_TEST = "control_test"
 
 
 # System State 2 (40532) flags under which the inverter stops acting: shutdown,
