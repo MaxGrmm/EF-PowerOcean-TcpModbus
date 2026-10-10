@@ -659,9 +659,17 @@ class ControlTest:
         ]
         if self._report_path:
             lines.append(f"The report is saved as `{self._report_path}`.")
+        # The diagnostics download itself needs a signed URL that expires within
+        # a minute, so the link goes to the device page, whose menu offers it.
+        device_id = self._device_id()
+        device_page = (
+            f"[device page](/config/devices/device/{device_id})"
+            if device_id
+            else "device page"
+        )
         lines.append(
-            "To share it, download the diagnostics from the inverter's device page "
-            "and attach them to a "
+            f"To share it, open the inverter's {device_page}, choose **Download "
+            "diagnostics** from its ⋮ menu, and attach the file to a "
             "[Control test report](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus"
             "/issues/new?template=control_test_report.yml) issue."
         )
@@ -672,14 +680,17 @@ class ControlTest:
             notification_id=self._notification_id(),
         )
 
-    def _fire(self, event: str, data: dict[str, Any]) -> None:
+    def _device_id(self) -> str | None:
         coordinator = self._coordinator
         devices = device_registry.async_entries_for_config_entry(
             device_registry.async_get(coordinator.hass),
             coordinator.config_entry.entry_id,
         )
-        coordinator.hass.bus.async_fire(
-            event, {"device_id": devices[0].id if devices else None, **data}
+        return devices[0].id if devices else None
+
+    def _fire(self, event: str, data: dict[str, Any]) -> None:
+        self._coordinator.hass.bus.async_fire(
+            event, {"device_id": self._device_id(), **data}
         )
 
     async def _save(self, report: ControlTestReport) -> None:

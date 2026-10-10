@@ -19,6 +19,7 @@ import pytest
 from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import device_registry
 from homeassistant.util import dt
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -432,6 +433,23 @@ async def test_a_notification_says_the_report_is_ready(
     assert notification["title"] == "Control test finished"
     assert "6 followed" in notification["message"]
     assert "control_test_" in notification["message"]
+    # Without a device registered, the device page is named but not linked.
+    assert "device page" in notification["message"]
+
+
+async def test_the_notification_links_to_the_device_page(
+    hass: HomeAssistant, coordinator: FakeCoordinator
+) -> None:
+    device = device_registry.async_get(hass).async_get_or_create(
+        config_entry_id=coordinator.config_entry.entry_id,
+        identifiers={(const.DOMAIN, "HJ31")},
+    )
+
+    await runner(coordinator).async_run(1500)
+
+    notifications = persistent_notification._async_get_or_create_notifications(hass)
+    (notification,) = notifications.values()
+    assert f"(/config/devices/device/{device.id})" in notification["message"]
 
 
 async def test_events_bracket_the_run(
