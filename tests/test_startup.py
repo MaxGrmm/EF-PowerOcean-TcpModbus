@@ -467,3 +467,90 @@ async def test_entities_show_what_reading_everything_shows(
 
     assert at_setup_differences == []
     assert on_demand_differences == []
+
+
+# ── Refused registers are retried after a firmware update ─────────────────────
+
+
+def _serve_firmware(inverter: FakeInverter, version: int) -> None:
+    """Publish a firmware version, 0x01020304 for 1.2.3.4, low word first."""
+    inverter.registers[const.FIRMWARE_VERSION.address] = version & 0xFFFF
+    inverter.registers[const.FIRMWARE_VERSION.address + 1] = version >> 16
+
+
+async def _set_up_refusing(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> tuple[MockConfigEntry, EcoflowCoordinator]:
+    """Set up with firmware 1.2.3.4 and one register the device has refused."""
+    _serve_firmware(inverter, 0x01020304)
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator: EcoflowCoordinator = entry.runtime_data
+    coordinator._unsupported_keys = frozenset({"breaker_capacity"})
+    coordinator._plan_reads()
+    return entry, coordinator
+
+
+async def test_a_firmware_update_retries_refused_registers(
+    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+) -> None:
+    entry, coordinator = await _set_up_refusing(hass, inverter)
+    registry = dr.async_get(hass)
+    try:
+        (device,) = dr.async_entries_for_config_entry(registry, entry.entry_id)
+        sw_version_before = device.sw_version
+
+        # The update reboots the inverter, and the reconnect reads the device again.
+        _serve_firmware(inverter, 0x01020400)
+        await coordinator.async_read_device_info()
+
+        unsupported = coordinator.unsupported_registers
+        polled = coordinator.polled_registers
+        sw_version = registry.async_get(device.id).sw_version
+    finally:
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert sw_version_before == "1.2.3.4"
+    assert unsupported == frozenset()
+    assert "breaker_capacity" in polled
+    assert sw_version == "1.2.4.0"
+
+
+async def test_a_reconnect_on_the_same_firmware_keeps_refused_registers_out(
+    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+) -> None:
+    entry, coordinator = await _set_up_refusing(hass, inverter)
+
+    await coordinator.async_read_device_info()
+
+    unsupported = coordinator.unsupported_registers
+    polled = coordinator.polled_registers
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert unsupported == {"breaker_capacity"}
+    assert "breaker_capacity" not in polled
+
+
+async def test_an_unreadable_firmware_version_is_not_a_change(
+    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+) -> None:
+    """A version of zero reads as none, and keeps the one known before."""
+    entry, coordinator = await _set_up_refusing(hass, inverter)
+
+    _serve_firmware(inverter, 0)
+    await coordinator.async_read_device_info()
+
+    unsupported = coordinator.unsupported_registers
+    firmware = coordinator.identity.firmware_version
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert unsupported == {"breaker_capacity"}
+    assert firmware == "1.2.3.4"

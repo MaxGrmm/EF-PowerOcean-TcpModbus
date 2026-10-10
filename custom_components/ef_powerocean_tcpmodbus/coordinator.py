@@ -318,9 +318,39 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         if firmware := decode_firmware_version(
             registers_for(FIRMWARE_VERSION), self.inverter_model.traits.high_word_first
         ):
+            previous = identity.firmware_version
             identity.firmware_version = firmware
+            if previous is not None and firmware != previous:
+                self._firmware_changed(previous, firmware)
 
         await self._async_read_device_info_extra()
+
+    @callback
+    def _firmware_changed(self, previous: str, firmware: str) -> None:
+        """Retry what the old firmware refused, and show the new version.
+
+        An update can add registers, so the ones refused before may now be there.
+        Those still missing are refused and dropped again on the next poll.
+        """
+        if self._unsupported_keys:
+            _LOGGER.info(
+                "Firmware changed from %s to %s; retrying %s",
+                previous,
+                firmware,
+                ", ".join(sorted(self._unsupported_keys)),
+            )
+            self._unsupported_keys = frozenset()
+            self._plan_reads()
+        else:
+            _LOGGER.info("Firmware changed from %s to %s", previous, firmware)
+
+        # Only written when the entities are created, so it would show the old
+        # version until a reload.
+        registry = device_registry.async_get(self.hass)
+        for device in device_registry.async_entries_for_config_entry(
+            registry, self.config_entry.entry_id
+        ):
+            registry.async_update_device(device.id, sw_version=firmware)
 
     async def _async_read_device_info_extra(self) -> None:
         """Read the protocol version and device address, where the device has them.
