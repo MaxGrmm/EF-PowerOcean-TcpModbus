@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.9.0] - 2026-10-10
+
 ### Added
 
 - Control sends the command again when the inverter doesn't report following it, as after an inverter restart, and shows Not accepted by inverter if that doesn't help.
