@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta
 from enum import Enum, auto
 from typing import Any, NamedTuple, Protocol
@@ -29,7 +30,6 @@ from .const import (
     CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
-    FEED_IN_POWER_MAX_KEY,
     FEED_IN_POWER_MAX_SETTING_KEY,
     FOLLOW_GRACE_S,
     FOLLOW_RESENDS,
@@ -47,7 +47,7 @@ from .const import (
     MIN_CONTROL_DWELL_S,
     SOLAR_EXPORT_CAP_MARGIN_W,
 )
-from .heartbeat import Heartbeat
+from .heartbeat import Heartbeat, StartTask
 from .modbus import ModbusClient
 from .models import (
     BATTERY_FULL_SOC,
@@ -111,6 +111,47 @@ class CommandExpired(Protocol):
     def __call__(self, feature: ControlFeature) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ControlInputs:
+    """The values from a poll the control loop acts on.
+
+    The field names are the data keys, so this is also the list of what the loop
+    needs read: the coordinator keeps these registers polled whatever entities are
+    enabled. Reading anything else is an AttributeError rather than a silent None.
+    """
+
+    battery_power: float | None = None
+    battery_soc: float | None = None
+    grid_power: float | None = None
+    house_power: float | None = None
+    solar_power: float | None = None
+    inverter_rated_power: float | None = None
+    # A GridFeedMode once telemetry has decoded it.
+    grid_feed_mode: GridFeedMode | float | str | None = None
+    # The inverter's own reserve (40536).
+    min_soc_limit: float | None = None
+    feed_in_power_max: float | None = None
+    feed_in_power_max_setting: float | None = None
+    feed_in_power_max_percent: float | None = None
+    limit_inv_power: float | None = None
+    system_modes: float | None = None
+    system_state_2: float | None = None
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> ControlInputs:
+        """Take the fields out of a poll's data; anything else in it is ignored."""
+        return cls(**{field.name: data.get(field.name) for field in fields(cls)})
+
+    @classmethod
+    def keys(cls) -> frozenset[str]:
+        """Return the data keys the control loop reads."""
+        return frozenset(field.name for field in fields(cls))
+
+    def value(self, key: str) -> Any:
+        """Return the value under a key a feature definition names."""
+        return getattr(self, key)
+
+
 def _allows_export(
     mode: GridFeedMode | None, power: float, percent: float | None = None
 ) -> bool:
@@ -126,35 +167,35 @@ def _allows_export(
     return int(power) > 0
 
 
-def _device_export_limit(data: dict[str, Any]) -> float | None:
+def _device_export_limit(inputs: ControlInputs) -> float | None:
     """Return the most the device lets out, infinity if uncapped, or None if unknown.
 
     The cap is the one in force where the model reports it, since that is where the
     inverter curtails, and it only counts in the mode that applies it.
     """
-    mode = data.get("grid_feed_mode")
+    mode = inputs.grid_feed_mode
     if mode is GridFeedMode.UNLIMITED:
         return math.inf
     if mode is GridFeedMode.LIMITED:
-        limit = data.get(FEED_IN_POWER_MAX_KEY)
+        limit = inputs.feed_in_power_max
         return None if limit is None else float(limit)
     if mode is GridFeedMode.LIMITED_PERCENT:
-        percent = data.get("feed_in_power_max_percent")
-        rated = data.get("inverter_rated_power")
+        percent = inputs.feed_in_power_max_percent
+        rated = inputs.inverter_rated_power
         if percent is None or not rated:
             return None
         return float(rated) * float(percent) / 100
     return None
 
 
-def _configured_feed_cap(data: dict[str, Any]) -> float | None:
+def _configured_feed_cap(inputs: ControlInputs) -> float | None:
     """Return the export cap as configured (40538), which is what a restore puts back.
 
     Deliberately without a fallback: the effective cap (40609) can sit below it after
     the internal safety rules, and writing that back would lower the configured cap
     for good.
     """
-    return data.get(FEED_IN_POWER_MAX_SETTING_KEY)
+    return inputs.feed_in_power_max_setting
 
 
 class HandbackPhase(Enum):
@@ -219,6 +260,7 @@ class ControlManager:
         write_setting: WriteSetting,
         on_command_expired: CommandExpired,
         heartbeat: Heartbeat | None = None,
+        start_task: StartTask | None = None,
         battery_reserve: ReserveSupport = ReserveSupport.EMULATED,
     ) -> None:
         self._modbus_client = modbus_client
@@ -236,7 +278,7 @@ class ControlManager:
         self._enabled = enabled
         # One beating on another clock can be passed in, as for a simulation.
         self._heartbeat = heartbeat or Heartbeat(
-            modbus_client, scan_interval_s=scan_interval_s
+            modbus_client, scan_interval_s=scan_interval_s, start_task=start_task
         )
 
         # A restart stops the heartbeat, so the inverter has already handed control
@@ -310,7 +352,7 @@ class ControlManager:
         self._deviation_candidate: ControlStatus | None = None
         self._deviation_polls = 0
         # The last frame read, so a ceiling can be quoted between polls.
-        self._data: dict[str, Any] = {}
+        self._inputs = ControlInputs()
 
     @property
     def enabled(self) -> bool:
@@ -407,19 +449,19 @@ class ControlManager:
         }
 
     @staticmethod
-    def grid_feed_allowed(data: dict[str, Any] | None) -> bool:
+    def grid_feed_allowed(data: Mapping[str, Any] | None) -> bool:
         """Return whether a frame shows the inverter allowed to export."""
-        data = data or {}
+        inputs = ControlInputs.from_mapping(data or {})
         return _allows_export(
-            data.get("grid_feed_mode"),
-            _configured_feed_cap(data) or 0,
-            data.get("feed_in_power_max_percent"),
+            inputs.grid_feed_mode,
+            _configured_feed_cap(inputs) or 0,
+            inputs.feed_in_power_max_percent,
         )
 
     @property
     def grid_feed_supported(self) -> bool:
         """Return whether the inverter is in a mode the switch knows how to restore."""
-        mode = self._data.get("grid_feed_mode")
+        mode = self._inputs.grid_feed_mode
         return mode is None or (isinstance(mode, GridFeedMode) and mode.switchable)
 
     @property
@@ -653,7 +695,7 @@ class ControlManager:
             await self._write_setting(
                 self._registers_by_key[BATTERY_RESERVE_REGISTER_KEY], soc
             )
-            self._data = {**self._data, BATTERY_RESERVE_REGISTER_KEY: soc}
+            self._inputs = replace(self._inputs, min_soc_limit=soc)
         if self._update_limits(self._charge_limit_soc, soc):
             await self.async_apply(force=True)
 
@@ -688,14 +730,14 @@ class ControlManager:
             return False
 
         latched = (self._charge_guard, self._reserve_guard)
-        if self._data.get("battery_soc") is not None:
+        if self._inputs.battery_soc is not None:
             if charge_limit_soc != self._charge_limit_soc:
                 self._charge_guard = False
             if battery_reserve_soc != self._battery_reserve_soc:
                 self._reserve_guard = False
         self._charge_limit_soc = charge_limit_soc
         self._battery_reserve_soc = battery_reserve_soc
-        self._update_guards(self._data)
+        self._update_guards(self._inputs)
         if (self._charge_guard, self._reserve_guard) != latched:
             self._handback = GuardHandback()
         return True
@@ -745,7 +787,7 @@ class ControlManager:
             await self._write_setting(mode, mode_value, publish_as=mode_state)
             await self._write_setting(power, 0)
 
-    def _track_grid_feed_restore(self, data: dict[str, Any]) -> None:
+    def _track_grid_feed_restore(self, inputs: ControlInputs) -> None:
         """Remember the export settings to put back, while there are any to keep.
 
         Nothing is adopted while the switch holds the export off, since what the
@@ -761,8 +803,8 @@ class ControlManager:
         """
         if self._grid_feed_stopped:
             return
-        mode = data.get("grid_feed_mode")
-        power = _configured_feed_cap(data)
+        mode = inputs.grid_feed_mode
+        power = _configured_feed_cap(inputs)
         if (
             not isinstance(mode, GridFeedMode)
             or not mode.switchable
@@ -791,7 +833,7 @@ class ControlManager:
         ceilings = [float(CONTROL_POWER_FALLBACK_MAX)]
 
         if definition.limit_key is not None and (
-            limit := self._data.get(definition.limit_key)
+            limit := self._inputs.value(definition.limit_key)
         ):
             ceilings.append(float(limit))
         # Zero means it was not configured, e.g. no battery count, which bounds nothing.
@@ -802,18 +844,18 @@ class ControlManager:
         # Power that has to pass the inverter's DC to AC stage cannot exceed it. Zero
         # or missing means the firmware did not report it, which bounds nothing.
         if definition.capacity_key is not None and (
-            capacity := self._data.get(definition.capacity_key)
+            capacity := self._inputs.value(definition.capacity_key)
         ):
             ceilings.append(float(capacity))
         if definition.bounded_by_rating and (
-            rated := self._data.get("inverter_rated_power")
+            rated := self._inputs.inverter_rated_power
         ):
             ceilings.append(float(rated))
         # The export cap only binds in the feed mode that applies it. One too small to
         # keep the margin under bounds nothing here, so a Solar Export Limit set while
         # the export is off is not lowered for good; the command handles that case.
         if feature is ControlFeature.EXPORT_SOLAR_FIRST and (
-            limit := _device_export_limit(self._data)
+            limit := _device_export_limit(self._inputs)
         ):
             if limit > SOLAR_EXPORT_CAP_MARGIN_W:
                 ceilings.append(limit)
@@ -824,13 +866,13 @@ class ControlManager:
         """Clamp a magnitude to zero and the inverter's own ceiling for *feature*."""
         return max(0.0, min(float(watts), self._control_power_ceiling(feature)))
 
-    def _update_guards(self, data: dict[str, Any]) -> None:
+    def _update_guards(self, inputs: ControlInputs) -> None:
         """Latch both guards, each releasing well clear of where it engaged.
 
         A ceiling of 100 and a floor of 0 mean the guard is off, so an untouched
         install never takes control away from the app.
         """
-        soc = data.get("battery_soc")
+        soc = inputs.battery_soc
         if soc is None:
             return
         soc = float(soc)
@@ -859,11 +901,11 @@ class ControlManager:
             and soc < self._battery_reserve_soc
         )
 
-    def _follow_native_reserve(self, data: dict[str, Any]) -> None:
+    def _follow_native_reserve(self, inputs: ControlInputs) -> None:
         """Take a native reserve from the inverter, where the app may also change it."""
         if not self._reserve_native:
             return
-        if (reserve := data.get(BATTERY_RESERVE_REGISTER_KEY)) is None:
+        if (reserve := inputs.min_soc_limit) is None:
             return
         if float(reserve) == self._battery_reserve_soc:
             return
@@ -874,7 +916,7 @@ class ControlManager:
         )
         self._update_limits(self._charge_limit_soc, float(reserve))
 
-    def _natural_battery_power(self, data: dict[str, Any]) -> float | None:
+    def _natural_battery_power(self, inputs: ControlInputs) -> float | None:
         """Estimate the battery power the inverter would reach without us.
 
         The guard logic hands control back when natural power flows the way the guard
@@ -882,28 +924,28 @@ class ControlManager:
         following us or running its own self-consumption. Measuring it on the grid
         side is preferred because it carries the conversion losses the panels do not.
         """
-        from_grid_side = self._natural_from_grid_side(data)
+        from_grid_side = self._natural_from_grid_side(inputs)
         if from_grid_side is not None:
             return from_grid_side
-        return self._natural_from_solar_side(data)
+        return self._natural_from_solar_side(inputs)
 
-    def _natural_from_grid_side(self, data: dict[str, Any]) -> float | None:
+    def _natural_from_grid_side(self, inputs: ControlInputs) -> float | None:
         """Return the natural battery power read from the battery and the grid."""
-        battery, grid = data.get("battery_power"), data.get("grid_power")
+        battery, grid = inputs.battery_power, inputs.grid_power
         if battery is None or grid is None:
             return None
         return float(battery) - float(grid)
 
-    def _natural_from_solar_side(self, data: dict[str, Any]) -> float | None:
+    def _natural_from_solar_side(self, inputs: ControlInputs) -> float | None:
         """Return the natural battery power read from the solar and the house."""
-        solar, house = data.get("solar_power"), data.get("house_power")
+        solar, house = inputs.solar_power, inputs.house_power
         if solar is None or house is None:
             return None
         return float(solar) - float(house)
 
     def _one_way_automatic(
         self,
-        data: dict[str, Any],
+        inputs: ControlInputs,
         forbidden: frozenset[Way],
         blocked: ControlStatus,
     ) -> Decision:
@@ -917,10 +959,10 @@ class ControlManager:
         if forbidden != self._handback_for:
             self._handback = GuardHandback()
             self._handback_for = forbidden
-        natural = self._natural_battery_power(data)
+        natural = self._natural_battery_power(inputs)
         if natural is None:
             self._handback.take_back(dt.now())
-            return self._hold(data, blocked)
+            return self._hold(inputs, blocked)
 
         tracks = self._inverter_model.traits.guard_tracks_setpoints
         if not tracks:
@@ -929,8 +971,8 @@ class ControlManager:
             # surplus. That hands back sooner under a charge limit, where holding draws
             # from the grid, and later under a reserve, where handing back drains the
             # battery below it.
-            from_grid_side = self._natural_from_grid_side(data)
-            from_solar_side = self._natural_from_solar_side(data)
+            from_grid_side = self._natural_from_grid_side(inputs)
+            from_solar_side = self._natural_from_solar_side(inputs)
             if from_grid_side is not None and from_solar_side is not None:
                 natural = min(from_grid_side, from_solar_side)
 
@@ -938,7 +980,7 @@ class ControlManager:
             return Decision(ControlFeature.AUTOMATIC, 0.0, blocked, bypass_dwell=True)
 
         if not tracks:
-            return self._hold(data, blocked)
+            return self._hold(inputs, blocked)
 
         if CHARGE in forbidden:
             natural = min(natural, 0.0)
@@ -946,7 +988,7 @@ class ControlManager:
             natural = max(natural, 0.0)
 
         if natural == 0.0:
-            return self._hold(data, blocked)
+            return self._hold(inputs, blocked)
 
         # Ensures that we never import from the grid if the battery can cover the demand.
         if natural > 0:
@@ -962,17 +1004,17 @@ class ControlManager:
         slack = watts - held if natural > 0 else held - watts
         if self._commanded_feature is feature and (
             0.0 <= slack < GUARD_TRACKING_STEP_W
-            or (abs(slack) < POWER_TOLERANCE_W and not self._battery_settled(data))
+            or (abs(slack) < POWER_TOLERANCE_W and not self._battery_settled(inputs))
         ):
             watts = held
 
         if watts <= 0.0:
-            return self._hold(data, blocked)
+            return self._hold(inputs, blocked)
         return Decision(
             feature, self._clamp_power(watts, feature), blocked, bypass_dwell=True
         )
 
-    def _battery_settled(self, data: dict[str, Any]) -> bool:
+    def _battery_settled(self, inputs: ControlInputs) -> bool:
         """Return whether the battery has reached the current setpoint.
 
         Some inverters start over on every new setpoint, so correcting before the
@@ -980,7 +1022,9 @@ class ControlManager:
         correct anyway.
         """
         definition = CONTROL_FEATURES[self._commanded_feature]
-        measured = data.get(definition.measure_key) if definition.measure_key else None
+        measured = (
+            inputs.value(definition.measure_key) if definition.measure_key else None
+        )
         if measured is not None:
             target = self._commanded_power * definition.sign
             off_by = abs(float(measured) - target)
@@ -1054,9 +1098,11 @@ class ControlManager:
                     return False
                 return True
 
-    def _observe_device(self, data: dict[str, Any]) -> None:
+    def _observe_device(self, inputs: ControlInputs) -> None:
         """Take in what the inverter reports about itself, once per poll."""
-        report = self._report = DeviceReport.from_data(data)
+        report = self._report = DeviceReport.from_words(
+            inputs.system_modes, inputs.system_state_2
+        )
         if report is None:
             # Nothing reported, so nothing changes: no state is assumed or kept.
             self._aside_candidate, self._aside_polls, self._aside = None, 0, None
@@ -1140,7 +1186,7 @@ class ControlManager:
             feature, power, ControlStatus.CHARGING_TO_RESERVE, bypass_dwell=True
         )
 
-    def _hold(self, data: dict[str, Any], blocked: ControlStatus | None) -> Decision:
+    def _hold(self, inputs: ControlInputs, blocked: ControlStatus | None) -> Decision:
         """Hold the battery, unless holding it could only limit solar.
 
         A full battery cannot charge, so a battery limit set against a surplus
@@ -1151,8 +1197,8 @@ class ControlManager:
         """
         # A guard's hold goes out at once, a hold the mode asks for after the dwell.
         urgent = blocked is not None
-        soc = data.get("battery_soc")
-        surplus = self._natural_battery_power(data) or 0.0
+        soc = inputs.battery_soc
+        surplus = self._natural_battery_power(inputs) or 0.0
         if (
             soc is not None
             and float(soc) >= BATTERY_FULL_SOC
@@ -1163,7 +1209,7 @@ class ControlManager:
             ControlFeature.HOLD_BATTERY, HOLD_SETPOINT_W, blocked, bypass_dwell=urgent
         )
 
-    def _desired_command(self, data: dict[str, Any]) -> Decision:
+    def _desired_command(self, inputs: ControlInputs) -> Decision:
         """Decide what to send for the selected mode; plans.py says what each runs."""
         if self._mode_state.feature is not self._feature or not self._enabled:
             self._mode_state = ModeState(self._feature)
@@ -1176,21 +1222,21 @@ class ControlManager:
             return decision
 
         mode = self._mode_state.mode
-        power = self._mode_power(data)
-        surplus = self._natural_battery_power(data)
-        step = self._choose_step(mode, data, surplus, power)
-        return self._carry_out(mode, step, surplus, power, data)
+        power = self._mode_power(inputs)
+        surplus = self._natural_battery_power(inputs)
+        step = self._choose_step(mode, inputs, surplus, power)
+        return self._carry_out(mode, step, surplus, power, inputs)
 
     def _choose_step(
         self,
         mode: Mode,
-        data: dict[str, Any],
+        inputs: ControlInputs,
         surplus: float | None,
         limit: float | None,
     ) -> Step:
         if not mode.adapts:
             return mode.deficit
-        soc = data.get("battery_soc")
+        soc = inputs.battery_soc
         return self._mode_state.choose(
             surplus,
             limit,
@@ -1205,7 +1251,7 @@ class ControlManager:
         step: Step,
         surplus: float | None,
         power: float | None,
-        data: dict[str, Any],
+        inputs: ControlInputs,
     ) -> Decision:
         """Send *step*, holding the battery wherever it would move a forbidden way."""
         command = step.command
@@ -1218,12 +1264,12 @@ class ControlManager:
             # the house changes, which a guard near its limit can afford but a mode
             # running all day cannot, so a step's own never holds instead, below.
             self._stopped = None
-            return self._one_way_automatic(data, frozenset(forbidden), guard)
+            return self._one_way_automatic(inputs, frozenset(forbidden), guard)
 
         if command is ControlFeature.HOLD_BATTERY:
             self._stopped = None
             if not mode.adapts:
-                return self._hold(data, None)
+                return self._hold(inputs, None)
             return Decision(
                 command, HOLD_SETPOINT_W, guard or step.status, bypass_dwell=True
             )
@@ -1236,13 +1282,13 @@ class ControlManager:
             # The inverter reads a zero battery setpoint as no limit at all and runs
             # itself, guards or not.
             self._stopped = None
-            return self._hold(data, None)
+            return self._hold(inputs, None)
 
         way = self._forbidden_way_moved(step, surplus, power, forbidden)
         if (
             way is CHARGE
             and not self._charge_guard
-            and self._grid_cannot_take(data, surplus)
+            and self._grid_cannot_take(inputs, surplus)
         ):
             # A step's own never only keeps a surplus for the grid, so it gives way
             # where holding could only curtail solar. A guard never does.
@@ -1250,7 +1296,7 @@ class ControlManager:
         self._stopped = None if way is None else (step, way)
         if way is not None:
             # A command is stopped, never turned around.
-            return self._hold(data, forbidden[way] or ControlStatus.ACTIVE)
+            return self._hold(inputs, forbidden[way] or ControlStatus.ACTIVE)
 
         if command is ControlFeature.AUTOMATIC:
             status = ControlStatus.AUTOMATIC if mode.adapts else None
@@ -1281,22 +1327,22 @@ class ControlManager:
             return False
         return not (self._reserve_native and step.command is ControlFeature.AUTOMATIC)
 
-    def _grid_cannot_take(self, data: dict[str, Any], surplus: float | None) -> bool:
+    def _grid_cannot_take(self, inputs: ControlInputs, surplus: float | None) -> bool:
         """Return whether holding the battery would export more than the device lets
         out, with the same margin Export Solar First keeps under the cap."""
-        device_limit = _device_export_limit(data)
+        device_limit = _device_export_limit(inputs)
         if surplus is None or device_limit is None:
             return False
         return surplus > device_limit - SOLAR_EXPORT_CAP_MARGIN_W
 
-    def _mode_power(self, data: dict[str, Any]) -> float | None:
+    def _mode_power(self, inputs: ControlInputs) -> float | None:
         """Return the selected mode's power, which an adapting mode uses as its limit.
 
         None for a mode without one, or for Export Solar First while the device
         exports nothing.
         """
         if self._feature is ControlFeature.EXPORT_SOLAR_FIRST:
-            return self._solar_export_target(data)
+            return self._solar_export_target(inputs)
         if CONTROL_FEATURES[self._feature].has_power:
             return self._clamp_power(self.feature_power(self._feature), self._feature)
         return None
@@ -1333,14 +1379,14 @@ class ControlManager:
                 return way
         return None
 
-    def _solar_export_target(self, data: dict[str, Any]) -> float | None:
+    def _solar_export_target(self, inputs: ControlInputs) -> float | None:
         """Return the export to hold the meter at, or None if there is none.
 
         The Solar Export Limit, kept just under the device's cap when it is set at
         it. None when the device exports nothing, such as with the Grid Feed-in
         switch off, or when its cap cannot be told.
         """
-        device_limit = _device_export_limit(data)
+        device_limit = _device_export_limit(inputs)
         if device_limit is None or device_limit <= SOLAR_EXPORT_CAP_MARGIN_W:
             return None
         feature = ControlFeature.EXPORT_SOLAR_FIRST
@@ -1362,7 +1408,7 @@ class ControlManager:
         self._deviation_candidate = None
         self._deviation_polls = 0
 
-    def _update_deviation(self, data: dict[str, Any]) -> None:
+    def _update_deviation(self, inputs: ControlInputs) -> None:
         """Judge the commanded setpoint, ignoring a miss that passes in a poll or two.
 
         A load switching on pulls the measurement well outside tolerance until the
@@ -1373,20 +1419,19 @@ class ControlManager:
             self._reset_deviation()
             return
 
-        data = data or {}
         measured = (
-            data.get(definition.measure_key)
+            inputs.value(definition.measure_key)
             if definition.measure_key is not None
             else None
         )
-        inverter_floor = float(data.get(BATTERY_RESERVE_REGISTER_KEY) or 0.0)
+        inverter_floor = float(inputs.min_soc_limit or 0.0)
         state = deviation_state(
             signed_target=self._commanded_power * definition.sign,
             measured=None if measured is None else float(measured),
-            soc=None if (soc := data.get("battery_soc")) is None else float(soc),
+            soc=None if (soc := inputs.battery_soc) is None else float(soc),
             min_soc=max(inverter_floor, self._battery_reserve_soc),
             battery=None
-            if (battery := data.get("battery_power")) is None
+            if (battery := inputs.battery_power) is None
             else float(battery),
         )
 
@@ -1410,9 +1455,9 @@ class ControlManager:
         age = (dt.now() - self._retargeted_at).total_seconds()
         return age < GUARD_SETTLE_S
 
-    async def async_poll(self, data: dict[str, Any]) -> None:
+    async def async_poll(self, data: Mapping[str, Any]) -> None:
         """Run from a poll, where a write failure must not stop the read."""
-        self._track_grid_feed_restore(data)
+        self._track_grid_feed_restore(ControlInputs.from_mapping(data))
         try:
             await self.async_apply(data, notify=False)
         except HomeAssistantError as err:
@@ -1420,7 +1465,7 @@ class ControlManager:
 
     async def async_apply(
         self,
-        data: dict[str, Any] | None = None,
+        data: Mapping[str, Any] | None = None,
         *,
         notify: bool = True,
         force: bool = False,
@@ -1429,13 +1474,13 @@ class ControlManager:
         # Only a poll brings data; a user action re-applies the last poll's.
         polled = data is not None
         if data is not None:
-            self._data = data
-        data = self._data
+            self._inputs = ControlInputs.from_mapping(data)
+        inputs = self._inputs
         self._expire_command()
         if polled:
-            self._observe_device(data)
-        self._follow_native_reserve(data)
-        self._update_guards(data)
+            self._observe_device(inputs)
+        self._follow_native_reserve(inputs)
+        self._update_guards(inputs)
 
         # A lapsed window hands the inverter back to its app settings, so the command
         # is sent again rather than assumed to have survived.
@@ -1443,7 +1488,7 @@ class ControlManager:
             self._control_stale = True
 
         self._one_way_ran = False
-        decision = self._desired_command(data)
+        decision = self._desired_command(inputs)
         if not self._one_way_ran:
             self._handback = GuardHandback()
             self._handback_for = frozenset()
@@ -1484,7 +1529,7 @@ class ControlManager:
             # from scratch would hide a battery that never catches up.
             if retargeted or (changed and decision.status is None):
                 self._reset_deviation()
-            self._update_deviation(data)
+            self._update_deviation(inputs)
             if polled:
                 self._check_followed()
         finally:

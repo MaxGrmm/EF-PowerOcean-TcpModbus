@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 import struct
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, fields
 
 from .models import (
     REGISTER_SIZES,
@@ -105,40 +105,45 @@ class TelemetryData:
     feed_in_power_max_setting: float | None = None
     feed_in_power_max_effective: float | None = None
 
+    # Read for the Modbus-disabled check, which needs both.
+    inverter_rated_power: float | None = None
+    limit_inv_max: float | None = None
+
     @classmethod
     def from_mapping(cls, data: Mapping[str, float | None]) -> TelemetryData:
         """Create calculation input from the coordinator's raw telemetry."""
-        faults = [
-            (int(key.removeprefix("fault_")), value)
+        faults = sorted(
+            (int(key.removeprefix(_FAULT_PREFIX)), value)
             for key, value in data.items()
-            if key.startswith("fault_") and key.removeprefix("fault_").isdigit()
-        ]
-        return cls(
-            battery_soc=data.get("battery_soc"),
-            bat_charged_total=data.get("bat_charged_total"),
-            bat_discharged_total=data.get("bat_discharged_total"),
-            solar_today=data.get("solar_today"),
-            grid_import_today=data.get("grid_import_today"),
-            bat_discharged_today=data.get("bat_discharged_today"),
-            grid_export_today=data.get("grid_export_today"),
-            bat_charged_today=data.get("bat_charged_today"),
-            solar_total=data.get("solar_total"),
-            grid_import_total=data.get("grid_import_total"),
-            grid_export_total=data.get("grid_export_total"),
-            pv1_current=data.get("pv1_current"),
-            pv1_voltage=data.get("pv1_voltage"),
-            pv2_current=data.get("pv2_current"),
-            pv2_voltage=data.get("pv2_voltage"),
-            pv3_current=data.get("pv3_current"),
-            pv3_voltage=data.get("pv3_voltage"),
-            system_modes=data.get("system_modes"),
-            system_state_2=data.get("system_state_2"),
-            battery_capacity=data.get("battery_capacity"),
-            grid_feed_mode=data.get("grid_feed_mode"),
-            fault_codes=tuple(value for _, value in sorted(faults)),
-            feed_in_power_max_setting=data.get("feed_in_power_max_setting"),
-            feed_in_power_max_effective=data.get("feed_in_power_max_effective"),
+            if is_fault_key(key)
         )
+        return cls(
+            **{name: data.get(name) for name in _value_fields(cls)},
+            fault_codes=tuple(value for _, value in faults),
+        )
+
+    @classmethod
+    def keys(cls, register_keys: Iterable[str]) -> frozenset[str]:
+        """Return the data keys the derived values are made from.
+
+        The faults are read as one register each, so they are picked out of the
+        register keys rather than named here.
+        """
+        return frozenset(_value_fields(cls)) | {
+            key for key in register_keys if is_fault_key(key)
+        }
+
+
+_FAULT_PREFIX = "fault_"
+
+
+def is_fault_key(key: str) -> bool:
+    """Return whether *key* is one of the fault code registers."""
+    return key.startswith(_FAULT_PREFIX) and key.removeprefix(_FAULT_PREFIX).isdigit()
+
+
+def _value_fields(cls: type[TelemetryData]) -> tuple[str, ...]:
+    return tuple(field.name for field in fields(cls) if field.name != "fault_codes")
 
 
 def _is_bit_set(value: int, bit_position: int) -> bool:

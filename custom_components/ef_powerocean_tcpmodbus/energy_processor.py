@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.util import dt
 
@@ -17,6 +17,15 @@ from .const import (
 from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
+
+
+# The counters the processor validates and derives the daily values from.
+ENERGY_KEYS: Final = frozenset(
+    key
+    for energy_sensor in ENERGY_SENSOR_MAP
+    for key in (energy_sensor.key, energy_sensor.total_source)
+    if key is not None
+)
 
 
 class EnergyProcessor:

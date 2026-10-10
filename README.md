@@ -395,7 +395,8 @@ To enable debug logging without editing `configuration.yaml`:
   registers; multi-register values are encoded high word first
 - **Float encoding:** 32-bit IEEE 754
 - **Read strategy:** 3 block reads per poll cycle, grouped automatically from the
-  register addresses, plus one device-information read when the connection opens
+  register addresses, plus one device-information read when the connection opens.
+  Registers only disabled sensors would show are left out
 - **Tested firmware:** 3.0.19.19 + 3.0.20.54(PO+)
 - **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 

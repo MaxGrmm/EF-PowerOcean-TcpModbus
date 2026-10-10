@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -15,6 +15,7 @@ from .models import (
     NumberWritableDef,
     SensorDef,
     SwitchDef,
+    shown_keys,
 )
 
 
@@ -30,7 +31,8 @@ class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
         | ControlEntityDef
         | SwitchDef,
     ) -> None:
-        super().__init__(coordinator)
+        # The keys this entity shows, which the coordinator reads on demand.
+        super().__init__(coordinator, context=shown_keys(definition))
         self._entry_id = entry.entry_id
         self._attr_has_entity_name = True
         self._definition = definition
@@ -46,7 +48,6 @@ class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
             "manufacturer": "EcoFlow",
             "model": self.coordinator.inverter_model.traits.display_name,
             "serial_number": self.coordinator.identity.serial_number,
-            "entry_type": DeviceEntryType.SERVICE,
         }
         if self.coordinator.identity.firmware_version:
             info["sw_version"] = self.coordinator.identity.firmware_version

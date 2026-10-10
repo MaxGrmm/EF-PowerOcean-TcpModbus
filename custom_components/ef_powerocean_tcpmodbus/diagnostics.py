@@ -37,7 +37,7 @@ async def async_get_config_entry_diagnostics(
     entry: ConfigEntry,
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    coordinator: EcoflowCoordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    coordinator: EcoflowCoordinator = entry.runtime_data
 
     identity = asdict(coordinator.identity)
     if identity["serial_number"] not in (None, "unknown"):

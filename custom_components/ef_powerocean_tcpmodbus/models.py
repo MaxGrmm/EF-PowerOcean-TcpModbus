@@ -410,10 +410,17 @@ class DeviceReport:
 
     @classmethod
     def from_data(cls, data: Mapping[str, Any]) -> DeviceReport | None:
-        if (modes := data.get("system_modes")) is None:
+        return cls.from_words(data.get("system_modes"), data.get("system_state_2"))
+
+    @classmethod
+    def from_words(
+        cls, system_modes: float | None, system_state_2: float | None
+    ) -> DeviceReport | None:
+        """Decode System Status (40530) and System State 2 (40532)."""
+        if system_modes is None:
             return None
-        modes = int(modes)
-        state_2 = int(data.get("system_state_2") or 0)
+        modes = int(system_modes)
+        state_2 = int(system_state_2 or 0)
         return cls(
             method=ControlMode.from_status((modes >> 7) & 0xF),
             manual=bool(modes >> 11 & 1),
@@ -778,3 +785,14 @@ class NumberWritableDef:
     def size(self) -> int:
         """Return how many 16-bit words the write occupies."""
         return REGISTER_SIZES[self.data_type]
+
+
+def shown_keys(definition: object) -> frozenset[str]:
+    """Return the data keys an entity made from *definition* shows."""
+    keys = {definition.key}  # type: ignore[attr-defined]
+    keys.update(getattr(definition, "attribute_keys", ()))
+    if read_key := getattr(definition, "read_key", None):
+        keys.add(read_key)
+    if total_source := getattr(definition, "total_source", None):
+        keys.add(total_source)
+    return frozenset(keys)

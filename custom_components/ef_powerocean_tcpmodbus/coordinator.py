@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any
@@ -50,13 +51,14 @@ from .const import (
     MODBUS_DISABLED_READ_THRESHOLD,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
+    REGISTERS_BY_KEY,
     SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
     register_blocks_for,
 )
 from .control import ControlManager
-from .energy_processor import EnergyProcessor
+from .energy_processor import ENERGY_KEYS, EnergyProcessor
 from .modbus import ModbusReadRejected, create_client
 from .models import (
     ControlFeature,
@@ -87,6 +89,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     # Optional registers the device refused to read, which are no longer polled.
     _unsupported_keys: frozenset[str] = frozenset()
+    # The data keys something asks for, which decide the registers polled. None
+    # reads everything, which the poll does until the entities have all been
+    # added: a poll in between would leave out what they have yet to ask for.
+    _wanted_keys: frozenset[str] | None = None
+    _on_demand: bool = False
 
     def __init__(
         self,
@@ -153,6 +160,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             on_refresh=self.async_refresh,
             write_setting=self._async_write_register,
             on_command_expired=self._command_expired,
+            # A background task of Home Assistant's: cancelled on shutdown and not
+            # waited for at startup, unlike a bare asyncio task.
+            start_task=hass.async_create_background_task,
             battery_reserve=battery_reserve_for(
                 self.inverter_model,
                 config_entry.data.get(CONF_BATTERY_RESERVE),
@@ -308,9 +318,39 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         if firmware := decode_firmware_version(
             registers_for(FIRMWARE_VERSION), self.inverter_model.traits.high_word_first
         ):
+            previous = identity.firmware_version
             identity.firmware_version = firmware
+            if previous is not None and firmware != previous:
+                self._firmware_changed(previous, firmware)
 
         await self._async_read_device_info_extra()
+
+    @callback
+    def _firmware_changed(self, previous: str, firmware: str) -> None:
+        """Retry what the old firmware refused, and show the new version.
+
+        An update can add registers, so the ones refused before may now be there.
+        Those still missing are refused and dropped again on the next poll.
+        """
+        if self._unsupported_keys:
+            _LOGGER.info(
+                "Firmware changed from %s to %s; retrying %s",
+                previous,
+                firmware,
+                ", ".join(sorted(self._unsupported_keys)),
+            )
+            self._unsupported_keys = frozenset()
+            self._plan_reads()
+        else:
+            _LOGGER.info("Firmware changed from %s to %s", previous, firmware)
+
+        # Only written when the entities are created, so it would show the old
+        # version until a reload.
+        registry = device_registry.async_get(self.hass)
+        for device in device_registry.async_entries_for_config_entry(
+            registry, self.config_entry.entry_id
+        ):
+            registry.async_update_device(device.id, sw_version=firmware)
 
     async def _async_read_device_info_extra(self) -> None:
         """Read the protocol version and device address, where the device has them.
@@ -366,10 +406,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             for register_block in tuple(self._register_blocks):
                 await self._async_read_block(register_block, data)
 
+            telemetry = TelemetryData.from_mapping(data)
             if is_modbus_disabled(
                 self.identity.serial_number,
-                data.get("inverter_rated_power"),
-                data.get("limit_inv_max"),
+                telemetry.inverter_rated_power,
+                telemetry.limit_inv_max,
             ):
                 self._consecutive_modbus_disabled_reads += 1
             else:
@@ -388,6 +429,83 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def unsupported_registers(self) -> frozenset[str]:
         """Return the optional registers the device refused, which are not polled."""
         return self._unsupported_keys
+
+    @property
+    def polled_registers(self) -> frozenset[str]:
+        """Return the keys of the registers the poll reads."""
+        return frozenset(
+            register.key
+            for block in self._register_blocks
+            for register in block.registers
+        )
+
+    # ── Demand-driven reads ───────────────────────────────────────────────────
+    #
+    # A register is polled because something asks for it. Each listener's context
+    # is the set of data keys it needs: an entity the keys it shows, the control
+    # loop the fields of ControlInputs. The coordinator adds what it needs itself,
+    # the derived values and the energy counters.
+
+    @property
+    def _own_keys(self) -> frozenset[str]:
+        """Return the keys the coordinator's own processing reads."""
+        return TelemetryData.keys(REGISTERS_BY_KEY) | ENERGY_KEYS
+
+    def _plan_reads(self) -> None:
+        """Group the registers to read, leaving out what nothing asks for."""
+        exclude = set(self._unsupported_keys)
+        if self._wanted_keys is not None:
+            exclude |= REGISTERS_BY_KEY.keys() - self._wanted_keys
+        self._register_blocks = register_blocks_for(
+            self.inverter_model, exclude=exclude
+        )
+
+    @callback
+    def async_add_listener(
+        self, update_callback: Callable[[], None], context: Any = None
+    ) -> Callable[[], None]:
+        """Track the keys the listeners ask for, as well as the listeners."""
+        remove_listener = super().async_add_listener(update_callback, context)
+        self._async_track_wanted_keys()
+
+        @callback
+        def remove() -> None:
+            remove_listener()
+            self._async_track_wanted_keys()
+
+        return remove
+
+    @callback
+    def async_require(self, keys: frozenset[str]) -> Callable[[], None]:
+        """Keep *keys* polled for something that is not an entity, until removed."""
+        return self.async_add_listener(lambda: None, keys)
+
+    @callback
+    def async_poll_on_demand(self) -> None:
+        """Stop reading everything, once everything that asks has been added."""
+        self._on_demand = True
+        self._async_track_wanted_keys()
+
+    @callback
+    def _async_track_wanted_keys(self) -> None:
+        if not self._on_demand:
+            return
+        wanted = self._own_keys.union(
+            *(
+                context
+                for context in self.async_contexts()
+                if isinstance(context, (set, frozenset))
+            )
+        )
+        if wanted == self._wanted_keys:
+            return
+        previous = self._wanted_keys
+        self._wanted_keys = wanted
+        self._plan_reads()
+        # Something that starts asking after the first poll would otherwise show
+        # nothing until the next interval.
+        if previous is not None and wanted - previous and self.data is not None:
+            self.hass.async_create_task(self.async_request_refresh())
 
     async def _async_read_block(
         self, register_block: RegisterBlock, data: dict[str, Any]
@@ -440,9 +558,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 ", ".join(sorted(refused)),
             )
             self._unsupported_keys = self._unsupported_keys | refused
-            self._register_blocks = register_blocks_for(
-                self.inverter_model, exclude=self._unsupported_keys
-            )
+            self._plan_reads()
 
     def _decode(self, words: list[int], register: RegisterDef) -> float | None:
         traits = self.inverter_model.traits

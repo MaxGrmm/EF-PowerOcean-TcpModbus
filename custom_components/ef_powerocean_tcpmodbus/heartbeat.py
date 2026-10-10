@@ -11,9 +11,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from collections.abc import Callable, Coroutine
 from contextlib import suppress
 from datetime import datetime
 from math import inf
+from typing import Any
 
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt
@@ -46,12 +48,30 @@ def retry_delays(scan_interval_s: float) -> tuple[float, ...]:
     return (0.0, *(delay,) * int(HEARTBEAT_RETRY_TOTAL_S // delay))
 
 
-class Heartbeat:
-    """Writes the heartbeat register on a timer, and reports whether it is landing."""
+type StartTask = Callable[[Coroutine[Any, Any, None], str], asyncio.Task[None]]
 
-    def __init__(self, modbus_client: ModbusClient, *, scan_interval_s: float) -> None:
+
+class Heartbeat:
+    """Writes the heartbeat register on a timer, and reports whether it is landing.
+
+    The timer runs as a task started by *start_task*, which Home Assistant should
+    supply so the task is a background task of its own: one it cancels on
+    shutdown and does not wait for at startup. Without it a plain asyncio task is
+    started, which is enough for a test.
+    """
+
+    def __init__(
+        self,
+        modbus_client: ModbusClient,
+        *,
+        scan_interval_s: float,
+        start_task: StartTask | None = None,
+    ) -> None:
         self._modbus_client = modbus_client
         self._retry_delays = retry_delays(scan_interval_s)
+        self._start_task: StartTask = start_task or (
+            lambda coro, name: asyncio.create_task(coro, name=name)
+        )
         self._lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
         self._last_success: datetime | None = None
@@ -74,7 +94,7 @@ class Heartbeat:
 
     def start(self) -> None:
         if self._task is None or self._task.done():
-            self._task = asyncio.create_task(self._run(), name="powerocean-heartbeat")
+            self._task = self._start_task(self._run(), "powerocean-heartbeat")
 
     async def async_stop(self) -> None:
         """Stop writing.

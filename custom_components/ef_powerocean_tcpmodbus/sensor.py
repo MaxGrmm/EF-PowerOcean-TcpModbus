@@ -25,7 +25,6 @@ from .const import (
     CONF_BATTERY_COUNT,
     CONTROL_STATUS_SENSOR,
     DAILY_ENERGY_SENSORS_DEVICE_RAW,
-    DOMAIN,
     ENERGY_SENSOR_MAP,
     SENSOR_MAP,
     UNIT_OF_RATIO,
@@ -54,7 +53,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: EcoflowCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: EcoflowCoordinator = entry.runtime_data
     entities: list[EcoflowSensor] = []
 
     empty_battery_slots = set(

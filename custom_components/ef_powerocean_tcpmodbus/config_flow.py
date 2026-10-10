@@ -38,15 +38,20 @@ from .const import (
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
     REGISTERS_BY_KEY,
+    SERIAL_NUMBER,
 )
 from .modbus import TRANSPORT_ERRORS, ModbusClient, async_temporary_client
 from .models import InverterModel, ReserveSupport, battery_reserve_for
-from .telemetry import decode_register
+from .telemetry import decode_register, decode_serial_number
 
 _LOGGER = logging.getLogger(__name__)
 
 MIN_CONFIG_POWER: Final = 1000
 MAX_CONFIG_POWER: Final = 60000
+
+# Key of the serial number in the settings the device reports. Not a config key:
+# it becomes the entry's unique id rather than part of its data.
+DEVICE_SERIAL_NUMBER: Final = "serial_number"
 
 # Config key -> register that suggests it, and the range a suggestion must fall in.
 # Maximum grid power is left out: it is the grid connection, which the house alone
@@ -93,6 +98,10 @@ async def _async_read_settings(client: ModbusClient) -> dict[str, Any]:
         )
         if model is not None:
             settings[CONF_INVERTER_MODEL] = model.value
+        if serial := decode_serial_number(
+            DEVICE_INFO_BLOCK.registers_for(raw, SERIAL_NUMBER)
+        ):
+            settings[DEVICE_SERIAL_NUMBER] = serial
 
     for key, (register, minimum, maximum) in DEVICE_SUGGESTED_SETTINGS.items():
         try:
@@ -135,10 +144,20 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
             if device_settings is not None:
                 self._device_settings = device_settings
                 self._user_input = user_input
+                # The serial number identifies the inverter whatever address it is
+                # at; host and port stand in only until it can be read.
                 await self.async_set_unique_id(
-                    f"{self._user_input[CONF_HOST]}:{self._user_input[CONF_PORT]}"
+                    device_settings.get(DEVICE_SERIAL_NUMBER)
+                    or f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}"
                 )
-                self._abort_if_unique_id_configured()
+                # An inverter already set up that has moved on the network gets
+                # its new address rather than a second entry.
+                self._abort_if_unique_id_configured(
+                    updates={
+                        CONF_HOST: user_input[CONF_HOST],
+                        CONF_PORT: user_input[CONF_PORT],
+                    }
+                )
                 return await self.async_step_parameters()
             else:
                 errors["base"] = "cannot_connect"
