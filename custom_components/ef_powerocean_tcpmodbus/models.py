@@ -395,7 +395,7 @@ class ControlStatus(StrEnum):
 
 
 # System State 2 (40532): one alert per bit, bit 0 first, as EcoFlow's Open Modbus
-# Protocol names them. These codes are the states of the System Alerts sensor, so
+# Protocol V1.0 documents them; bits above 22 are not documented. These codes are the states of the System Alerts sensor, so
 # one is never reworded once released.
 SYSTEM_ALERT_NAMES: Final[tuple[str, ...]] = (
     "system_shutdown",  # BIT0

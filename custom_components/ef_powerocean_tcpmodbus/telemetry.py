@@ -18,9 +18,9 @@ from .models import (
     RegisterType,
 )
 
-# Bits 4-6 of the System Status (40530) hold the operating mode as one value,
-# not as three flags. Value 7 is undocumented; it has been seen on a three-phase
-# PowerOcean whenever a Backup Reserve above 0 is set, and is not an error.
+# Bits 4-6 of the System Status (40530) hold the operating status as one
+# enumeration, not as three flags (Open Modbus Protocol V1.0): 0 standby,
+# 1 self-consumption, 2 AI. Any other value is not documented.
 _OPERATING_MODE_SHIFT = 4
 _OPERATING_MODE_MASK = 0b111
 _SELF_USE_MODE = 1
@@ -238,15 +238,11 @@ _OPERATING_MODES = {
 def system_alerts(state_2: int) -> str:
     """Return the active System State 2 alerts in bit order, or none.
 
-    A bit past the documented ones is reported as bit_<n> rather than dropped.
-    Codes are listed while they fit in a state; the rest are counted in a
-    closing +N, so a site with many alerts still shows a value.
+    Only the bits the protocol documents (0-22) are named; any other bit is
+    left out here and stays visible in the raw word. Codes are listed while they
+    fit in a state; the rest are counted in a closing +N.
     """
-    active = [
-        SYSTEM_ALERT_NAMES[bit] if bit < len(SYSTEM_ALERT_NAMES) else f"bit_{bit}"
-        for bit in range(state_2.bit_length())
-        if state_2 >> bit & 1
-    ]
+    active = [name for bit, name in enumerate(SYSTEM_ALERT_NAMES) if state_2 >> bit & 1]
     if not active:
         return SYSTEM_ALERTS_NONE
     shown: list[str] = []
@@ -346,15 +342,14 @@ def calculate_derived_values(
         calculated["system_fault"] = _is_bit_set(system_modes, 1)
         calculated["system_power_on"] = _is_bit_set(system_modes, 2)
         calculated["battery_saver_mode_ena"] = _is_bit_set(system_modes, 3)
-        # One field, so the two flags follow its value: read as single bits, the
-        # undocumented 7 would switch both on at once.
+        # One enumeration, so the two flags follow its value rather than bits 4
+        # and 5 on their own.
         operating_mode = system_modes >> _OPERATING_MODE_SHIFT & _OPERATING_MODE_MASK
         calculated["self_use_mode_ena"] = operating_mode == _SELF_USE_MODE
         calculated["intelligent_mode_ena"] = operating_mode == _INTELLIGENT_MODE
         calculated["operating_mode"] = _OPERATING_MODES.get(
             operating_mode, OperatingMode.UNKNOWN
         )
-        calculated["operating_mode_raw"] = operating_mode
         # What the device says it follows, as opposed to what was commanded.
         active_mode = ControlMode.from_status(
             (system_modes >> _CONTROL_MODE_SHIFT) & _CONTROL_MODE_MASK

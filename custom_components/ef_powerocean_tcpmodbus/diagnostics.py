@@ -20,7 +20,6 @@ PROTOCOL_REPORT_KEYS = (
     "system_modes_hex",
     "system_state_2_hex",
     "system_alerts",
-    "operating_mode_raw",
     "active_control_mode",
     "device_modbus_control",
     "bms_connected",

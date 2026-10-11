@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -50,6 +51,7 @@ from .const import (
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MODBUS_DISABLED_READ_THRESHOLD,
+    MODBUS_POLL_BUDGET_S,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
     REGISTERS_BY_KEY,
@@ -528,21 +530,27 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         if not self._modbus_client.connected and not await self.async_reconnect():
             raise UpdateFailed("Reconnect failed!")
 
-        if not self._identity_verified:
-            await self.async_read_device_info()
-            if self._identity_mismatch:
-                raise IdentityMismatch(
-                    f"The device at {self.host} is not the inverter this entry "
-                    "belongs to"
-                )
-            if not self._identity_verified:
-                _LOGGER.debug("Serial number not confirmed yet; skipping this poll")
-                return None
-
         try:
-            # A probe may replan the blocks, so the loop runs over this poll's plan.
-            for register_block in tuple(self._register_blocks):
-                await self._async_read_block(register_block, data)
+            # One budget for every request of the poll, the identity check included.
+            # The reconnect above is left out: it has a backoff of its own.
+            async with asyncio.timeout(MODBUS_POLL_BUDGET_S):
+                if not self._identity_verified:
+                    await self.async_read_device_info()
+                    if self._identity_mismatch:
+                        raise IdentityMismatch(
+                            f"The device at {self.host} is not the inverter this "
+                            "entry belongs to"
+                        )
+                    if not self._identity_verified:
+                        _LOGGER.debug(
+                            "Serial number not confirmed yet; skipping this poll"
+                        )
+                        return None
+
+                # A probe may replan the blocks, so the loop runs over this poll's
+                # plan.
+                for register_block in tuple(self._register_blocks):
+                    await self._async_read_block(register_block, data)
 
             telemetry = TelemetryData.from_mapping(data)
             if is_modbus_disabled(
@@ -555,16 +563,27 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._consecutive_modbus_disabled_reads = 0
 
             return data
-        except ModbusException as err:
-            _LOGGER.debug(f"{err.string}. Connection closing...")
-            self._modbus_client.close()
-            # A shared link may come back up without us seeing it drop, so the
-            # device is asked for its serial again before anything is trusted.
-            self._mark_identity_unverified()
+        except TimeoutError:
+            # The request cut off may still be answered later, so the connection
+            # is dropped rather than left with a reply nobody waits for.
+            _LOGGER.debug(
+                "Poll exceeded its %ss budget. Connection closing...",
+                MODBUS_POLL_BUDGET_S,
+            )
+            self._read_failed()
             return None
-        except Exception as err:
-            _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
-            return data
+        except (ModbusException, ConnectionError) as err:
+            _LOGGER.debug(f"{err}. Connection closing...")
+            self._read_failed()
+            return None
+        # Anything else is a bug, not a read failure: it propagates, and the
+        # coordinator logs it with its traceback and marks the update failed.
+
+    def _read_failed(self) -> None:
+        self._modbus_client.close()
+        # A shared link may come back up without us seeing it drop, so the
+        # device is asked for its serial again before anything is trusted.
+        self._mark_identity_unverified()
 
     @property
     def unsupported_registers(self) -> frozenset[str]:
@@ -763,10 +782,13 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
 
             return dict(result)
-        except Exception as err:
+        except Exception:
+            # A bug in the processing, not a device problem. Re-raised so the
+            # coordinator logs it with its traceback and marks the update failed:
+            # the entities go unavailable instead of showing an empty frame as if
+            # it were a good one.
             self._status = CoordinatorStatus.PROCESSING_FAILED
-            _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
-            return None
+            raise
 
     # ── Parameter and setpoint writes ─────────────────────────────────────────
 

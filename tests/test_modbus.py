@@ -270,3 +270,13 @@ def test_blocked_writes_never_reach_the_link(client, pymodbus) -> None:
     pymodbus.write_register.return_value = answer(is_error=False)
     asyncio.run(client.async_write(40536, [10], what="reserve"))
     pymodbus.write_register.assert_awaited_once()
+
+
+def test_an_own_link_waits_a_few_seconds_not_twenty() -> None:
+    async def make() -> modbus_module.PymodbusLink:
+        return modbus_module.PymodbusLink("192.0.2.10", 502)
+
+    link = asyncio.run(make())
+
+    assert link._pymodbus.comm_params.timeout_connect == const.MODBUS_REQUEST_TIMEOUT_S
+    assert const.MODBUS_POLL_BUDGET_S < const.HEARTBEAT_WINDOW_S / 2

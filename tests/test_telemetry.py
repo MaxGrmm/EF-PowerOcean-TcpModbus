@@ -351,7 +351,9 @@ def test_system_state_2_rides_on_the_fault_count() -> None:
         (1 << 4, "fan_failure"),
         ((1 << 13) | (1 << 0), "system_shutdown,battery_overheating"),
         (1 << 22, "parallel_meter_fault"),
-        (1 << 23, "bit_23"),
+        # Undocumented bits are not named; the raw word still shows them.
+        (1 << 23, "none"),
+        ((1 << 23) | (1 << 4), "fan_failure"),
     ),
 )
 def test_system_alerts_names_each_bit(state_2: int, expected: str) -> None:
@@ -359,7 +361,7 @@ def test_system_alerts_names_each_bit(state_2: int, expected: str) -> None:
 
 
 def test_system_alerts_fit_in_a_state_and_count_the_rest() -> None:
-    every_bit = (1 << 23) - 1
+    every_bit = (1 << 32) - 1
 
     alerts = system_alerts(every_bit)
 
@@ -368,15 +370,26 @@ def test_system_alerts_fit_in_a_state_and_count_the_rest() -> None:
     assert len(shown.split(",")) + int(hidden) == 23
 
 
-def test_the_operating_mode_is_one_field_not_three_flags() -> None:
-    """Value 7 shows on a three-phase unit with a Backup Reserve, and is no mode."""
+@pytest.mark.parametrize(
+    ("field", "mode", "self_use", "intelligent"),
+    (
+        (0, "standby", False, False),
+        (1, "self_consumption", True, False),
+        (2, "ai", False, True),
+        # Not in the protocol's enumeration.
+        (3, "unknown", False, False),
+        (7, "unknown", False, False),
+    ),
+)
+def test_the_operating_status_is_one_enumeration_not_three_flags(
+    field: int, mode: str, self_use: bool, intelligent: bool
+) -> None:
     calculated = calculate_derived_values(
-        TelemetryData(system_modes=float(0b111 << 4)),
+        TelemetryData(system_modes=float(field << 4)),
         calculate_solar_power=False,
         startup_voltage=0,
     )
 
-    assert calculated["operating_mode"] == "unknown"
-    assert calculated["operating_mode_raw"] == 7
-    assert calculated["self_use_mode_ena"] is False
-    assert calculated["intelligent_mode_ena"] is False
+    assert calculated["operating_mode"] == mode
+    assert calculated["self_use_mode_ena"] is self_use
+    assert calculated["intelligent_mode_ena"] is intelligent

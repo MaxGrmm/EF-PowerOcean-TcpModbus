@@ -24,7 +24,12 @@ from homeassistant.setup import async_setup_component
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
-from .const import DEFAULT_SLAVE, DEVICE_INFO_BLOCK, SLEEP_TIME_AFTER_RECONNECT_S
+from .const import (
+    DEFAULT_SLAVE,
+    DEVICE_INFO_BLOCK,
+    MODBUS_REQUEST_TIMEOUT_S,
+    SLEEP_TIME_AFTER_RECONNECT_S,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -149,7 +154,7 @@ class PymodbusLink:
         port: int,
         *,
         device_id: int = DEFAULT_SLAVE,
-        timeout: float = 20,
+        timeout: float = MODBUS_REQUEST_TIMEOUT_S,
     ) -> None:
         self._device_id = device_id
         self._pymodbus = AsyncModbusTcpClient(
@@ -412,7 +417,7 @@ async def async_temporary_client(
     """Hold a client for the context, for a config flow that has no entry yet."""
     await async_prepare(hass)
     if _shared is None:
-        client = ModbusClient(PymodbusLink(host, port, timeout=5))
+        client = ModbusClient(PymodbusLink(host, port))
         try:
             yield client
         finally:

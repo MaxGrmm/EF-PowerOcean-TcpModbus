@@ -70,6 +70,18 @@ MAX_FAULT_EVENTS: Final = 20
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 
+# How long one request, or one connect, may wait for the inverter. It answers on
+# the local network within a second even when busy, so a request that has not
+# answered in this time has failed, and the next poll is the retry. Kept well
+# under the poll interval, so a silent inverter cannot hold the client lock (and
+# the heartbeat queued behind it) for long.
+MODBUS_REQUEST_TIMEOUT_S: Final = 3
+# How long one whole poll may take, every request together. Each request has its
+# own timeout, but a device answering each one just inside it could still hold a
+# poll of a dozen reads for over half a minute. A few request timeouts leave room
+# for a slow but working device and keep the heartbeat's 60 s window safe.
+MODBUS_POLL_BUDGET_S: Final = 4 * MODBUS_REQUEST_TIMEOUT_S
+
 # The inverter runs on its app settings and merely stores the commands it is sent,
 # until this register is written; each write buys it a minute of obeying them. Every
 # constant below is seconds measured against that one deadline.
@@ -615,7 +627,6 @@ SENSOR_MAP: list[SensorDef] = [
         device_class="enum",
         options=tuple(OperatingMode),
         icon="mdi:home-lightning-bolt",
-        attribute_keys=("operating_mode_raw",),
     ),
     SensorDef(
         key="system_alerts",

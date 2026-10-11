@@ -394,10 +394,53 @@ def test_processing_failure_updates_coordinator_status(coordinator) -> None:
         side_effect=ValueError("Invalid data")
     )
 
-    result = asyncio.run(coordinator._async_update_data())
+    # Raised, so the coordinator logs the traceback and marks the update failed,
+    # instead of publishing an empty frame as a good one.
+    with pytest.raises(ValueError, match="Invalid data"):
+        asyncio.run(coordinator._async_update_data())
 
-    assert result is None
     assert coordinator.status == models.CoordinatorStatus.PROCESSING_FAILED
+
+
+def test_a_poll_over_its_budget_fails_and_drops_the_connection(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(coordinator_module, "MODBUS_POLL_BUDGET_S", 0.01)
+
+    async def slow_read(*_args):
+        await asyncio.sleep(1)
+
+    coordinator._modbus_client.async_read = slow_read
+
+    with pytest.raises(coordinator_module.UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.status == models.CoordinatorStatus.READ_FAILED
+    coordinator._modbus_client.close.assert_called_once()
+    assert not coordinator.identity_verified
+
+
+def test_a_lost_socket_is_a_read_failure(coordinator) -> None:
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=ConnectionResetError("reset")
+    )
+
+    with pytest.raises(coordinator_module.UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.status == models.CoordinatorStatus.READ_FAILED
+    coordinator._modbus_client.close.assert_called_once()
+
+
+def test_a_bug_while_reading_is_raised_not_published_as_partial_data(
+    coordinator,
+) -> None:
+    coordinator._modbus_client.async_read = AsyncMock(side_effect=KeyError("bug"))
+
+    with pytest.raises(KeyError):
+        asyncio.run(coordinator._async_update_data())
+
+    coordinator._modbus_client.close.assert_not_called()
 
 
 def test_persisted_state_after_reload_clamps_total_reset(
