@@ -108,7 +108,6 @@ def test_a_recent_beat_is_reused_and_a_stale_one_is_rewritten(
 def test_no_heartbeat_reaches_a_device_with_an_unverified_identity(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A beat to the wrong inverter would hand us control of it."""
     write = allow_writes(control, monkeypatch)
     control._modbus_client.writes_allowed = False
 

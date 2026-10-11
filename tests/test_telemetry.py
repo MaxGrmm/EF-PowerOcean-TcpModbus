@@ -320,7 +320,6 @@ def test_decodes_the_active_control_method_from_the_system_status(
 
 
 def test_system_state_2_is_published_raw_and_only_when_read() -> None:
-    """The word is published as read, and nothing at all when it was not read."""
     flags = (1 << 1) | (1 << 3)
     read = calculate_derived_values(
         TelemetryData.from_mapping({"system_state_2": float(flags)}),
@@ -351,7 +350,6 @@ def test_system_state_2_rides_on_the_fault_count() -> None:
         (1 << 4, "fan_failure"),
         ((1 << 13) | (1 << 0), "system_shutdown,battery_overheating"),
         (1 << 22, "parallel_meter_fault"),
-        # Undocumented bits are not named; the raw word still shows them.
         (1 << 23, "none"),
         ((1 << 23) | (1 << 4), "fan_failure"),
     ),
@@ -376,7 +374,6 @@ def test_system_alerts_fit_in_a_state_and_count_the_rest() -> None:
         (0, "standby", False, False),
         (1, "self_consumption", True, False),
         (2, "ai", False, True),
-        # Not in the protocol's enumeration.
         (3, "unknown", False, False),
         (7, "unknown", False, False),
     ),

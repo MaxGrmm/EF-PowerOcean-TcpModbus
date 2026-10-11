@@ -262,12 +262,8 @@ class ModbusClient:
     def __init__(self, link: ModbusLink) -> None:
         self._link = link
         self._lock = asyncio.Lock()
-        # Set once the client is shut down, so a reconnect still in its backoff
-        # does not open the link again behind the unload.
+        # Stops a reconnect in its backoff from reopening the link after unload.
         self._closed = False
-        # Why writes are refused, or None while they are allowed. The coordinator
-        # blocks them until the device has proven it is the one this entry
-        # belongs to.
         self._write_block: str | None = None
 
     @property
@@ -279,7 +275,6 @@ class ModbusClient:
         return self._write_block is None
 
     def block_writes(self, reason: str) -> None:
-        """Refuse every write until allow_writes is called."""
         self._write_block = reason
 
     def allow_writes(self) -> None:
@@ -292,7 +287,7 @@ class ModbusClient:
         self._link.close()
 
     async def async_close(self) -> None:
-        """Close once any transaction in flight has finished, and stay closed."""
+        """Close once any transaction in flight has finished."""
         self._closed = True
         async with self._lock:
             self._link.close()
@@ -300,9 +295,7 @@ class ModbusClient:
     async def async_reconnect(self) -> bool:
         """Retry the connection with a widening backoff.
 
-        The backoff is waited out without the lock, which only guards the
-        attempt itself: holding it through a two-minute wait would stall every
-        write and the unload behind a reconnect that may never succeed.
+        The backoff waits outside the lock, so writes and unload are not stalled.
         """
         _LOGGER.debug("Modbus TCP is not connected. Start reconnect!")
         attempts = len(RECONNECT_DELAYS_S)
@@ -318,7 +311,6 @@ class ModbusClient:
                 if self._closed:
                     return False
                 if self._link.connected:
-                    # Someone else got the link up while this one waited.
                     return True
                 _LOGGER.debug(f"Modbus TCP reconnect (Attempt {attempt}/{attempts})...")
                 if await self._link.connect():
@@ -330,7 +322,6 @@ class ModbusClient:
                     self._link.close()
                     connected = False
             if connected:
-                # Settle time for the device, also outside the lock.
                 await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
                 return True
 

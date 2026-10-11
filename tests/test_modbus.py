@@ -208,10 +208,7 @@ async def test_any_answer_counts_as_a_shared_link_being_up(shared_client, unit) 
 
 
 class _FlakyLink:
-    """A link that comes up on the attempt given, and records the lock each time."""
-
-    def __init__(self, client_ref: list, up_on_attempt: int) -> None:
-        self._client_ref = client_ref
+    def __init__(self, up_on_attempt: int) -> None:
         self._up_on_attempt = up_on_attempt
         self.attempts = 0
         self.connected = False
@@ -229,8 +226,7 @@ class _FlakyLink:
 def test_the_reconnect_backoff_does_not_hold_the_lock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    ref: list = []
-    link = _FlakyLink(ref, up_on_attempt=3)
+    link = _FlakyLink(up_on_attempt=3)
     client = modbus_module.ModbusClient(link)
 
     async def sleep(_delay: float) -> None:
@@ -245,11 +241,10 @@ def test_the_reconnect_backoff_does_not_hold_the_lock(
 
 
 def test_a_closed_client_stops_reconnecting(monkeypatch: pytest.MonkeyPatch) -> None:
-    link = _FlakyLink([], up_on_attempt=99)
+    link = _FlakyLink(up_on_attempt=99)
     client = modbus_module.ModbusClient(link)
 
     async def sleep(_delay: float) -> None:
-        # The unload lands while the backoff is waited out.
         await client.async_close()
 
     monkeypatch.setattr(modbus_module.asyncio, "sleep", sleep)

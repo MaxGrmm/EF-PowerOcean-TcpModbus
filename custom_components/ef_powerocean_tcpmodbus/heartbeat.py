@@ -169,8 +169,7 @@ class Heartbeat:
             for delay in self._retry_delays:
                 if delay:
                     await asyncio.sleep(delay)
-                # A device that has not proven its identity gets no heartbeat:
-                # it would hand Modbus control of whatever answers to us.
+                # Unverified: a beat could take control of the wrong inverter.
                 if (
                     not self._modbus_client.connected
                     or not self._modbus_client.writes_allowed

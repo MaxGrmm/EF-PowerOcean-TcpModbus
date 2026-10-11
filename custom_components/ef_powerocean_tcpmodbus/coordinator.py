@@ -87,17 +87,15 @@ from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
-# Why writes are refused while the device has not shown its serial number.
 _IDENTITY_UNVERIFIED = "the device has not confirmed its serial number yet"
 
 
 def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
-    """Return the stable id of the repairs issue raised for a different device."""
     return f"identity_mismatch_{entry.entry_id}"
 
 
 class IdentityMismatch(UpdateFailed):
-    """The device at the configured address is not the one this entry belongs to."""
+    """Another device answers at the configured address."""
 
 
 class EcoflowCoordinator(DataUpdateCoordinator):
@@ -110,12 +108,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     # added: a poll in between would leave out what they have yet to ask for.
     _wanted_keys: frozenset[str] | None = None
     _on_demand: bool = False
-    # Whether the device answering has shown the serial number this entry belongs
-    # to since the link last came up. Until it has, nothing is written to it and
-    # its telemetry is not published.
     _identity_verified: bool = False
     _identity_mismatch: bool = False
-    # The serial seen first in this session, for an entry still keyed by address.
+    # For entries still keyed by host:port.
     _pinned_serial: str | None = None
 
     def __init__(
@@ -223,7 +218,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
     @property
     def identity_verified(self) -> bool:
-        """Return whether the device has shown the serial this entry belongs to."""
         return self._identity_verified
 
     @property
@@ -336,7 +330,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         identity = self.identity
         if identity.serial_number is None:
             identity.serial_number = "unknown"
-        # Whatever answers on a link that has just come up is checked again.
         self._mark_identity_unverified()
 
         try:
@@ -374,12 +367,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     # ── Identity ──────────────────────────────────────────────────────────────
 
     def _expected_serial(self) -> str | None:
-        """Return the serial number the device has to show, if one is known.
-
-        The entry's unique id is the serial once the device has reported one;
-        an entry still keyed by host and port falls back to the first serial
-        seen in this session.
-        """
         unique_id = self.config_entry.unique_id
         if unique_id and ":" not in unique_id:
             return unique_id
@@ -390,22 +377,15 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._modbus_client.block_writes(_IDENTITY_UNVERIFIED)
 
     def _accept_unreadable_identity(self) -> None:
-        """Decide what an unreadable serial means.
-
-        With nothing to compare against it is let through, as before the check
-        existed. With a known serial it stays unverified, and the next poll asks
-        again.
-        """
+        # Nothing to compare against: keep the behaviour from before the check.
         if self._expected_serial() is None:
             self._set_identity_verified()
 
     def _check_identity(self, serial: str | None) -> bool:
-        """Verify *serial* against the one this entry belongs to.
+        """Block reads and writes to a device with another serial.
 
-        A different serial means another device now answers at this address: a
-        changed DHCP lease, a second inverter, a swapped unit. Its data is not
-        published and nothing is written to it, so the heartbeat cannot hand us
-        control of an inverter nobody configured.
+        Otherwise a changed DHCP lease could hand us Modbus control of an
+        inverter nobody configured.
         """
         if not serial:
             self._accept_unreadable_identity()
@@ -531,8 +511,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Reconnect failed!")
 
         try:
-            # One budget for every request of the poll, the identity check included.
-            # The reconnect above is left out: it has a backoff of its own.
+            # The reconnect above has its own backoff, so it is not budgeted.
             async with asyncio.timeout(MODBUS_POLL_BUDGET_S):
                 if not self._identity_verified:
                     await self.async_read_device_info()
@@ -547,8 +526,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                         )
                         return None
 
-                # A probe may replan the blocks, so the loop runs over this poll's
-                # plan.
+                # A probe may replan the blocks.
                 for register_block in tuple(self._register_blocks):
                     await self._async_read_block(register_block, data)
 
@@ -564,8 +542,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
             return data
         except TimeoutError:
-            # The request cut off may still be answered later, so the connection
-            # is dropped rather than left with a reply nobody waits for.
+            # A late answer to the cancelled request would confuse the next one.
             _LOGGER.debug(
                 "Poll exceeded its %ss budget. Connection closing...",
                 MODBUS_POLL_BUDGET_S,
@@ -576,13 +553,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             _LOGGER.debug(f"{err}. Connection closing...")
             self._read_failed()
             return None
-        # Anything else is a bug, not a read failure: it propagates, and the
-        # coordinator logs it with its traceback and marks the update failed.
+        # Anything else is a bug: let the coordinator log its traceback.
 
     def _read_failed(self) -> None:
         self._modbus_client.close()
-        # A shared link may come back up without us seeing it drop, so the
-        # device is asked for its serial again before anything is trusted.
+        # A shared link can reconnect without us seeing it drop.
         self._mark_identity_unverified()
 
     @property
@@ -783,10 +758,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
 
             return dict(result)
         except Exception:
-            # A bug in the processing, not a device problem. Re-raised so the
-            # coordinator logs it with its traceback and marks the update failed:
-            # the entities go unavailable instead of showing an empty frame as if
-            # it were a good one.
+            # Re-raised so the coordinator logs the traceback and marks the
+            # entities unavailable, rather than publishing an empty frame.
             self._status = CoordinatorStatus.PROCESSING_FAILED
             raise
 

@@ -9,27 +9,23 @@ from dataclasses import dataclass, fields
 
 from .models import (
     REGISTER_SIZES,
-    SYSTEM_ALERT_NAMES,
     UNKNOWN_STATE,
     ControlMode,
     GridFeedMode,
     GridMode,
     OperatingMode,
     RegisterType,
+    SystemAlert,
 )
 
-# Bits 4-6 of the System Status (40530) hold the operating status as one
-# enumeration, not as three flags (Open Modbus Protocol V1.0): 0 standby,
-# 1 self-consumption, 2 AI. Any other value is not documented.
+# Bits 4-6 of the System Status (40530): one enumeration, not three flags.
 _OPERATING_MODE_SHIFT = 4
 _OPERATING_MODE_MASK = 0b111
 _SELF_USE_MODE = 1
 _INTELLIGENT_MODE = 2
 
-# The System Alerts state while no System State 2 bit is set.
 SYSTEM_ALERTS_NONE = "none"
-# Home Assistant stores at most 255 characters as a state and shows anything
-# longer as unknown. All 23 codes together run to 463.
+# Home Assistant shows a longer state as unknown; all 23 codes run to 463.
 _STATE_MAX_LEN = 255
 
 # Bit layout of the System Status (40530) beyond the low flags.
@@ -236,13 +232,12 @@ _OPERATING_MODES = {
 
 
 def system_alerts(state_2: int) -> str:
-    """Return the active System State 2 alerts in bit order, or none.
+    """Return the active alert codes in bit order, or none.
 
-    Only the bits the protocol documents (0-22) are named; any other bit is
-    left out here and stays visible in the raw word. Codes are listed while they
-    fit in a state; the rest are counted in a closing +N.
+    Undocumented bits are left out. Codes that would overrun a state are
+    counted in a closing +N.
     """
-    active = [name for bit, name in enumerate(SYSTEM_ALERT_NAMES) if state_2 >> bit & 1]
+    active = [alert.code for alert in SystemAlert(state_2)]
     if not active:
         return SYSTEM_ALERTS_NONE
     shown: list[str] = []
@@ -342,8 +337,6 @@ def calculate_derived_values(
         calculated["system_fault"] = _is_bit_set(system_modes, 1)
         calculated["system_power_on"] = _is_bit_set(system_modes, 2)
         calculated["battery_saver_mode_ena"] = _is_bit_set(system_modes, 3)
-        # One enumeration, so the two flags follow its value rather than bits 4
-        # and 5 on their own.
         operating_mode = system_modes >> _OPERATING_MODE_SHIFT & _OPERATING_MODE_MASK
         calculated["self_use_mode_ena"] = operating_mode == _SELF_USE_MODE
         calculated["intelligent_mode_ena"] = operating_mode == _INTELLIGENT_MODE
@@ -363,7 +356,7 @@ def calculate_derived_values(
         calculated["bms_connected"] = _is_bit_set(system_modes, _BMS_CONNECTED_BIT)
         calculated["system_modes_hex"] = f"0x{system_modes:08X}"
 
-    # Only when the word was read: no word, no "none" invented.
+    # Unread is not the same as no alerts.
     if data.system_state_2 is not None:
         state_2 = int(data.system_state_2)
         calculated["system_state_2_hex"] = f"0x{state_2:08X}"

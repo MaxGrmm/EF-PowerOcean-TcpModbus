@@ -39,7 +39,6 @@ def coordinator():
     instance.config_entry = SimpleNamespace(
         entry_id="entry", unique_id="R371ZD1AZH3X0450"
     )
-    # Verified, so the poll tests read telemetry straight away.
     instance._identity_verified = True
     instance._status = None
     instance._store = None
@@ -394,8 +393,6 @@ def test_processing_failure_updates_coordinator_status(coordinator) -> None:
         side_effect=ValueError("Invalid data")
     )
 
-    # Raised, so the coordinator logs the traceback and marks the update failed,
-    # instead of publishing an empty frame as a good one.
     with pytest.raises(ValueError, match="Invalid data"):
         asyncio.run(coordinator._async_update_data())
 
@@ -1425,7 +1422,7 @@ def test_a_poll_against_another_device_fails_without_reading_telemetry(
         asyncio.run(coordinator._async_update_data())
 
     assert coordinator.status is models.CoordinatorStatus.IDENTITY_MISMATCH
-    # The device info block and its two extras were never reached: one read only.
+    # Only the device info block; no telemetry.
     assert coordinator._modbus_client.async_read.await_count == 1
 
 
@@ -1469,7 +1466,6 @@ def test_an_entry_without_a_known_serial_pins_the_first_one_seen(
 def test_an_entry_without_a_known_serial_stays_usable_when_none_is_readable(
     coordinator, issues
 ) -> None:
-    """Nothing to compare against, so the device is let through as before."""
     coordinator.config_entry.unique_id = "192.0.2.10:502"
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=coordinator_module.ModbusException("timeout")

@@ -14,7 +14,7 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field, replace
-from enum import IntEnum, StrEnum
+from enum import IntEnum, IntFlag, StrEnum
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from homeassistant.const import EntityCategory, UnitOfEnergy
@@ -394,47 +394,50 @@ class ControlStatus(StrEnum):
     CONTROL_TEST = "control_test"
 
 
-# System State 2 (40532): one alert per bit, bit 0 first, as EcoFlow's Open Modbus
-# Protocol V1.0 documents them; bits above 22 are not documented. These codes are the states of the System Alerts sensor, so
-# one is never reworded once released.
-SYSTEM_ALERT_NAMES: Final[tuple[str, ...]] = (
-    "system_shutdown",  # BIT0
-    "upgrade_shutdown",  # BIT1
-    "epo_triggered",  # BIT2
-    "low_power_mode",  # BIT3
-    "fan_failure",  # BIT4
-    "system_failure",  # BIT5
-    "battery_reverse_connection",  # BIT6
-    "battery_disconnected",  # BIT7
-    "auxiliary_power_failure",  # BIT8
-    "pcs_timeout",  # BIT9
-    "pcs_failure",  # BIT10
-    "igbt_self_test_failure",  # BIT11
-    "high_temperature_protection",  # BIT12
-    "battery_overheating",  # BIT13
-    "ntc_circuit_failure",  # BIT14
-    "system_reset",  # BIT15
-    "hardware_version_error",  # BIT16
-    "parallel_sync_error",  # BIT17
-    "low_temperature_protection",  # BIT18
-    "parallel_master_slave_conflict",  # BIT19
-    "parallel_slave_setting_error",  # BIT20
-    "parallel_inverter_error",  # BIT21
-    "parallel_meter_fault",  # BIT22
-)
+class SystemAlert(IntFlag):
+    """System State 2 (40532) bits, as the Open Modbus Protocol V1.0 documents them.
 
-# The System State 2 alerts under which the inverter stops acting.
-_STOP_ALERTS: Final = (
-    "system_shutdown",
-    "upgrade_shutdown",
-    "epo_triggered",
-    "system_failure",
-    "battery_disconnected",
-    "pcs_timeout",
-    "pcs_failure",
-)
-_STOP_FLAGS_MASK: Final = sum(
-    1 << SYSTEM_ALERT_NAMES.index(name) for name in _STOP_ALERTS
+    The lowercase names are the System Alerts states, so never rename one.
+    """
+
+    SYSTEM_SHUTDOWN = 1 << 0
+    UPGRADE_SHUTDOWN = 1 << 1
+    EPO_TRIGGERED = 1 << 2
+    LOW_POWER_MODE = 1 << 3
+    FAN_FAILURE = 1 << 4
+    SYSTEM_FAILURE = 1 << 5
+    BATTERY_REVERSE_CONNECTION = 1 << 6
+    BATTERY_DISCONNECTED = 1 << 7
+    AUXILIARY_POWER_FAILURE = 1 << 8
+    PCS_TIMEOUT = 1 << 9
+    PCS_FAILURE = 1 << 10
+    IGBT_SELF_TEST_FAILURE = 1 << 11
+    HIGH_TEMPERATURE_PROTECTION = 1 << 12
+    BATTERY_OVERHEATING = 1 << 13
+    NTC_CIRCUIT_FAILURE = 1 << 14
+    SYSTEM_RESET = 1 << 15
+    HARDWARE_VERSION_ERROR = 1 << 16
+    PARALLEL_SYNC_ERROR = 1 << 17
+    LOW_TEMPERATURE_PROTECTION = 1 << 18
+    PARALLEL_MASTER_SLAVE_CONFLICT = 1 << 19
+    PARALLEL_SLAVE_SETTING_ERROR = 1 << 20
+    PARALLEL_INVERTER_ERROR = 1 << 21
+    PARALLEL_METER_FAULT = 1 << 22
+
+    @property
+    def code(self) -> str:
+        return str(self.name).lower()
+
+
+# The inverter stops acting under any of these.
+STOP_ALERTS: Final = (
+    SystemAlert.SYSTEM_SHUTDOWN
+    | SystemAlert.UPGRADE_SHUTDOWN
+    | SystemAlert.EPO_TRIGGERED
+    | SystemAlert.SYSTEM_FAILURE
+    | SystemAlert.BATTERY_DISCONNECTED
+    | SystemAlert.PCS_TIMEOUT
+    | SystemAlert.PCS_FAILURE
 )
 
 
@@ -467,7 +470,7 @@ class DeviceReport:
             manual=bool(modes >> 11 & 1),
             off_grid=bool(modes & 1),
             bms_connected=bool(modes >> 12 & 1),
-            fault=bool(modes >> 1 & 1) or bool(state_2 & _STOP_FLAGS_MASK),
+            fault=bool(modes >> 1 & 1) or bool(state_2 & STOP_ALERTS),
         )
 
 
