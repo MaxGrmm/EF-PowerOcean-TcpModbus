@@ -31,7 +31,15 @@ def coordinator():
         async_read=AsyncMock(),
         async_write=AsyncMock(),
         close=Mock(),
+        block_writes=Mock(),
+        allow_writes=Mock(),
     )
+    instance.hass = Mock()
+    instance.host = "192.0.2.10"
+    instance.config_entry = SimpleNamespace(
+        entry_id="entry", unique_id="R371ZD1AZH3X0450"
+    )
+    instance._identity_verified = True
     instance._status = None
     instance._store = None
     instance.identity = models.DeviceIdentity()
@@ -385,10 +393,51 @@ def test_processing_failure_updates_coordinator_status(coordinator) -> None:
         side_effect=ValueError("Invalid data")
     )
 
-    result = asyncio.run(coordinator._async_update_data())
+    with pytest.raises(ValueError, match="Invalid data"):
+        asyncio.run(coordinator._async_update_data())
 
-    assert result is None
     assert coordinator.status == models.CoordinatorStatus.PROCESSING_FAILED
+
+
+def test_a_poll_over_its_budget_fails_and_drops_the_connection(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(coordinator_module, "MODBUS_POLL_BUDGET_S", 0.01)
+
+    async def slow_read(*_args):
+        await asyncio.sleep(1)
+
+    coordinator._modbus_client.async_read = slow_read
+
+    with pytest.raises(coordinator_module.UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.status == models.CoordinatorStatus.READ_FAILED
+    coordinator._modbus_client.close.assert_called_once()
+    assert not coordinator.identity_verified
+
+
+def test_a_lost_socket_is_a_read_failure(coordinator) -> None:
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=ConnectionResetError("reset")
+    )
+
+    with pytest.raises(coordinator_module.UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.status == models.CoordinatorStatus.READ_FAILED
+    coordinator._modbus_client.close.assert_called_once()
+
+
+def test_a_bug_while_reading_is_raised_not_published_as_partial_data(
+    coordinator,
+) -> None:
+    coordinator._modbus_client.async_read = AsyncMock(side_effect=KeyError("bug"))
+
+    with pytest.raises(KeyError):
+        asyncio.run(coordinator._async_update_data())
+
+    coordinator._modbus_client.close.assert_not_called()
 
 
 def test_persisted_state_after_reload_clamps_total_reset(
@@ -1316,3 +1365,124 @@ def test_the_powerocean_reads_the_new_diagnostic_registers_in_its_live_block() -
     }
 
     assert {"grid_voltage_l1", "inverter_ac_out_total"} <= keys
+
+
+# ── Identity check ────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def issues(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    created, deleted = Mock(), Mock()
+    monkeypatch.setattr(coordinator_module.ir, "async_create_issue", created)
+    monkeypatch.setattr(coordinator_module.ir, "async_delete_issue", deleted)
+    return SimpleNamespace(created=created, deleted=deleted)
+
+
+def _device_info_reads(serial: str) -> AsyncMock:
+    return AsyncMock(side_effect=[_device_info_registers(serial=serial), [1], [1]])
+
+
+def test_the_expected_serial_verifies_the_device_and_allows_writes(
+    coordinator, issues
+) -> None:
+    coordinator._identity_verified = False
+    coordinator._modbus_client.async_read = _device_info_reads("R371ZD1AZH3X0450")
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.identity_verified
+    coordinator._modbus_client.allow_writes.assert_called_once()
+    issues.created.assert_not_called()
+
+
+def test_another_serial_blocks_writes_and_keeps_the_known_identity(
+    coordinator, issues
+) -> None:
+    coordinator.identity.serial_number = "R371ZD1AZH3X0450"
+    coordinator._modbus_client.async_read = _device_info_reads("R371ZD1AZH3X9999")
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert not coordinator.identity_verified
+    assert coordinator.identity.serial_number == "R371ZD1AZH3X0450"
+    reason = coordinator._modbus_client.block_writes.call_args.args[0]
+    assert "R371ZD1AZH3X9999" in reason
+    coordinator._modbus_client.allow_writes.assert_not_called()
+    issues.created.assert_called_once()
+    assert issues.created.call_args.kwargs["translation_key"] == "identity_mismatch"
+
+
+def test_a_poll_against_another_device_fails_without_reading_telemetry(
+    coordinator, issues
+) -> None:
+    coordinator._identity_verified = False
+    coordinator._modbus_client.async_read = _device_info_reads("R371ZD1AZH3X9999")
+
+    with pytest.raises(coordinator_module.IdentityMismatch):
+        asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.status is models.CoordinatorStatus.IDENTITY_MISMATCH
+    # Only the device info block; no telemetry.
+    assert coordinator._modbus_client.async_read.await_count == 1
+
+
+def test_the_right_device_coming_back_clears_the_mismatch(coordinator, issues) -> None:
+    coordinator._modbus_client.async_read = _device_info_reads("R371ZD1AZH3X9999")
+    asyncio.run(coordinator.async_read_device_info())
+
+    coordinator._modbus_client.async_read = _device_info_reads("R371ZD1AZH3X0450")
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.identity_verified
+    issues.deleted.assert_called_once()
+
+
+def test_an_unreadable_serial_keeps_a_known_device_unverified(
+    coordinator, issues
+) -> None:
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=coordinator_module.ModbusException("timeout")
+    )
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert not coordinator.identity_verified
+    coordinator._modbus_client.allow_writes.assert_not_called()
+
+
+def test_an_entry_without_a_known_serial_pins_the_first_one_seen(
+    coordinator, issues
+) -> None:
+    coordinator.config_entry.unique_id = "192.0.2.10:502"
+    coordinator._modbus_client.async_read = _device_info_reads("R371ZD1AZH3X0450")
+    asyncio.run(coordinator.async_read_device_info())
+    assert coordinator.identity_verified
+
+    coordinator._modbus_client.async_read = _device_info_reads("R371ZD1AZH3X9999")
+    asyncio.run(coordinator.async_read_device_info())
+    assert not coordinator.identity_verified
+
+
+def test_an_entry_without_a_known_serial_stays_usable_when_none_is_readable(
+    coordinator, issues
+) -> None:
+    coordinator.config_entry.unique_id = "192.0.2.10:502"
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=coordinator_module.ModbusException("timeout")
+    )
+
+    asyncio.run(coordinator.async_read_device_info())
+
+    assert coordinator.identity_verified
+
+
+def test_a_failed_poll_asks_for_the_serial_again(coordinator, issues) -> None:
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=coordinator_module.ModbusException("timeout")
+    )
+
+    with pytest.raises(coordinator_module.UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert not coordinator.identity_verified
+    coordinator._modbus_client.block_writes.assert_called()

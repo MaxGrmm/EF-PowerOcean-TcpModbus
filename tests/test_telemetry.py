@@ -17,6 +17,7 @@ from custom_components.ef_powerocean_tcpmodbus.telemetry import (
     decode_firmware_version,
     decode_register,
     is_modbus_disabled,
+    system_alerts,
 )
 
 
@@ -319,7 +320,6 @@ def test_decodes_the_active_control_method_from_the_system_status(
 
 
 def test_system_state_2_is_published_raw_and_only_when_read() -> None:
-    """The fault flags have no confirmed meaning yet, so only the word is published."""
     flags = (1 << 1) | (1 << 3)
     read = calculate_derived_values(
         TelemetryData.from_mapping({"system_state_2": float(flags)}),
@@ -331,7 +331,9 @@ def test_system_state_2_is_published_raw_and_only_when_read() -> None:
     )
 
     assert read["system_state_2_hex"] == "0x0000000A"
+    assert read["system_alerts"] == "upgrade_shutdown,low_power_mode"
     assert "system_state_2_hex" not in unread
+    assert "system_alerts" not in unread
 
 
 def test_system_state_2_rides_on_the_fault_count() -> None:
@@ -339,3 +341,52 @@ def test_system_state_2_rides_on_the_fault_count() -> None:
 
     assert fault_count.attribute_keys == ("system_state_2_hex",)
     assert REGISTERS_BY_KEY["system_state_2"].address == 40532
+
+
+@pytest.mark.parametrize(
+    ("state_2", "expected"),
+    (
+        (0, "none"),
+        (1 << 4, "fan_failure"),
+        ((1 << 13) | (1 << 0), "system_shutdown,battery_overheating"),
+        (1 << 22, "parallel_meter_fault"),
+        (1 << 23, "none"),
+        ((1 << 23) | (1 << 4), "fan_failure"),
+    ),
+)
+def test_system_alerts_names_each_bit(state_2: int, expected: str) -> None:
+    assert system_alerts(state_2) == expected
+
+
+def test_system_alerts_fit_in_a_state_and_count_the_rest() -> None:
+    every_bit = (1 << 32) - 1
+
+    alerts = system_alerts(every_bit)
+
+    assert len(alerts) <= 255
+    shown, hidden = alerts.rsplit(",+", 1)
+    assert len(shown.split(",")) + int(hidden) == 23
+
+
+@pytest.mark.parametrize(
+    ("field", "mode", "self_use", "intelligent"),
+    (
+        (0, "standby", False, False),
+        (1, "self_consumption", True, False),
+        (2, "ai", False, True),
+        (3, "unknown", False, False),
+        (7, "unknown", False, False),
+    ),
+)
+def test_the_operating_status_is_one_enumeration_not_three_flags(
+    field: int, mode: str, self_use: bool, intelligent: bool
+) -> None:
+    calculated = calculate_derived_values(
+        TelemetryData(system_modes=float(field << 4)),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+
+    assert calculated["operating_mode"] == mode
+    assert calculated["self_use_mode_ena"] is self_use
+    assert calculated["intelligent_mode_ena"] is intelligent

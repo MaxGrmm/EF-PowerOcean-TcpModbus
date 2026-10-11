@@ -25,7 +25,7 @@ HEARTBEAT_START = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
 def control():
     blocks = const.register_blocks_for(const.DEFAULT_INVERTER_MODEL)
     manager = control_module.ControlManager(
-        SimpleNamespace(connected=True, async_write=AsyncMock()),
+        SimpleNamespace(connected=True, writes_allowed=True, async_write=AsyncMock()),
         registers_by_key={
             register.key: register for block in blocks for register in block.registers
         },
@@ -103,6 +103,17 @@ def test_a_recent_beat_is_reused_and_a_stale_one_is_rewritten(
     stale = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_REUSE_S + 1)
     assert beat(control, stale, monkeypatch) is True
     assert write.await_args.args == (const.HEARTBEAT_REGISTER, [const.HEARTBEAT_VALUE])
+
+
+def test_no_heartbeat_reaches_a_device_with_an_unverified_identity(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write = allow_writes(control, monkeypatch)
+    control._modbus_client.writes_allowed = False
+
+    stale = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_REUSE_S + 1)
+    assert beat(control, stale, monkeypatch) is False
+    write.assert_not_awaited()
 
 
 def test_a_busy_inverter_is_retried_but_an_invalid_request_latches_off(
@@ -1471,7 +1482,7 @@ def make_single_phase_control(
 ):
     blocks = const.register_blocks_for(inverter_model)
     manager = control_module.ControlManager(
-        SimpleNamespace(connected=True, async_write=AsyncMock()),
+        SimpleNamespace(connected=True, writes_allowed=True, async_write=AsyncMock()),
         registers_by_key={
             register.key: register for block in blocks for register in block.registers
         },

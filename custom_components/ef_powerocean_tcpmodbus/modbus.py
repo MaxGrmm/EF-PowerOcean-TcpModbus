@@ -24,7 +24,12 @@ from homeassistant.setup import async_setup_component
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
-from .const import DEFAULT_SLAVE, DEVICE_INFO_BLOCK, SLEEP_TIME_AFTER_RECONNECT_S
+from .const import (
+    DEFAULT_SLAVE,
+    DEVICE_INFO_BLOCK,
+    MODBUS_REQUEST_TIMEOUT_S,
+    SLEEP_TIME_AFTER_RECONNECT_S,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -149,7 +154,7 @@ class PymodbusLink:
         port: int,
         *,
         device_id: int = DEFAULT_SLAVE,
-        timeout: float = 20,
+        timeout: float = MODBUS_REQUEST_TIMEOUT_S,
     ) -> None:
         self._device_id = device_id
         self._pymodbus = AsyncModbusTcpClient(
@@ -257,10 +262,23 @@ class ModbusClient:
     def __init__(self, link: ModbusLink) -> None:
         self._link = link
         self._lock = asyncio.Lock()
+        # Stops a reconnect in its backoff from reopening the link after unload.
+        self._closed = False
+        self._write_block: str | None = None
 
     @property
     def connected(self) -> bool:
         return self._link.connected
+
+    @property
+    def writes_allowed(self) -> bool:
+        return self._write_block is None
+
+    def block_writes(self, reason: str) -> None:
+        self._write_block = reason
+
+    def allow_writes(self) -> None:
+        self._write_block = None
 
     async def async_connect(self) -> bool:
         return await self._link.connect()
@@ -270,30 +288,42 @@ class ModbusClient:
 
     async def async_close(self) -> None:
         """Close once any transaction in flight has finished."""
+        self._closed = True
         async with self._lock:
             self._link.close()
 
     async def async_reconnect(self) -> bool:
-        """Retry the connection with a widening backoff."""
+        """Retry the connection with a widening backoff.
+
+        The backoff waits outside the lock, so writes and unload are not stalled.
+        """
         _LOGGER.debug("Modbus TCP is not connected. Start reconnect!")
         attempts = len(RECONNECT_DELAYS_S)
 
         for attempt, delay in enumerate(RECONNECT_DELAYS_S, start=1):
-            async with self._lock:
-                if delay > 0:
-                    _LOGGER.debug(
-                        f"Reconnect failed! Wait {delay}s until next attempt."
-                    )
-                    await asyncio.sleep(delay)
+            if delay > 0:
+                _LOGGER.debug(f"Reconnect failed! Wait {delay}s until next attempt.")
+                await asyncio.sleep(delay)
+            if self._closed:
+                return False
 
+            async with self._lock:
+                if self._closed:
+                    return False
+                if self._link.connected:
+                    return True
                 _LOGGER.debug(f"Modbus TCP reconnect (Attempt {attempt}/{attempts})...")
                 if await self._link.connect():
                     _LOGGER.debug(
                         f"Reconnect successful! Attempts: {attempt}/{attempts}"
                     )
-                    await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
-                    return True
-                self._link.close()
+                    connected = True
+                else:
+                    self._link.close()
+                    connected = False
+            if connected:
+                await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
+                return True
 
         _LOGGER.error(
             "EF-Modbus-TCP: All reconnect attempts failed! – will retry next poll"
@@ -321,6 +351,10 @@ class ModbusClient:
         ModbusRejected if the device refused it and HomeAssistantError if it never
         arrived.
         """
+        if self._write_block is not None:
+            raise HomeAssistantError(
+                f"Not sending {what} to register {address}: {self._write_block}"
+            )
         values = list(words)
         _LOGGER.debug(
             "Sending Modbus write command [%s]: %s as %s to address %s",
@@ -374,7 +408,7 @@ async def async_temporary_client(
     """Hold a client for the context, for a config flow that has no entry yet."""
     await async_prepare(hass)
     if _shared is None:
-        client = ModbusClient(PymodbusLink(host, port, timeout=5))
+        client = ModbusClient(PymodbusLink(host, port))
         try:
             yield client
         finally:

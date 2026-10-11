@@ -70,6 +70,11 @@ MAX_FAULT_EVENTS: Final = 20
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 
+# Short, so a silent inverter cannot hold the lock the heartbeat waits on.
+MODBUS_REQUEST_TIMEOUT_S: Final = 3
+# Well under the sum of all request timeouts, which could pass a minute.
+MODBUS_POLL_BUDGET_S: Final = 4 * MODBUS_REQUEST_TIMEOUT_S
+
 # The inverter runs on its app settings and merely stores the commands it is sent,
 # until this register is written; each write buys it a minute of obeying them. Every
 # constant below is seconds measured against that one deadline.
@@ -615,6 +620,11 @@ SENSOR_MAP: list[SensorDef] = [
         device_class="enum",
         options=tuple(OperatingMode),
         icon="mdi:home-lightning-bolt",
+    ),
+    SensorDef(
+        key="system_alerts",
+        icon="mdi:alert-outline",
+        attribute_keys=("system_state_2_hex",),
     ),
     *[
         SensorDef(

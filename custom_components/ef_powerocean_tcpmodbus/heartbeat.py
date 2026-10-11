@@ -169,7 +169,11 @@ class Heartbeat:
             for delay in self._retry_delays:
                 if delay:
                     await asyncio.sleep(delay)
-                if not self._modbus_client.connected:
+                # Unverified: a beat could take control of the wrong inverter.
+                if (
+                    not self._modbus_client.connected
+                    or not self._modbus_client.writes_allowed
+                ):
                     return False
 
                 # Timed from before the write, so a slow round trip is counted

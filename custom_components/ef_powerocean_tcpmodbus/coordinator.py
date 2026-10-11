@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -13,6 +14,7 @@ from homeassistant.const import ATTR_DEVICE_ID, ATTR_ENTITY_ID, Platform
 from homeassistant.core import Context, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry, entity_registry
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt
@@ -49,6 +51,7 @@ from .const import (
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MODBUS_DISABLED_READ_THRESHOLD,
+    MODBUS_POLL_BUDGET_S,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
     REGISTERS_BY_KEY,
@@ -84,6 +87,16 @@ from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
+_IDENTITY_UNVERIFIED = "the device has not confirmed its serial number yet"
+
+
+def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
+    return f"identity_mismatch_{entry.entry_id}"
+
+
+class IdentityMismatch(UpdateFailed):
+    """Another device answers at the configured address."""
+
 
 class EcoflowCoordinator(DataUpdateCoordinator):
     """Fetches data from EcoFlow PowerOcean Plus via Modbus TCP."""
@@ -95,6 +108,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     # added: a poll in between would leave out what they have yet to ask for.
     _wanted_keys: frozenset[str] | None = None
     _on_demand: bool = False
+    _identity_verified: bool = False
+    _identity_mismatch: bool = False
+    # For entries still keyed by host:port.
+    _pinned_serial: str | None = None
 
     def __init__(
         self,
@@ -147,6 +164,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._last_inverter_temperature: float | None = None
         self._consecutive_modbus_disabled_reads = 0
         self._modbus_client = create_client(hass, config_entry, self.host, self.port)
+        self._modbus_client.block_writes(_IDENTITY_UNVERIFIED)
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
 
@@ -197,6 +215,10 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     @property
     def status(self) -> CoordinatorStatus | None:
         return self._status
+
+    @property
+    def identity_verified(self) -> bool:
+        return self._identity_verified
 
     @property
     def is_modbus_disabled(self) -> bool:
@@ -308,6 +330,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         identity = self.identity
         if identity.serial_number is None:
             identity.serial_number = "unknown"
+        self._mark_identity_unverified()
 
         try:
             raw = await self._modbus_client.async_read(
@@ -315,16 +338,19 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             )
         except ModbusException as err:
             _LOGGER.warning(f"Can not read device information. {err.string}.")
+            self._accept_unreadable_identity()
             return
 
         if not raw or len(raw) < DEVICE_INFO_BLOCK.count:
+            self._accept_unreadable_identity()
             return
 
         registers_for = partial(DEVICE_INFO_BLOCK.registers_for, raw)
 
-        identity.serial_number = (
-            decode_serial_number(registers_for(SERIAL_NUMBER)) or "unknown"
-        )
+        serial = decode_serial_number(registers_for(SERIAL_NUMBER))
+        if not self._check_identity(serial):
+            return
+        identity.serial_number = serial or "unknown"
         identity.product_number = registers_for(PRODUCT_NUMBER)[0]
         identity.product_category = registers_for(PRODUCT_CATEGORY)[0]
 
@@ -337,6 +363,76 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._firmware_changed(previous, firmware)
 
         await self._async_read_device_info_extra()
+
+    # ── Identity ──────────────────────────────────────────────────────────────
+
+    def _expected_serial(self) -> str | None:
+        unique_id = self.config_entry.unique_id
+        if unique_id and ":" not in unique_id:
+            return unique_id
+        return self._pinned_serial
+
+    def _mark_identity_unverified(self) -> None:
+        self._identity_verified = False
+        self._modbus_client.block_writes(_IDENTITY_UNVERIFIED)
+
+    def _accept_unreadable_identity(self) -> None:
+        # Nothing to compare against: keep the behaviour from before the check.
+        if self._expected_serial() is None:
+            self._set_identity_verified()
+
+    def _check_identity(self, serial: str | None) -> bool:
+        """Block reads and writes to a device with another serial.
+
+        Otherwise a changed DHCP lease could hand us Modbus control of an
+        inverter nobody configured.
+        """
+        if not serial:
+            self._accept_unreadable_identity()
+            return self._identity_verified
+
+        expected = self._expected_serial()
+        if expected is not None and serial != expected:
+            reason = (
+                f"the device at {self.host} reports serial {serial}, not {expected}"
+            )
+            self._modbus_client.block_writes(reason)
+            if not self._identity_mismatch:
+                _LOGGER.warning(
+                    "%s. Nothing is read from or written to it. Check the address, "
+                    "or remove the entry and add the new inverter",
+                    reason[0].upper() + reason[1:],
+                )
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    identity_mismatch_issue_id(self.config_entry),
+                    is_fixable=False,
+                    is_persistent=False,
+                    severity=ir.IssueSeverity.ERROR,
+                    translation_key="identity_mismatch",
+                    translation_placeholders={
+                        "host": str(self.host),
+                        "expected": expected,
+                        "found": serial,
+                    },
+                )
+            self._identity_mismatch = True
+            return False
+
+        self._pinned_serial = self._pinned_serial or serial
+        self._set_identity_verified()
+        return True
+
+    def _set_identity_verified(self) -> None:
+        self._identity_verified = True
+        self._modbus_client.allow_writes()
+        if self._identity_mismatch:
+            _LOGGER.info("The device at %s shows the expected serial again", self.host)
+            ir.async_delete_issue(
+                self.hass, DOMAIN, identity_mismatch_issue_id(self.config_entry)
+            )
+        self._identity_mismatch = False
 
     @callback
     def _firmware_changed(self, previous: str, firmware: str) -> None:
@@ -415,9 +511,24 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Reconnect failed!")
 
         try:
-            # A probe may replan the blocks, so the loop runs over this poll's plan.
-            for register_block in tuple(self._register_blocks):
-                await self._async_read_block(register_block, data)
+            # The reconnect above has its own backoff, so it is not budgeted.
+            async with asyncio.timeout(MODBUS_POLL_BUDGET_S):
+                if not self._identity_verified:
+                    await self.async_read_device_info()
+                    if self._identity_mismatch:
+                        raise IdentityMismatch(
+                            f"The device at {self.host} is not the inverter this "
+                            "entry belongs to"
+                        )
+                    if not self._identity_verified:
+                        _LOGGER.debug(
+                            "Serial number not confirmed yet; skipping this poll"
+                        )
+                        return None
+
+                # A probe may replan the blocks.
+                for register_block in tuple(self._register_blocks):
+                    await self._async_read_block(register_block, data)
 
             telemetry = TelemetryData.from_mapping(data)
             if is_modbus_disabled(
@@ -430,13 +541,24 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._consecutive_modbus_disabled_reads = 0
 
             return data
-        except ModbusException as err:
-            _LOGGER.debug(f"{err.string}. Connection closing...")
-            self._modbus_client.close()
+        except TimeoutError:
+            # A late answer to the cancelled request would confuse the next one.
+            _LOGGER.debug(
+                "Poll exceeded its %ss budget. Connection closing...",
+                MODBUS_POLL_BUDGET_S,
+            )
+            self._read_failed()
             return None
-        except Exception as err:
-            _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
-            return data
+        except (ModbusException, ConnectionError) as err:
+            _LOGGER.debug(f"{err}. Connection closing...")
+            self._read_failed()
+            return None
+        # Anything else is a bug: let the coordinator log its traceback.
+
+    def _read_failed(self) -> None:
+        self._modbus_client.close()
+        # A shared link can reconnect without us seeing it drop.
+        self._mark_identity_unverified()
 
     @property
     def unsupported_registers(self) -> frozenset[str]:
@@ -587,6 +709,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             raw_data = await self.async_get_raw_data()
+        except IdentityMismatch:
+            self._status = CoordinatorStatus.IDENTITY_MISMATCH
+            raise
         except UpdateFailed:
             self._status = CoordinatorStatus.RECONNECT_FAILED
             raise UpdateFailed(
@@ -632,10 +757,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
 
             return dict(result)
-        except Exception as err:
+        except Exception:
+            # Re-raised so the coordinator logs the traceback and marks the
+            # entities unavailable, rather than publishing an empty frame.
             self._status = CoordinatorStatus.PROCESSING_FAILED
-            _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
-            return None
+            raise
 
     # ── Parameter and setpoint writes ─────────────────────────────────────────
 

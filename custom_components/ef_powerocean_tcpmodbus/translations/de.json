@@ -83,6 +83,10 @@
     }
   },
   "issues": {
+    "identity_mismatch": {
+      "title": "Unter {host} antwortet ein anderer Wechselrichter",
+      "description": "Dieser Eintrag gehört zum Wechselrichter mit der Seriennummer {expected}, das Gerät unter {host} meldet aber {found}. Es wird nichts davon gelesen oder darauf geschrieben, damit die Modbus-Steuerung nicht an einen Wechselrichter geht, den Sie nicht eingerichtet haben. Prüfen Sie, ob die Adresse noch auf den richtigen Wechselrichter zeigt (eine feste Adresse im Router verhindert das), oder entfernen Sie diesen Eintrag und fügen Sie den neuen Wechselrichter hinzu."
+    },
     "modbus_disabled": {
       "title": "Modbus ist am Wechselrichter unter {host} deaktiviert",
       "description": "Für die Integration muss Modbus TCP in der EcoFlow Pro App aktiviert sein. Bitten Sie Ihren Installateur, es zu aktivieren. Die Integration wird anschließend automatisch funktionieren."
@@ -302,7 +306,8 @@
           "success": "Erfolgreich",
           "read_failed": "Abfrage fehlgeschlagen",
           "reconnect_failed": "Wiederverbindung fehlgeschlagen",
-          "processing_failed": "Verarbeitung fehlgeschlagen"
+          "processing_failed": "Verarbeitung fehlgeschlagen",
+          "identity_mismatch": "Anderes Gerät"
         }
       },
       "protocol_version": {
@@ -403,6 +408,12 @@
       },
       "fault_count": {
         "name": "Anzahl aktiver Fehler"
+      },
+      "system_alerts": {
+        "name": "Systemwarnungen",
+        "state": {
+          "none": "Keine"
+        }
       },
       "active_faults": {
         "name": "Aktive Fehlercodes",

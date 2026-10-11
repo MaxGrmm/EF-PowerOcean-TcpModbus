@@ -15,7 +15,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
 from .control import ControlInputs
-from .coordinator import EcoflowCoordinator
+from .coordinator import EcoflowCoordinator, identity_mismatch_issue_id
 from .modbus import async_prepare
 from .services import async_setup_services
 
@@ -159,6 +159,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
         return False
 
     ir.async_delete_issue(hass, DOMAIN, _modbus_disabled_issue_id(entry))
+    ir.async_delete_issue(hass, DOMAIN, identity_mismatch_issue_id(entry))
     # close connection and shutdown
     await entry.runtime_data.async_client_shutdown()
 

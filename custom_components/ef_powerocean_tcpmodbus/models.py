@@ -14,7 +14,7 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field, replace
-from enum import IntEnum, StrEnum
+from enum import IntEnum, IntFlag, StrEnum
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from homeassistant.const import EntityCategory, UnitOfEnergy
@@ -248,6 +248,7 @@ class CoordinatorStatus(StrEnum):
     READ_FAILED = "read_failed"
     RECONNECT_FAILED = "reconnect_failed"
     PROCESSING_FAILED = "processing_failed"
+    IDENTITY_MISMATCH = "identity_mismatch"
 
 
 class OperatingMode(StrEnum):
@@ -393,10 +394,51 @@ class ControlStatus(StrEnum):
     CONTROL_TEST = "control_test"
 
 
-# System State 2 (40532) flags under which the inverter stops acting: shutdown,
-# upgrade shutdown, emergency power off, system failure, battery pack disconnected,
-# PCS timeout and PCS failure.
-_STOP_FLAGS_MASK: Final = sum(1 << bit for bit in (0, 1, 2, 5, 7, 9, 10))
+class SystemAlert(IntFlag):
+    """System State 2 (40532) bits, as the Open Modbus Protocol V1.0 documents them.
+
+    The lowercase names are the System Alerts states, so never rename one.
+    """
+
+    SYSTEM_SHUTDOWN = 1 << 0
+    UPGRADE_SHUTDOWN = 1 << 1
+    EPO_TRIGGERED = 1 << 2
+    LOW_POWER_MODE = 1 << 3
+    FAN_FAILURE = 1 << 4
+    SYSTEM_FAILURE = 1 << 5
+    BATTERY_REVERSE_CONNECTION = 1 << 6
+    BATTERY_DISCONNECTED = 1 << 7
+    AUXILIARY_POWER_FAILURE = 1 << 8
+    PCS_TIMEOUT = 1 << 9
+    PCS_FAILURE = 1 << 10
+    IGBT_SELF_TEST_FAILURE = 1 << 11
+    HIGH_TEMPERATURE_PROTECTION = 1 << 12
+    BATTERY_OVERHEATING = 1 << 13
+    NTC_CIRCUIT_FAILURE = 1 << 14
+    SYSTEM_RESET = 1 << 15
+    HARDWARE_VERSION_ERROR = 1 << 16
+    PARALLEL_SYNC_ERROR = 1 << 17
+    LOW_TEMPERATURE_PROTECTION = 1 << 18
+    PARALLEL_MASTER_SLAVE_CONFLICT = 1 << 19
+    PARALLEL_SLAVE_SETTING_ERROR = 1 << 20
+    PARALLEL_INVERTER_ERROR = 1 << 21
+    PARALLEL_METER_FAULT = 1 << 22
+
+    @property
+    def code(self) -> str:
+        return str(self.name).lower()
+
+
+# The inverter stops acting under any of these.
+STOP_ALERTS: Final = (
+    SystemAlert.SYSTEM_SHUTDOWN
+    | SystemAlert.UPGRADE_SHUTDOWN
+    | SystemAlert.EPO_TRIGGERED
+    | SystemAlert.SYSTEM_FAILURE
+    | SystemAlert.BATTERY_DISCONNECTED
+    | SystemAlert.PCS_TIMEOUT
+    | SystemAlert.PCS_FAILURE
+)
 
 
 @dataclass(frozen=True)
@@ -428,7 +470,7 @@ class DeviceReport:
             manual=bool(modes >> 11 & 1),
             off_grid=bool(modes & 1),
             bms_connected=bool(modes >> 12 & 1),
-            fault=bool(modes >> 1 & 1) or bool(state_2 & _STOP_FLAGS_MASK),
+            fault=bool(modes >> 1 & 1) or bool(state_2 & STOP_ALERTS),
         )
 
 

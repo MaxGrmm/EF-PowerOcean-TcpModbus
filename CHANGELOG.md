@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- System Alerts sensor naming the active System State 2 bits as documented in EcoFlow's Open Modbus Protocol, or `none`.
+- Nothing is read from or written to the inverter, the heartbeat included, until it shows the entry's serial number. A different serial raises a repairs issue.
+
+### Changed
+
+- Modbus requests time out after 3 s instead of 20 s, and a whole poll after 12 s.
+- Processing errors make the entities unavailable instead of publishing an empty update.
+
+### Fixed
+
+- A reconnect no longer holds the Modbus connection during its backoff, which stalled writes and unloading for up to two minutes.
+- Self-use Mode and Intelligent Mode no longer both turn on for an undocumented operating status.
+
 ## [2.9.0] - 2026-10-10
 
 ### Added
