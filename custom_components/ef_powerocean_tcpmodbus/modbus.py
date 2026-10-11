@@ -1,4 +1,4 @@
-"""Modbus TCP transport for EcoFlow PowerOcean Plus.
+"""Modbus TCP transport for the PowerOcean.
 
 One ModbusClient talks to the inverter over a link. From Home Assistant 2026.9 the
 link is a unit on the connection Home Assistant shares, so another integration
@@ -12,7 +12,8 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
-from types import SimpleNamespace
+from dataclasses import dataclass
+from types import ModuleType
 from typing import Any, Final, Protocol
 
 from awesomeversion import AwesomeVersion
@@ -23,6 +24,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.setup import async_setup_component
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
+from pymodbus.pdu import ModbusPDU
 
 from .const import (
     DEFAULT_SLAVE,
@@ -36,7 +38,16 @@ _LOGGER = logging.getLogger(__name__)
 # The .dev0 makes betas of 2026.9 count.
 SHARED_MIN_VERSION: Final = AwesomeVersion("2026.9.0.dev0")
 
-_shared: SimpleNamespace | None = None
+
+@dataclass(frozen=True, slots=True)
+class _SharedModbus:
+    """The modules behind Home Assistant's shared connection, imported on demand."""
+
+    ha: ModuleType
+    mc: ModuleType
+
+
+_shared: _SharedModbus | None = None
 _unshared_reason = "Home Assistant older than 2026.9"
 
 RECONNECT_DELAYS_S: Final = (0, 5, 30, 120)
@@ -54,7 +65,7 @@ async def async_prepare(hass: HomeAssistant) -> bool:
     Setting it up is what registers its connections panel and installs its
     requirements, so this has to run before anything asks for a unit.
     """
-    global _shared, _unshared_reason  # noqa: PLW0603
+    global _shared, _unshared_reason
     if _shared is not None:
         return True
     if AwesomeVersion(HA_VERSION) < SHARED_MIN_VERSION:
@@ -62,15 +73,17 @@ async def async_prepare(hass: HomeAssistant) -> bool:
     if not await async_setup_component(hass, "modbus", {}):
         _unshared_reason = "the modbus integration did not set up"
         return False
+    # Imported here: neither exists before Home Assistant 2026.9.
     try:
-        import modbus_connection  # noqa: PLC0415
-        from homeassistant.components import modbus as ha_modbus  # noqa: PLC0415
-
-        ha_modbus.async_get_unit  # noqa: B018
-    except (ImportError, AttributeError) as err:
+        import modbus_connection
+        from homeassistant.components import modbus as ha_modbus
+    except ImportError as err:
         _unshared_reason = str(err)
         return False
-    _shared = SimpleNamespace(ha=ha_modbus, mc=modbus_connection)
+    if not hasattr(ha_modbus, "async_get_unit"):
+        _unshared_reason = "the modbus integration does not share connections"
+        return False
+    _shared = _SharedModbus(ha=ha_modbus, mc=modbus_connection)
     return True
 
 
@@ -176,7 +189,7 @@ class PymodbusLink:
         response = await self._pymodbus.read_holding_registers(
             address=address, count=count, device_id=self._device_id
         )
-        return _answered(response).registers
+        return list(_answered(response).registers)
 
     async def write_register(self, address: int, value: int) -> None:
         _answered(
@@ -193,7 +206,7 @@ class PymodbusLink:
         )
 
 
-def _answered(response: Any) -> Any:
+def _answered(response: ModbusPDU) -> ModbusPDU:
     """Return a pymodbus response, raising DeviceRefused for an exception response."""
     if response.isError():
         raise DeviceRefused(getattr(response, "exception_code", None), response)
@@ -201,13 +214,13 @@ def _answered(response: Any) -> Any:
 
 
 @contextmanager
-def _translated_errors() -> Iterator[None]:
+def _translated_errors(mc: ModuleType) -> Iterator[None]:
     """Raise the modbus_connection errors as the ones every link raises."""
     try:
         yield
-    except _shared.mc.ModbusExceptionError as err:
+    except mc.ModbusExceptionError as err:
         raise DeviceRefused(int(err.exception_code), err) from err
-    except _shared.mc.ModbusError as err:
+    except mc.ModbusError as err:
         raise ModbusException(str(err)) from err
 
 
@@ -219,12 +232,13 @@ class SharedLink:
     config entry holding a unit on it unloads, so this link never closes it.
     """
 
-    def __init__(self, unit: Any) -> None:
+    def __init__(self, unit: Any, mc: ModuleType) -> None:
         self._unit = unit
+        self._mc = mc
 
     @property
     def connected(self) -> bool:
-        return self._unit.connected
+        return bool(self._unit.connected)
 
     async def connect(self) -> bool:
         """Make one request, which opens the link if it is down.
@@ -233,9 +247,9 @@ class SharedLink:
         """
         try:
             await self._unit.read_holding_registers(DEVICE_INFO_BLOCK.start, 1)
-        except _shared.mc.ModbusExceptionError:
+        except self._mc.ModbusExceptionError:
             return True
-        except _shared.mc.ModbusError as err:
+        except self._mc.ModbusError as err:
             _LOGGER.debug("Modbus probe failed: %s", err)
             return False
         return True
@@ -244,15 +258,15 @@ class SharedLink:
         """Leave the link up, since other integrations may be using it."""
 
     async def read_holding_registers(self, address: int, count: int) -> list[int]:
-        with _translated_errors():
-            return await self._unit.read_holding_registers(address, count)
+        with _translated_errors(self._mc):
+            return list(await self._unit.read_holding_registers(address, count))
 
     async def write_register(self, address: int, value: int) -> None:
-        with _translated_errors():
+        with _translated_errors(self._mc):
             await self._unit.write_register(address, value)
 
     async def write_registers(self, address: int, values: list[int]) -> None:
-        with _translated_errors():
+        with _translated_errors(self._mc):
             await self._unit.write_registers(address, values)
 
 
@@ -302,21 +316,17 @@ class ModbusClient:
 
         for attempt, delay in enumerate(RECONNECT_DELAYS_S, start=1):
             if delay > 0:
-                _LOGGER.debug(f"Reconnect failed! Wait {delay}s until next attempt.")
+                _LOGGER.debug("Reconnect failed! Wait %ss until next attempt.", delay)
                 await asyncio.sleep(delay)
-            if self._closed:
-                return False
 
             async with self._lock:
                 if self._closed:
                     return False
                 if self._link.connected:
                     return True
-                _LOGGER.debug(f"Modbus TCP reconnect (Attempt {attempt}/{attempts})...")
+                _LOGGER.debug("Modbus TCP reconnect (attempt %s/%s)", attempt, attempts)
                 if await self._link.connect():
-                    _LOGGER.debug(
-                        f"Reconnect successful! Attempts: {attempt}/{attempts}"
-                    )
+                    _LOGGER.debug("Reconnected after %s/%s attempts", attempt, attempts)
                     connected = True
                 else:
                     self._link.close()
@@ -326,7 +336,7 @@ class ModbusClient:
                 return True
 
         _LOGGER.error(
-            "EF-Modbus-TCP: All reconnect attempts failed! – will retry next poll"
+            "EF-Modbus-TCP: All reconnect attempts failed, will retry next poll"
         )
         return False
 
@@ -398,7 +408,7 @@ def create_client(
     )
     params = _shared.mc.ModbusTcpParams(host=host, port=port)
     unit = _shared.ha.async_get_unit(hass, entry, params, DEFAULT_SLAVE)
-    return ModbusClient(SharedLink(unit))
+    return ModbusClient(SharedLink(unit, _shared.mc))
 
 
 @asynccontextmanager
@@ -417,4 +427,4 @@ async def async_temporary_client(
 
     params = _shared.mc.ModbusTcpParams(host=host, port=port)
     async with _shared.ha.async_get_temporary_unit(hass, params, DEFAULT_SLAVE) as unit:
-        yield ModbusClient(SharedLink(unit))
+        yield ModbusClient(SharedLink(unit, _shared.mc))

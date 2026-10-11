@@ -14,7 +14,7 @@ from homeassistant.helpers import device_registry as dr
 
 from .const import ATTR_MODE, CONTROL_FEATURES, DOMAIN
 from .control_test_core import DEFAULT_TEST_POWER_W, MAX_TEST_POWER_W, MIN_TEST_POWER_W
-from .coordinator import EcoflowCoordinator
+from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .models import ControlFeature
 
 SERVICE_SET_BATTERY_COMMAND: Final = "set_battery_command"
@@ -139,7 +139,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
     )
 
 
-def _entry_ids(device: dr.DeviceEntry) -> set[str]:
+def _entry_ids(device: dr.DeviceEntry | dr.ChildDeviceEntry) -> set[str]:
     """Return the config entries of a device.
 
     Home Assistant 2026.10 gives a device a single config_entry_id and deprecates
@@ -154,7 +154,9 @@ def _coordinator_for(hass: HomeAssistant, device_id: str) -> EcoflowCoordinator:
     """Return the coordinator of a device this integration has set up."""
     if device := dr.async_get(hass).async_get(device_id):
         for entry_id in _entry_ids(device):
-            entry = hass.config_entries.async_get_entry(entry_id)
+            entry: EcoflowConfigEntry | None = hass.config_entries.async_get_entry(
+                entry_id
+            )
             if (
                 entry is not None
                 and entry.domain == DOMAIN

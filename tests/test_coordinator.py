@@ -3,19 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import struct
-from datetime import datetime, timedelta, timezone
+from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
+from pymodbus.exceptions import ModbusException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const, models
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
+from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowConfigEntry
 from custom_components.ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
+from custom_components.ef_powerocean_tcpmodbus.modbus import (
+    ModbusClient,
+    ModbusReadRejected,
+)
+from custom_components.ef_powerocean_tcpmodbus.telemetry import TelemetryData
 
 
 @pytest.fixture
@@ -25,19 +39,23 @@ def coordinator():
     )
     instance._last_checked_data = {}
     instance._last_checked_time = None
-    instance.data = None
-    instance._modbus_client = SimpleNamespace(
-        connected=True,
-        async_read=AsyncMock(),
-        async_write=AsyncMock(),
-        close=Mock(),
-        block_writes=Mock(),
-        allow_writes=Mock(),
+    instance.data = cast(dict[str, Any], None)
+    instance._modbus_client = cast(
+        ModbusClient,
+        SimpleNamespace(
+            connected=True,
+            async_read=AsyncMock(),
+            async_write=AsyncMock(),
+            close=Mock(),
+            block_writes=Mock(),
+            allow_writes=Mock(),
+        ),
     )
     instance.hass = Mock()
     instance.host = "192.0.2.10"
-    instance.config_entry = SimpleNamespace(
-        entry_id="entry", unique_id="R371ZD1AZH3X0450"
+    instance.config_entry = cast(
+        EcoflowConfigEntry,
+        SimpleNamespace(entry_id="entry", unique_id="R371ZD1AZH3X0450"),
     )
     instance._identity_verified = True
     instance._status = None
@@ -70,7 +88,7 @@ def coordinator():
         write_setting=instance._async_write_register,
         on_command_expired=Mock(),
     )
-    instance._energy_processor = coordinator_module.EnergyProcessor(instance.limits)
+    instance._energy_processor = EnergyProcessor(instance.limits)
     return instance
 
 
@@ -80,7 +98,7 @@ def validate_totals(
     now: datetime,
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, float]:
-    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
     return coordinator._energy_processor.validate_totals(
         data, coordinator._last_checked_data, coordinator._last_checked_time
     )
@@ -88,19 +106,19 @@ def validate_totals(
 
 def run_update(
     coordinator,
-    raw_data: dict[str, float | None],
+    raw_data: Mapping[str, float | None],
     now: datetime,
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, float]:
     """Run a full coordinator update cycle with a fixed frame and clock."""
     coordinator.async_get_raw_data = AsyncMock(return_value=dict(raw_data))
-    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
     return asyncio.run(coordinator._async_update_data())
 
 
 @pytest.mark.parametrize(
     ("entry_data", "expected"),
-    [({}, False), ({const.CONF_MODBUS_CONTROL: True}, True)],
+    (({}, False), ({const.CONF_MODBUS_CONTROL: True}, True)),
 )
 async def test_modbus_control_enablement_comes_from_config_entry(
     hass: HomeAssistant,
@@ -111,9 +129,11 @@ async def test_modbus_control_enablement_comes_from_config_entry(
     monkeypatch.setattr(
         coordinator_module,
         "create_client",
-        lambda *args, **kwargs: Mock(connected=False),
+        lambda *_args, **_kwargs: Mock(connected=False),
     )
-    config_entry = MockConfigEntry(domain=const.DOMAIN, data=entry_data)
+    config_entry = MockConfigEntry(
+        domain=const.DOMAIN, data={const.CONF_HOST: "192.0.2.10", **entry_data}
+    )
 
     instance = coordinator_module.EcoflowCoordinator(hass, config_entry)
 
@@ -149,23 +169,19 @@ def test_seeds_baseline_from_legacy_persisted_state(coordinator) -> None:
     asyncio.run(coordinator.async_load_persisted_state())
 
     assert coordinator._last_checked_data == {"grid_import_total": 12.5}
-    assert coordinator._last_checked_time == datetime(
-        2026, 8, 7, 12, 0, tzinfo=timezone.utc
-    )
+    assert coordinator._last_checked_time == datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
     assert coordinator._energy_processor.daily_snapshots == {}
     assert coordinator._energy_processor.last_rollover is None
 
 
 def test_persisted_state_round_trips(coordinator) -> None:
     coordinator._last_checked_data = {"grid_import_total": 12.5}
-    coordinator._last_checked_time = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    coordinator._last_checked_time = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
     coordinator._energy_processor.accepted_at = {
-        "grid_import_total": datetime(2026, 8, 7, 11, 0, tzinfo=timezone.utc)
+        "grid_import_total": datetime(2026, 8, 7, 11, 0, tzinfo=UTC)
     }
     coordinator._energy_processor.daily_snapshots = {"grid_import_today": 10.0}
-    coordinator._energy_processor.last_rollover = datetime(
-        2026, 8, 7, 0, 0, tzinfo=timezone.utc
-    )
+    coordinator._energy_processor.last_rollover = datetime(2026, 8, 7, 0, 0, tzinfo=UTC)
 
     stored = coordinator._persisted_state()
 
@@ -180,11 +196,11 @@ def test_persisted_state_round_trips(coordinator) -> None:
 
     assert coordinator._last_checked_data == {"grid_import_total": 12.5}
     assert coordinator._energy_processor.accepted_at == {
-        "grid_import_total": datetime(2026, 8, 7, 11, 0, tzinfo=timezone.utc)
+        "grid_import_total": datetime(2026, 8, 7, 11, 0, tzinfo=UTC)
     }
     assert coordinator._energy_processor.daily_snapshots == {"grid_import_today": 10.0}
     assert coordinator._energy_processor.last_rollover == datetime(
-        2026, 8, 7, 0, 0, tzinfo=timezone.utc
+        2026, 8, 7, 0, 0, tzinfo=UTC
     )
 
 
@@ -255,7 +271,7 @@ def test_ocean_2_plus_energy_state_from_beta_2_is_dropped(
     result = run_update(
         coordinator,
         {"grid_import_total": 12.5, "grid_import_today": 2.5},
-        datetime(2026, 8, 7, 12, 5, tzinfo=timezone.utc),
+        datetime(2026, 8, 7, 12, 5, tzinfo=UTC),
         monkeypatch,
     )
 
@@ -287,10 +303,10 @@ def test_a_failed_cap_write_still_leaves_the_feed_mode_as_an_enum(
     )
     coordinator._modbus_client.async_read = AsyncMock(return_value=[0])
     coordinator._modbus_client.async_write = AsyncMock(
-        side_effect=[None, coordinator_module.HomeAssistantError("rejected")]
+        side_effect=[None, HomeAssistantError("rejected")]
     )
 
-    with pytest.raises(coordinator_module.HomeAssistantError):
+    with pytest.raises(HomeAssistantError):
         asyncio.run(coordinator.control.async_set_grid_feed(False))
 
     assert coordinator.data["grid_feed_mode"] is models.GridFeedMode.LIMITED
@@ -299,7 +315,7 @@ def test_a_failed_cap_write_still_leaves_the_feed_mode_as_an_enum(
 def test_accepted_update_publishes_successful_coordinator_status(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
     coordinator.async_get_raw_data = AsyncMock(return_value={"grid_import_total": 10.0})
     coordinator._energy_processor.validate_totals = Mock(
         return_value={"grid_import_total": 10.0}
@@ -312,9 +328,9 @@ def test_accepted_update_publishes_successful_coordinator_status(
     )
     coordinator._ena_calc_solar_power = False
     coordinator._store = None
-    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
     monkeypatch.setattr(
-        coordinator_module.TelemetryData,
+        TelemetryData,
         "from_mapping",
         Mock(return_value=object()),
     )
@@ -332,7 +348,7 @@ def test_control_sees_the_derived_solar_power_not_the_raw_register(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The register reads 0 W on some inverters, which would read as a sunless day."""
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
     coordinator.async_get_raw_data = AsyncMock(
         return_value={"solar_power": 0.0, "house_power": 900.0}
     )
@@ -348,10 +364,8 @@ def test_control_sees_the_derived_solar_power_not_the_raw_register(
     )
     coordinator._ena_calc_solar_power = True
     coordinator.control.async_poll = AsyncMock()
-    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
-    monkeypatch.setattr(
-        coordinator_module.TelemetryData, "from_mapping", Mock(return_value=object())
-    )
+    monkeypatch.setattr(dt_util, "now", lambda: now)
+    monkeypatch.setattr(TelemetryData, "from_mapping", Mock(return_value=object()))
     monkeypatch.setattr(
         coordinator_module,
         "calculate_derived_values",
@@ -368,7 +382,7 @@ def test_read_failure_raises_to_show_gap(coordinator) -> None:
     coordinator._last_checked_data = {"grid_import_total": 10.0}
     coordinator.async_get_raw_data = AsyncMock(return_value=None)
 
-    with pytest.raises(coordinator_module.UpdateFailed):
+    with pytest.raises(UpdateFailed):
         asyncio.run(coordinator._async_update_data())
 
     assert coordinator.status == models.CoordinatorStatus.READ_FAILED
@@ -378,10 +392,10 @@ def test_read_failure_raises_to_show_gap(coordinator) -> None:
 
 def test_reconnect_failure_updates_coordinator_status(coordinator) -> None:
     coordinator.async_get_raw_data = AsyncMock(
-        side_effect=coordinator_module.UpdateFailed("Reconnect failed")
+        side_effect=UpdateFailed("Reconnect failed")
     )
 
-    with pytest.raises(coordinator_module.UpdateFailed):
+    with pytest.raises(UpdateFailed):
         asyncio.run(coordinator._async_update_data())
 
     assert coordinator.status == models.CoordinatorStatus.RECONNECT_FAILED
@@ -409,7 +423,7 @@ def test_a_poll_over_its_budget_fails_and_drops_the_connection(
 
     coordinator._modbus_client.async_read = slow_read
 
-    with pytest.raises(coordinator_module.UpdateFailed):
+    with pytest.raises(UpdateFailed):
         asyncio.run(coordinator._async_update_data())
 
     assert coordinator.status == models.CoordinatorStatus.READ_FAILED
@@ -422,7 +436,7 @@ def test_a_lost_socket_is_a_read_failure(coordinator) -> None:
         side_effect=ConnectionResetError("reset")
     )
 
-    with pytest.raises(coordinator_module.UpdateFailed):
+    with pytest.raises(UpdateFailed):
         asyncio.run(coordinator._async_update_data())
 
     assert coordinator.status == models.CoordinatorStatus.READ_FAILED
@@ -450,7 +464,7 @@ def test_persisted_state_after_reload_clamps_total_reset(
     coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
     asyncio.run(coordinator.async_load_persisted_state())
 
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
     result = validate_totals(coordinator, {"grid_import_total": 0.0}, now, monkeypatch)
 
     assert result["grid_import_total"] == 10.0
@@ -462,7 +476,7 @@ def test_initial_daily_snapshot_uses_device_daily_value(
     result = run_update(
         coordinator,
         {"grid_import_total": 1000.0, "grid_import_today": 5.0},
-        datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc),
+        datetime(2026, 8, 7, 12, 0, tzinfo=UTC),
         monkeypatch,
     )
 
@@ -485,27 +499,27 @@ def test_rolls_daily_counters_at_local_midnight(
     before = run_update(
         coordinator,
         totals,
-        datetime(2026, 8, 27, 16, 0, 0),
+        datetime(2026, 8, 27, 16, 0, 0, tzinfo=UTC),
         monkeypatch,
     )
     # Energy grows on same date (8 kWh over 7 hours)
     during = run_update(
         coordinator,
         {**totals, "solar_total": 1008.0},
-        datetime(2026, 8, 27, 23, 59, 55),
+        datetime(2026, 8, 27, 23, 59, 55, tzinfo=UTC),
         monkeypatch,
     )
     # Local date boundary crossed at 00:00:05 -> daily reset rolls
     after = run_update(
         coordinator,
         {**totals, "solar_total": 1008.0},
-        datetime(2026, 8, 28, 0, 0, 5),
+        datetime(2026, 8, 28, 0, 0, 5, tzinfo=UTC),
         monkeypatch,
     )
     grown = run_update(
         coordinator,
         {**totals, "solar_total": 1008.01},
-        datetime(2026, 8, 28, 0, 0, 10),
+        datetime(2026, 8, 28, 0, 0, 10, tzinfo=UTC),
         monkeypatch,
     )
 
@@ -513,7 +527,9 @@ def test_rolls_daily_counters_at_local_midnight(
     assert during["solar_today"] == 8.0
     assert after["solar_today"] == 0.0
     assert grown["solar_today"] == 0.01
-    assert coordinator._energy_processor.last_rollover == datetime(2026, 8, 28, 0, 0, 5)
+    assert coordinator._energy_processor.last_rollover == datetime(
+        2026, 8, 28, 0, 0, 5, tzinfo=UTC
+    )
 
 
 def test_ignores_bogus_zero_device_registers(
@@ -525,7 +541,9 @@ def test_ignores_bogus_zero_device_registers(
     midnight snapshots, so bogus device registers have no impact.
     """
     totals = {"solar_total": 1000.0, "bat_discharged_total": 180.0}
-    coordinator._energy_processor.last_rollover = datetime(2026, 8, 27, 0, 0, 0)
+    coordinator._energy_processor.last_rollover = datetime(
+        2026, 8, 27, 0, 0, 0, tzinfo=UTC
+    )
     coordinator._energy_processor.daily_snapshots = {
         "solar_today": 992.0,
         "bat_discharged_today": 177.5,
@@ -534,7 +552,7 @@ def test_ignores_bogus_zero_device_registers(
     result = run_update(
         coordinator,
         {**totals, "solar_today": 0.0, "bat_discharged_today": 0.0},
-        datetime(2026, 8, 27, 12, 0, 5),
+        datetime(2026, 8, 27, 12, 0, 5, tzinfo=UTC),
         monkeypatch,
     )
 
@@ -547,13 +565,15 @@ def test_publishes_raw_device_daily_as_diagnostic(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The device's own register is published unmodified under a *_raw diagnostic key.
-    coordinator._energy_processor.last_rollover = datetime(2026, 8, 27, 0, 0, 0)
+    coordinator._energy_processor.last_rollover = datetime(
+        2026, 8, 27, 0, 0, 0, tzinfo=UTC
+    )
     coordinator._energy_processor.daily_snapshots = {"solar_today": 990.0}
 
     result = run_update(
         coordinator,
         {"solar_total": 1000.0, "solar_today": 9.5},
-        datetime(2026, 8, 27, 12, 0, 0),
+        datetime(2026, 8, 27, 12, 0, 0, tzinfo=UTC),
         monkeypatch,
     )
 
@@ -565,7 +585,7 @@ def test_a_refresh_within_a_second_of_a_poll_keeps_the_grid_feed_mode(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The second update reuses the first one's frame, where the mode is decoded."""
-    first = datetime(2026, 8, 27, 12, 0, 0)
+    first = datetime(2026, 8, 27, 12, 0, 0, tzinfo=UTC)
     frame = {"solar_total": 1000.0, "grid_feed_mode": 0.0}
 
     run_update(coordinator, frame, first, monkeypatch)
@@ -577,7 +597,7 @@ def test_a_refresh_within_a_second_of_a_poll_keeps_the_grid_feed_mode(
 def test_clamps_derived_house_energy_rounding_jitter(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    now = datetime(2026, 8, 21, 8, 24, 19, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 21, 8, 24, 19, tzinfo=UTC)
     previous = {
         "solar_total": 104.0,
         "grid_import_total": 102.0,
@@ -608,7 +628,7 @@ def test_clamps_derived_house_energy_rounding_jitter(
             "bat_charged_today": 1.36,
         }
     )
-    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
 
     result = asyncio.run(coordinator._async_update_data())
 
@@ -618,7 +638,7 @@ def test_clamps_derived_house_energy_rounding_jitter(
 def test_clamps_derived_house_energy_jitter_during_raw_counter_reset(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    now = datetime(2026, 8, 21, 9, 10, 54, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 21, 9, 10, 54, tzinfo=UTC)
     previous = {
         "solar_total": 105.63,
         "grid_import_total": 100.0,
@@ -645,7 +665,7 @@ def test_clamps_derived_house_energy_jitter_during_raw_counter_reset(
     coordinator.async_get_raw_data = AsyncMock(
         return_value={**previous, "solar_today": 5.62}
     )
-    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
 
     result = asyncio.run(coordinator._async_update_data())
 
@@ -682,8 +702,10 @@ def test_replays_daily_register_flap_without_spike(
         "bat_discharged_today": 0.51,
     }
 
-    # The midnight reset occurred two hours earlier at local midnight (2026-08-28 00:00:02)
-    coordinator._energy_processor.last_rollover = datetime(2026, 8, 28, 0, 0, 2)
+    # The reset happened at local midnight, two hours earlier.
+    coordinator._energy_processor.last_rollover = datetime(
+        2026, 8, 28, 0, 0, 2, tzinfo=UTC
+    )
     coordinator._energy_processor.daily_snapshots = {
         "solar_today": 12408.0,
         "grid_import_today": 820.55,
@@ -691,7 +713,7 @@ def test_replays_daily_register_flap_without_spike(
         "bat_charged_today": 3120.4,
         "bat_discharged_today": 2979.60,
     }
-    now = datetime(2026, 8, 28, 1, 59, 57)
+    now = datetime(2026, 8, 28, 1, 59, 57, tzinfo=UTC)
     previous = run_update(coordinator, {**totals, **new_day}, now, monkeypatch)
     assert previous["solar_today"] == 0.0
     assert previous["bat_discharged_today"] == 0.51
@@ -722,13 +744,15 @@ def test_replays_hours_long_total_read_gap_with_clean_recovery(
     the device's reset cannot be confirmed, then roll and accept the first
     genuine reading the next morning.
     """
-    coordinator._energy_processor.last_rollover = datetime(2026, 8, 27, 0, 0, 0)
+    coordinator._energy_processor.last_rollover = datetime(
+        2026, 8, 27, 0, 0, 0, tzinfo=UTC
+    )
     coordinator._energy_processor.daily_snapshots = {"solar_today": 12388.0}
 
     seeded = run_update(
         coordinator,
         {"solar_total": 12408.0, "solar_today": 20.0},
-        datetime(2026, 8, 27, 21, 0, 0),
+        datetime(2026, 8, 27, 21, 0, 0, tzinfo=UTC),
         monkeypatch,
     )
     assert seeded["solar_today"] == 20.0
@@ -737,7 +761,7 @@ def test_replays_hours_long_total_read_gap_with_clean_recovery(
         held = run_update(
             coordinator,
             {"solar_total": None, "solar_today": None},
-            datetime(2026, 8, 27, hour, 0, 0),
+            datetime(2026, 8, 27, hour, 0, 0, tzinfo=UTC),
             monkeypatch,
         )
         assert held["solar_total"] == 12408.0
@@ -746,7 +770,7 @@ def test_replays_hours_long_total_read_gap_with_clean_recovery(
     past_midnight = run_update(
         coordinator,
         {"solar_total": None, "solar_today": None},
-        datetime(2026, 8, 28, 0, 30, 0),
+        datetime(2026, 8, 28, 0, 30, 0, tzinfo=UTC),
         monkeypatch,
     )
     assert past_midnight["solar_total"] == 12408.0
@@ -755,7 +779,7 @@ def test_replays_hours_long_total_read_gap_with_clean_recovery(
     recovered = run_update(
         coordinator,
         {"solar_total": 12408.01, "solar_today": 0.01},
-        datetime(2026, 8, 28, 6, 20, 0),
+        datetime(2026, 8, 28, 6, 20, 0, tzinfo=UTC),
         monkeypatch,
     )
     assert recovered["solar_total"] == 12408.01
@@ -765,7 +789,7 @@ def test_replays_hours_long_total_read_gap_with_clean_recovery(
 def test_floors_derived_house_energy_at_zero_without_baseline(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    now = datetime(2026, 8, 26, 12, 0, 4, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 26, 12, 0, 4, tzinfo=UTC)
     raw = {
         "solar_total": 100.0,
         "grid_import_total": 100.04,
@@ -789,7 +813,7 @@ def test_floors_derived_house_energy_at_zero_without_baseline(
         "bat_charged_today": 100.0,
     }
     coordinator.async_get_raw_data = AsyncMock(return_value=dict(raw))
-    monkeypatch.setattr(coordinator_module.dt, "now", lambda: now)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
 
     result = asyncio.run(coordinator._async_update_data())
 
@@ -864,7 +888,7 @@ def test_every_device_energy_counter_is_read_from_a_register() -> None:
     """The Wh conversion applies to what the coordinator reads, so each counter
     the device reports has to be a register."""
     assert const.DEVICE_ENERGY_KEYS
-    assert const.DEVICE_ENERGY_KEYS <= const.REGISTERS_BY_KEY.keys()
+    assert const.REGISTERS_BY_KEY.keys() >= const.DEVICE_ENERGY_KEYS
 
 
 def test_modbus_disabled_recovers_when_telemetry_returns(
@@ -927,7 +951,7 @@ def test_registers_do_not_overlap(registers: tuple[models.RegisterDef, ...]) -> 
     """A multi-word register must not extend into the next register's address."""
     ordered = sorted(registers, key=lambda register: register.address)
 
-    for register, following in zip(ordered, ordered[1:]):
+    for register, following in itertools.pairwise(ordered):
         assert register.end <= following.address, (
             f"{register.key} at {register.address} spans {register.size} words "
             f"and overlaps {following.key} at {following.address}"
@@ -1099,7 +1123,7 @@ def test_a_failed_device_info_read_leaves_the_connection_to_the_poll(
 ) -> None:
     """It runs on every reconnect, so closing here would fail the poll after it."""
     coordinator._modbus_client.async_read = AsyncMock(
-        side_effect=coordinator_module.ModbusException("boom")
+        side_effect=ModbusException("boom")
     )
 
     asyncio.run(coordinator.async_read_device_info())
@@ -1112,7 +1136,7 @@ def test_a_failed_device_info_read_keeps_what_was_known(coordinator) -> None:
     coordinator.identity.serial_number = "R371ZD1AZH3X0450"
     coordinator.identity.firmware_version = "3.0.19.19"
     coordinator._modbus_client.async_read = AsyncMock(
-        side_effect=coordinator_module.ModbusException("timeout")
+        side_effect=ModbusException("timeout")
     )
 
     asyncio.run(coordinator.async_read_device_info())
@@ -1127,7 +1151,7 @@ def test_a_refused_protocol_version_leaves_the_rest_of_the_device_info(
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=[
             _device_info_registers(),
-            coordinator_module.ModbusException("illegal address"),
+            ModbusException("illegal address"),
             [1],
         ]
     )
@@ -1157,7 +1181,7 @@ def test_read_plan_is_not_split_more_than_necessary(
 ) -> None:
     """Neighbouring blocks must be unmergeable, so no poll wastes a round trip."""
     blocks = const.register_blocks_for(inverter_model)
-    for block, following in zip(blocks, blocks[1:]):
+    for block, following in itertools.pairwise(blocks):
         end = block.start + block.count
         gap = following.start - end
         merged = following.start + following.count - block.start
@@ -1247,7 +1271,7 @@ def test_raw_data_raises_when_reconnect_fails(coordinator) -> None:
     coordinator._modbus_client.connected = False
     coordinator.async_reconnect = AsyncMock(return_value=False)
 
-    with pytest.raises(coordinator_module.UpdateFailed, match="Reconnect failed"):
+    with pytest.raises(UpdateFailed, match="Reconnect failed"):
         asyncio.run(coordinator.async_get_raw_data())
 
 
@@ -1285,7 +1309,7 @@ def _optional_block_coordinator(coordinator):
 def test_a_refused_optional_block_is_probed_register_by_register(coordinator) -> None:
     """One register the firmware lacks must not blank the rest of the poll."""
     _optional_block_coordinator(coordinator)
-    rejected = coordinator_module.ModbusReadRejected("illegal", exception_code=2)
+    rejected = ModbusReadRejected("illegal", exception_code=2)
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=[[55], rejected, rejected, [30]]
     )
@@ -1310,7 +1334,7 @@ def test_a_refused_optional_block_is_probed_register_by_register(coordinator) ->
 def test_a_busy_optional_block_is_skipped_for_one_poll_only(coordinator) -> None:
     """Device busy says nothing about whether the register exists."""
     _optional_block_coordinator(coordinator)
-    busy = coordinator_module.ModbusReadRejected("busy", exception_code=6)
+    busy = ModbusReadRejected("busy", exception_code=6)
     coordinator._modbus_client.async_read = AsyncMock(side_effect=[[55], busy])
 
     data = asyncio.run(coordinator.async_get_raw_data())
@@ -1327,7 +1351,7 @@ def test_a_busy_optional_block_is_skipped_for_one_poll_only(coordinator) -> None
 def test_a_refused_required_block_still_fails_the_poll(coordinator) -> None:
     _optional_block_coordinator(coordinator)
     coordinator._modbus_client.async_read = AsyncMock(
-        side_effect=coordinator_module.ModbusReadRejected("illegal", exception_code=2)
+        side_effect=ModbusReadRejected("illegal", exception_code=2)
     )
 
     assert asyncio.run(coordinator.async_get_raw_data()) is None
@@ -1373,8 +1397,8 @@ def test_the_powerocean_reads_the_new_diagnostic_registers_in_its_live_block() -
 @pytest.fixture
 def issues(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     created, deleted = Mock(), Mock()
-    monkeypatch.setattr(coordinator_module.ir, "async_create_issue", created)
-    monkeypatch.setattr(coordinator_module.ir, "async_delete_issue", deleted)
+    monkeypatch.setattr(ir, "async_create_issue", created)
+    monkeypatch.setattr(ir, "async_delete_issue", deleted)
     return SimpleNamespace(created=created, deleted=deleted)
 
 
@@ -1412,8 +1436,9 @@ def test_another_serial_blocks_writes_and_keeps_the_known_identity(
     assert issues.created.call_args.kwargs["translation_key"] == "identity_mismatch"
 
 
+@pytest.mark.usefixtures("issues")
 def test_a_poll_against_another_device_fails_without_reading_telemetry(
-    coordinator, issues
+    coordinator,
 ) -> None:
     coordinator._identity_verified = False
     coordinator._modbus_client.async_read = _device_info_reads("R371ZD1AZH3X9999")
@@ -1437,11 +1462,10 @@ def test_the_right_device_coming_back_clears_the_mismatch(coordinator, issues) -
     issues.deleted.assert_called_once()
 
 
-def test_an_unreadable_serial_keeps_a_known_device_unverified(
-    coordinator, issues
-) -> None:
+@pytest.mark.usefixtures("issues")
+def test_an_unreadable_serial_keeps_a_known_device_unverified(coordinator) -> None:
     coordinator._modbus_client.async_read = AsyncMock(
-        side_effect=coordinator_module.ModbusException("timeout")
+        side_effect=ModbusException("timeout")
     )
 
     asyncio.run(coordinator.async_read_device_info())
@@ -1450,9 +1474,8 @@ def test_an_unreadable_serial_keeps_a_known_device_unverified(
     coordinator._modbus_client.allow_writes.assert_not_called()
 
 
-def test_an_entry_without_a_known_serial_pins_the_first_one_seen(
-    coordinator, issues
-) -> None:
+@pytest.mark.usefixtures("issues")
+def test_an_entry_without_a_known_serial_pins_the_first_one_seen(coordinator) -> None:
     coordinator.config_entry.unique_id = "192.0.2.10:502"
     coordinator._modbus_client.async_read = _device_info_reads("R371ZD1AZH3X0450")
     asyncio.run(coordinator.async_read_device_info())
@@ -1463,12 +1486,13 @@ def test_an_entry_without_a_known_serial_pins_the_first_one_seen(
     assert not coordinator.identity_verified
 
 
+@pytest.mark.usefixtures("issues")
 def test_an_entry_without_a_known_serial_stays_usable_when_none_is_readable(
-    coordinator, issues
+    coordinator,
 ) -> None:
     coordinator.config_entry.unique_id = "192.0.2.10:502"
     coordinator._modbus_client.async_read = AsyncMock(
-        side_effect=coordinator_module.ModbusException("timeout")
+        side_effect=ModbusException("timeout")
     )
 
     asyncio.run(coordinator.async_read_device_info())
@@ -1476,12 +1500,13 @@ def test_an_entry_without_a_known_serial_stays_usable_when_none_is_readable(
     assert coordinator.identity_verified
 
 
-def test_a_failed_poll_asks_for_the_serial_again(coordinator, issues) -> None:
+@pytest.mark.usefixtures("issues")
+def test_a_failed_poll_asks_for_the_serial_again(coordinator) -> None:
     coordinator._modbus_client.async_read = AsyncMock(
-        side_effect=coordinator_module.ModbusException("timeout")
+        side_effect=ModbusException("timeout")
     )
 
-    with pytest.raises(coordinator_module.UpdateFailed):
+    with pytest.raises(UpdateFailed):
         asyncio.run(coordinator._async_update_data())
 
     assert not coordinator.identity_verified

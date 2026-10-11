@@ -6,9 +6,13 @@ import logging
 from typing import Any, Final
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
     BooleanSelector,
     SelectSelector,
@@ -124,17 +128,17 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize the config flow."""
-        self._user_input: dict = {}
+        self._user_input: dict[str, Any] = {}
         self._device_settings: dict[str, Any] = {}
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry):
+    def async_get_options_flow(config_entry: ConfigEntry) -> EcoflowOptionsFlow:
         return EcoflowOptionsFlow(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -159,8 +163,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
                     }
                 )
                 return await self.async_step_parameters()
-            else:
-                errors["base"] = "cannot_connect"
+            errors["base"] = "cannot_connect"
 
         return self.async_show_form(
             step_id="user",
@@ -173,7 +176,9 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_parameters(self, user_input=None) -> FlowResult:
+    async def async_step_parameters(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -239,23 +244,27 @@ class EcoflowOptionsFlow(OptionsFlow):
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._config_entry = config_entry
-        self._user_input: dict = {}
+        self._user_input: dict[str, Any] = {}
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
             host = user_input[CONF_HOST]
             port = user_input[CONF_PORT]
 
-            # Only re-test connection if host or port changed
-            current_host = self._config_entry.data.get(CONF_HOST)
-            current_port = self._config_entry.data.get(CONF_PORT, DEFAULT_PORT)
-            if host != current_host or port != current_port:
-                if await async_read_device_settings(self.hass, host, port) is None:
-                    errors["base"] = "cannot_connect"
+            # Only a new address needs the connection tested again.
+            moved = (host, port) != (
+                self._config_entry.data.get(CONF_HOST),
+                self._config_entry.data.get(CONF_PORT, DEFAULT_PORT),
+            )
+            if (
+                moved
+                and await async_read_device_settings(self.hass, host, port) is None
+            ):
+                errors["base"] = "cannot_connect"
 
             if not errors:
                 self._user_input = user_input
@@ -277,7 +286,9 @@ class EcoflowOptionsFlow(OptionsFlow):
             errors=errors,
         )
 
-    async def async_step_parameters(self, user_input=None) -> FlowResult:
+    async def async_step_parameters(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:

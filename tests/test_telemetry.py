@@ -167,36 +167,36 @@ class CalculateValuesTest(unittest.TestCase):
     def test_calculates_energy_and_battery_values(self) -> None:
         result = self.calculate()
 
-        self.assertEqual(result["bat_remaining"], 6.0)
-        self.assertEqual(result["bat_net_energy"], 20.25)
-        self.assertEqual(result["house_energy_today"], 20.0)
-        self.assertEqual(result["house_energy_total"], 2179.75)
+        assert result["bat_remaining"] == 6.0
+        assert result["bat_net_energy"] == 20.25
+        assert result["house_energy_today"] == 20.0
+        assert result["house_energy_total"] == 2179.75
 
     def test_calculates_pv_power_and_honors_voltage_threshold(self) -> None:
         result = self.calculate()
 
-        self.assertEqual(result["pv1_power"], 1500.0)
-        self.assertEqual(result["pv2_power"], 0)
-        self.assertEqual(result["pv3_power"], 750.0)
-        self.assertEqual(result["solar_power"], 2250.0)
+        assert result["pv1_power"] == 1500.0
+        assert result["pv2_power"] == 0
+        assert result["pv3_power"] == 750.0
+        assert result["solar_power"] == 2250.0
 
     def test_decodes_system_mode_bits(self) -> None:
         result = self.calculate()
 
-        self.assertEqual(result["grid_mode"], "grid")
-        self.assertTrue(result["battery_saver_mode_ena"])
-        self.assertFalse(result["self_use_mode_ena"])
-        self.assertTrue(result["intelligent_mode_ena"])
+        assert result["grid_mode"] == "grid"
+        assert result["battery_saver_mode_ena"]
+        assert not result["self_use_mode_ena"]
+        assert result["intelligent_mode_ena"]
 
     def test_replaces_the_grid_feed_mode_register_with_its_enum(self) -> None:
         self.data["grid_feed_mode"] = 1.0
-        self.assertEqual(self.calculate()["grid_feed_mode"], "unlimited")
+        assert self.calculate()["grid_feed_mode"] == "unlimited"
 
         self.data["grid_feed_mode"] = 0.0
-        self.assertEqual(self.calculate()["grid_feed_mode"], "limited")
+        assert self.calculate()["grid_feed_mode"] == "limited"
 
         del self.data["grid_feed_mode"]
-        self.assertIsNone(self.calculate()["grid_feed_mode"])
+        assert self.calculate()["grid_feed_mode"] is None
 
     def test_omits_optional_values_when_their_inputs_are_disabled_or_absent(
         self,
@@ -205,11 +205,11 @@ class CalculateValuesTest(unittest.TestCase):
 
         result = self.calculate(calculate_solar_power=False)
 
-        self.assertNotIn("solar_power", result)
-        self.assertNotIn("grid_mode", result)
-        self.assertNotIn("battery_saver_mode_ena", result)
-        self.assertNotIn("self_use_mode_ena", result)
-        self.assertNotIn("intelligent_mode_ena", result)
+        assert "solar_power" not in result
+        assert "grid_mode" not in result
+        assert "battery_saver_mode_ena" not in result
+        assert "self_use_mode_ena" not in result
+        assert "intelligent_mode_ena" not in result
 
     def test_returns_none_when_required_inputs_are_missing(self) -> None:
         del self.data["battery_soc"]
@@ -219,11 +219,11 @@ class CalculateValuesTest(unittest.TestCase):
 
         result = self.calculate()
 
-        self.assertIsNone(result["bat_remaining"])
-        self.assertIsNone(result["pv1_power"])
-        self.assertIsNone(result["solar_power"])
-        self.assertIsNone(result["house_energy_today"])
-        self.assertIsNone(result["house_energy_total"])
+        assert result["bat_remaining"] is None
+        assert result["pv1_power"] is None
+        assert result["solar_power"] is None
+        assert result["house_energy_today"] is None
+        assert result["house_energy_total"] is None
 
     def test_treats_zero_as_a_value_and_does_not_mutate_input(self) -> None:
         self.data.update(dict.fromkeys(self.data, 0))
@@ -231,16 +231,16 @@ class CalculateValuesTest(unittest.TestCase):
 
         result = self.calculate()
 
-        self.assertEqual(self.data, original)
-        self.assertEqual(result["bat_remaining"], 0)
-        self.assertEqual(result["bat_net_energy"], 0)
-        self.assertEqual(result["house_energy_today"], 0)
-        self.assertEqual(result["house_energy_total"], 0)
-        self.assertEqual(result["solar_power"], 0)
-        self.assertEqual(result["grid_mode"], "grid")
-        self.assertFalse(result["battery_saver_mode_ena"])
-        self.assertFalse(result["self_use_mode_ena"])
-        self.assertFalse(result["intelligent_mode_ena"])
+        assert self.data == original
+        assert result["bat_remaining"] == 0
+        assert result["bat_net_energy"] == 0
+        assert result["house_energy_today"] == 0
+        assert result["house_energy_total"] == 0
+        assert result["solar_power"] == 0
+        assert result["grid_mode"] == "grid"
+        assert not result["battery_saver_mode_ena"]
+        assert not result["self_use_mode_ena"]
+        assert not result["intelligent_mode_ena"]
 
 
 if __name__ == "__main__":

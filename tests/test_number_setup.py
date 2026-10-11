@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const, number
@@ -18,8 +20,8 @@ def fake_coordinator(*, native: bool) -> SimpleNamespace:
         charge_limit_soc=100.0,
         async_set_battery_reserve_soc=None,
         async_set_charge_limit_soc=None,
-        feature_power=lambda feature: 0.0,
-        feature_power_max=lambda feature: 0.0,
+        feature_power=lambda _feature: 0.0,
+        feature_power_max=lambda _feature: 0.0,
     )
     return SimpleNamespace(
         control=control, inverter_model=InverterModel.POWEROCEAN_THREE_PHASE
@@ -31,7 +33,7 @@ async def set_up(hass, *, native: bool) -> list:
     entry.add_to_hass(hass)
     entry.runtime_data = fake_coordinator(native=native)
     added: list = []
-    await number.async_setup_entry(hass, entry, added.extend)
+    await number.async_setup_entry(hass, entry, cast(AddEntitiesCallback, added.extend))
     return added
 
 

@@ -6,11 +6,10 @@ from dataclasses import asdict
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_HOST, CONTROL_FEATURES, DOMAIN
-from .coordinator import EcoflowCoordinator
+from .coordinator import EcoflowConfigEntry
 from .modbus import is_shared
 
 TO_REDACT = (CONF_HOST, "title", "unique_id")
@@ -34,11 +33,11 @@ PROTOCOL_REPORT_KEYS = (
 
 
 async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
+    hass: HomeAssistant,  # noqa: ARG001 - required by the diagnostics API
+    entry: EcoflowConfigEntry,
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    coordinator: EcoflowCoordinator = entry.runtime_data
+    coordinator = entry.runtime_data
 
     identity = asdict(coordinator.identity)
     if identity["serial_number"] not in (None, "unknown"):

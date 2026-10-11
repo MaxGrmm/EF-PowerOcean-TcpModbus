@@ -17,6 +17,9 @@ from dataclasses import dataclass, field, replace
 from enum import IntEnum, IntFlag, StrEnum
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+from homeassistant.components.number import NumberDeviceClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import EntityCategory, UnitOfEnergy
 
 if TYPE_CHECKING:
@@ -490,9 +493,9 @@ class ControlFeatureDef:
     method: ControlMode
     # Read key of the setpoint register the method acts on
     setpoint_key: str | None = None
-    # Whether the power should be considered positive or negative. +1 for charging, -1 for discharging
+    # +1 where a positive power charges the battery, -1 where it discharges it.
     sign: int = 1
-    # Sensor that this control measures against, e.g. battery_power for the battery_power_setpoint
+    # The sensor the command is measured against, e.g. battery_power.
     measure_key: str | None = None
     # Sensor that stores the maximum allowed value for this mode, if available
     limit_key: str | None = None
@@ -538,7 +541,7 @@ def deviation_state(
     min_soc: float,
     battery: float | None = None,
 ) -> ControlStatus:
-    """Compare the deviation between what control we command and what the inverter reports."""
+    """Compare what we command with what the inverter reports."""
     if measured is None:
         return ControlStatus.ACTIVE
 
@@ -759,8 +762,8 @@ class SensorDef:
     key: str
     name: str | None = None
     unit: str | None = None
-    device_class: str | None = None
-    state_class: str | None = None
+    device_class: SensorDeviceClass | None = None
+    state_class: SensorStateClass | None = None
     entity_category: EntityCategory | None = None
     icon: str | None = None
     options: tuple[str, ...] | None = None
@@ -778,11 +781,12 @@ class EnergySensorDef:
     unit: str = UnitOfEnergy.KILO_WATT_HOUR
     is_calculated: bool = False
     resets_daily: bool = False
-    max_power: int | None = None
-    # The _total value of the energy counter, used to validate daily resets and prevent invalid spikes.
+    # Config key of the power that bounds how fast the counter can rise.
+    max_power: str | None = None
+    # The lifetime counter a daily one is checked against.
     total_source: str | None = None
-    device_class: str = "energy"
-    state_class: str = "total_increasing"
+    device_class: SensorDeviceClass = SensorDeviceClass.ENERGY
+    state_class: SensorStateClass = SensorStateClass.TOTAL_INCREASING
     entity_category: EntityCategory | None = None
     icon: str | None = None
 
@@ -791,7 +795,7 @@ class EnergySensorDef:
 class BinarySensorDef:
     key: str
     name: str | None = None
-    device_class: str | None = None
+    device_class: BinarySensorDeviceClass | None = None
     entity_category: EntityCategory | None = None
 
 
@@ -808,17 +812,18 @@ class SwitchDef:
 
 @dataclass(frozen=True)
 class NumberWritableDef:
-    key: str  # Unique key for the number entity (e.g., "min_soc_limit_control")
-    read_key: str  # The original key from MODBUS_REGISTERS used for reading (e.g., "min_soc_limit")
-    name: str  # Display name for Home Assistant UI
-    register: int  # Physical Modbus register address for writing
-    min_value: float  # Slider minimum value
-    max_value: float  # Slider maximum value
-    step: float  # Step size (1.0 for integers, 0.1 for floats)
-    data_type: RegisterType = RegisterType.UINT16  # Word layout used for the write
-    unit: str | None = None  # Unit of measurement
-    device_class: str | None = None  # Device class type
-    icon: str | None = None  # Custom icon for the slider
+    key: str
+    # The register key the value is read back from.
+    read_key: str
+    name: str
+    register: int
+    min_value: float
+    max_value: float
+    step: float
+    data_type: RegisterType = RegisterType.UINT16
+    unit: str | None = None
+    device_class: NumberDeviceClass | None = None
+    icon: str | None = None
     # Not implemented on every model: hidden from the entity list unless enabled.
     advanced: bool = False
     # Models whose firmware stores the write but never acts on it. Writing anyway
@@ -831,12 +836,24 @@ class NumberWritableDef:
         return REGISTER_SIZES[self.data_type]
 
 
-def shown_keys(definition: object) -> frozenset[str]:
+type EntityDef = (
+    SensorDef
+    | EnergySensorDef
+    | BinarySensorDef
+    | NumberWritableDef
+    | ControlEntityDef
+    | SwitchDef
+)
+
+
+def shown_keys(definition: EntityDef) -> frozenset[str]:
     """Return the data keys an entity made from *definition* shows."""
-    keys = {definition.key}  # type: ignore[attr-defined]
-    keys.update(getattr(definition, "attribute_keys", ()))
-    if read_key := getattr(definition, "read_key", None):
-        keys.add(read_key)
-    if total_source := getattr(definition, "total_source", None):
-        keys.add(total_source)
+    keys = {definition.key}
+    match definition:
+        case SensorDef():
+            keys.update(definition.attribute_keys)
+        case EnergySensorDef(total_source=str() as total_source):
+            keys.add(total_source)
+        case NumberWritableDef():
+            keys.add(definition.read_key)
     return frozenset(keys)

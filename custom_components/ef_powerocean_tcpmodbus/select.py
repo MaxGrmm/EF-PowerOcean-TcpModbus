@@ -10,25 +10,25 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import BATTERY_MODE_SELECT
-from .coordinator import EcoflowCoordinator
+from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .models import ControlEntityDef, ControlFeature
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
+    hass: HomeAssistant,  # noqa: ARG001 - required by the platform API
+    entry: EcoflowConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up EcoFlow selects from a config entry."""
-    coordinator: EcoflowCoordinator = entry.runtime_data
+    coordinator = entry.runtime_data
 
     async_add_entities(
         [EcoFlowBatteryModeSelect(coordinator, entry, BATTERY_MODE_SELECT)]
     )
 
 
-class EcoFlowBatteryModeSelect(EcoFlowBaseEntity, SelectEntity):
+class EcoFlowBatteryModeSelect(EcoFlowBaseEntity[ControlEntityDef], SelectEntity):
     """What the inverter should be doing.
 
     The protocol follows one control method at a time, so this is a single choice

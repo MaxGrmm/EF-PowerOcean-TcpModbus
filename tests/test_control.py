@@ -3,29 +3,41 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util import dt as dt_util
 
 from custom_components.ef_powerocean_tcpmodbus import const, models
 from custom_components.ef_powerocean_tcpmodbus import control as control_module
 from custom_components.ef_powerocean_tcpmodbus import heartbeat as heartbeat_module
-from custom_components.ef_powerocean_tcpmodbus.modbus import ModbusRejected
+from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
+from custom_components.ef_powerocean_tcpmodbus.modbus import (
+    ModbusClient,
+    ModbusRejected,
+)
 from custom_components.ef_powerocean_tcpmodbus.switch import (
     GRID_FEED_SWITCH,
     EcoFlowSwitch,
 )
 
-HEARTBEAT_START = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
+HEARTBEAT_START = datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture
 def control():
     blocks = const.register_blocks_for(const.DEFAULT_INVERTER_MODEL)
     manager = control_module.ControlManager(
-        SimpleNamespace(connected=True, writes_allowed=True, async_write=AsyncMock()),
+        cast(
+            ModbusClient,
+            SimpleNamespace(
+                connected=True, writes_allowed=True, async_write=AsyncMock()
+            ),
+        ),
         registers_by_key={
             register.key: register for block in blocks for register in block.registers
         },
@@ -51,7 +63,7 @@ def control():
 
 def allow_writes(control, monkeypatch: pytest.MonkeyPatch, *, rejected=False):
     """Put the manager in control of a device that answers, and return the writes."""
-    monkeypatch.setattr(control_module.dt, "now", lambda: HEARTBEAT_START)
+    monkeypatch.setattr(dt_util, "now", lambda: HEARTBEAT_START)
     control._modbus_client.connected = True
     control._modbus_client.async_write = AsyncMock(
         side_effect=ModbusRejected("rejected") if rejected else None
@@ -79,12 +91,12 @@ def commands(write) -> list[tuple[int, list[int]]]:
 def advance(control, monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
     """Move the clock as polling would, keeping control authority alive."""
     now = HEARTBEAT_START + timedelta(seconds=seconds)
-    monkeypatch.setattr(control_module.dt, "now", lambda: now)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
     control._heartbeat._last_success = now
 
 
 def beat(control, now: datetime, monkeypatch: pytest.MonkeyPatch) -> bool:
-    monkeypatch.setattr(control_module.dt, "now", lambda: now)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
     # asyncio.run() builds a fresh loop per call, and a lock binds to the first one.
     control._heartbeat._lock = asyncio.Lock()
     return asyncio.run(control._heartbeat.async_ensure_fresh())
@@ -141,7 +153,7 @@ def test_a_busy_inverter_is_retried_but_an_invalid_request_latches_off(
 
     control._heartbeat._supported = None
     control._modbus_client.async_write = AsyncMock(
-        side_effect=control_module.HomeAssistantError("connection reset")
+        side_effect=HomeAssistantError("connection reset")
     )
 
     assert beat(control, HEARTBEAT_START, monkeypatch) is False
@@ -177,7 +189,7 @@ def test_a_reconnect_keeps_control_unless_the_window_lapsed(
     assert control._control_stale is False
 
     lapsed = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_WINDOW_S + 1)
-    monkeypatch.setattr(control_module.dt, "now", lambda: lapsed)
+    monkeypatch.setattr(dt_util, "now", lambda: lapsed)
     control.mark_stale()
 
     assert control.in_control is False
@@ -196,7 +208,7 @@ def test_a_failed_beat_is_retried_before_the_deadline_not_after_it(
 
     for age, expected in ((12, 8), (const.HEARTBEAT_RETRY_TOTAL_S, 5), (40, 5)):
         now = HEARTBEAT_START + timedelta(seconds=age)
-        monkeypatch.setattr(control_module.dt, "now", lambda now=now: now)
+        monkeypatch.setattr(dt_util, "now", lambda now=now: now)
         assert heartbeat._delay_before_next_write() == expected
 
     heartbeat._supported = False
@@ -330,7 +342,7 @@ def test_a_mode_cannot_be_selected_without_modbus_control(
     control._enabled = False
     control._inputs = control_module.ControlInputs.from_mapping({"battery_soc": 50.0})
 
-    with pytest.raises(control_module.HomeAssistantError):
+    with pytest.raises(HomeAssistantError):
         asyncio.run(control.async_select_feature(Feature.CHARGE_BATTERY))
 
     assert control.selected_feature is Feature.AUTOMATIC
@@ -516,7 +528,7 @@ def test_the_control_word_refuses_off_grid_and_shutdown_bits(
     # the guard: battery saver now lands on BIT0, which takes the system off-grid.
     monkeypatch.setattr(control_module, "CONTROL_COMMAND_BATTERY_SAVER_BIT", 0)
 
-    with pytest.raises(control_module.HomeAssistantError):
+    with pytest.raises(HomeAssistantError):
         asyncio.run(control.async_set_battery_saver(True))
 
     write.assert_not_awaited()
@@ -1015,7 +1027,7 @@ def test_a_command_needs_modbus_control_unless_it_only_sets_the_limit(
     write = allow_writes(control, monkeypatch)
     control._enabled = False
 
-    with pytest.raises(control_module.HomeAssistantError):
+    with pytest.raises(HomeAssistantError):
         asyncio.run(
             control.async_set_command(
                 Feature.CHARGE_BATTERY, power=2000.0, charge_limit_soc=80.0
@@ -1117,7 +1129,7 @@ def test_switching_modbus_control_off_hands_back_and_on_takes_control_again(
     assert control.selected_feature is Feature.AUTOMATIC
 
     lapsed = HEARTBEAT_START + timedelta(seconds=const.HEARTBEAT_WINDOW_S + 1)
-    monkeypatch.setattr(control_module.dt, "now", lambda: lapsed)
+    monkeypatch.setattr(dt_util, "now", lambda: lapsed)
     assert control.status is Status.NO_MODBUS_CONTROL
     assert control.hands_back_at is None
 
@@ -1180,7 +1192,7 @@ def test_a_failed_write_does_not_break_the_poll_and_is_retried(
     allow_writes(control, monkeypatch)
     control._feature = Feature.CHARGE_BATTERY
     control._modbus_client.async_write = AsyncMock(
-        side_effect=control_module.HomeAssistantError("connection reset")
+        side_effect=HomeAssistantError("connection reset")
     )
 
     asyncio.run(control.async_poll({"battery_soc": 50.0}))
@@ -1238,7 +1250,7 @@ def test_a_refused_command_rolls_back_the_commanded_state(
     """The UI must not report a write the device threw out."""
     allow_writes(control, monkeypatch, rejected=True)
 
-    with pytest.raises(control_module.HomeAssistantError):
+    with pytest.raises(HomeAssistantError):
         asyncio.run(control.async_set_battery_saver(True))
 
     assert control.battery_saver_commanded is False
@@ -1288,7 +1300,7 @@ def test_the_parameters_survive_a_restart_but_the_selected_mode_does_not(
 # Unlimited mode ignores the cap, so it allows export even with a zero cap.
 @pytest.mark.parametrize(
     ("mode", "power"),
-    [(Feed.LIMITED, 9000), (Feed.UNLIMITED, 0), (Feed.UNLIMITED, 9000)],
+    ((Feed.LIMITED, 9000), (Feed.UNLIMITED, 0), (Feed.UNLIMITED, 9000)),
 )
 def test_the_grid_feed_switch_stops_the_export_and_restores_it_exactly(
     control, monkeypatch: pytest.MonkeyPatch, mode: models.GridFeedMode, power: int
@@ -1296,7 +1308,9 @@ def test_the_grid_feed_switch_stops_the_export_and_restores_it_exactly(
     allow_writes(control, monkeypatch)
     switch = EcoFlowSwitch.__new__(EcoFlowSwitch)
     switch._definition = GRID_FEED_SWITCH
-    switch.coordinator = SimpleNamespace(control=control, data={})
+    switch.coordinator = cast(
+        EcoflowCoordinator, SimpleNamespace(control=control, data={})
+    )
     writes: list[tuple[str, int]] = []
     control._write_setting = AsyncMock(
         side_effect=lambda register, value, **_: writes.append((register.key, value))
@@ -1368,7 +1382,7 @@ def test_the_percentage_mode_is_never_adopted_or_switched(
     # Even with a restore remembered from before the mode changed.
     control._grid_feed_restore = {"mode": 1, "power": 9000}
     assert control.grid_feed_switchable is False
-    with pytest.raises(control_module.HomeAssistantError):
+    with pytest.raises(HomeAssistantError):
         asyncio.run(control.async_set_grid_feed(False))
     control._write_setting.assert_not_awaited()
 
@@ -1391,11 +1405,11 @@ def test_an_export_limit_raised_on_the_device_is_adopted(control) -> None:
 
 @pytest.mark.parametrize(
     ("restore", "enabled"),
-    [
+    (
         ({"grid_feed_mode": Feed.LIMITED, "feed_in_power_max": 0.0}, True),
         ({"feed_in_power_max": 9000.0}, True),
         ({"grid_feed_mode": Feed.UNLIMITED, "feed_in_power_max": 0.0}, False),
-    ],
+    ),
     ids=["limited-to-zero", "mode-not-read", "modbus-control-off"],
 )
 def test_the_grid_feed_switch_refuses_without_a_restore_or_modbus_control(
@@ -1405,7 +1419,7 @@ def test_the_grid_feed_switch_refuses_without_a_restore_or_modbus_control(
     control._enabled = enabled
     control._track_grid_feed_restore(control_module.ControlInputs.from_mapping(restore))
 
-    with pytest.raises(control_module.HomeAssistantError):
+    with pytest.raises(HomeAssistantError):
         asyncio.run(control.async_set_grid_feed(False))
     control._write_setting.assert_not_awaited()
 
@@ -1482,7 +1496,12 @@ def make_single_phase_control(
 ):
     blocks = const.register_blocks_for(inverter_model)
     manager = control_module.ControlManager(
-        SimpleNamespace(connected=True, writes_allowed=True, async_write=AsyncMock()),
+        cast(
+            ModbusClient,
+            SimpleNamespace(
+                connected=True, writes_allowed=True, async_write=AsyncMock()
+            ),
+        ),
         registers_by_key={
             register.key: register for block in blocks for register in block.registers
         },
@@ -1534,7 +1553,7 @@ def test_single_phase_charge_guard_hands_back_to_automatic_when_house_exceeds_so
     assert sp_control._commanded_feature is Feature.HOLD_BATTERY
     assert sp_control.power == 1.0
 
-    # Deficit during the settling window (<= 30s): stays in HOLD_BATTERY to let inverter settle.
+    # A deficit inside the settling window (<= 30 s) keeps HOLD_BATTERY.
     deficit_frame = {
         "battery_soc": 88.0,
         "solar_power": 1404.0,
@@ -1545,14 +1564,14 @@ def test_single_phase_charge_guard_hands_back_to_automatic_when_house_exceeds_so
     asyncio.run(sp_control.async_apply(deficit_frame))
     assert sp_control._commanded_feature is Feature.HOLD_BATTERY
 
-    # Settling window elapses: house load exceeds solar by 138 W. It hands back to native Automatic.
+    # Once settled, a house 138 W over solar hands back to native Automatic.
     advance(sp_control, monkeypatch, const.GUARD_SETTLE_S)
     asyncio.run(sp_control.async_apply(deficit_frame))
     assert sp_control.status is Status.CHARGE_LIMIT_REACHED
     assert sp_control._commanded_feature is Feature.AUTOMATIC
     assert sp_control.power == 0.0
 
-    # Dwell time in Automatic elapses: clear solar surplus returns and holds battery again.
+    # After the dwell time in Automatic, a clear surplus holds the battery again.
     advance(sp_control, monkeypatch, 2 * const.GUARD_SETTLE_S)
     asyncio.run(sp_control.async_apply(surplus_frame))
     assert sp_control.status is Status.CHARGE_LIMIT_REACHED
@@ -1641,7 +1660,8 @@ def test_single_phase_guarded_command_uses_minimum_surplus(
         "house_power": 1450.0,
     }
     # from_grid_side is +110 W, but from_solar_side is -75 W.
-    # min(+110, -75) = -75 W, so wanted = +75 W (> 20 W deadband) -> hands back to AUTOMATIC.
+    # min(+110, -75) = -75 W, so wanted = +75 W, past the 20 W deadband:
+    # hands back to AUTOMATIC.
     asyncio.run(sp_control.async_apply(data))
     assert sp_control._commanded_feature is Feature.AUTOMATIC
 
@@ -1650,7 +1670,7 @@ def test_single_phase_guard_handback_deadband_hysteresis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Small fluctuations around equilibrium (<= 20W) do not toggle between HOLD
-    and AUTOMATIC, but once handed back, it remains in AUTOMATIC until clear surplus returns."""
+    and AUTOMATIC; once handed back it stays in AUTOMATIC until a clear surplus."""
     sp_control = make_single_phase_control()
     allow_writes(sp_control, monkeypatch)
     asyncio.run(sp_control.async_set_charge_limit_soc(88))
@@ -1663,7 +1683,7 @@ def test_single_phase_guard_handback_deadband_hysteresis(
     )
     assert sp_control._commanded_feature is Feature.HOLD_BATTERY
 
-    # 2. Small noise draw of 10 W (<= 20 W deadband) after settling: stays in HOLD_BATTERY.
+    # 2. A 10 W draw (inside the 20 W deadband) after settling keeps HOLD_BATTERY.
     advance(sp_control, monkeypatch, const.GUARD_SETTLE_S)
     asyncio.run(
         sp_control.async_apply(
@@ -1688,7 +1708,7 @@ def test_single_phase_guard_handback_deadband_hysteresis(
     )
     assert sp_control._commanded_feature is Feature.AUTOMATIC
 
-    # 5. Small 10 W surplus (< 20 W deadband): hysteresis keeps it in AUTOMATIC even after dwell time.
+    # 5. A 10 W surplus (inside the deadband) stays in AUTOMATIC after the dwell.
     advance(sp_control, monkeypatch, 2 * const.GUARD_SETTLE_S)
     asyncio.run(
         sp_control.async_apply(
@@ -1697,7 +1717,7 @@ def test_single_phase_guard_handback_deadband_hysteresis(
     )
     assert sp_control._commanded_feature is Feature.AUTOMATIC
 
-    # 6. Clear surplus returns (solar 1030 W > house 1000 W, wanted <= -20 W): takes back control to HOLD.
+    # 6. A clear surplus (solar 1030 W, house 1000 W) takes control back to HOLD.
     asyncio.run(
         sp_control.async_apply(
             {"battery_soc": 88.0, "solar_power": 1030.0, "house_power": 1000.0}
@@ -1953,7 +1973,8 @@ def test_the_status_words_decode_to_what_the_inverter_is_doing() -> None:
     stopped = models.DeviceReport.from_data(
         {"system_modes": 0x1014, "system_state_2": 1 << 2}
     )
-    assert stopped is not None and stopped.fault
+    assert stopped is not None
+    assert stopped.fault
     assert models.DeviceReport.from_data({}) is None
 
 

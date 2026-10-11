@@ -170,16 +170,14 @@ def _calculate_house_energy(
     battery_charged: float | None,
     precision: int,
 ) -> float | None:
-    values = (
-        solar,
-        grid_import,
-        battery_discharged,
-        grid_export,
-        battery_charged,
-    )
-    if any(value is None for value in values):
+    if (
+        solar is None
+        or grid_import is None
+        or battery_discharged is None
+        or grid_export is None
+        or battery_charged is None
+    ):
         return None
-
     return round(
         solar + grid_import + battery_discharged - grid_export - battery_charged,
         precision,
@@ -206,7 +204,7 @@ def decode_register(
     if data_type is RegisterType.INT32:
         return float(struct.unpack("<i", raw)[0])
 
-    value = struct.unpack("<f", raw)[0]
+    value = float(struct.unpack("<f", raw)[0])
     if not math.isfinite(value) or abs(value) > 1e9:
         return None
     return round(value, 2)
@@ -310,23 +308,20 @@ def calculate_derived_values(
         precision=2,
     )
 
-    for pv_number in range(1, 4):
-        current = getattr(data, f"pv{pv_number}_current")
-        voltage = getattr(data, f"pv{pv_number}_voltage")
-        calculated[f"pv{pv_number}_power"] = _calculate_pv_power(
-            current,
-            voltage,
-            startup_voltage,
+    pv_powers = [
+        _calculate_pv_power(current, voltage, startup_voltage)
+        for current, voltage in (
+            (data.pv1_current, data.pv1_voltage),
+            (data.pv2_current, data.pv2_voltage),
+            (data.pv3_current, data.pv3_voltage),
         )
+    ]
+    for pv_number, pv_power in enumerate(pv_powers, start=1):
+        calculated[f"pv{pv_number}_power"] = pv_power
 
     if calculate_solar_power:
-        pv_power_values = tuple(
-            calculated[f"pv{pv_number}_power"] for pv_number in range(1, 4)
-        )
         calculated["solar_power"] = (
-            sum(pv_power_values)
-            if all(value is not None for value in pv_power_values)
-            else None
+            None if None in pv_powers else sum(p for p in pv_powers if p is not None)
         )
 
     if data.system_modes is not None:

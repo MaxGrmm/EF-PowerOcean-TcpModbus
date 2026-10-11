@@ -18,6 +18,7 @@ followed. Nothing is written.
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import sys
 import time
@@ -227,7 +228,7 @@ def report_readable_addresses(
             count = min(16, high - base + 1)
             chunk, _ = reader.read(base, count)
             if chunk is not None:
-                found.update(zip(range(base, base + count), chunk))
+                found.update(zip(range(base, base + count), chunk, strict=False))
                 continue
             for address in range(base, base + count):
                 word, reason = reader.read(address, 1)
@@ -325,7 +326,7 @@ def read_addresses(reader: RegisterReader, addresses: list[int]) -> dict[int, in
     for first, last in contiguous_spans(addresses):
         words, _ = reader.read(first, last - first + 1)
         if words is not None:
-            sampled.update(zip(range(first, last + 1), words))
+            sampled.update(zip(range(first, last + 1), words, strict=False))
     return sampled
 
 
@@ -422,7 +423,9 @@ def report_behaviour(
         shared = set.intersection(
             *(
                 matching_registers(candidates_seen, values)
-                for (_, candidates_seen), (values, _) in zip(readings, taken)
+                for (_, candidates_seen), (values, _) in zip(
+                    readings, taken, strict=True
+                )
             )
         )
         mirrored = min(shared) if shared else None
@@ -557,7 +560,7 @@ def snapshot(reader: RegisterReader, addresses: list[int]) -> dict[int, int]:
             count = min(WATCH_CHUNK, last - base + 1)
             chunk, _ = reader.read(base, count)
             if chunk is not None:
-                words.update(zip(range(base, base + count), chunk))
+                words.update(zip(range(base, base + count), chunk, strict=False))
                 continue
             for address in range(base, base + count):
                 word, _ = reader.read(address, 1)
@@ -668,7 +671,7 @@ def render_change(
     names: dict[int, str],
     high_word_first: bool,
 ) -> str:
-    """One line for a changed address: its words, and a 32-bit reading if the pair moved."""
+    """One line for a changed address: its words, and a 32-bit reading if both moved."""
     old, new = before.get(address), after.get(address)
     signed = new - 0x10000 if new is not None and new >= 0x8000 else new
     line = f"    {render_address(address):<16} {old!s:>6} -> {new!s:<6}"
@@ -776,7 +779,7 @@ def report_watch_summary(
     moved = sorted(
         {
             address
-            for (_, previous), (_, current) in zip(history, history[1:])
+            for (_, previous), (_, current) in itertools.pairwise(history)
             for address in current
             if address not in quiet and previous.get(address) != current.get(address)
         }

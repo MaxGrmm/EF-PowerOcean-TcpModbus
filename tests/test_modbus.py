@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from homeassistant.const import MAJOR_VERSION, MINOR_VERSION
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from pymodbus.exceptions import ModbusException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const
@@ -41,7 +44,7 @@ def shared_modules(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             modbus_module,
             "_shared",
-            SimpleNamespace(ha=ha_modbus, mc=modbus_connection),
+            modbus_module._SharedModbus(ha=ha_modbus, mc=modbus_connection),
         )
 
 
@@ -55,7 +58,7 @@ def client(pymodbus):
     link = modbus_module.PymodbusLink.__new__(modbus_module.PymodbusLink)
     link._device_id = const.DEFAULT_SLAVE
     link._pymodbus = pymodbus
-    return modbus_module.ModbusClient(link)
+    return modbus_module.ModbusClient(cast(modbus_module.ModbusLink, link))
 
 
 @pytest.fixture
@@ -65,7 +68,9 @@ def unit():
 
 @pytest.fixture
 def shared_client(unit):
-    return modbus_module.ModbusClient(modbus_module.SharedLink(unit))
+    import modbus_connection
+
+    return modbus_module.ModbusClient(modbus_module.SharedLink(unit, modbus_connection))
 
 
 def answer(*, is_error: bool, registers=None):
@@ -86,7 +91,7 @@ def test_reads_register_block(client, pymodbus, is_error: bool) -> None:
         with pytest.raises(modbus_module.ModbusReadRejected) as raised:
             asyncio.run(client.async_read(100, 2))
         # Still a ModbusException, so existing read handling is unchanged.
-        assert isinstance(raised.value, modbus_module.ModbusException)
+        assert isinstance(raised.value, ModbusException)
         assert raised.value.exception_code == 2
     else:
         assert asyncio.run(client.async_read(100, 2)) == [11, 22]
@@ -128,11 +133,9 @@ def test_a_refused_write_is_told_apart_from_one_that_never_arrived(
     with pytest.raises(modbus_module.ModbusRejected):
         asyncio.run(client.async_write(40608, [1], what="heartbeat"))
 
-    pymodbus.write_register = AsyncMock(
-        side_effect=modbus_module.ModbusException("connection reset")
-    )
+    pymodbus.write_register = AsyncMock(side_effect=ModbusException("connection reset"))
 
-    with pytest.raises(modbus_module.HomeAssistantError) as raised:
+    with pytest.raises(HomeAssistantError) as raised:
         asyncio.run(client.async_write(40608, [1], what="heartbeat"))
 
     assert not isinstance(raised.value, modbus_module.ModbusRejected)
@@ -160,16 +163,16 @@ async def test_a_shared_link_tells_a_refused_read_from_a_lost_link(
 
     unit.fail_requests(ModbusConnectionError("link down"))
 
-    with pytest.raises(modbus_module.ModbusException) as raised:
+    with pytest.raises(ModbusException) as lost:
         await shared_client.async_read(100, 2)
-    assert not isinstance(raised.value, modbus_module.ModbusReadRejected)
+    assert not isinstance(lost.value, modbus_module.ModbusReadRejected)
 
 
 @shared_only
 async def test_a_shared_link_writes_one_word_as_fc6_and_more_as_fc16(
     shared_client, unit
 ) -> None:
-    written = []
+    written: list[Any] = []
     unit.on_write(written.append)
 
     await shared_client.async_write(40608, [1], what="heartbeat")
@@ -193,9 +196,9 @@ async def test_a_shared_link_tells_a_refused_write_from_a_lost_link(
 
     unit.fail_requests(ModbusConnectionError("link down"))
 
-    with pytest.raises(modbus_module.HomeAssistantError) as raised:
+    with pytest.raises(HomeAssistantError) as lost:
         await shared_client.async_write(40608, [1], what="heartbeat")
-    assert not isinstance(raised.value, modbus_module.ModbusRejected)
+    assert not isinstance(lost.value, modbus_module.ModbusRejected)
 
 
 @shared_only
@@ -227,12 +230,12 @@ def test_the_reconnect_backoff_does_not_hold_the_lock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     link = _FlakyLink(up_on_attempt=3)
-    client = modbus_module.ModbusClient(link)
+    client = modbus_module.ModbusClient(cast(modbus_module.ModbusLink, link))
 
     async def sleep(_delay: float) -> None:
         link.lock_held_while_sleeping.append(client._lock.locked())
 
-    monkeypatch.setattr(modbus_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(asyncio, "sleep", sleep)
 
     assert asyncio.run(client.async_reconnect())
     assert link.attempts == 3
@@ -242,12 +245,12 @@ def test_the_reconnect_backoff_does_not_hold_the_lock(
 
 def test_a_closed_client_stops_reconnecting(monkeypatch: pytest.MonkeyPatch) -> None:
     link = _FlakyLink(up_on_attempt=99)
-    client = modbus_module.ModbusClient(link)
+    client = modbus_module.ModbusClient(cast(modbus_module.ModbusLink, link))
 
     async def sleep(_delay: float) -> None:
         await client.async_close()
 
-    monkeypatch.setattr(modbus_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(asyncio, "sleep", sleep)
 
     assert not asyncio.run(client.async_reconnect())
     assert link.attempts == 1
@@ -257,7 +260,7 @@ def test_blocked_writes_never_reach_the_link(client, pymodbus) -> None:
     pymodbus.write_register = AsyncMock()
     client.block_writes("serial mismatch")
 
-    with pytest.raises(modbus_module.HomeAssistantError, match="serial mismatch"):
+    with pytest.raises(HomeAssistantError, match="serial mismatch"):
         asyncio.run(client.async_write(40536, [10], what="reserve"))
     pymodbus.write_register.assert_not_called()
 

@@ -10,9 +10,10 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -30,7 +31,12 @@ from custom_components.ef_powerocean_tcpmodbus.control_test import (
     ControlTestState,
     Timing,
 )
-from custom_components.ef_powerocean_tcpmodbus.modbus import ModbusRejected
+from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
+from custom_components.ef_powerocean_tcpmodbus.heartbeat import Heartbeat
+from custom_components.ef_powerocean_tcpmodbus.modbus import (
+    ModbusClient,
+    ModbusRejected,
+)
 from custom_components.ef_powerocean_tcpmodbus.models import (
     ControlFeature,
     ControlMode,
@@ -65,6 +71,7 @@ class FakeInverter:
     follows: set[ControlMode] = field(default_factory=lambda: set(ControlMode))
     soc: float = 50.0
     beating: bool = False
+    beat_started: asyncio.Event = field(default_factory=asyncio.Event)
     # Polls after the heartbeat stops until it reports the app back in charge.
     handback_polls: int = 0
     method: ControlMode = ControlMode.DEFAULT
@@ -78,7 +85,13 @@ class FakeInverter:
     def in_control(self) -> bool:
         return self.beating or self.handback_polls > 0
 
-    async def async_write(self, address: int, words: list[int], *, what: str) -> None:
+    async def async_write(
+        self,
+        address: int,
+        words: list[int],
+        *,
+        what: str,  # noqa: ARG002 - matches ModbusClient
+    ) -> None:
         if code := self.refuse.get(address):
             raise ModbusRejected("refused", exception_code=code)
         self.writes.append((address, list(words)))
@@ -129,7 +142,7 @@ class FakeHeartbeat:
         self._inverter = inverter
         self._supported = supported
         self.supported: bool | None = None
-        self.last_success = None
+        self.last_success: datetime | None = None
         self.running = False
 
     @property
@@ -141,6 +154,7 @@ class FakeHeartbeat:
         if not self._supported:
             return False
         self._inverter.beating = True
+        self._inverter.beat_started.set()
         self.last_success = dt.now()
         return True
 
@@ -226,10 +240,10 @@ async def coordinator(hass: HomeAssistant, inverter: FakeInverter, tmp_path: Pat
 
 def runner(coordinator: FakeCoordinator, *, supported: bool = True) -> ControlTest:
     return ControlTest(
-        coordinator,
+        cast(EcoflowCoordinator, coordinator),
         timing=FAST,
-        heartbeat_factory=lambda: FakeHeartbeat(
-            coordinator.inverter, supported=supported
+        heartbeat_factory=lambda: cast(
+            Heartbeat, FakeHeartbeat(coordinator.inverter, supported=supported)
         ),
     )
 
@@ -238,8 +252,9 @@ def verdicts(report: dict[str, Any]) -> dict[str, str]:
     return {item["name"]: item["verdict"] for item in report["features"]}
 
 
+@pytest.mark.usefixtures("hass")
 async def test_a_firmware_that_follows_every_method_passes_every_test(
-    hass: HomeAssistant, coordinator: FakeCoordinator
+    coordinator: FakeCoordinator,
 ) -> None:
     test = runner(coordinator)
 
@@ -257,13 +272,13 @@ async def test_a_firmware_that_follows_every_method_passes_every_test(
     assert coordinator.required is None
 
 
+@pytest.mark.usefixtures("hass")
 async def test_the_registers_it_reads_stay_polled_while_it_runs(
-    hass: HomeAssistant, coordinator: FakeCoordinator, inverter: FakeInverter
+    coordinator: FakeCoordinator, inverter: FakeInverter
 ) -> None:
     test = runner(coordinator)
     test.async_start(1500)
-    while not inverter.beating:
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(inverter.beat_started.wait(), 5)
 
     assert coordinator.required is not None
     assert {"inverter_output_power", "battery_power_setpoint", "system_modes"} <= (
@@ -273,8 +288,9 @@ async def test_the_registers_it_reads_stay_polled_while_it_runs(
     assert coordinator.required is None
 
 
+@pytest.mark.usefixtures("hass")
 async def test_a_method_the_firmware_ignores_is_reported_not_followed(
-    hass: HomeAssistant, coordinator: FakeCoordinator, inverter: FakeInverter
+    coordinator: FakeCoordinator, inverter: FakeInverter
 ) -> None:
     inverter.follows = {ControlMode.BATTERY_LIMITS, ControlMode.SYSTEM_FEED}
 
@@ -286,8 +302,9 @@ async def test_a_method_the_firmware_ignores_is_reported_not_followed(
     assert result["inverter feed"] == "not_followed"
 
 
+@pytest.mark.usefixtures("hass")
 async def test_the_inverter_is_left_on_the_default_method(
-    hass: HomeAssistant, coordinator: FakeCoordinator, inverter: FakeInverter
+    coordinator: FakeCoordinator, inverter: FakeInverter
 ) -> None:
     await runner(coordinator).async_run(1500)
 
@@ -296,8 +313,9 @@ async def test_the_inverter_is_left_on_the_default_method(
     assert not inverter.beating
 
 
+@pytest.mark.usefixtures("hass")
 async def test_the_report_is_saved_and_kept_for_the_diagnostics(
-    hass: HomeAssistant, coordinator: FakeCoordinator, tmp_path: Path
+    coordinator: FakeCoordinator, tmp_path: Path
 ) -> None:
     test = runner(coordinator)
 
@@ -310,8 +328,9 @@ async def test_the_report_is_saved_and_kept_for_the_diagnostics(
     assert test.attributes["report_file"] == str(saved[0])
 
 
+@pytest.mark.usefixtures("hass")
 async def test_a_full_battery_skips_the_charge_tests(
-    hass: HomeAssistant, coordinator: FakeCoordinator, inverter: FakeInverter
+    coordinator: FakeCoordinator, inverter: FakeInverter
 ) -> None:
     inverter.soc = 98
 
@@ -322,9 +341,8 @@ async def test_a_full_battery_skips_the_charge_tests(
     assert result["battery discharge"] == "followed"
 
 
-async def test_a_refused_heartbeat_tests_nothing(
-    hass: HomeAssistant, coordinator: FakeCoordinator
-) -> None:
+@pytest.mark.usefixtures("hass")
+async def test_a_refused_heartbeat_tests_nothing(coordinator: FakeCoordinator) -> None:
     report = await runner(coordinator, supported=False).async_run(1500)
 
     assert report["outcome"] == "done"
@@ -332,8 +350,9 @@ async def test_a_refused_heartbeat_tests_nothing(
     assert "refused" in report["heartbeat"]
 
 
+@pytest.mark.usefixtures("hass")
 async def test_a_refused_setpoint_is_reported_and_the_run_goes_on(
-    hass: HomeAssistant, coordinator: FakeCoordinator, inverter: FakeInverter
+    coordinator: FakeCoordinator, inverter: FakeInverter
 ) -> None:
     inverter.refuse[SETPOINTS["inverter_power_setpoint"].address] = 2
     inverter.follows = set(ControlMode)
@@ -345,41 +364,45 @@ async def test_a_refused_setpoint_is_reported_and_the_run_goes_on(
     assert result["battery charge"] == "followed"
 
 
+@pytest.mark.usefixtures("hass")
 async def test_cancelling_hands_control_back(
-    hass: HomeAssistant, coordinator: FakeCoordinator, inverter: FakeInverter
+    coordinator: FakeCoordinator, inverter: FakeInverter
 ) -> None:
     test = runner(coordinator)
     test.async_start(1500)
-    while not inverter.beating:
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(inverter.beat_started.wait(), 5)
 
     await test.async_cancel()
 
     assert test.state is ControlTestState.ABORTED
+    assert test.last_report is not None
     assert test.last_report["abort_reason"] == "cancelled"
     assert inverter.method is ControlMode.DEFAULT
     assert not inverter.beating
     coordinator.control.end_test.assert_called_once()
 
 
+@pytest.mark.usefixtures("hass")
 async def test_a_lost_connection_aborts_and_hands_back(
-    hass: HomeAssistant, coordinator: FakeCoordinator, inverter: FakeInverter
+    coordinator: FakeCoordinator, inverter: FakeInverter
 ) -> None:
     test = runner(coordinator)
     test.async_start(1500)
-    while not inverter.beating:
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(inverter.beat_started.wait(), 5)
     await coordinator.stop_polling()
 
+    assert test._task is not None
     await asyncio.wait_for(test._task, 5)
 
     assert test.state is ControlTestState.ABORTED
+    assert test.last_report is not None
     assert "connection lost" in test.last_report["abort_reason"]
     assert not inverter.beating
 
 
+@pytest.mark.usefixtures("hass")
 async def test_it_takes_over_when_the_integration_holds_control(
-    hass: HomeAssistant, coordinator: FakeCoordinator, inverter: FakeInverter
+    coordinator: FakeCoordinator, inverter: FakeInverter
 ) -> None:
     """No switching Modbus Control off and waiting: the confirmation is enough."""
     inverter.beating = True
@@ -397,8 +420,9 @@ async def test_it_takes_over_when_the_integration_holds_control(
     coordinator.control.end_test.assert_called_once()
 
 
+@pytest.mark.usefixtures("hass")
 async def test_it_does_not_start_while_another_controller_is_active(
-    hass: HomeAssistant, coordinator: FakeCoordinator, inverter: FakeInverter
+    coordinator: FakeCoordinator, inverter: FakeInverter
 ) -> None:
     inverter.beating = True
     coordinator.data = inverter.frame()
@@ -410,9 +434,8 @@ async def test_it_does_not_start_while_another_controller_is_active(
     assert raised.value.translation_key == "control_test_other_controller"
 
 
-async def test_only_one_run_at_a_time(
-    hass: HomeAssistant, coordinator: FakeCoordinator
-) -> None:
+@pytest.mark.usefixtures("hass")
+async def test_only_one_run_at_a_time(coordinator: FakeCoordinator) -> None:
     test = runner(coordinator)
     test.async_start(1500)
 
@@ -457,7 +480,7 @@ async def test_events_bracket_the_run(
 ) -> None:
     events: list[str] = []
     for name in (const.EVENT_CONTROL_TEST_STARTED, const.EVENT_CONTROL_TEST_FINISHED):
-        hass.bus.async_listen(name, lambda event: events.append(event.event_type))
+        hass.bus.async_listen(name, lambda event: events.append(str(event.event_type)))
 
     await runner(coordinator).async_run(1500)
     await hass.async_block_till_done()
@@ -474,7 +497,12 @@ async def test_events_bracket_the_run(
 def control_manager() -> control_module.ControlManager:
     blocks = const.register_blocks_for(const.DEFAULT_INVERTER_MODEL)
     return control_module.ControlManager(
-        SimpleNamespace(connected=True, writes_allowed=True, async_write=AsyncMock()),
+        cast(
+            ModbusClient,
+            SimpleNamespace(
+                connected=True, writes_allowed=True, async_write=AsyncMock()
+            ),
+        ),
         registers_by_key={
             register.key: register for block in blocks for register in block.registers
         },
@@ -514,7 +542,8 @@ async def test_no_command_or_battery_saver_reaches_the_inverter_during_a_test() 
         await manager.async_set_battery_saver(True)
     await manager.async_poll({"battery_soc": 50})
 
-    manager._modbus_client.async_write.assert_not_awaited()
+    write = cast(AsyncMock, manager._modbus_client.async_write)
+    write.assert_not_awaited()
 
 
 async def test_control_status_shows_the_test() -> None:

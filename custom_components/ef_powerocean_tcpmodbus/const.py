@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Final
 
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import (
     EntityCategory,
     UnitOfElectricCurrent,
@@ -278,207 +280,207 @@ SENSOR_MAP: list[SensorDef] = [
         key="system_modes",
         unit=None,
         device_class=None,
-        state_class="measurement",
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="house_power",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorDef(
         key="grid_power",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorDef(
         key="solar_power",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorDef(
         key="battery_power",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorDef(
         key="battery_soc",
         unit=UNIT_OF_RATIO,
-        device_class="battery",
-        state_class="measurement",
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     # A setting, not a battery level: as a battery sensor, Home Assistant would show
     # it as the battery's charge wherever it picks the device's first one.
     SensorDef(
         key="min_soc_limit",
         unit=UNIT_OF_RATIO,
-        state_class="measurement",
+        state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:battery-lock",
     ),
     SensorDef(
         key="battery_charge_power_limit",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_discharge_power_limit",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="limit_inv_power",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="limit_inv_max",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_capacity",
         unit=UnitOfEnergy.WATT_HOUR,
-        device_class="energy_storage",
-        state_class="measurement",
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_voltage",
         unit=UnitOfElectricPotential.VOLT,
-        device_class="voltage",
-        state_class="measurement",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_current",
         unit=UnitOfElectricCurrent.AMPERE,
-        device_class="current",
-        state_class="measurement",
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_temperature",
         unit=UnitOfTemperature.CELSIUS,
-        device_class="temperature",
-        state_class="measurement",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="voltage_l1",
         unit=UnitOfElectricPotential.VOLT,
-        device_class="voltage",
-        state_class="measurement",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="voltage_l2",
         unit=UnitOfElectricPotential.VOLT,
-        device_class="voltage",
-        state_class="measurement",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="voltage_l3",
         unit=UnitOfElectricPotential.VOLT,
-        device_class="voltage",
-        state_class="measurement",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="current_l1",
         unit=UnitOfElectricCurrent.AMPERE,
-        device_class="current",
-        state_class="measurement",
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="current_l2",
         unit=UnitOfElectricCurrent.AMPERE,
-        device_class="current",
-        state_class="measurement",
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="current_l3",
         unit=UnitOfElectricCurrent.AMPERE,
-        device_class="current",
-        state_class="measurement",
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="inverter_temperature",
         unit=UnitOfTemperature.CELSIUS,
-        device_class="temperature",
-        state_class="measurement",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="frequency",
         unit=UnitOfFrequency.HERTZ,
-        device_class="frequency",
-        state_class="measurement",
+        device_class=SensorDeviceClass.FREQUENCY,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv1_voltage",
         unit=UnitOfElectricPotential.VOLT,
-        device_class="voltage",
-        state_class="measurement",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv2_voltage",
         unit=UnitOfElectricPotential.VOLT,
-        device_class="voltage",
-        state_class="measurement",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv3_voltage",
         unit=UnitOfElectricPotential.VOLT,
-        device_class="voltage",
-        state_class="measurement",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv1_current",
         unit=UnitOfElectricCurrent.AMPERE,
-        device_class="current",
-        state_class="measurement",
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv2_current",
         unit=UnitOfElectricCurrent.AMPERE,
-        device_class="current",
-        state_class="measurement",
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="pv3_current",
         unit=UnitOfElectricCurrent.AMPERE,
-        device_class="current",
-        state_class="measurement",
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     *[
         SensorDef(
             key=key,
             unit=UnitOfPower.WATT,
-            device_class="power",
-            state_class="measurement",
+            device_class=SensorDeviceClass.POWER,
+            state_class=SensorStateClass.MEASUREMENT,
             entity_category=EntityCategory.DIAGNOSTIC,
         )
         for key in (FEED_IN_POWER_MAX_KEY, FEED_IN_POWER_MAX_SETTING_KEY)
@@ -486,8 +488,8 @@ SENSOR_MAP: list[SensorDef] = [
     SensorDef(
         key=FEED_IN_POWER_MAX_EFFECTIVE_KEY,
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
         unsupported_models=tuple(
             model
@@ -498,7 +500,7 @@ SENSOR_MAP: list[SensorDef] = [
     SensorDef(
         key="feed_in_power_max_percent",
         unit=UNIT_OF_RATIO,
-        state_class="measurement",
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:transmission-tower-export",
         # Accepts and stores any value but acts on none of them (40573 probe).
@@ -507,22 +509,22 @@ SENSOR_MAP: list[SensorDef] = [
     SensorDef(
         key="breaker_capacity",
         unit=UnitOfElectricCurrent.AMPERE,
-        device_class="current",
+        device_class=SensorDeviceClass.CURRENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="inverter_output_power",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     *[
         SensorDef(
             key=f"grid_voltage_l{phase}",
             unit=UnitOfElectricPotential.VOLT,
-            device_class="voltage",
-            state_class="measurement",
+            device_class=SensorDeviceClass.VOLTAGE,
+            state_class=SensorStateClass.MEASUREMENT,
             entity_category=EntityCategory.DIAGNOSTIC,
         )
         for phase in (1, 2, 3)
@@ -531,15 +533,15 @@ SENSOR_MAP: list[SensorDef] = [
         SensorDef(
             key=f"grid_current_l{phase}",
             unit=UnitOfElectricCurrent.AMPERE,
-            device_class="current",
-            state_class="measurement",
+            device_class=SensorDeviceClass.CURRENT,
+            state_class=SensorStateClass.MEASUREMENT,
             entity_category=EntityCategory.DIAGNOSTIC,
         )
         for phase in (1, 2, 3)
     ],
     SensorDef(
         key="active_control_mode",
-        device_class="enum",
+        device_class=SensorDeviceClass.ENUM,
         options=ACTIVE_CONTROL_MODE_OPTIONS,
         entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:remote",
@@ -547,7 +549,7 @@ SENSOR_MAP: list[SensorDef] = [
     ),
     SensorDef(
         key="grid_feed_mode",
-        device_class="enum",
+        device_class=SensorDeviceClass.ENUM,
         options=tuple(GridFeedMode),
         entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:transmission-tower-export",
@@ -555,23 +557,23 @@ SENSOR_MAP: list[SensorDef] = [
     SensorDef(
         key="inverter_rated_power",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="battery_count",
         unit=None,
         device_class=None,
-        state_class="measurement",
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     *[
         SensorDef(
             key=key,
             unit=UNIT_OF_RATIO,
-            device_class="battery",
-            state_class="measurement",
+            device_class=SensorDeviceClass.BATTERY,
+            state_class=SensorStateClass.MEASUREMENT,
             entity_category=EntityCategory.DIAGNOSTIC,
         )
         for key in BATTERY_SOC_KEYS
@@ -579,45 +581,45 @@ SENSOR_MAP: list[SensorDef] = [
     SensorDef(
         key="bat_remaining",
         unit=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class="energy_storage",
-        state_class="measurement",
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorDef(
         key="pv1_power",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorDef(
         key="pv2_power",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorDef(
         key="pv3_power",
         unit=UnitOfPower.WATT,
-        device_class="power",
-        state_class="measurement",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorDef(
         key="bat_net_energy",
         unit=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class="energy",
-        state_class="total",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     SensorDef(
         key="grid_mode",
         unit=None,
-        device_class="enum",
+        device_class=SensorDeviceClass.ENUM,
         state_class=None,
         options=tuple(GridMode),
         icon="mdi:transmission-tower",
     ),
     SensorDef(
         key="operating_mode",
-        device_class="enum",
+        device_class=SensorDeviceClass.ENUM,
         options=tuple(OperatingMode),
         icon="mdi:home-lightning-bolt",
     ),
@@ -630,8 +632,8 @@ SENSOR_MAP: list[SensorDef] = [
         SensorDef(
             key=key,
             unit=UnitOfPower.WATT,
-            device_class="power",
-            state_class="measurement",
+            device_class=SensorDeviceClass.POWER,
+            state_class=SensorStateClass.MEASUREMENT,
             entity_category=EntityCategory.DIAGNOSTIC,
         )
         for key in (
@@ -642,7 +644,7 @@ SENSOR_MAP: list[SensorDef] = [
     ],
     SensorDef(
         key="fault_count",
-        state_class="measurement",
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
         icon="mdi:alert-circle-outline",
         attribute_keys=("system_state_2_hex",),
@@ -654,7 +656,7 @@ SENSOR_MAP: list[SensorDef] = [
     ),
     SensorDef(
         key="coordinator_status",
-        device_class="enum",
+        device_class=SensorDeviceClass.ENUM,
         entity_category=EntityCategory.DIAGNOSTIC,
         options=tuple(CoordinatorStatus),
     ),
@@ -763,8 +765,8 @@ DAILY_ENERGY_SENSORS_DEVICE_RAW: list[SensorDef] = [
     SensorDef(
         key=f"{energy_sensor.key}_raw",
         unit=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class="energy",
-        state_class="total_increasing",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
         entity_category=EntityCategory.DIAGNOSTIC,
     )
     for energy_sensor in ENERGY_SENSOR_MAP
@@ -777,22 +779,22 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
     BinarySensorDef("intelligent_mode_ena"),
     BinarySensorDef(
         "system_fault",
-        device_class="problem",
+        device_class=BinarySensorDeviceClass.PROBLEM,
     ),
     BinarySensorDef(
         "system_power_on",
-        device_class="running",
+        device_class=BinarySensorDeviceClass.RUNNING,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     # Bits 11 and 12 of the System Status (40530).
     BinarySensorDef(
         "device_modbus_control",
-        device_class="running",
+        device_class=BinarySensorDeviceClass.RUNNING,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     BinarySensorDef(
         "bms_connected",
-        device_class="connectivity",
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
 ]
@@ -800,7 +802,7 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
 # Whether the heartbeat currently holds control authority
 MODBUS_CONTROL_BINARY_SENSOR: Final = BinarySensorDef(
     key="modbus_control",
-    device_class="running",
+    device_class=BinarySensorDeviceClass.RUNNING,
 )
 
 CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
@@ -916,13 +918,14 @@ CONTROL_STATUS_DAMPING_POLLS: Final = 3
 # sent again when it does not, before the status says it is not accepted.
 FOLLOW_GRACE_S: Final = 15.0
 FOLLOW_RESENDS: Final = 2
-# 0 means "no limit" to the inverter and not "hold at zero", so we therefore set the lowest power to hold.
+# 0 means "no limit" to the inverter, not "hold at zero", so hold at the lowest
+# power instead.
 HOLD_SETPOINT_W: Final = 1.0
 
 # Not a device register: whether the selected mode is doing anything, and why not.
 CONTROL_STATUS_SENSOR: Final = SensorDef(
     key="control_status",
-    device_class="enum",
+    device_class=SensorDeviceClass.ENUM,
     options=tuple(str(status) for status in ControlStatus),
     icon="mdi:robot",
 )
@@ -931,7 +934,7 @@ CONTROL_STATUS_SENSOR: Final = SensorDef(
 # control_test.ControlTestState.
 CONTROL_TEST_SENSOR: Final = SensorDef(
     key="control_test",
-    device_class="enum",
+    device_class=SensorDeviceClass.ENUM,
     entity_category=EntityCategory.DIAGNOSTIC,
     options=("idle", "running", "done", "aborted", "failed"),
     icon="mdi:test-tube",

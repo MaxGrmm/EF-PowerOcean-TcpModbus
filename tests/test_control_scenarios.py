@@ -8,10 +8,13 @@ must never happen across the whole run.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import math
 
 import pytest
-from simulation import (
+
+from custom_components.ef_powerocean_tcpmodbus import const, models
+from tests.simulation import (
     AUTOMATIC,
     BATTERY_LIMITS,
     POLL_S,
@@ -20,8 +23,6 @@ from simulation import (
     select,
     sunny_day,
 )
-
-from custom_components.ef_powerocean_tcpmodbus import const, models
 
 
 def test_a_charge_limit_holds_through_a_cycling_load(
@@ -128,7 +129,7 @@ def test_a_guard_retunes_as_fast_as_the_inverter_can_follow(
 
     # The grid never imports two polls in a row.
     late = [step for step, watts in enumerate(quick.grid) if watts > 0]
-    assert all(later - earlier > 1 for earlier, later in zip(late, late[1:]))
+    assert all(later - earlier > 1 for earlier, later in itertools.pairwise(late))
 
     imported = sum(max(watts, 0.0) for watts in patient.grid) / len(patient.grid)
     assert imported < 100
@@ -195,13 +196,13 @@ def test_a_guard_only_falls_behind_the_poll_an_unexpected_load_arrives(
         late = [step for step, watts in enumerate(run.grid) if watts > 0]
         # Never two polls running: a catch-up, not a standing shortfall.
         assert len(late) == late_polls
-        assert all(later - earlier > 1 for earlier, later in zip(late, late[1:]))
+        assert all(later - earlier > 1 for earlier, later in itertools.pairwise(late))
 
 
 def test_a_reserve_lets_the_battery_refill_once_the_sun_returns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Tests that setting a reserve allows the battery to charge when the sun is back."""
+    """A reserve still lets the battery charge once the sun is back."""
     sim = Simulation(monkeypatch, soc=20.0, reserve=20.0)
 
     evening = sim.run(polls=60, solar=0, house=1000)
@@ -643,7 +644,9 @@ def test_export_solar_first_keeps_exporting_while_export_to_grid_waits(
     run = sim.run(polls=len(surplus), solar=solar, house=500)
 
     over_the_limit = [
-        method for method, watts in zip(run.method, surplus) if watts >= 4000
+        method
+        for method, watts in zip(run.method, surplus, strict=True)
+        if watts >= 4000
     ]
     assert AUTOMATIC not in over_the_limit
     assert run.method[-1] == SYSTEM_FEED

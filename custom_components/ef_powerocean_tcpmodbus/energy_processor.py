@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Final
 
@@ -14,6 +15,7 @@ from .const import (
     ENERGY_RESOLUTION_KWH,
     ENERGY_SENSOR_MAP,
 )
+from .models import EnergySensorDef
 from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,7 +37,8 @@ class EnergyProcessor:
       against a max believable power since the last accepted read.
     - Daily _today values are derived as total - snapshot, where the snapshot is
       taken at local midnight. The raw daily registers of the device is only used
-      to reconstruct a missing snapshot or preserve energy before the first poll after midnight.
+      to reconstruct a missing snapshot or keep energy from before the first poll
+      after midnight.
     - The daily reset is triggered when the local calendar date advances.
     """
 
@@ -69,8 +72,8 @@ class EnergyProcessor:
 
     def validate_totals(
         self,
-        raw_data: dict[str, Any],
-        previous_data: dict[str, Any],
+        raw_data: Mapping[str, Any],
+        previous_data: Mapping[str, Any],
         previous_time: datetime | None,
     ) -> dict[str, Any]:
         """Validate lifetime energy counters against physical plausibility.
@@ -86,7 +89,8 @@ class EnergyProcessor:
             elapsed_seconds = (now - previous_time).total_seconds()
             if elapsed_seconds < 1:
                 _LOGGER.debug(
-                    f"dt is less than one second. Return last data. Delta-t: {elapsed_seconds}"
+                    "dt is less than one second. Return last data. Delta-t: %s",
+                    elapsed_seconds,
                 )
                 return dict(previous_data)
 
@@ -103,7 +107,9 @@ class EnergyProcessor:
                 if baseline is not None:
                     result[key] = baseline
                     _LOGGER.debug(
-                        f"Fill missing read of {key} with last validated value {baseline}"
+                        "Fill missing read of %s with last validated value %s",
+                        key,
+                        baseline,
                     )
                 continue
 
@@ -119,7 +125,15 @@ class EnergyProcessor:
             if energy_delta < 0 or energy_delta > max_believable_delta:
                 result[key] = baseline
                 _LOGGER.debug(
-                    f"Hold implausible {key}! (raw energy: {current_energy} baseline: {baseline} delta energy: {round(energy_delta, 2)} max delta: {round(max_believable_delta, 4)} accepted at: {accepted_at.time()})"
+                    "Hold implausible %s! (raw energy: %s baseline: %s "
+                    "delta energy: %s "
+                    "max delta: %s accepted at: %s)",
+                    key,
+                    current_energy,
+                    baseline,
+                    round(energy_delta, 2),
+                    round(max_believable_delta, 4),
+                    accepted_at.time(),
                 )
             else:
                 self.accepted_at[key] = now
@@ -127,14 +141,18 @@ class EnergyProcessor:
         return result
 
     def _max_believable_energy_delta(
-        self, energy_sensor: Any, accepted_at: datetime, now: datetime
+        self, energy_sensor: EnergySensorDef, accepted_at: datetime, now: datetime
     ) -> float:
-        """Largest believable rise (kWh) for the elapsed time since last accepted value."""
-        limit = self.limits.get(energy_sensor.max_power, DEFAULT_MAX_POWER)
+        """Largest believable rise in kWh since the last accepted value."""
+        limit = (
+            self.limits.get(energy_sensor.max_power, DEFAULT_MAX_POWER)
+            if energy_sensor.max_power
+            else DEFAULT_MAX_POWER
+        )
         elapsed_hours = max((now - accepted_at).total_seconds(), 0) / 3600
         return limit * elapsed_hours / 1000 + ENERGY_RESOLUTION_KWH
 
-    def derive_daily(self, data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    def derive_daily(self, data: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
         """Set each daily counter to its lifetime counter's growth since the
         last reset snapshot; also return whether a reset rolled this poll."""
         result = dict(data)
@@ -159,12 +177,21 @@ class EnergyProcessor:
                 if self._is_valid_raw_daily(energy_sensor, raw_daily, total_energy):
                     snapshot = total_energy - raw_daily
                     _LOGGER.debug(
-                        f"Snapshot {energy_sensor.key} set to {snapshot} using {raw_sensor_key} (total: {total_energy} reset: {is_daily_reset})"
+                        "Snapshot %s set to %s using %s (total: %s reset: %s)",
+                        energy_sensor.key,
+                        snapshot,
+                        raw_sensor_key,
+                        total_energy,
+                        is_daily_reset,
                     )
                 else:
                     snapshot = total_energy
                     _LOGGER.debug(
-                        f"Snapshot {energy_sensor.key} set to {snapshot} (total: {total_energy} reset: {is_daily_reset})"
+                        "Snapshot %s set to %s (total: %s reset: %s)",
+                        energy_sensor.key,
+                        snapshot,
+                        total_energy,
+                        is_daily_reset,
                     )
 
             snapshot = min(snapshot, total_energy)
@@ -189,7 +216,10 @@ class EnergyProcessor:
         )
         if raw_daily > max_believable_daily:
             _LOGGER.debug(
-                f"Ignore implausible raw daily {energy_sensor.key} {raw_daily} (max: {round(max_believable_daily, 2)})"
+                "Ignore implausible raw daily %s %s (max: %s)",
+                energy_sensor.key,
+                raw_daily,
+                round(max_believable_daily, 2),
             )
             return False
 
@@ -218,7 +248,7 @@ class EnergyProcessor:
 
         if now.date() > self.last_rollover.date():
             self.last_rollover = now
-            _LOGGER.info(f"Daily reset triggered at local midnight ({now.date()})")
+            _LOGGER.info("Daily reset triggered at local midnight (%s)", now.date())
             return True
 
         return False
@@ -263,11 +293,22 @@ class EnergyProcessor:
             guarded_energy = max(guarded_energy, 0)
             if current_energy < 0:
                 _LOGGER.warning(
-                    f"Calculated {energy_sensor.key} came out negative ({current_energy}); guarded to {guarded_energy}. (last: {last_energy} daily_reset: {accepts_decrease})"
+                    "Calculated %s came out negative (%s); guarded to %s. "
+                    "(last: %s daily_reset: %s)",
+                    energy_sensor.key,
+                    current_energy,
+                    guarded_energy,
+                    last_energy,
+                    accepts_decrease,
                 )
             elif guarded_energy - current_energy > ENERGY_RESOLUTION_KWH:
                 _LOGGER.debug(
-                    f"Keep last calculated {energy_sensor.key} {guarded_energy} (raw: {current_energy} last: {last_energy} daily_reset: {accepts_decrease})"
+                    "Keep last calculated %s %s (raw: %s last: %s daily_reset: %s)",
+                    energy_sensor.key,
+                    guarded_energy,
+                    current_energy,
+                    last_energy,
+                    accepts_decrease,
                 )
 
             result[energy_sensor.key] = guarded_energy

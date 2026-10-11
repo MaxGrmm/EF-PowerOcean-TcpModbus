@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Final
+from datetime import UTC, datetime, timedelta
+from typing import Final, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -25,9 +25,11 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.ef_powerocean_tcpmodbus import const, models
 from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
+from custom_components.ef_powerocean_tcpmodbus.heartbeat import Heartbeat
+from custom_components.ef_powerocean_tcpmodbus.modbus import ModbusClient
 
 POLL_S: Final = 5.0
-START: Final = datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc)
+START: Final = datetime(2026, 9, 21, 9, 0, tzinfo=UTC)
 SETPOINT_REGISTER: Final = const.REGISTERS_BY_KEY["battery_power_setpoint"].address
 BATTERY_LIMITS: Final = models.ControlMode.BATTERY_LIMITS.command_value
 SYSTEM_SETPOINT_REGISTER: Final = const.REGISTERS_BY_KEY[
@@ -37,9 +39,9 @@ SYSTEM_FEED: Final = models.ControlMode.SYSTEM_FEED.command_value
 AUTOMATIC: Final = models.ControlMode.DEFAULT.command_value
 
 
-def at(watts: float | list[float], step: int) -> float:
+def at(watts: float | Sequence[float], step: int) -> float:
     """Return a steady value, or one poll of a pattern that repeats."""
-    if isinstance(watts, list):
+    if isinstance(watts, Sequence):
         return float(watts[step % len(watts)])
     return float(watts)
 
@@ -78,7 +80,11 @@ class FakeInverter:
     curtailed: float = 0.0
 
     async def async_write(
-        self, address: int, words: list[int], *, what: str = ""
+        self,
+        address: int,
+        words: list[int],
+        *,
+        what: str = "",  # noqa: ARG002 - matches ModbusClient
     ) -> None:
         if not self.reachable:
             raise HomeAssistantError("the inverter is unreachable")
@@ -235,7 +241,7 @@ class Simulation:
 
         blocks = const.register_blocks_for(model)
         self.control = ControlManager(
-            self.inverter,
+            cast(ModbusClient, self.inverter),
             registers_by_key={
                 register.key: register
                 for block in blocks
@@ -252,7 +258,7 @@ class Simulation:
             on_refresh=AsyncMock(),
             write_setting=AsyncMock(),
             on_command_expired=self.command_expired,
-            heartbeat=self.heartbeat,
+            heartbeat=cast(Heartbeat, self.heartbeat),
         )
         asyncio.run(self._async_start(charge_limit, reserve))
 
@@ -273,8 +279,8 @@ class Simulation:
         self,
         *,
         polls: int,
-        solar: float | list[float],
-        house: float | list[float],
+        solar: float | Sequence[float],
+        house: float | Sequence[float],
         reachable: bool = True,
     ) -> Run:
         return asyncio.run(self._async_run(polls, solar, house, reachable))
@@ -282,8 +288,8 @@ class Simulation:
     async def _async_run(
         self,
         polls: int,
-        solar: float | list[float],
-        house: float | list[float],
+        solar: float | Sequence[float],
+        house: float | Sequence[float],
         reachable: bool,
     ) -> Run:
         self.inverter.reachable = reachable
@@ -305,9 +311,9 @@ class Simulation:
             frame = self.inverter.frame()
             await self.control.async_poll(frame)
 
-            run.battery.append(frame["battery_power"])
-            run.grid.append(frame["grid_power"])
-            run.soc.append(frame["battery_soc"])
+            run.battery.append(float(frame["battery_power"]))
+            run.grid.append(float(frame["grid_power"]))
+            run.soc.append(float(frame["battery_soc"]))
             run.status.append(self.control.status)
             run.curtailed.append(self.inverter.curtailed)
             run.method.append(self.inverter.method)

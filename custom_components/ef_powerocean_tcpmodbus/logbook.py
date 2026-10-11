@@ -37,7 +37,10 @@ def async_describe_events(
         state = hass.states.get(entity_id) if entity_id else None
         described = {
             LOGBOOK_ENTRY_NAME: state.name if state else "Battery Mode",
-            LOGBOOK_ENTRY_MESSAGE: f"returned to automatic because the {event.data.get(ATTR_MODE)} action expired",
+            LOGBOOK_ENTRY_MESSAGE: (
+                "returned to automatic because the "
+                f"{event.data.get(ATTR_MODE)} action expired"
+            ),
         }
         if entity_id:
             described[LOGBOOK_ENTRY_ENTITY_ID] = entity_id

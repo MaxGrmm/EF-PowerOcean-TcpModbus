@@ -1,6 +1,6 @@
 """Modbus control of the inverter: what to command, and keeping track of what it does.
 
-The coordinator reads and this decides what the inverter should be doing and commands it.
+The coordinator reads; this decides what the inverter should do and commands it.
 Everything here is driven by one selected feature plus two state-of-charge guards,
 and nothing reaches the wire unless the inverter is currently following us.
 """
@@ -153,7 +153,7 @@ class ControlInputs:
 
 
 def _allows_export(
-    mode: GridFeedMode | None, power: float, percent: float | None = None
+    mode: GridFeedMode | float | str | None, power: float, percent: float | None = None
 ) -> bool:
     """Return whether these feed settings let the inverter export at all.
 
@@ -288,7 +288,7 @@ class ControlManager:
         self._feature_power: dict[ControlFeature, float] = {
             feature: definition.default_power
             for feature, definition in CONTROL_FEATURES.items()
-            if definition.has_power
+            if definition.default_power is not None
         }
         self._charge_limit_soc = DEFAULT_CHARGE_LIMIT_SOC
         self._battery_reserve_soc = DEFAULT_BATTERY_RESERVE_SOC
@@ -818,7 +818,7 @@ class ControlManager:
                 "The grid feed cannot be switched while the inverter is in a feed-in "
                 "mode it cannot restore, such as the percentage limit. Nothing written."
             )
-        if not self.grid_feed_switchable:
+        if restore is None or not self.grid_feed_switchable:
             raise HomeAssistantError(
                 "The grid feed cannot be switched: the inverter has not reported an "
                 "export it would allow, so there is nothing to restore."
@@ -908,11 +908,12 @@ class ControlManager:
         # The export cap only binds in the feed mode that applies it. One too small to
         # keep the margin under bounds nothing here, so a Solar Export Limit set while
         # the export is off is not lowered for good; the command handles that case.
-        if feature is ControlFeature.EXPORT_SOLAR_FIRST and (
-            limit := _device_export_limit(self._inputs)
+        if (
+            feature is ControlFeature.EXPORT_SOLAR_FIRST
+            and (limit := _device_export_limit(self._inputs))
+            and limit > SOLAR_EXPORT_CAP_MARGIN_W
         ):
-            if limit > SOLAR_EXPORT_CAP_MARGIN_W:
-                ceilings.append(limit)
+            ceilings.append(limit)
 
         return min(ceilings)
 
@@ -1044,7 +1045,7 @@ class ControlManager:
         if natural == 0.0:
             return self._hold(inputs, blocked)
 
-        # Ensures that we never import from the grid if the battery can cover the demand.
+        # Never import from the grid while the battery can cover the demand.
         if natural > 0:
             feature = ControlFeature.CHARGE_BATTERY
             watts = float(math.floor(natural))
@@ -1099,7 +1100,7 @@ class ControlManager:
         return not self._control_written_within(GUARD_SETTLE_S)
 
     def _advance_handback(self, natural: float, forbidden: frozenset[Way]) -> bool:
-        """Move the hand-back on by one poll and return whether the inverter runs itself.
+        """Advance the hand-back by one poll; return whether the inverter runs itself.
 
         Under a charge limit, a house that clearly uses more than the solar can only
         be served by discharging, which the limit allows. The inverter does that by
@@ -1217,8 +1218,8 @@ class ControlManager:
             _LOGGER.info(
                 "The inverter reports method %s and Modbus mode %s instead of %s; "
                 "sending the command again",
-                report.method if report else None,
-                report.manual if report else None,
+                report.method,
+                report.manual,
                 self.method,
             )
             self._control_stale = True
@@ -1515,7 +1516,7 @@ class ControlManager:
         try:
             await self.async_apply(data, notify=False)
         except HomeAssistantError as err:
-            _LOGGER.debug(f"Could not apply {self._feature} this poll: {err!r}")
+            _LOGGER.debug("Could not apply %s this poll: %r", self._feature, err)
 
     async def async_apply(
         self,
@@ -1642,7 +1643,7 @@ class ControlManager:
         self._note_control_written()
 
     async def _async_apply_control_command(self) -> None:
-        """Write the composed control word once and refresh so the read-back shows it."""
+        """Write the control word once and refresh so the read-back shows it."""
         value = self._compose_control_command()
         if value & CONTROL_COMMAND_UNSAFE_BITS:
             raise HomeAssistantError(
@@ -1687,7 +1688,7 @@ class ControlManager:
                 f"No register mapped for setpoint {definition.setpoint_key} on "
                 f"{self._inverter_model}"
             ) from err
-        value = int(round(watts)) * definition.sign
+        value = round(watts) * definition.sign
 
         try:
             words = encode_register(value, RegisterType.INT32)

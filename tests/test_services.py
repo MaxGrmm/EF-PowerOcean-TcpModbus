@@ -47,8 +47,9 @@ async def call(hass: HomeAssistant, **data) -> None:
     )
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_setting_up_the_integration_offers_the_action(
-    hass: HomeAssistant, enable_custom_integrations: None
+    hass: HomeAssistant,
 ) -> None:
     """The fields shown in the UI must be the ones the action accepts."""
     assert await async_setup_component(hass, DOMAIN, {})

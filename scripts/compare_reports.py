@@ -34,7 +34,7 @@ def load(path: str) -> dict[str, Any]:
         content = json.loads(text)
     except json.JSONDecodeError:
         try:
-            import yaml  # noqa: PLC0415 - only needed for a pasted response
+            import yaml
         except ImportError:
             sys.exit(f"{path} is not JSON, and PyYAML is not installed to read it.")
         content = yaml.safe_load(text)

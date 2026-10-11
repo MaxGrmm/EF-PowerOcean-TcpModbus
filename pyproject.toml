@@ -3,7 +3,78 @@ target-version = "py313"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I"]
+select = [
+    "ARG",   # unused arguments
+    "ASYNC", # asyncio pitfalls
+    "B",     # bugbear
+    "C4",    # comprehensions
+    "DTZ",   # naive datetimes
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "G",     # logging format
+    "I",     # isort
+    "LOG",   # logging misuse
+    "PERF",  # performance anti-patterns
+    "PIE",   # misc lints
+    "PT",    # pytest style
+    "RET",   # return statements
+    "RUF",   # ruff-specific
+    "SIM",   # simplifications
+    "TRY",   # exception handling
+    "UP",    # pyupgrade
+    "W",     # pycodestyle warnings
+]
+ignore = [
+    "TRY003", # Descriptive exception messages are wanted, as in Home Assistant.
+]
+
+[tool.ruff.lint.flake8-unused-arguments]
+# Entity methods take **kwargs because Home Assistant's signatures do.
+ignore-variadic-names = true
+
+[tool.ruff.lint.per-file-ignores]
+# The expected outcomes are tables, one row per mode.
+"tests/test_control_behaviour.py" = ["E501"]
+
+[tool.ruff.lint.flake8-pytest-style]
+parametrize-values-type = "tuple"
+
+[tool.mypy]
+python_version = "3.13"
+files = ["custom_components", "tests"]
+explicit_package_bases = true
+strict = true
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+
+[[tool.mypy.overrides]]
+# Home Assistant re-exports from its .const modules without __all__.
+module = ["homeassistant.*"]
+implicit_reexport = true
+
+[[tool.mypy.overrides]]
+# Home Assistant 2026.10 installs probatio as voluptuous at runtime, so the real
+# voluptuous types no longer match what it accepts.
+module = ["voluptuous", "voluptuous.*"]
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = ["pytest_homeassistant_custom_component.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Tests are checked, but need no annotations of their own. A test asserts one
+# state, acts and asserts the next, which narrowing reads as unreachable.
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+warn_return_any = false
+warn_unreachable = false
+strict_equality = false
+# Replacing a method on an instance to observe it is the point of a test.
+disable_error_code = ["method-assign"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

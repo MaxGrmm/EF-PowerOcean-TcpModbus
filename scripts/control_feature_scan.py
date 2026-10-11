@@ -31,7 +31,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final
@@ -120,8 +120,6 @@ RESERVE_SHADOW_ADDRESS: Final = 40518
 
 class Aborted(Exception):
     """Stop the scan when its preconditions are not met."""
-
-    pass
 
 
 CoreTest = core.CoreTest
@@ -685,9 +683,7 @@ def take_control(inverter: Inverter, report: Report) -> bool:
 def send(inverter: Inverter, test: CoreTest, power: float, saver: bool) -> str:
     """Write the setpoint, then the control word."""
     inverter.ensure_fresh()
-    ok, reason, _ = inverter.write_value(
-        test.setpoint_key, int(round(power)) * test.sign
-    )
+    ok, reason, _ = inverter.write_value(test.setpoint_key, round(power) * test.sign)
     if not ok:
         return f"setpoint write refused ({reason})"
     ok, reason, _ = inverter.write_control_word(
@@ -878,6 +874,20 @@ def check_settled(inverter: Inverter, key: str, value: int, written: float) -> s
     return f"{key} reads {after if after is not None else reason} later, not {value}"
 
 
+def choose_model(
+    requested: str | None, detected: models.InverterModel | None
+) -> models.InverterModel:
+    """Return the model to test as; an unknown one is never written to."""
+    if requested:
+        return models.InverterModel(requested)
+    if detected is not None:
+        return detected
+    raise Aborted(
+        "The model is not recognised. Writing to an unknown map is unsafe; "
+        "pass --model to say which one to test as."
+    )
+
+
 def test_grid_feed(
     inverter: Inverter, report: Report, power: float, saver: bool
 ) -> None:
@@ -894,15 +904,20 @@ def test_grid_feed(
         print(f"  Skipped: {reason}.\n")
 
     if mode is None or raw_mode is None or cap is None:
-        return skip("the feed-in mode or cap is unreadable")
+        skip("the feed-in mode or cap is unreadable")
+        return
     if not mode.switchable:
-        return skip(f"the feed-in mode is {mode}, which the switch leaves alone")
+        skip(f"the feed-in mode is {mode}, which the switch leaves alone")
+        return
     if mode is models.GridFeedMode.LIMITED and cap < MIN_ACHIEVABLE_W:
-        return skip(f"the export is already capped at {cap:.0f} W")
+        skip(f"the export is already capped at {cap:.0f} W")
+        return
     if report.write_order.startswith(("unclear", "untested")):
-        return skip("the write word order is unknown")
+        skip("the write word order is unknown")
+        return
     if reason := skip_reason(export, raw):
-        return skip(reason)
+        skip(reason)
+        return
     limit = achievable_power(export, raw, derived)
     if limit is not None:
         power = min(power, limit)
@@ -912,7 +927,8 @@ def test_grid_feed(
     print(f"  Set export target to {power:.0f} W")
     if failure := send(inverter, export, power, saver):
         return_to_default(inverter, saver)
-        return skip(failure)
+        skip(failure)
+        return
     took, grid, _ = watch_grid(
         inverter,
         lambda grid: abs(grid + power) <= tolerance(power),
@@ -920,9 +936,8 @@ def test_grid_feed(
     )
     if took is None:
         return_to_default(inverter, saver)
-        return skip(
-            f"no export to stop, the grid stayed at {fmt_power(grid).strip()} W"
-        )
+        skip(f"no export to stop, the grid stayed at {fmt_power(grid).strip()} W")
+        return
 
     print("  Stopping export (limited mode, 0 W cap)")
     inverter.ensure_fresh()
@@ -1465,7 +1480,7 @@ def build_report(
     abort_reason: str | None,
 ) -> core.ControlTestReport:
     """Return the run in the form shared with the integration's action."""
-    now = datetime.now(timezone.utc).astimezone().isoformat()
+    now = datetime.now(UTC).astimezone().isoformat()
     return core.ControlTestReport(
         source="script",
         created_at=now,
@@ -1590,15 +1605,7 @@ def main() -> int:
     interrupted = False
     try:
         detected = report_device(reader, arguments.show_serial, identity)
-        if arguments.model:
-            model = models.InverterModel(arguments.model)
-        elif detected is not None:
-            model = detected
-        else:
-            raise Aborted(
-                "The model is not recognised. Writing to an unknown map is unsafe; "
-                "pass --model to say which one to test as."
-            )
+        model = choose_model(arguments.model, detected)
         print(f"Testing as the {model.traits.display_name}.\n")
         reader.high_word_first = model.traits.high_word_first
         inverter = Inverter(client, reader, arguments.slave, model)
@@ -1665,7 +1672,7 @@ def main() -> int:
                         f"{inverter.pending_app_reserve}%; set it back there."
                     )
                 print()
-            except (Exception, KeyboardInterrupt) as error:  # noqa: BLE001
+            except (Exception, KeyboardInterrupt) as error:
                 print(
                     f"  Restore failed ({error!r}). The inverter returns to the app "
                     f"without a heartbeat within "

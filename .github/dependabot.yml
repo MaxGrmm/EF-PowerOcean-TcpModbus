@@ -8,3 +8,8 @@ updates:
     directory: "/"
     schedule:
       interval: monthly
+    ignore:
+      # Both track a branch, not releases, and run an image that is pulled
+      # fresh on every run. Bump their pins by hand if the wrapper changes.
+      - dependency-name: hacs/action
+      - dependency-name: home-assistant/actions
