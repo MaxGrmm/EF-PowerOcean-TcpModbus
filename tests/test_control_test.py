@@ -474,7 +474,7 @@ async def test_events_bracket_the_run(
 def control_manager() -> control_module.ControlManager:
     blocks = const.register_blocks_for(const.DEFAULT_INVERTER_MODEL)
     return control_module.ControlManager(
-        SimpleNamespace(connected=True, async_write=AsyncMock()),
+        SimpleNamespace(connected=True, writes_allowed=True, async_write=AsyncMock()),
         registers_by_key={
             register.key: register for block in blocks for register in block.registers
         },

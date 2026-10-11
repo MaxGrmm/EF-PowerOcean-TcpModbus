@@ -17,6 +17,7 @@ from custom_components.ef_powerocean_tcpmodbus.telemetry import (
     decode_firmware_version,
     decode_register,
     is_modbus_disabled,
+    system_alerts,
 )
 
 
@@ -319,7 +320,7 @@ def test_decodes_the_active_control_method_from_the_system_status(
 
 
 def test_system_state_2_is_published_raw_and_only_when_read() -> None:
-    """The fault flags have no confirmed meaning yet, so only the word is published."""
+    """The word is published as read, and nothing at all when it was not read."""
     flags = (1 << 1) | (1 << 3)
     read = calculate_derived_values(
         TelemetryData.from_mapping({"system_state_2": float(flags)}),
@@ -331,7 +332,9 @@ def test_system_state_2_is_published_raw_and_only_when_read() -> None:
     )
 
     assert read["system_state_2_hex"] == "0x0000000A"
+    assert read["system_alerts"] == "upgrade_shutdown,low_power_mode"
     assert "system_state_2_hex" not in unread
+    assert "system_alerts" not in unread
 
 
 def test_system_state_2_rides_on_the_fault_count() -> None:
@@ -339,3 +342,41 @@ def test_system_state_2_rides_on_the_fault_count() -> None:
 
     assert fault_count.attribute_keys == ("system_state_2_hex",)
     assert REGISTERS_BY_KEY["system_state_2"].address == 40532
+
+
+@pytest.mark.parametrize(
+    ("state_2", "expected"),
+    (
+        (0, "none"),
+        (1 << 4, "fan_failure"),
+        ((1 << 13) | (1 << 0), "system_shutdown,battery_overheating"),
+        (1 << 22, "parallel_meter_fault"),
+        (1 << 23, "bit_23"),
+    ),
+)
+def test_system_alerts_names_each_bit(state_2: int, expected: str) -> None:
+    assert system_alerts(state_2) == expected
+
+
+def test_system_alerts_fit_in_a_state_and_count_the_rest() -> None:
+    every_bit = (1 << 23) - 1
+
+    alerts = system_alerts(every_bit)
+
+    assert len(alerts) <= 255
+    shown, hidden = alerts.rsplit(",+", 1)
+    assert len(shown.split(",")) + int(hidden) == 23
+
+
+def test_the_operating_mode_is_one_field_not_three_flags() -> None:
+    """Value 7 shows on a three-phase unit with a Backup Reserve, and is no mode."""
+    calculated = calculate_derived_values(
+        TelemetryData(system_modes=float(0b111 << 4)),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+
+    assert calculated["operating_mode"] == "unknown"
+    assert calculated["operating_mode_raw"] == 7
+    assert calculated["self_use_mode_ena"] is False
+    assert calculated["intelligent_mode_ena"] is False

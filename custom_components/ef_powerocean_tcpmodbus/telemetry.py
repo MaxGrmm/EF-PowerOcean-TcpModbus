@@ -9,6 +9,7 @@ from dataclasses import dataclass, fields
 
 from .models import (
     REGISTER_SIZES,
+    SYSTEM_ALERT_NAMES,
     UNKNOWN_STATE,
     ControlMode,
     GridFeedMode,
@@ -16,6 +17,20 @@ from .models import (
     OperatingMode,
     RegisterType,
 )
+
+# Bits 4-6 of the System Status (40530) hold the operating mode as one value,
+# not as three flags. Value 7 is undocumented; it has been seen on a three-phase
+# PowerOcean whenever a Backup Reserve above 0 is set, and is not an error.
+_OPERATING_MODE_SHIFT = 4
+_OPERATING_MODE_MASK = 0b111
+_SELF_USE_MODE = 1
+_INTELLIGENT_MODE = 2
+
+# The System Alerts state while no System State 2 bit is set.
+SYSTEM_ALERTS_NONE = "none"
+# Home Assistant stores at most 255 characters as a state and shows anything
+# longer as unknown. All 23 codes together run to 463.
+_STATE_MAX_LEN = 255
 
 # Bit layout of the System Status (40530) beyond the low flags.
 _CONTROL_MODE_SHIFT = 7
@@ -220,6 +235,31 @@ _OPERATING_MODES = {
 }
 
 
+def system_alerts(state_2: int) -> str:
+    """Return the active System State 2 alerts in bit order, or none.
+
+    A bit past the documented ones is reported as bit_<n> rather than dropped.
+    Codes are listed while they fit in a state; the rest are counted in a
+    closing +N, so a site with many alerts still shows a value.
+    """
+    active = [
+        SYSTEM_ALERT_NAMES[bit] if bit < len(SYSTEM_ALERT_NAMES) else f"bit_{bit}"
+        for bit in range(state_2.bit_length())
+        if state_2 >> bit & 1
+    ]
+    if not active:
+        return SYSTEM_ALERTS_NONE
+    shown: list[str] = []
+    for index, code in enumerate(active):
+        rest = len(active) - index - 1
+        candidate = ",".join([*shown, code]) + (f",+{rest}" if rest else "")
+        if len(candidate) > _STATE_MAX_LEN:
+            break
+        shown.append(code)
+    hidden = len(active) - len(shown)
+    return ",".join(shown) + (f",+{hidden}" if hidden else "")
+
+
 def _format_active_faults(fault_codes: tuple[float | None, ...]) -> str:
     active = [f"0x{int(code):04X}" for code in fault_codes if code]
     return ", ".join(active) if active else "none"
@@ -306,11 +346,15 @@ def calculate_derived_values(
         calculated["system_fault"] = _is_bit_set(system_modes, 1)
         calculated["system_power_on"] = _is_bit_set(system_modes, 2)
         calculated["battery_saver_mode_ena"] = _is_bit_set(system_modes, 3)
-        calculated["self_use_mode_ena"] = _is_bit_set(system_modes, 4)
-        calculated["intelligent_mode_ena"] = _is_bit_set(system_modes, 5)
+        # One field, so the two flags follow its value: read as single bits, the
+        # undocumented 7 would switch both on at once.
+        operating_mode = system_modes >> _OPERATING_MODE_SHIFT & _OPERATING_MODE_MASK
+        calculated["self_use_mode_ena"] = operating_mode == _SELF_USE_MODE
+        calculated["intelligent_mode_ena"] = operating_mode == _INTELLIGENT_MODE
         calculated["operating_mode"] = _OPERATING_MODES.get(
-            (system_modes >> 4) & 0b111, OperatingMode.UNKNOWN
+            operating_mode, OperatingMode.UNKNOWN
         )
+        calculated["operating_mode_raw"] = operating_mode
         # What the device says it follows, as opposed to what was commanded.
         active_mode = ControlMode.from_status(
             (system_modes >> _CONTROL_MODE_SHIFT) & _CONTROL_MODE_MASK
@@ -324,9 +368,11 @@ def calculate_derived_values(
         calculated["bms_connected"] = _is_bit_set(system_modes, _BMS_CONNECTED_BIT)
         calculated["system_modes_hex"] = f"0x{system_modes:08X}"
 
-    # The fault flags, raw: no model has shown a flag set yet, so none is named.
+    # Only when the word was read: no word, no "none" invented.
     if data.system_state_2 is not None:
-        calculated["system_state_2_hex"] = f"0x{int(data.system_state_2):08X}"
+        state_2 = int(data.system_state_2)
+        calculated["system_state_2_hex"] = f"0x{state_2:08X}"
+        calculated["system_alerts"] = system_alerts(state_2)
 
     calculated["active_faults"] = _format_active_faults(data.fault_codes)
 

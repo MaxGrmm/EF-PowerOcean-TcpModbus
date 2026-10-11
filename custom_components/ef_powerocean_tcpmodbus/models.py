@@ -248,6 +248,7 @@ class CoordinatorStatus(StrEnum):
     READ_FAILED = "read_failed"
     RECONNECT_FAILED = "reconnect_failed"
     PROCESSING_FAILED = "processing_failed"
+    IDENTITY_MISMATCH = "identity_mismatch"
 
 
 class OperatingMode(StrEnum):
@@ -393,10 +394,48 @@ class ControlStatus(StrEnum):
     CONTROL_TEST = "control_test"
 
 
-# System State 2 (40532) flags under which the inverter stops acting: shutdown,
-# upgrade shutdown, emergency power off, system failure, battery pack disconnected,
-# PCS timeout and PCS failure.
-_STOP_FLAGS_MASK: Final = sum(1 << bit for bit in (0, 1, 2, 5, 7, 9, 10))
+# System State 2 (40532): one alert per bit, bit 0 first, as EcoFlow's Open Modbus
+# Protocol names them. These codes are the states of the System Alerts sensor, so
+# one is never reworded once released.
+SYSTEM_ALERT_NAMES: Final[tuple[str, ...]] = (
+    "system_shutdown",  # BIT0
+    "upgrade_shutdown",  # BIT1
+    "epo_triggered",  # BIT2
+    "low_power_mode",  # BIT3
+    "fan_failure",  # BIT4
+    "system_failure",  # BIT5
+    "battery_reverse_connection",  # BIT6
+    "battery_disconnected",  # BIT7
+    "auxiliary_power_failure",  # BIT8
+    "pcs_timeout",  # BIT9
+    "pcs_failure",  # BIT10
+    "igbt_self_test_failure",  # BIT11
+    "high_temperature_protection",  # BIT12
+    "battery_overheating",  # BIT13
+    "ntc_circuit_failure",  # BIT14
+    "system_reset",  # BIT15
+    "hardware_version_error",  # BIT16
+    "parallel_sync_error",  # BIT17
+    "low_temperature_protection",  # BIT18
+    "parallel_master_slave_conflict",  # BIT19
+    "parallel_slave_setting_error",  # BIT20
+    "parallel_inverter_error",  # BIT21
+    "parallel_meter_fault",  # BIT22
+)
+
+# The System State 2 alerts under which the inverter stops acting.
+_STOP_ALERTS: Final = (
+    "system_shutdown",
+    "upgrade_shutdown",
+    "epo_triggered",
+    "system_failure",
+    "battery_disconnected",
+    "pcs_timeout",
+    "pcs_failure",
+)
+_STOP_FLAGS_MASK: Final = sum(
+    1 << SYSTEM_ALERT_NAMES.index(name) for name in _STOP_ALERTS
+)
 
 
 @dataclass(frozen=True)

@@ -169,7 +169,12 @@ class Heartbeat:
             for delay in self._retry_delays:
                 if delay:
                     await asyncio.sleep(delay)
-                if not self._modbus_client.connected:
+                # A device that has not proven its identity gets no heartbeat:
+                # it would hand Modbus control of whatever answers to us.
+                if (
+                    not self._modbus_client.connected
+                    or not self._modbus_client.writes_allowed
+                ):
                     return False
 
                 # Timed from before the write, so a slow round trip is counted

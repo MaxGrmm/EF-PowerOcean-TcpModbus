@@ -615,6 +615,12 @@ SENSOR_MAP: list[SensorDef] = [
         device_class="enum",
         options=tuple(OperatingMode),
         icon="mdi:home-lightning-bolt",
+        attribute_keys=("operating_mode_raw",),
+    ),
+    SensorDef(
+        key="system_alerts",
+        icon="mdi:alert-outline",
+        attribute_keys=("system_state_2_hex",),
     ),
     *[
         SensorDef(

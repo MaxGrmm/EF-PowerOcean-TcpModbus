@@ -257,10 +257,28 @@ class ModbusClient:
     def __init__(self, link: ModbusLink) -> None:
         self._link = link
         self._lock = asyncio.Lock()
+        # Set once the client is shut down, so a reconnect still in its backoff
+        # does not open the link again behind the unload.
+        self._closed = False
+        # Why writes are refused, or None while they are allowed. The coordinator
+        # blocks them until the device has proven it is the one this entry
+        # belongs to.
+        self._write_block: str | None = None
 
     @property
     def connected(self) -> bool:
         return self._link.connected
+
+    @property
+    def writes_allowed(self) -> bool:
+        return self._write_block is None
+
+    def block_writes(self, reason: str) -> None:
+        """Refuse every write until allow_writes is called."""
+        self._write_block = reason
+
+    def allow_writes(self) -> None:
+        self._write_block = None
 
     async def async_connect(self) -> bool:
         return await self._link.connect()
@@ -269,31 +287,47 @@ class ModbusClient:
         self._link.close()
 
     async def async_close(self) -> None:
-        """Close once any transaction in flight has finished."""
+        """Close once any transaction in flight has finished, and stay closed."""
+        self._closed = True
         async with self._lock:
             self._link.close()
 
     async def async_reconnect(self) -> bool:
-        """Retry the connection with a widening backoff."""
+        """Retry the connection with a widening backoff.
+
+        The backoff is waited out without the lock, which only guards the
+        attempt itself: holding it through a two-minute wait would stall every
+        write and the unload behind a reconnect that may never succeed.
+        """
         _LOGGER.debug("Modbus TCP is not connected. Start reconnect!")
         attempts = len(RECONNECT_DELAYS_S)
 
         for attempt, delay in enumerate(RECONNECT_DELAYS_S, start=1):
-            async with self._lock:
-                if delay > 0:
-                    _LOGGER.debug(
-                        f"Reconnect failed! Wait {delay}s until next attempt."
-                    )
-                    await asyncio.sleep(delay)
+            if delay > 0:
+                _LOGGER.debug(f"Reconnect failed! Wait {delay}s until next attempt.")
+                await asyncio.sleep(delay)
+            if self._closed:
+                return False
 
+            async with self._lock:
+                if self._closed:
+                    return False
+                if self._link.connected:
+                    # Someone else got the link up while this one waited.
+                    return True
                 _LOGGER.debug(f"Modbus TCP reconnect (Attempt {attempt}/{attempts})...")
                 if await self._link.connect():
                     _LOGGER.debug(
                         f"Reconnect successful! Attempts: {attempt}/{attempts}"
                     )
-                    await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
-                    return True
-                self._link.close()
+                    connected = True
+                else:
+                    self._link.close()
+                    connected = False
+            if connected:
+                # Settle time for the device, also outside the lock.
+                await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
+                return True
 
         _LOGGER.error(
             "EF-Modbus-TCP: All reconnect attempts failed! – will retry next poll"
@@ -321,6 +355,10 @@ class ModbusClient:
         ModbusRejected if the device refused it and HomeAssistantError if it never
         arrived.
         """
+        if self._write_block is not None:
+            raise HomeAssistantError(
+                f"Not sending {what} to register {address}: {self._write_block}"
+            )
         values = list(words)
         _LOGGER.debug(
             "Sending Modbus write command [%s]: %s as %s to address %s",

@@ -13,6 +13,7 @@ from homeassistant.const import ATTR_DEVICE_ID, ATTR_ENTITY_ID, Platform
 from homeassistant.core import Context, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry, entity_registry
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt
@@ -84,6 +85,18 @@ from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
+# Why writes are refused while the device has not shown its serial number.
+_IDENTITY_UNVERIFIED = "the device has not confirmed its serial number yet"
+
+
+def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
+    """Return the stable id of the repairs issue raised for a different device."""
+    return f"identity_mismatch_{entry.entry_id}"
+
+
+class IdentityMismatch(UpdateFailed):
+    """The device at the configured address is not the one this entry belongs to."""
+
 
 class EcoflowCoordinator(DataUpdateCoordinator):
     """Fetches data from EcoFlow PowerOcean Plus via Modbus TCP."""
@@ -95,6 +108,13 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     # added: a poll in between would leave out what they have yet to ask for.
     _wanted_keys: frozenset[str] | None = None
     _on_demand: bool = False
+    # Whether the device answering has shown the serial number this entry belongs
+    # to since the link last came up. Until it has, nothing is written to it and
+    # its telemetry is not published.
+    _identity_verified: bool = False
+    _identity_mismatch: bool = False
+    # The serial seen first in this session, for an entry still keyed by address.
+    _pinned_serial: str | None = None
 
     def __init__(
         self,
@@ -147,6 +167,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         self._last_inverter_temperature: float | None = None
         self._consecutive_modbus_disabled_reads = 0
         self._modbus_client = create_client(hass, config_entry, self.host, self.port)
+        self._modbus_client.block_writes(_IDENTITY_UNVERIFIED)
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
 
@@ -197,6 +218,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     @property
     def status(self) -> CoordinatorStatus | None:
         return self._status
+
+    @property
+    def identity_verified(self) -> bool:
+        """Return whether the device has shown the serial this entry belongs to."""
+        return self._identity_verified
 
     @property
     def is_modbus_disabled(self) -> bool:
@@ -308,6 +334,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         identity = self.identity
         if identity.serial_number is None:
             identity.serial_number = "unknown"
+        # Whatever answers on a link that has just come up is checked again.
+        self._mark_identity_unverified()
 
         try:
             raw = await self._modbus_client.async_read(
@@ -315,16 +343,19 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             )
         except ModbusException as err:
             _LOGGER.warning(f"Can not read device information. {err.string}.")
+            self._accept_unreadable_identity()
             return
 
         if not raw or len(raw) < DEVICE_INFO_BLOCK.count:
+            self._accept_unreadable_identity()
             return
 
         registers_for = partial(DEVICE_INFO_BLOCK.registers_for, raw)
 
-        identity.serial_number = (
-            decode_serial_number(registers_for(SERIAL_NUMBER)) or "unknown"
-        )
+        serial = decode_serial_number(registers_for(SERIAL_NUMBER))
+        if not self._check_identity(serial):
+            return
+        identity.serial_number = serial or "unknown"
         identity.product_number = registers_for(PRODUCT_NUMBER)[0]
         identity.product_category = registers_for(PRODUCT_CATEGORY)[0]
 
@@ -337,6 +368,89 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 self._firmware_changed(previous, firmware)
 
         await self._async_read_device_info_extra()
+
+    # ── Identity ──────────────────────────────────────────────────────────────
+
+    def _expected_serial(self) -> str | None:
+        """Return the serial number the device has to show, if one is known.
+
+        The entry's unique id is the serial once the device has reported one;
+        an entry still keyed by host and port falls back to the first serial
+        seen in this session.
+        """
+        unique_id = self.config_entry.unique_id
+        if unique_id and ":" not in unique_id:
+            return unique_id
+        return self._pinned_serial
+
+    def _mark_identity_unverified(self) -> None:
+        self._identity_verified = False
+        self._modbus_client.block_writes(_IDENTITY_UNVERIFIED)
+
+    def _accept_unreadable_identity(self) -> None:
+        """Decide what an unreadable serial means.
+
+        With nothing to compare against it is let through, as before the check
+        existed. With a known serial it stays unverified, and the next poll asks
+        again.
+        """
+        if self._expected_serial() is None:
+            self._set_identity_verified()
+
+    def _check_identity(self, serial: str | None) -> bool:
+        """Verify *serial* against the one this entry belongs to.
+
+        A different serial means another device now answers at this address: a
+        changed DHCP lease, a second inverter, a swapped unit. Its data is not
+        published and nothing is written to it, so the heartbeat cannot hand us
+        control of an inverter nobody configured.
+        """
+        if not serial:
+            self._accept_unreadable_identity()
+            return self._identity_verified
+
+        expected = self._expected_serial()
+        if expected is not None and serial != expected:
+            reason = (
+                f"the device at {self.host} reports serial {serial}, not {expected}"
+            )
+            self._modbus_client.block_writes(reason)
+            if not self._identity_mismatch:
+                _LOGGER.warning(
+                    "%s. Nothing is read from or written to it. Check the address, "
+                    "or remove the entry and add the new inverter",
+                    reason[0].upper() + reason[1:],
+                )
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    identity_mismatch_issue_id(self.config_entry),
+                    is_fixable=False,
+                    is_persistent=False,
+                    severity=ir.IssueSeverity.ERROR,
+                    translation_key="identity_mismatch",
+                    translation_placeholders={
+                        "host": str(self.host),
+                        "expected": expected,
+                        "found": serial,
+                    },
+                )
+            self._identity_mismatch = True
+            return False
+
+        self._pinned_serial = self._pinned_serial or serial
+        self._set_identity_verified()
+        return True
+
+    def _set_identity_verified(self) -> None:
+        self._identity_verified = True
+        self._modbus_client.allow_writes()
+        if self._identity_mismatch:
+            _LOGGER.info("The device at %s shows the expected serial again", self.host)
+            ir.async_delete_issue(
+                self.hass, DOMAIN, identity_mismatch_issue_id(self.config_entry)
+            )
+        self._identity_mismatch = False
 
     @callback
     def _firmware_changed(self, previous: str, firmware: str) -> None:
@@ -414,6 +528,17 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         if not self._modbus_client.connected and not await self.async_reconnect():
             raise UpdateFailed("Reconnect failed!")
 
+        if not self._identity_verified:
+            await self.async_read_device_info()
+            if self._identity_mismatch:
+                raise IdentityMismatch(
+                    f"The device at {self.host} is not the inverter this entry "
+                    "belongs to"
+                )
+            if not self._identity_verified:
+                _LOGGER.debug("Serial number not confirmed yet; skipping this poll")
+                return None
+
         try:
             # A probe may replan the blocks, so the loop runs over this poll's plan.
             for register_block in tuple(self._register_blocks):
@@ -433,6 +558,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         except ModbusException as err:
             _LOGGER.debug(f"{err.string}. Connection closing...")
             self._modbus_client.close()
+            # A shared link may come back up without us seeing it drop, so the
+            # device is asked for its serial again before anything is trusted.
+            self._mark_identity_unverified()
             return None
         except Exception as err:
             _LOGGER.error(f"Unexpected error during data fetch: {repr(err)}")
@@ -587,6 +715,9 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             raw_data = await self.async_get_raw_data()
+        except IdentityMismatch:
+            self._status = CoordinatorStatus.IDENTITY_MISMATCH
+            raise
         except UpdateFailed:
             self._status = CoordinatorStatus.RECONNECT_FAILED
             raise UpdateFailed(

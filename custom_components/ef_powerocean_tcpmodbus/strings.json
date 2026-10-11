@@ -83,6 +83,10 @@
     }
   },
   "issues": {
+    "identity_mismatch": {
+      "title": "A different inverter answers at {host}",
+      "description": "This entry belongs to the inverter with serial number {expected}, but the device at {host} reports {found}. Nothing is read from or written to it, so Modbus control cannot be handed to an inverter you did not set up. Check that the address still points at the right inverter (a reserved address in your router prevents this), or remove this entry and add the new inverter."
+    },
     "modbus_disabled": {
       "title": "Modbus is disabled on the inverter at {host}",
       "description": "The integration requires Modbus TCP to be enabled in the EcoFlow Pro app. Ask your installer to enable it and the integration will automatically start working."
@@ -302,7 +306,8 @@
           "success": "Success",
           "read_failed": "Read failed",
           "reconnect_failed": "Reconnect failed",
-          "processing_failed": "Processing failed"
+          "processing_failed": "Processing failed",
+          "identity_mismatch": "Different device"
         }
       },
       "protocol_version": {
@@ -403,6 +408,12 @@
       },
       "fault_count": {
         "name": "Active Fault Count"
+      },
+      "system_alerts": {
+        "name": "System Alerts",
+        "state": {
+          "none": "None"
+        }
       },
       "active_faults": {
         "name": "Active Fault Codes"

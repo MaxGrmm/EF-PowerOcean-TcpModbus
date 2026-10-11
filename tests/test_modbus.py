@@ -205,3 +205,68 @@ async def test_any_answer_counts_as_a_shared_link_being_up(shared_client, unit) 
 
     unit.fail_requests(ModbusConnectionError("link down"))
     assert not await shared_client.async_connect()
+
+
+class _FlakyLink:
+    """A link that comes up on the attempt given, and records the lock each time."""
+
+    def __init__(self, client_ref: list, up_on_attempt: int) -> None:
+        self._client_ref = client_ref
+        self._up_on_attempt = up_on_attempt
+        self.attempts = 0
+        self.connected = False
+        self.lock_held_while_sleeping: list[bool] = []
+
+    async def connect(self) -> bool:
+        self.attempts += 1
+        self.connected = self.attempts >= self._up_on_attempt
+        return self.connected
+
+    def close(self) -> None:
+        self.connected = False
+
+
+def test_the_reconnect_backoff_does_not_hold_the_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ref: list = []
+    link = _FlakyLink(ref, up_on_attempt=3)
+    client = modbus_module.ModbusClient(link)
+
+    async def sleep(_delay: float) -> None:
+        link.lock_held_while_sleeping.append(client._lock.locked())
+
+    monkeypatch.setattr(modbus_module.asyncio, "sleep", sleep)
+
+    assert asyncio.run(client.async_reconnect())
+    assert link.attempts == 3
+    assert link.lock_held_while_sleeping
+    assert not any(link.lock_held_while_sleeping)
+
+
+def test_a_closed_client_stops_reconnecting(monkeypatch: pytest.MonkeyPatch) -> None:
+    link = _FlakyLink([], up_on_attempt=99)
+    client = modbus_module.ModbusClient(link)
+
+    async def sleep(_delay: float) -> None:
+        # The unload lands while the backoff is waited out.
+        await client.async_close()
+
+    monkeypatch.setattr(modbus_module.asyncio, "sleep", sleep)
+
+    assert not asyncio.run(client.async_reconnect())
+    assert link.attempts == 1
+
+
+def test_blocked_writes_never_reach_the_link(client, pymodbus) -> None:
+    pymodbus.write_register = AsyncMock()
+    client.block_writes("serial mismatch")
+
+    with pytest.raises(modbus_module.HomeAssistantError, match="serial mismatch"):
+        asyncio.run(client.async_write(40536, [10], what="reserve"))
+    pymodbus.write_register.assert_not_called()
+
+    client.allow_writes()
+    pymodbus.write_register.return_value = answer(is_error=False)
+    asyncio.run(client.async_write(40536, [10], what="reserve"))
+    pymodbus.write_register.assert_awaited_once()
