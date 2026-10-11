@@ -22,7 +22,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -37,7 +37,7 @@ jobs:
 
       - name: Create GitHub release
         if: steps.notes.outputs.tag != ''
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ steps.notes.outputs.tag }}
           name: ${{ steps.notes.outputs.tag }}
@@ -52,7 +52,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -67,7 +67,7 @@ jobs:
         run: zip -r "$RUNNER_TEMP/ef_powerocean_tcpmodbus.zip" . -x "__pycache__/*" "*/__pycache__/*"
 
       - name: Create GitHub pre-release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ steps.notes.outputs.tag }}
           target_commitish: ${{ github.sha }}
