@@ -117,7 +117,8 @@ class CoreTest:
 def from_feature(name: str, feature: ControlFeature) -> CoreTest:
     """Build a test from the integration's feature definition."""
     definition = CONTROL_FEATURES[feature]
-    assert definition.setpoint_key is not None and definition.measure_key is not None
+    assert definition.setpoint_key is not None
+    assert definition.measure_key is not None
     return CoreTest(
         name,
         definition.method,

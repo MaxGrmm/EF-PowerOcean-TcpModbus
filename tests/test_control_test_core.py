@@ -78,8 +78,9 @@ def test_a_power_already_flowing_is_moved_to_one_that_tells() -> None:
 def test_a_settled_command_is_followed() -> None:
     test = TESTS["battery charge"]
     plan, _ = plan_test(test, frame(), 1500)
+    assert plan is not None
 
-    verdict, detail, achieved = judge(
+    verdict, _detail, achieved = judge(
         test, plan, 12.0, ControlStatus.ACTIVE, [1400.0, 1500.0, 1500.0]
     )
 
@@ -90,6 +91,7 @@ def test_a_settled_command_is_followed() -> None:
 def test_a_command_never_reached_is_not_followed() -> None:
     test = TESTS["battery charge"]
     plan, _ = plan_test(test, frame(), 1500)
+    assert plan is not None
 
     verdict, detail, _ = judge(test, plan, None, ControlStatus.RAMPING, [0.0, 0.0])
 
@@ -100,6 +102,7 @@ def test_a_command_never_reached_is_not_followed() -> None:
 def test_a_full_battery_during_the_command_is_unreachable() -> None:
     test = TESTS["battery charge"]
     plan, _ = plan_test(test, frame(), 1500)
+    assert plan is not None
 
     verdict, _, _ = judge(
         test, plan, None, ControlStatus.UNREACHABLE_BATTERY_FULL, [0.0]

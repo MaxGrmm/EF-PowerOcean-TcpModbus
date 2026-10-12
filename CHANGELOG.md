@@ -11,11 +11,13 @@
 
 - Modbus requests time out after 3 s instead of 20 s, and a whole poll after 12 s.
 - Processing errors make the entities unavailable instead of publishing an empty update.
+- CI type-checks the integration with mypy in strict mode, lints with a wider set of ruff rules, and pins every GitHub Action to a commit.
 
 ### Fixed
 
 - A reconnect no longer holds the Modbus connection during its backoff, which stalled writes and unloading for up to two minutes.
 - Self-use Mode and Intelligent Mode no longer both turn on for an undocumented operating status.
+- Sensors shown without decimals round their value instead of cutting it off, so 1499.7 W shows as 1500 W.
 
 ## [2.9.0] - 2026-10-10
 

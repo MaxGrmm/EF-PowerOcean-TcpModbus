@@ -19,6 +19,7 @@ reads of its own.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Callable
@@ -229,10 +230,8 @@ class ControlTest:
             return
         assert self._task is not None
         self._task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await self._task
-        except asyncio.CancelledError:
-            pass
 
     # ── The run ──────────────────────────────────────────────────────────────
 
@@ -298,7 +297,7 @@ class ControlTest:
             report.outcome = str(ControlTestState.ABORTED)
             report.abort_reason = str(reason)
             self._state = ControlTestState.ABORTED
-        except Exception as err:  # noqa: BLE001 - the inverter is put back regardless
+        except Exception as err:
             _LOGGER.exception("The control test failed")
             report.outcome = str(ControlTestState.FAILED)
             report.abort_reason = repr(err)
@@ -331,7 +330,7 @@ class ControlTest:
             version = str(
                 (await async_get_integration(coordinator.hass, DOMAIN)).version
             )
-        except Exception:  # noqa: BLE001 - only the report misses it
+        except Exception:
             version = None
         identity = coordinator.identity
         return ControlTestReport(
@@ -483,7 +482,7 @@ class ControlTest:
             if self._heartbeat is not None and self._heartbeat.in_control:
                 await self._return_to_default(saver)
                 await self._restore_setpoints(originals)
-        except Exception as err:  # noqa: BLE001 - the window hands back regardless
+        except Exception as err:
             _LOGGER.warning(
                 "Could not restore the inverter after the control test (%r); it "
                 "returns to the EcoFlow app within a minute without a heartbeat.",
@@ -501,8 +500,8 @@ class ControlTest:
         register = self._coordinator.registers_by_key[test.setpoint_key]
         if failure := await self._write(
             register.address,
-            encode_register(int(round(power)) * test.sign, RegisterType.INT32),
-            f"{test.setpoint_key} {int(round(power)) * test.sign} W",
+            encode_register(round(power) * test.sign, RegisterType.INT32),
+            f"{test.setpoint_key} {round(power) * test.sign} W",
         ):
             return f"setpoint write refused ({failure})"
         if failure := await self._write_control_word(
@@ -591,7 +590,7 @@ class ControlTest:
 
         @callback
         def _updated() -> None:
-            if coordinator.data is not None and coordinator.data is not previous:
+            if coordinator.data is not previous:
                 fresh.set()
 
         remove: CALLBACK_TYPE = coordinator.async_add_listener(_updated)

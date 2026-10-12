@@ -1,4 +1,4 @@
-"""Binary entities for EcoFlow PowerOcean Plus."""
+"""Binary sensor entities for EF-PowerOcean-TcpModbus."""
 
 from __future__ import annotations
 
@@ -8,31 +8,34 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import BINARY_SENSOR_MAP, MODBUS_CONTROL_BINARY_SENSOR
-from .coordinator import EcoflowCoordinator
+from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .models import BinarySensorDef
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
+    hass: HomeAssistant,  # noqa: ARG001 - required by the platform API
+    entry: EcoflowConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up EcoFlow binary sensors from a config entry."""
-    coordinator: EcoflowCoordinator = entry.runtime_data
-    entities: list[BinarySensorEntity] = [
-        EcoFlowModbusControlBinarySensor(
-            coordinator, entry, MODBUS_CONTROL_BINARY_SENSOR
-        )
-    ]
+    coordinator = entry.runtime_data
+    async_add_entities(
+        [
+            EcoFlowModbusControlBinarySensor(
+                coordinator, entry, MODBUS_CONTROL_BINARY_SENSOR
+            ),
+            *(
+                EcoFlowBinarySensor(coordinator, entry, definition)
+                for definition in BINARY_SENSOR_MAP
+            ),
+        ]
+    )
 
-    for definition in BINARY_SENSOR_MAP:
-        entities.append(EcoFlowBinarySensor(coordinator, entry, definition))
 
-    async_add_entities(entities)
-
-
-class EcoFlowModbusControlBinarySensor(EcoFlowBaseEntity, BinarySensorEntity):
+class EcoFlowModbusControlBinarySensor(
+    EcoFlowBaseEntity[BinarySensorDef], BinarySensorEntity
+):
     """Whether the inverter is currently following this integration, not the app.
 
     Commands are stored but ignored unless the heartbeat is current, and the device
@@ -59,7 +62,7 @@ class EcoFlowModbusControlBinarySensor(EcoFlowBaseEntity, BinarySensorEntity):
         return control.in_control or control.handing_back
 
 
-class EcoFlowBinarySensor(EcoFlowBaseEntity, BinarySensorEntity):
+class EcoFlowBinarySensor(EcoFlowBaseEntity[BinarySensorDef], BinarySensorEntity):
     def __init__(
         self,
         coordinator: EcoflowCoordinator,
@@ -73,7 +76,6 @@ class EcoFlowBinarySensor(EcoFlowBaseEntity, BinarySensorEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
         new_value = self.is_on
         if new_value != self._last_written_value:
             self._last_written_value = new_value
@@ -81,11 +83,5 @@ class EcoFlowBinarySensor(EcoFlowBaseEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:
-        """Return true if the binary sensor is on."""
-        if self.coordinator.data is not None:
-            value = self.coordinator.data.get(self._definition.key, None)
-
-            if value is not None:
-                return bool(value)
-
-        return self._last_written_value
+        value = (self.coordinator.data or {}).get(self._definition.key)
+        return bool(value) if value is not None else self._last_written_value

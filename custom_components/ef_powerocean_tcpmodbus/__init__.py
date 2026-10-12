@@ -1,4 +1,4 @@
-"""EF-PowerOcean-TcpModbus – Local Modbus TCP integration for EcoFlow PowerOcean Plus."""
+"""EF-PowerOcean-TcpModbus: local Modbus TCP integration for EcoFlow PowerOcean."""
 
 from __future__ import annotations
 
@@ -15,7 +15,11 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
 from .control import ControlInputs
-from .coordinator import EcoflowCoordinator, identity_mismatch_issue_id
+from .coordinator import (
+    EcoflowConfigEntry,
+    EcoflowCoordinator,
+    identity_mismatch_issue_id,
+)
 from .modbus import async_prepare
 from .services import async_setup_services
 
@@ -31,15 +35,16 @@ PLATFORMS: Final = [
     Platform.SWITCH,
 ]
 
-type EcoflowConfigEntry = ConfigEntry[EcoflowCoordinator]
-
 
 def _modbus_disabled_issue_id(entry: ConfigEntry) -> str:
     """Return the stable id of the repairs issue raised while Modbus is disabled."""
     return f"modbus_disabled_{entry.entry_id}"
 
 
-async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+async def async_setup(
+    hass: HomeAssistant,
+    config: ConfigType,  # noqa: ARG001 - required by the integration API
+) -> bool:
     """Register the actions, which serve every configured inverter."""
     async_setup_services(hass)
     return True

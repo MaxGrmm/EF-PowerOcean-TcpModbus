@@ -61,8 +61,8 @@ class FakeInverter:
             self.registers[address] = count
             return pdu[:5]
         if function == 0x10:  # write multiple registers
-            values = struct.unpack(f">{count}H", pdu[6 : 6 + 2 * count])
-            for i, value in enumerate(values):
+            written = struct.unpack(f">{count}H", pdu[6 : 6 + 2 * count])
+            for i, value in enumerate(written):
                 self.registers[address + i] = value
             return pdu[:5]
         return bytes([function | 0x80, 0x01])  # illegal function
@@ -85,7 +85,9 @@ class FakeInverter:
 
 
 @pytest.fixture
-async def inverter(socket_enabled: None) -> AsyncIterator[FakeInverter]:
+async def inverter(
+    socket_enabled: None,  # noqa: ARG001 - lets the fake inverter listen
+) -> AsyncIterator[FakeInverter]:
     """Serve a fake inverter on localhost."""
     fake = FakeInverter()
     server = await asyncio.start_server(fake.serve, HOST, 0)
@@ -104,9 +106,8 @@ async def test_uses_the_shared_connection_where_home_assistant_has_one(
     assert modbus_module.is_shared() is expected
 
 
-async def test_starts_and_unloads(
-    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
-) -> None:
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_starts_and_unloads(hass: HomeAssistant, inverter: FakeInverter) -> None:
     entry = MockConfigEntry(
         domain=const.DOMAIN,
         data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
@@ -140,8 +141,9 @@ def _serve_serial(inverter: FakeInverter, serial: str) -> None:
         ) | ord(padded[offset + 1])
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_an_entry_keyed_by_address_takes_the_serial_number(
-    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+    hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
     """Entries made before the serial was read are keyed by host and port."""
     _serve_serial(inverter, SERIAL)
@@ -162,8 +164,9 @@ async def test_an_entry_keyed_by_address_takes_the_serial_number(
     await hass.async_block_till_done()
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_a_serial_number_another_entry_has_is_left_to_it(
-    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+    hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
     _serve_serial(inverter, SERIAL)
     MockConfigEntry(domain=const.DOMAIN, unique_id=SERIAL).add_to_hass(hass)
@@ -183,8 +186,9 @@ async def test_a_serial_number_another_entry_has_is_left_to_it(
     await hass.async_block_till_done()
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_raises_a_repairs_issue_while_modbus_is_disabled(
-    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+    hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
     """The inverter answers, with a serial number, but every value reads zero."""
     _serve_serial(inverter, SERIAL)
@@ -217,8 +221,9 @@ async def test_raises_a_repairs_issue_while_modbus_is_disabled(
     await hass.async_block_till_done()
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_a_device_registered_as_a_service_becomes_a_device(
-    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+    hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
     entry = MockConfigEntry(
         domain=const.DOMAIN,
@@ -235,14 +240,17 @@ async def test_a_device_registered_as_a_service_becomes_a_device(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert registry.async_get(device.id).entry_type is None
+    updated = registry.async_get(device.id)
+    assert isinstance(updated, dr.DeviceEntry)
+    assert updated.entry_type is None
 
     await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_a_disabled_sensor_is_not_read(
-    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+    hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
     """Only what an enabled entity, the control loop or the coordinator needs."""
     entry = MockConfigEntry(
@@ -320,11 +328,11 @@ class _RecordingData(dict):
         self.read.add("*")
         return super().__iter__()
 
-    def items(self):  # type: ignore[override]
+    def items(self):
         self.read.add("*")
         return super().items()
 
-    def values(self):  # type: ignore[override]
+    def values(self):
         self.read.add("*")
         return super().values()
 
@@ -342,8 +350,9 @@ def _enable_every_entity(hass: HomeAssistant, entry: MockConfigEntry) -> None:
         )
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_every_entity_reads_only_what_it_asks_for(
-    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+    hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
     """An entity that reads a register it did not ask for would show nothing once
     that register is left out of the poll. Every entity is enabled here, so the
@@ -370,7 +379,7 @@ async def test_every_entity_reads_only_what_it_asks_for(
             recording = _RecordingData(data)
             coordinator.data = recording
             entity.async_write_ha_state()
-            asked = entity.coordinator_context or frozenset()
+            asked = getattr(entity, "coordinator_context", None) or frozenset()
             extra = (recording.read & (registers | {"*"})) - asked - always
             if extra:
                 undeclared[entity.entity_id] = extra
@@ -422,9 +431,9 @@ def _differences(shown: dict[str, Any], reference: dict[str, Any]) -> list[str]:
     ]
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_entities_show_what_reading_everything_shows(
     hass: HomeAssistant,
-    enable_custom_integrations: None,
     inverter: FakeInverter,
 ) -> None:
     """Each entity, after a poll of only what was asked for, shows what it would
@@ -496,8 +505,9 @@ async def _set_up_refusing(
     return entry, coordinator
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_a_firmware_update_retries_refused_registers(
-    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+    hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
     entry, coordinator = await _set_up_refusing(hass, inverter)
     registry = dr.async_get(hass)
@@ -511,7 +521,9 @@ async def test_a_firmware_update_retries_refused_registers(
 
         unsupported = coordinator.unsupported_registers
         polled = coordinator.polled_registers
-        sw_version = registry.async_get(device.id).sw_version
+        updated = registry.async_get(device.id)
+        assert isinstance(updated, dr.DeviceEntry)
+        sw_version = updated.sw_version
     finally:
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
@@ -522,8 +534,9 @@ async def test_a_firmware_update_retries_refused_registers(
     assert sw_version == "1.2.4.0"
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_a_reconnect_on_the_same_firmware_keeps_refused_registers_out(
-    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+    hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
     entry, coordinator = await _set_up_refusing(hass, inverter)
 
@@ -538,8 +551,9 @@ async def test_a_reconnect_on_the_same_firmware_keeps_refused_registers_out(
     assert "breaker_capacity" not in polled
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_an_unreadable_firmware_version_is_not_a_change(
-    hass: HomeAssistant, enable_custom_integrations: None, inverter: FakeInverter
+    hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
     """A version of zero reads as none, and keeps the one known before."""
     entry, coordinator = await _set_up_refusing(hass, inverter)

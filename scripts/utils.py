@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import sys
 import types
 from pathlib import Path
 from typing import Final
+
+from pymodbus.client import ModbusTcpClient
 
 INTEGRATION: Final = (
     Path(__file__).resolve().parents[1]
@@ -19,9 +22,7 @@ PACKAGE: Final = "ef_powerocean_registers"
 
 def load_integration() -> tuple[types.ModuleType, ...]:
     """Load the register map without importing all of Home Assistant."""
-    try:
-        import homeassistant.const  # noqa: F401
-    except ImportError:
+    if importlib.util.find_spec("homeassistant") is None:
         stub = types.ModuleType("homeassistant.const")
         stub.__getattr__ = lambda _name: type("Any", (), {"__getattr__": str})()
         sys.modules.setdefault("homeassistant", types.ModuleType("homeassistant"))
@@ -38,7 +39,6 @@ def load_integration() -> tuple[types.ModuleType, ...]:
 
 const, models, telemetry, core = load_integration()
 
-from pymodbus.client import ModbusTcpClient  # noqa: E402
 
 EXCEPTION_MEANINGS: Final[dict[int, str]] = {
     1: "illegal function",
@@ -154,7 +154,8 @@ def report_device(
             "  No model matches these product registers; the default map will be used."
         )
         print(
-            "  Include the product number and category in the issue so support can add it."
+            "  Include the product number and category in the issue so support can "
+            "add it."
         )
     print()
     return detected

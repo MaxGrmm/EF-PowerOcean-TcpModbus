@@ -94,12 +94,17 @@ def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
     return f"identity_mismatch_{entry.entry_id}"
 
 
+type EcoflowConfigEntry = ConfigEntry[EcoflowCoordinator]
+
+
 class IdentityMismatch(UpdateFailed):
     """Another device answers at the configured address."""
 
 
-class EcoflowCoordinator(DataUpdateCoordinator):
-    """Fetches data from EcoFlow PowerOcean Plus via Modbus TCP."""
+class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Polls the inverter over Modbus TCP and runs its control."""
+
+    config_entry: EcoflowConfigEntry
 
     # Optional registers the device refused to read, which are no longer polled.
     _unsupported_keys: frozenset[str] = frozenset()
@@ -116,11 +121,11 @@ class EcoflowCoordinator(DataUpdateCoordinator):
     def __init__(
         self,
         hass: HomeAssistant,
-        config_entry: ConfigEntry,
+        config_entry: EcoflowConfigEntry,
     ) -> None:
-        self.host = config_entry.data.get(CONF_HOST)
-        self.port = config_entry.data.get(CONF_PORT, DEFAULT_PORT)
-        self.scan_interval = config_entry.data.get(
+        self.host: str = config_entry.data[CONF_HOST]
+        self.port: int = config_entry.data.get(CONF_PORT, DEFAULT_PORT)
+        self.scan_interval: int = config_entry.data.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_S
         )
         self.limits = {
@@ -304,18 +309,21 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         await super().async_shutdown()
 
     async def async_connect_client(self) -> None:
-        """First Client-Connect"""
+        """Connect for the first time and read the device's identity."""
         # Started before the connect can fail: the heartbeat skips beats while the
         # client is down and is beating again the moment a reconnect succeeds.
         self.control.start()
 
         if not await self._modbus_client.async_connect():
-            _LOGGER.error(f"Modbus TCP not connected to {self.host}:{self.port}")
+            _LOGGER.error("Modbus TCP not connected to %s:%s", self.host, self.port)
             return
 
         await self.async_read_device_info()
         _LOGGER.info(
-            f"Modbus TCP is connected to {self.host}:{self.port} (SN: {self.identity.serial_number})"
+            "Modbus TCP is connected to %s:%s (SN: %s)",
+            self.host,
+            self.port,
+            self.identity.serial_number,
         )
 
     async def async_read_device_info(self) -> None:
@@ -337,7 +345,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 DEVICE_INFO_BLOCK.start, DEVICE_INFO_BLOCK.count
             )
         except ModbusException as err:
-            _LOGGER.warning(f"Can not read device information. {err.string}.")
+            _LOGGER.warning("Can not read device information: %s", err)
             self._accept_unreadable_identity()
             return
 
@@ -473,7 +481,7 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                     register.address, register.size
                 )
             except ModbusException as err:
-                _LOGGER.debug(f"Could not read {register.key}: {err.string}")
+                _LOGGER.debug("Could not read %s: %s", register.key, err)
                 values[register.key] = None
                 continue
             value = decode_register(
@@ -503,7 +511,8 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         await self.async_read_device_info()
         return True
 
-    async def async_get_raw_data(self) -> dict[str, Any]:
+    async def async_get_raw_data(self) -> dict[str, Any] | None:
+        """Read every planned register block, or None if the read failed."""
         data: dict[str, Any] = {}
 
         # ── Check Connection, if not -> start reconnection ──
@@ -529,18 +538,6 @@ class EcoflowCoordinator(DataUpdateCoordinator):
                 # A probe may replan the blocks.
                 for register_block in tuple(self._register_blocks):
                     await self._async_read_block(register_block, data)
-
-            telemetry = TelemetryData.from_mapping(data)
-            if is_modbus_disabled(
-                self.identity.serial_number,
-                telemetry.inverter_rated_power,
-                telemetry.limit_inv_max,
-            ):
-                self._consecutive_modbus_disabled_reads += 1
-            else:
-                self._consecutive_modbus_disabled_reads = 0
-
-            return data
         except TimeoutError:
             # A late answer to the cancelled request would confuse the next one.
             _LOGGER.debug(
@@ -550,10 +547,21 @@ class EcoflowCoordinator(DataUpdateCoordinator):
             self._read_failed()
             return None
         except (ModbusException, ConnectionError) as err:
-            _LOGGER.debug(f"{err}. Connection closing...")
+            _LOGGER.debug("%s. Connection closing...", err)
             self._read_failed()
             return None
         # Anything else is a bug: let the coordinator log its traceback.
+
+        telemetry = TelemetryData.from_mapping(data)
+        if is_modbus_disabled(
+            self.identity.serial_number,
+            telemetry.inverter_rated_power,
+            telemetry.limit_inv_max,
+        ):
+            self._consecutive_modbus_disabled_reads += 1
+        else:
+            self._consecutive_modbus_disabled_reads = 0
+        return data
 
     def _read_failed(self) -> None:
         self._modbus_client.close()
@@ -712,12 +720,12 @@ class EcoflowCoordinator(DataUpdateCoordinator):
         except IdentityMismatch:
             self._status = CoordinatorStatus.IDENTITY_MISMATCH
             raise
-        except UpdateFailed:
+        except UpdateFailed as err:
             self._status = CoordinatorStatus.RECONNECT_FAILED
             raise UpdateFailed(
                 "Reconnect attempts failed! Integration stopped. Retry after 120s.",
                 retry_after=120,
-            )
+            ) from err
 
         if raw_data is None:
             self._status = CoordinatorStatus.READ_FAILED

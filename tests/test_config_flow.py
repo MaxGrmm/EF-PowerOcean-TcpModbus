@@ -35,9 +35,8 @@ async def _start(hass: HomeAssistant, host: str, port: int = 502):
     )
 
 
-async def test_the_serial_number_is_the_unique_id(
-    hass: HomeAssistant, enable_custom_integrations: None, device_settings
-) -> None:
+@pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
+async def test_the_serial_number_is_the_unique_id(hass: HomeAssistant) -> None:
     result = await _start(hass, "192.168.1.10")
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "parameters"
@@ -53,8 +52,9 @@ async def test_the_serial_number_is_the_unique_id(
     assert result["result"].unique_id == SERIAL
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_falls_back_to_the_address_without_a_serial_number(
-    hass: HomeAssistant, enable_custom_integrations: None, device_settings
+    hass: HomeAssistant, device_settings
 ) -> None:
     device_settings.return_value = {}
 
@@ -69,9 +69,8 @@ async def test_falls_back_to_the_address_without_a_serial_number(
     assert result["result"].unique_id == "192.168.1.10:5020"
 
 
-async def test_an_inverter_that_moved_gets_its_new_address(
-    hass: HomeAssistant, enable_custom_integrations: None, device_settings
-) -> None:
+@pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
+async def test_an_inverter_that_moved_gets_its_new_address(hass: HomeAssistant) -> None:
     """Adding a known inverter at a new address updates the entry it already has."""
     entry = MockConfigEntry(
         domain=const.DOMAIN,

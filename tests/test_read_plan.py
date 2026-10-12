@@ -8,9 +8,11 @@ counters are made from.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -21,6 +23,7 @@ from custom_components.ef_powerocean_tcpmodbus.energy_processor import ENERGY_KE
 from custom_components.ef_powerocean_tcpmodbus.entity import EcoFlowBaseEntity
 from custom_components.ef_powerocean_tcpmodbus.models import (
     EnergySensorDef,
+    EntityDef,
     SensorDef,
     shown_keys,
 )
@@ -58,18 +61,14 @@ def test_telemetry_asks_for_the_fault_registers() -> None:
 
 def test_every_register_has_something_that_asks_for_it() -> None:
     """A register nothing asks for is never read, so it should not be mapped."""
-    shown = frozenset().union(
-        *(
-            shown_keys(definition)
-            for definition in (
-                *const.SENSOR_MAP,
-                *const.ENERGY_SENSOR_MAP,
-                *const.DAILY_ENERGY_SENSORS_DEVICE_RAW,
-                *const.BINARY_SENSOR_MAP,
-                *const.WRITABLE_NUMBERS_MAP,
-            )
-        )
+    definitions: tuple[EntityDef, ...] = (
+        *const.SENSOR_MAP,
+        *const.ENERGY_SENSOR_MAP,
+        *const.DAILY_ENERGY_SENSORS_DEVICE_RAW,
+        *const.BINARY_SENSOR_MAP,
+        *const.WRITABLE_NUMBERS_MAP,
     )
+    shown = frozenset().union(*(shown_keys(d) for d in definitions))
     assert REGISTERS - OWN - ControlInputs.keys() - shown == set()
 
 
@@ -174,7 +173,7 @@ async def test_a_refused_register_stays_out_whatever_is_asked(coordinator) -> No
 
 @pytest.mark.parametrize(
     ("definition", "keys"),
-    [
+    (
         (SensorDef("frequency"), {"frequency"}),
         (
             SensorDef("fault_count", attribute_keys=("system_state_2_hex",)),
@@ -188,10 +187,12 @@ async def test_a_refused_register_stays_out_whatever_is_asked(coordinator) -> No
             const.WRITABLE_NUMBERS_MAP[0],
             {const.WRITABLE_NUMBERS_MAP[0].key, "device_led_brightness"},
         ),
-    ],
+    ),
 )
 def test_an_entity_asks_for_the_keys_it_shows(definition, keys) -> None:
     entity = EcoFlowBaseEntity(
-        SimpleNamespace(), SimpleNamespace(entry_id="entry"), definition
+        cast(EcoflowCoordinator, SimpleNamespace()),
+        cast(ConfigEntry, SimpleNamespace(entry_id="entry")),
+        definition,
     )
     assert entity.coordinator_context == frozenset(keys)

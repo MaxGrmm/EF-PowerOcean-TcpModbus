@@ -89,7 +89,7 @@ class Heartbeat:
 
     @property
     def in_control(self) -> bool:
-        """Return whether the last write is recent enough for commands to take effect."""
+        """Return whether the last write is recent enough for commands to act."""
         return self._age() <= HEARTBEAT_WINDOW_S
 
     def start(self) -> None:
@@ -139,7 +139,7 @@ class Heartbeat:
                 await self._async_write_heartbeat()
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 - one failed write must not stop the timer
+            except Exception:
                 _LOGGER.exception("Unexpected error in the heartbeat loop")
             # The jitter stops the write settling onto the same second as the poll.
             delay = self._delay_before_next_write() + random.uniform(
@@ -187,9 +187,9 @@ class Heartbeat:
                     if not err.transient:
                         self._record_refusal(err)
                         return False
-                    _LOGGER.debug(f"Heartbeat refused for now, retrying: {err}")
+                    _LOGGER.debug("Heartbeat refused for now, retrying: %s", err)
                 except HomeAssistantError as err:
-                    _LOGGER.debug(f"Heartbeat did not reach the inverter: {err!r}")
+                    _LOGGER.debug("Heartbeat did not reach the inverter: %r", err)
                 else:
                     self._record_success(sent_at)
                     return True

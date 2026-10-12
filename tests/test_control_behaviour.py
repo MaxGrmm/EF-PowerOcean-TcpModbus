@@ -16,11 +16,14 @@ Guards run differently on single-phase models, so every check runs on one of eac
 from __future__ import annotations
 
 import asyncio
-from typing import Final
+from collections.abc import Sequence
+from typing import Final, TypedDict
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
-from simulation import (
+
+from custom_components.ef_powerocean_tcpmodbus import const, models
+from tests.simulation import (
     AUTOMATIC,
     BATTERY_LIMITS,
     SYSTEM_FEED,
@@ -28,8 +31,6 @@ from simulation import (
     Simulation,
     select,
 )
-
-from custom_components.ef_powerocean_tcpmodbus import const, models
 
 Feature = models.ControlFeature
 Status = models.ControlStatus
@@ -46,7 +47,14 @@ NOISE_W: Final = 200.0
 SETTLE_POLLS: Final = 48
 LAST_MINUTE: Final = slice(-12, None)
 
-GUARDS: Final = {
+
+class _Guard(TypedDict, total=False):
+    soc: float
+    charge_limit: float
+    reserve: float
+
+
+GUARDS: Final[dict[str, _Guard]] = {
     "no guard": {"soc": 50.0},
     "charge limit": {"soc": 80.0, "charge_limit": 80.0},
     "reserve": {"soc": 20.0, "reserve": 20.0},
@@ -154,7 +162,7 @@ def _direction(watts: list[float], up: str, down: str, still: str) -> str:
     return seen.pop() if len(seen) == 1 else "varies"
 
 
-def _outcome_cases() -> list[pytest.param]:
+def _outcome_cases():
     return [
         pytest.param(
             mode,
@@ -183,7 +191,9 @@ def test_each_mode_moves_the_battery_and_grid_as_intended(
 
 # Weather and load that put the balance far either side of zero, and flip it across
 # zero faster than a guard settles. (solar, house, polls)
-WEATHER: Final = {
+WEATHER: Final[
+    dict[str, tuple[float | Sequence[float], float | Sequence[float], int]]
+] = {
     "evening": (0, 1500, 120),
     "heavy evening load": (0, 4500, 120),
     "large surplus": (9500, 500, 120),

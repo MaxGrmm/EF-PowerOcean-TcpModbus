@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -24,7 +24,7 @@ from custom_components.ef_powerocean_tcpmodbus.plans import (
 Feature = ControlFeature
 DEADBAND = 200.0
 LIMIT = 6000.0
-START = datetime(2026, 6, 1, 12, tzinfo=timezone.utc)
+START = datetime(2026, 6, 1, 12, tzinfo=UTC)
 
 
 def test_every_mode_is_written_down() -> None:
@@ -193,7 +193,10 @@ def test_a_waiting_step_runs_its_neighbour_closer_to_zero() -> None:
     out of the battery rather than left to Automatic."""
     mode = MODES[Feature.EXPORT_SOLAR_FIRST]
     state = ModeState(Feature.EXPORT_SOLAR_FIRST)
-    at = lambda s: START + timedelta(seconds=s)  # noqa: E731
+
+    def at(seconds: float) -> datetime:
+        return START + timedelta(seconds=seconds)
+
     state.choose(300.0, LIMIT, at(0), DEADBAND)
     state.choose(6000.0, LIMIT, at(400), DEADBAND)
     # Back under the limit after 4 s, so Export to Grid waits a minute.
@@ -208,7 +211,10 @@ def test_a_waiting_step_runs_its_neighbour_closer_to_zero() -> None:
 def test_with_every_neighbour_waiting_the_deficit_step_runs() -> None:
     mode = MODES[Feature.EXPORT_SOLAR_FIRST]
     state = ModeState(Feature.EXPORT_SOLAR_FIRST)
-    at = lambda s: START + timedelta(seconds=s)  # noqa: E731
+
+    def at(seconds: float) -> datetime:
+        return START + timedelta(seconds=seconds)
+
     state.choose(300.0, LIMIT, at(0), DEADBAND)
     state.choose(6000.0, LIMIT, at(10), DEADBAND)
     # Export to Grid lasted 10 s and the surplus step before it 10 s, so both wait.

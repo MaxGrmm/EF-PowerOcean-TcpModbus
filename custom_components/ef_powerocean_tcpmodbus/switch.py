@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .control import ControlManager
-from .coordinator import EcoflowCoordinator
+from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .models import SwitchDef, requires_modbus_control
 
@@ -74,12 +74,12 @@ SWITCHES: Final = (
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
+    hass: HomeAssistant,  # noqa: ARG001 - required by the platform API
+    entry: EcoflowConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up EcoFlow switches from a config entry."""
-    coordinator: EcoflowCoordinator = entry.runtime_data
+    coordinator = entry.runtime_data
 
     async_add_entities(
         EcoFlowSwitch(coordinator, entry, definition)
@@ -91,10 +91,8 @@ async def async_setup_entry(
     )
 
 
-class EcoFlowSwitch(EcoFlowBaseEntity, SwitchEntity):
+class EcoFlowSwitch(EcoFlowBaseEntity[SwitchDef], SwitchEntity):
     """A switch whose state and action come from its definition."""
-
-    _definition: SwitchDef
 
     def __init__(
         self,

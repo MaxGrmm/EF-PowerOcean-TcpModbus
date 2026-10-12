@@ -218,14 +218,14 @@ def test_full_is_judged_below_a_hundred_percent() -> None:
 
 @pytest.mark.parametrize(
     ("target", "measured"),
-    [
+    (
         # Issue #144, Ocean 2 Plus under a ~3.3 kW import ceiling: asked to charge,
         # the battery discharged; asked to discharge 1.5 kW, it gave 2.9 kW; asked
         # to hold, it discharged.
         (1500.0, -2847.0),
         (-1500.0, -2930.0),
         (const.HOLD_SETPOINT_W, -2000.0),
-    ],
+    ),
 )
 def test_going_the_other_way_or_past_the_target_is_limited_by_the_inverter(
     target: float, measured: float
@@ -249,12 +249,12 @@ def test_an_empty_battery_still_explains_a_discharge_it_cannot_give() -> None:
 
 @pytest.mark.parametrize(
     ("target", "measured", "soc"),
-    [
+    (
         # A hold met by a charge still winding down, under a raised reserve.
         (const.HOLD_SETPOINT_W, 2500.0, 40.0),
         # A hold met by a discharge on a full battery.
         (const.HOLD_SETPOINT_W, -2500.0, 100.0),
-    ],
+    ),
 )
 def test_a_full_or_empty_battery_only_explains_its_own_direction(
     target: float, measured: float, soc: float

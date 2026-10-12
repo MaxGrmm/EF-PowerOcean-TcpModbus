@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from homeassistant.util import dt as dt_util
 
 from custom_components.ef_powerocean_tcpmodbus import const
-from custom_components.ef_powerocean_tcpmodbus import (
-    energy_processor as energy_processor_module,
-)
 from custom_components.ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
 
 LIMITS = {
@@ -27,13 +26,13 @@ def processor() -> EnergyProcessor:
 
 def validate_totals(
     processor: EnergyProcessor,
-    current: dict[str, float | None],
-    previous_data: dict[str, float | None],
+    current: Mapping[str, float | None],
+    previous_data: Mapping[str, float | None],
     previous_time: datetime | None,
     now: datetime,
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, float]:
-    monkeypatch.setattr(energy_processor_module.dt, "now", lambda: now)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
     return processor.validate_totals(current, previous_data, previous_time)
 
 
@@ -47,7 +46,7 @@ def test_returns_current_data_for_first_observation(
         data,
         {},
         None,
-        datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc),
+        datetime(2026, 8, 7, 12, 0, tzinfo=UTC),
         monkeypatch,
     )
 
@@ -70,7 +69,7 @@ def test_handles_minimum_update_interval_boundary(
     elapsed: timedelta,
     expected: float,
 ) -> None:
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
 
     result = validate_totals(
         processor,
@@ -107,7 +106,7 @@ def test_validates_energy_changes_within_one_hour(
     current: float,
     expected: float,
 ) -> None:
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
 
     result = validate_totals(
         processor,
@@ -128,7 +127,7 @@ def test_accepts_single_register_step_regardless_of_scan_interval(
 ) -> None:
     # A single 0.01 kWh tick must never be flagged as unrealistic, even at a 2 s
     # interval where it implies a high instantaneous power.
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
 
     result = validate_totals(
         processor,
@@ -158,7 +157,7 @@ def test_holds_over_budget_increase_scaled_to_interval(
     expected: float,
 ) -> None:
     # grid budget at 15 kW: ~0.008 kWh over 2 s, ~0.125 kWh over 30 s.
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
 
     result = validate_totals(
         processor,
@@ -176,7 +175,7 @@ def test_holds_implausible_energy_read_without_discarding_frame(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A held energy read must not discard the rest of the frame.
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
 
     result = validate_totals(
         processor,
@@ -195,7 +194,7 @@ def test_holds_decreasing_total_regardless_of_repetition(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Unlike the old debounce, repetition must never grant a decrease amnesty.
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
     previous_time = now - timedelta(seconds=30)
     previous_data = {"grid_import_total": 10.0}
 
@@ -223,7 +222,7 @@ def test_accepts_true_value_after_hours_of_bogus_zero(
     value must be accepted on recovery because the rise budget accrues from
     the last genuine acceptance.
     """
-    start = datetime(2026, 8, 7, 9, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 8, 7, 9, 0, tzinfo=UTC)
     previous_data = {"bat_discharged_total": 1000.0}
     processor.accepted_at = {"bat_discharged_total": start}
 
@@ -273,11 +272,11 @@ def test_accepts_true_value_after_hours_of_bogus_zero(
 def test_fills_missing_readings_from_last_validated_value(
     processor: EnergyProcessor,
     monkeypatch: pytest.MonkeyPatch,
-    current_data: dict[str, float | None],
-    previous_data: dict[str, float | None],
-    expected: dict[str, float | None],
+    current_data: Mapping[str, float | None],
+    previous_data: Mapping[str, float | None],
+    expected: Mapping[str, float | None],
 ) -> None:
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
 
     result = validate_totals(
         processor,
@@ -307,7 +306,7 @@ def test_scales_rise_budget_with_time_since_last_acceptance(
     current: float,
     expected: float,
 ) -> None:
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
 
     result = validate_totals(
         processor,
@@ -323,18 +322,18 @@ def test_scales_rise_budget_with_time_since_last_acceptance(
 
 def derive_daily(
     processor: EnergyProcessor,
-    data: dict[str, float | None],
+    data: Mapping[str, float | None],
     now: datetime,
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[dict[str, float], bool]:
-    monkeypatch.setattr(energy_processor_module.dt, "now", lambda: now)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
     return processor.derive_daily(data)
 
 
 def test_derive_daily_initial_observation_starts_at_zero(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
     # Device registers like grid_import_today are ignored; derived daily starts at 0.
     result, is_reset = derive_daily(
         processor,
@@ -351,7 +350,7 @@ def test_derive_daily_initial_observation_starts_at_zero(
 def test_derive_daily_initial_observation_uses_raw_when_present(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
     # A restart without a snapshot must resume from the device's own daily
     # register rather than restarting the count at zero.
     result, is_reset = derive_daily(
@@ -379,7 +378,7 @@ def test_derive_daily_rejects_invalid_initial_raw_value(
     result, _ = derive_daily(
         processor,
         {"grid_import_total": 1000.0, "grid_import_today_raw": raw_daily},
-        datetime(2026, 8, 7, 0, 1, tzinfo=timezone.utc),
+        datetime(2026, 8, 7, 0, 1, tzinfo=UTC),
         monkeypatch,
     )
 
@@ -393,7 +392,7 @@ def test_derive_daily_omits_daily_value_when_total_is_missing(
     result, _ = derive_daily(
         processor,
         {"grid_import_today": 5.0, "grid_import_today_raw": 5.0},
-        datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc),
+        datetime(2026, 8, 7, 12, 0, tzinfo=UTC),
         monkeypatch,
     )
 
@@ -404,8 +403,8 @@ def test_derive_daily_omits_daily_value_when_total_is_missing(
 def test_derive_daily_accrues_on_same_date(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    t1 = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
-    t2 = datetime(2026, 8, 7, 18, 0, tzinfo=timezone.utc)
+    t1 = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
+    t2 = datetime(2026, 8, 7, 18, 0, tzinfo=UTC)
 
     derive_daily(processor, {"grid_import_total": 1000.0}, t1, monkeypatch)
     result, is_reset = derive_daily(
@@ -419,8 +418,8 @@ def test_derive_daily_accrues_on_same_date(
 def test_derive_daily_rolls_on_local_midnight_date_crossing(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    t1 = datetime(2026, 8, 7, 23, 59, 0, tzinfo=timezone.utc)
-    t2 = datetime(2026, 8, 8, 0, 0, 10, tzinfo=timezone.utc)
+    t1 = datetime(2026, 8, 7, 23, 59, 0, tzinfo=UTC)
+    t2 = datetime(2026, 8, 8, 0, 0, 10, tzinfo=UTC)
 
     derive_daily(processor, {"grid_import_total": 1000.0}, t1, monkeypatch)
     result, is_reset = derive_daily(
@@ -438,13 +437,13 @@ def test_derive_daily_preserves_energy_before_first_poll_after_midnight(
     derive_daily(
         processor,
         {"grid_import_total": 1000.0},
-        datetime(2026, 8, 7, 23, 59, tzinfo=timezone.utc),
+        datetime(2026, 8, 7, 23, 59, tzinfo=UTC),
         monkeypatch,
     )
     result, is_reset = derive_daily(
         processor,
         {"grid_import_total": 1000.01, "grid_import_today_raw": 0.01},
-        datetime(2026, 8, 8, 0, 0, 10, tzinfo=timezone.utc),
+        datetime(2026, 8, 8, 0, 0, 10, tzinfo=UTC),
         monkeypatch,
     )
 
@@ -459,13 +458,13 @@ def test_derive_daily_defers_rollover_for_missing_total(
     derive_daily(
         processor,
         {"grid_import_total": 1000.0},
-        datetime(2026, 8, 7, 23, 59, tzinfo=timezone.utc),
+        datetime(2026, 8, 7, 23, 59, tzinfo=UTC),
         monkeypatch,
     )
     missing_result, is_reset = derive_daily(
         processor,
         {"grid_import_today": 0.01, "grid_import_today_raw": 0.01},
-        datetime(2026, 8, 8, 0, 0, 10, tzinfo=timezone.utc),
+        datetime(2026, 8, 8, 0, 0, 10, tzinfo=UTC),
         monkeypatch,
     )
 
@@ -476,7 +475,7 @@ def test_derive_daily_defers_rollover_for_missing_total(
     recovered_result, is_reset = derive_daily(
         processor,
         {"grid_import_total": 1000.02, "grid_import_today_raw": 0.02},
-        datetime(2026, 8, 8, 0, 1, tzinfo=timezone.utc),
+        datetime(2026, 8, 8, 0, 1, tzinfo=UTC),
         monkeypatch,
     )
 

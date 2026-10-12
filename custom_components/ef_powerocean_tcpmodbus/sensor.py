@@ -1,12 +1,17 @@
-"""Sensor entities for EcoFlow PowerOcean Plus."""
+"""Sensor entities for EF-PowerOcean-TcpModbus."""
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Final
 
-from homeassistant.components.sensor import RestoreSensor, SensorEntity
+from homeassistant.components.sensor import (
+    RestoreSensor,
+    SensorDeviceClass,
+    SensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     UnitOfElectricCurrent,
@@ -18,6 +23,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import StateType
 
 from .const import (
     BATTERY_RESERVE_REGISTER_KEY,
@@ -31,9 +37,11 @@ from .const import (
     UNIT_OF_RATIO,
     WRITABLE_NUMBERS_MAP,
 )
-from .coordinator import EcoflowCoordinator
+from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .models import EnergySensorDef, SensorDef
+
+type SensorValue = StateType | date | datetime | Decimal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,11 +58,11 @@ VALUE_PRECISION: Final = {
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
+    hass: HomeAssistant,  # noqa: ARG001 - required by the platform API
+    entry: EcoflowConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: EcoflowCoordinator = entry.runtime_data
+    coordinator = entry.runtime_data
     entities: list[EcoflowSensor] = []
 
     empty_battery_slots = set(
@@ -81,11 +89,13 @@ async def async_setup_entry(
             continue
         entities.append(EcoflowSensor(coordinator, entry, sensor))
 
-    for sensor in ENERGY_SENSOR_MAP:
-        entities.append(EcoflowSensor(coordinator, entry, sensor))
-
-    for sensor in DAILY_ENERGY_SENSORS_DEVICE_RAW:
-        entities.append(EcoflowSensor(coordinator, entry, sensor))
+    energy_sensors: list[SensorDef | EnergySensorDef] = [
+        *ENERGY_SENSOR_MAP,
+        *DAILY_ENERGY_SENSORS_DEVICE_RAW,
+    ]
+    entities.extend(
+        EcoflowSensor(coordinator, entry, sensor) for sensor in energy_sensors
+    )
 
     async_add_entities(
         [
@@ -96,7 +106,7 @@ async def async_setup_entry(
     )
 
 
-class EcoFlowControlStatusSensor(EcoFlowBaseEntity, SensorEntity):
+class EcoFlowControlStatusSensor(EcoFlowBaseEntity[SensorDef], SensorEntity):
     """Whether the selected mode is achieving anything, and why not if it isn't.
 
     The select says what was asked for; this says what the inverter is managing to
@@ -135,7 +145,7 @@ class EcoFlowControlStatusSensor(EcoFlowBaseEntity, SensorEntity):
         }
 
 
-class EcoFlowControlTestSensor(EcoFlowBaseEntity, SensorEntity):
+class EcoFlowControlTestSensor(EcoFlowBaseEntity[SensorDef], SensorEntity):
     """Follows the control test the run_control_test action starts."""
 
     def __init__(self, coordinator: EcoflowCoordinator, entry: ConfigEntry) -> None:
@@ -159,7 +169,7 @@ class EcoFlowControlTestSensor(EcoFlowBaseEntity, SensorEntity):
         return self.coordinator.control_test.attributes
 
 
-class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
+class EcoflowSensor(EcoFlowBaseEntity[SensorDef | EnergySensorDef], RestoreSensor):
     def __init__(
         self,
         coordinator: EcoflowCoordinator,
@@ -170,15 +180,14 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
         self._attr_native_unit_of_measurement = self._definition.unit
         self._attr_device_class = self._definition.device_class
         self._attr_state_class = self._definition.state_class
-        if options := getattr(self._definition, "options", None):
-            self._attr_options = list(options)
-        self._restored_value: datetime | float | int | str | None = None
-        self._last_written_value: datetime | float | int | str | None = None
+        if isinstance(definition, SensorDef) and definition.options:
+            self._attr_options = list(definition.options)
+        self._last_written_value: SensorValue = None
         self._last_written_attributes: dict[str, Any] | None = None
 
-        if self._definition.unit in VALUE_PRECISION:
+        if definition.unit is not None:
             self._attr_suggested_display_precision = VALUE_PRECISION.get(
-                self._definition.unit
+                definition.unit
             )
 
         self._attr_entity_category = self._definition.entity_category
@@ -200,21 +209,23 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
             self.async_write_ha_state()
 
     async def async_added_to_hass(self) -> None:
-        """Restore last known value when sensor is added."""
         await super().async_added_to_hass()
         if (
             last_value := await self.async_get_last_sensor_data()
         ) and last_value.native_value is not None:
             _LOGGER.debug(
-                f"Restore Sensor '{self._definition.key}' with value: {last_value.native_value}"
+                "Restore sensor %s with value %s",
+                self._definition.key,
+                last_value.native_value,
             )
-            self._restored_value = last_value.native_value
-            self._last_written_value = self._restored_value
+            self._last_written_value = last_value.native_value
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Publish the data keys the definition names, such as a raw word."""
-        keys = getattr(self._definition, "attribute_keys", ())
+        if not isinstance(self._definition, SensorDef):
+            return None
+        keys = self._definition.attribute_keys
         if not keys:
             return None
         data = self.coordinator.data or {}
@@ -228,25 +239,20 @@ class EcoflowSensor(EcoFlowBaseEntity, RestoreSensor):
         return super().available
 
     @property
-    def native_value(self) -> datetime | float | int | str | None:
-        """Return the sensor value from coordinator, falling back to last value"""
+    def native_value(self) -> SensorValue:
+        """Return the value from the coordinator, else the last one shown."""
         if self._definition.key == "coordinator_status":
             return self.coordinator.status
-        if self.coordinator.data is not None:
-            value = self.coordinator.data.get(self._definition.key, None)
-            if value is not None:
-                if isinstance(value, datetime):
-                    return value
-                if isinstance(value, str):
-                    return value
-                if self._definition.device_class == "enum":
-                    return str(value)
-                if precision := VALUE_PRECISION.get(self._definition.unit, None):
-                    return (
-                        round(value, precision)
-                        if precision > 0
-                        else int(round(value, 0))
-                    )
-                else:
-                    return int(value)
-        return self._last_written_value
+        value = (self.coordinator.data or {}).get(self._definition.key)
+        if value is None:
+            return self._last_written_value
+        if isinstance(value, datetime | str):
+            return value
+        if self._definition.device_class is SensorDeviceClass.ENUM:
+            return str(value)
+        number = float(value)
+        unit = self._definition.unit
+        precision = VALUE_PRECISION.get(unit) if unit is not None else None
+        if precision is None:
+            return int(number)
+        return round(number, precision) if precision else round(number)
