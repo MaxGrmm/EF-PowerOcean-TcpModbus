@@ -482,3 +482,21 @@ def test_derive_daily_defers_rollover_for_missing_total(
     assert not is_reset
     assert recovered_result["grid_import_today"] == 0.02
     assert processor.daily_snapshots["grid_import_today"] == 1000.0
+
+
+def test_a_damaged_saved_timestamp_is_treated_as_never_saved(
+    processor: EnergyProcessor,
+) -> None:
+    accepted = datetime(2026, 8, 28, 12, tzinfo=UTC)
+    processor.accepted_at = {"grid_import_total": accepted}
+    processor.last_rollover = accepted
+    saved = processor.dump_state()
+    saved["energy_accepted_at"]["solar_total"] = "not a time"
+    saved["energy_accepted_at"]["battery_charged_total"] = 12345
+    saved["last_daily_rollover"] = "yesterday"
+
+    restored = EnergyProcessor(LIMITS)
+    restored.load_state(saved)
+
+    assert restored.accepted_at == {"grid_import_total": accepted}
+    assert restored.last_rollover is None
