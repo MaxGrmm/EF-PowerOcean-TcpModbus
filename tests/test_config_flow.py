@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,6 +12,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import config_flow, const
+from tests.fake_inverter import HOST, FakeInverter
 
 SERIAL = "HJ31ZAS2TEST0001"
 
@@ -84,3 +86,100 @@ async def test_an_inverter_that_moved_gets_its_new_address(hass: HomeAssistant) 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
     assert entry.data[const.CONF_HOST] == "192.168.1.20"
+
+
+async def _change_options(
+    hass: HomeAssistant, entry: MockConfigEntry, host: str, port: int = 502
+):
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], {const.CONF_HOST: host, const.CONF_PORT: port}
+    )
+
+
+def _configured_entry(hass: HomeAssistant) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        unique_id=SERIAL,
+        data={const.CONF_HOST: "192.168.1.10", const.CONF_PORT: 502},
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_options_keep_the_address_without_testing_it_again(
+    hass: HomeAssistant, device_settings
+) -> None:
+    entry = _configured_entry(hass)
+
+    result = await _change_options(hass, entry, "192.168.1.10")
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {const.CONF_SCAN_INTERVAL: 10}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    device_settings.assert_not_awaited()
+    assert entry.data[const.CONF_SCAN_INTERVAL] == 10
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_options_refuse_an_address_that_does_not_answer(
+    hass: HomeAssistant, device_settings
+) -> None:
+    entry = _configured_entry(hass)
+    device_settings.return_value = None
+
+    result = await _change_options(hass, entry, "192.168.1.99")
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect"}
+    assert entry.data[const.CONF_HOST] == "192.168.1.10"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
+async def test_options_move_the_entry_to_an_address_that_answers(
+    hass: HomeAssistant,
+) -> None:
+    entry = _configured_entry(hass)
+
+    result = await _change_options(hass, entry, "192.168.1.99", 5020)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.data[const.CONF_HOST] == "192.168.1.99"
+    assert entry.data[const.CONF_PORT] == 5020
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_the_inverter_fills_in_its_model_and_serial(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    """Read over Modbus TCP from the fake inverter, with nothing patched."""
+    inverter.serve_serial(SERIAL, const.SERIAL_NUMBER.address)
+    inverter.registers[const.PRODUCT_NUMBER.address] = 3  # PowerOcean Plus
+    inverter.registers[const.PRODUCT_CATEGORY.address] = 1  # three-phase
+
+    result = await _start(hass, HOST, inverter.port)
+    with patch(
+        "custom_components.ef_powerocean_tcpmodbus.async_setup_entry",
+        return_value=True,
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == SERIAL
+    assert result["data"][const.CONF_INVERTER_MODEL] == "powerocean_plus"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
+async def test_an_address_nothing_answers_on_is_reported(hass: HomeAssistant) -> None:
+    with socket.socket() as probe:
+        probe.bind((HOST, 0))
+        unused_port = probe.getsockname()[1]
+
+    result = await _start(hass, HOST, unused_port)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect"}

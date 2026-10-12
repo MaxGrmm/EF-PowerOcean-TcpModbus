@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
+
+from tests.fake_inverter import HOST, FakeInverter
 
 
 @pytest.fixture(autouse=True)
@@ -20,3 +22,16 @@ def reset_shared_modbus(monkeypatch: pytest.MonkeyPatch) -> None:
     from custom_components.ef_powerocean_tcpmodbus import modbus
 
     monkeypatch.setattr(modbus, "_shared", None)
+
+
+@pytest.fixture
+async def inverter(
+    socket_enabled: None,  # noqa: ARG001 - lets the fake inverter listen
+) -> AsyncIterator[FakeInverter]:
+    """Serve a fake inverter on localhost."""
+    fake = FakeInverter()
+    server = await asyncio.start_server(fake.serve, HOST, 0)
+    fake.port = server.sockets[0].getsockname()[1]
+    yield fake
+    server.close()
+    await server.wait_closed()
