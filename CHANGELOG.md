@@ -6,6 +6,10 @@
 
 - Grid Connection Code diagnostic sensor, with the grid standard it likely stands for as an unverified attribute.
 
+### Changed
+
+- An optional register is only read together with required ones when that read already covers it, and one that makes polls fail three times in a row is no longer read, so an unconfirmed register cannot take the poll down.
+
 ## [2.9.2] - 2026-10-21
 
 ### Fixed

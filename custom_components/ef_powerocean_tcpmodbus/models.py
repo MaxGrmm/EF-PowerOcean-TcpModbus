@@ -717,16 +717,49 @@ def plan_blocks(
     A new read starts when the next register is too far away to be worth reading
     through, when the block would outgrow a single Modbus response, or when reading
     through would take in an address in avoid. With isolate_optional, optional
-    registers are never read together with required ones.
+    registers are never read together with required ones. Without it, an optional
+    register only joins a required read that already covers its address, so mapping
+    it never widens a read the poll depends on: one outside is read on its own,
+    where a refusal drops it instead of failing the poll.
     """
     registers = tuple(registers)
+    required = [register for register in registers if not register.optional]
+    optional = [register for register in registers if register.optional]
+    if not optional or not required:
+        return _group(registers, avoid=avoid, max_gap=max_gap)
+    required_blocks = _group(required, avoid=avoid, max_gap=max_gap)
     if isolate_optional:
-        required = [register for register in registers if not register.optional]
-        optional = [register for register in registers if register.optional]
-        return plan_blocks(required, avoid=avoid, max_gap=max_gap) + plan_blocks(
-            optional, avoid=avoid, max_gap=max_gap
-        )
+        return required_blocks + _group(optional, avoid=avoid, max_gap=max_gap)
 
+    joined = [list(block.registers) for block in required_blocks]
+    apart: list[RegisterDef] = []
+    for register in optional:
+        home = next(
+            (
+                index
+                for index, block in enumerate(required_blocks)
+                if block.start <= register.address
+                and register.end <= block.start + block.count
+            ),
+            None,
+        )
+        if home is None:
+            apart.append(register)
+        else:
+            joined[home].append(register)
+    return tuple(
+        RegisterBlock(tuple(sorted(block, key=lambda register: register.address)))
+        for block in joined
+    ) + _group(apart, avoid=avoid, max_gap=max_gap)
+
+
+def _group(
+    registers: Iterable[RegisterDef],
+    *,
+    avoid: Collection[int] = (),
+    max_gap: int = MAX_REGISTER_GAP,
+) -> tuple[RegisterBlock, ...]:
+    """Group registers into reads by distance alone."""
     blocks: list[RegisterBlock] = []
     current: list[RegisterDef] = []
 

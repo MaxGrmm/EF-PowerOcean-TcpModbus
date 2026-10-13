@@ -209,6 +209,10 @@ GRID_CODE_STANDARDS: Final[dict[int, str]] = {
     1001: "North America",
 }
 
+# An optional read that fails this many polls in a row, while the required reads
+# before it succeed, is dropped like one the device refuses.
+OPTIONAL_STALLS_TO_DROP: Final = 3
+
 # Every polled register, by absolute Modbus address. Order is for readability only;
 # the reads are worked out by plan_blocks().
 MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
