@@ -328,12 +328,18 @@ that need the EcoFlow app open, or that change device settings, are left to
 
 ### AC Grid
 
-| Sensor                | Unit | Description          |
-| --------------------- | ---- | -------------------- |
-| Grid Voltage L1/L2/L3 | V    | Per-phase voltage    |
-| Grid Current L1/L2/L3 | A    | Per-phase current    |
-| Grid Frequency        | Hz   | Grid frequency       |
-| Inverter Temperature  | °C   | Inverter temperature |
+| Sensor                | Unit | Description                                          |
+| --------------------- | ---- | ---------------------------------------------------- |
+| Grid Voltage L1/L2/L3 | V    | Per-phase voltage                                    |
+| Grid Current L1/L2/L3 | A    | Per-phase current                                    |
+| Grid Frequency        | Hz   | Grid frequency                                       |
+| Inverter Temperature  | °C   | Inverter temperature                                 |
+| Grid Connection Code  | –    | Grid standard code set by the installer (diagnostic) |
+
+The _Grid Connection Code_ shows the grid standard in its `grid_code_standard`
+attribute, such as `UK G99 (unverified)`. EcoFlow doesn't document the codes for these
+inverters; the names come from its cloud protocol for another product and may be wrong,
+so check the setting with your installer before acting on it.
 
 ### Status
 

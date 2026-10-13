@@ -161,9 +161,51 @@ BATTERY_SOC_KEYS: Final = tuple(
     for battery_number in range(1, MAX_BATTERY_COUNT + 1)
 )
 
+# The grid standard behind each Grid Connection Code (40513), which the protocol
+# only calls "national grid standard codes". Taken from EcoFlow's cloud protocol for
+# the Stream AC Pro, as decoded by ioBroker.ecoflow-mqtt, and unverified for this
+# product line, so it is shown as a guess next to the code rather than instead of it.
+GRID_CODE_STANDARDS: Final[dict[int, str]] = {
+    1: "Austria",
+    2: "Switzerland",
+    3: "Poland",
+    4: "Netherlands",
+    5: "Germany (VDE 4105)",
+    6: "IEEE 1547",
+    7: "User defined",
+    8: "Norway",
+    9: "Czech Republic",
+    10: "Denmark",
+    11: "Ireland",
+    12: "Sweden",
+    13: "Latvia",
+    14: "Greece A",
+    15: "Greece B",
+    16: "Portugal",
+    17: "Romania",
+    18: "Lithuania",
+    19: "Hungary",
+    20: "Italy",
+    21: "UK G98",
+    22: "UK G99",
+    23: "Spain (NTS 631)",
+    24: "Spain (UNE 217001)",
+    25: "Spain (UNE 217002)",
+    26: "France mainland (UTE)",
+    27: "France island 50 Hz (UTE)",
+    28: "France island 60 Hz (UTE)",
+    29: "Belgium",
+    30: "Ukraine",
+    31: "Slovenia",
+    32: "Bulgaria",
+    33: "EU general",
+    1001: "North America",
+}
+
 # Every polled register, by absolute Modbus address. Order is for readability only;
 # the reads are worked out by plan_blocks().
 MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
+    RegisterDef("grid_connection_code", 40513, RegisterType.UINT16, optional=True),
     RegisterDef("house_power", 40519),
     RegisterDef("grid_power", 40521),
     RegisterDef("solar_power", 40523),
@@ -505,6 +547,12 @@ SENSOR_MAP: list[SensorDef] = [
         icon="mdi:transmission-tower-export",
         # Accepts and stores any value but acts on none of them (40573 probe).
         unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
+    ),
+    SensorDef(
+        key="grid_connection_code",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:transmission-tower",
+        attribute_keys=("grid_code_standard",),
     ),
     SensorDef(
         key="breaker_capacity",
