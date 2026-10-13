@@ -390,3 +390,27 @@ def test_the_operating_status_is_one_enumeration_not_three_flags(
     assert calculated["operating_mode"] == mode
     assert calculated["self_use_mode_ena"] is self_use
     assert calculated["intelligent_mode_ena"] is intelligent
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    (
+        (21.0, "UK G98 (unverified)"),
+        (22.0, "UK G99 (unverified)"),
+        (5.0, "Germany (VDE 4105) (unverified)"),
+        # No code set, or one outside the table, is not guessed at.
+        (0.0, None),
+        (999.0, None),
+        (None, None),
+    ),
+)
+def test_the_grid_code_is_named_but_marked_unverified(
+    code: float | None, expected: str | None
+) -> None:
+    calculated = calculate_derived_values(
+        TelemetryData(grid_connection_code=code),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+
+    assert calculated["grid_code_standard"] == expected

@@ -504,6 +504,9 @@
           "aborted": "Abgebrochen",
           "failed": "Fehlgeschlagen"
         }
+      },
+      "grid_connection_code": {
+        "name": "Netzanschlussnorm-Code"
       }
     },
     "binary_sensor": {

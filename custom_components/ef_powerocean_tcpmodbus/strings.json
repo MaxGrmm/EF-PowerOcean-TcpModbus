@@ -501,6 +501,9 @@
           "aborted": "Aborted",
           "failed": "Failed"
         }
+      },
+      "grid_connection_code": {
+        "name": "Grid Connection Code"
       }
     },
     "binary_sensor": {
