@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Grid Connection Code diagnostic sensor, with the grid standard it likely stands for as an unverified attribute.
+
 ## [2.9.2] - 2026-10-21
 
 ### Fixed
