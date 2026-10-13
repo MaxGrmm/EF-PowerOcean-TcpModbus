@@ -16,7 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const
+from custom_components.ef_powerocean_tcpmodbus import const, models
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
 from custom_components.ef_powerocean_tcpmodbus.energy_processor import ENERGY_KEYS
@@ -196,3 +196,41 @@ def test_an_entity_asks_for_the_keys_it_shows(definition, keys) -> None:
         definition,
     )
     assert entity.coordinator_context == frozenset(keys)
+
+
+def test_an_optional_register_never_widens_a_required_read() -> None:
+    """Outside a required read it is read on its own, where a refusal drops it."""
+    required = models.RegisterDef("required", 40519, models.RegisterType.UINT16)
+    inside = models.RegisterDef(
+        "inside", 40520, models.RegisterType.UINT16, optional=True
+    )
+    before = models.RegisterDef(
+        "before", 40513, models.RegisterType.UINT16, optional=True
+    )
+    tail = models.RegisterDef("tail", 40530, models.RegisterType.UINT16)
+
+    blocks = models.plan_blocks((before, required, inside, tail))
+
+    assert [(block.start, block.count, block.optional) for block in blocks] == [
+        (40519, 12, False),
+        (40513, 1, True),
+    ]
+    assert inside in blocks[0].registers
+
+
+def test_the_grid_code_leaves_every_existing_read_unchanged() -> None:
+    """Adding it only adds its own read, on every model."""
+
+    def plan(**kwargs) -> list[tuple[int, int, bool]]:
+        return [
+            (block.start, block.count, block.optional)
+            for block in const.register_blocks_for(model, **kwargs)
+        ]
+
+    for model in models.InverterModel:
+        with_code = plan()
+        without = plan(exclude=("grid_connection_code",))
+        assert [block for block in with_code if block not in without] == [
+            (40513, 1, True)
+        ], model
+        assert [block for block in without if block not in with_code] == [], model

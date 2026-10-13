@@ -10,6 +10,7 @@
 
 ### Changed
 
+- An optional register is only read together with required ones when that read already covers it, and one that makes polls fail three times in a row is no longer read, so an unconfirmed register cannot take the poll down.
 - Modbus requests time out after 3 s instead of 20 s, and a whole poll after 12 s.
 - Processing errors make the entities unavailable instead of publishing an empty update.
 - CI type-checks the integration with mypy in strict mode, lints with a wider set of ruff rules, and pins every GitHub Action to a commit.

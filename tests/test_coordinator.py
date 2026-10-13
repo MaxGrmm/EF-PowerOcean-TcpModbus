@@ -62,6 +62,7 @@ def coordinator():
     instance._store = None
     instance.identity = models.DeviceIdentity()
     instance._consecutive_modbus_disabled_reads = 0
+    instance._optional_stalls = {}
     instance._ena_calc_solar_power = False
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
     instance._register_blocks = const.register_blocks_for(instance.inverter_model)
@@ -1180,18 +1181,16 @@ def test_read_plan_is_not_split_more_than_necessary(
     inverter_model: models.InverterModel,
 ) -> None:
     """Neighbouring blocks must be unmergeable, so no poll wastes a round trip."""
-    blocks = const.register_blocks_for(inverter_model)
+    blocks = sorted(const.register_blocks_for(inverter_model), key=lambda b: b.start)
     for block, following in itertools.pairwise(blocks):
         end = block.start + block.count
         gap = following.start - end
         merged = following.start + following.count - block.start
 
-        # A model that rejects reads over unimplemented addresses keeps optional
-        # registers apart from required ones on purpose.
-        isolated = (
-            inverter_model.traits.rejects_unimplemented
-            and block.optional != following.optional
-        )
+        # Optional registers are kept apart from required ones on purpose: on a
+        # model that rejects reads over unimplemented addresses always, and on the
+        # others where joining would widen a required read.
+        isolated = block.optional != following.optional
         assert (
             gap > inverter_model.traits.max_register_gap
             or merged > models.MAX_REGISTERS_PER_READ
@@ -1369,13 +1368,20 @@ def test_optional_registers_share_no_read_where_the_model_rejects_them(
 
 
 def test_the_powerocean_reads_optional_registers_without_extra_requests() -> None:
-    """They sit inside the live block, which reads through unmapped addresses."""
+    """They sit inside the live block, which reads through unmapped addresses.
+
+    The Grid Connection Code lies before it, so it gets a read of its own rather
+    than widening the one the poll depends on.
+    """
     optional_keys = {
-        register.key for register in const.MODBUS_REGISTERS if register.optional
+        register.key
+        for register in const.MODBUS_REGISTERS
+        if register.optional and register.key != "grid_connection_code"
     }
+    optional_keys.add("grid_connection_code")
     model = models.InverterModel.POWEROCEAN_PLUS
 
-    assert len(const.register_blocks_for(model)) == len(
+    assert len(const.register_blocks_for(model)) == 1 + len(
         const.register_blocks_for(model, exclude=optional_keys)
     )
 
@@ -1511,3 +1517,59 @@ def test_a_failed_poll_asks_for_the_serial_again(coordinator) -> None:
 
     assert not coordinator.identity_verified
     coordinator._modbus_client.block_writes.assert_called()
+
+
+def test_an_optional_read_that_stalls_the_poll_is_dropped_after_a_few(
+    coordinator,
+) -> None:
+    """A model that times out on an address, rather than refusing it, recovers."""
+    _optional_block_coordinator(coordinator)
+    stalls = const.OPTIONAL_STALLS_TO_DROP
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=[[55], TimeoutError()] * stalls
+    )
+
+    for _ in range(stalls):
+        # A failed poll has the serial number checked again before the next.
+        coordinator._identity_verified = True
+        assert asyncio.run(coordinator.async_get_raw_data()) is None
+    assert coordinator.unsupported_registers == {
+        "feed_in_power_max_percent",
+        "battery_voltage_probe",
+    }
+
+    polled = {
+        register.key
+        for block in coordinator._register_blocks
+        for register in block.registers
+    }
+    assert not polled & coordinator.unsupported_registers
+    assert "battery_soc" in polled
+
+
+def test_a_lost_link_on_a_required_read_does_not_count_against_optional_ones(
+    coordinator,
+) -> None:
+    """The optional block is never reached, so a dead link drops nothing."""
+    _optional_block_coordinator(coordinator)
+    coordinator._modbus_client.async_read = AsyncMock(side_effect=TimeoutError())
+
+    for _ in range(const.OPTIONAL_STALLS_TO_DROP + 1):
+        coordinator._identity_verified = True
+        asyncio.run(coordinator.async_get_raw_data())
+
+    assert coordinator.unsupported_registers == frozenset()
+
+
+def test_an_optional_read_that_recovers_starts_counting_again(coordinator) -> None:
+    _optional_block_coordinator(coordinator)
+    reads = [[55], TimeoutError()] * (const.OPTIONAL_STALLS_TO_DROP - 1)
+    reads += [[55], [1, 2]]
+    reads += [[55], TimeoutError()] * (const.OPTIONAL_STALLS_TO_DROP - 1)
+    coordinator._modbus_client.async_read = AsyncMock(side_effect=reads)
+
+    for _ in range(2 * const.OPTIONAL_STALLS_TO_DROP - 1):
+        coordinator._identity_verified = True
+        asyncio.run(coordinator.async_get_raw_data())
+
+    assert coordinator.unsupported_registers == frozenset()
