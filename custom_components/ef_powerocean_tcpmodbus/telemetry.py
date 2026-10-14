@@ -7,7 +7,6 @@ import struct
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields
 
-from .const import GRID_CODE_STANDARDS
 from .models import (
     REGISTER_SIZES,
     UNKNOWN_STATE,
@@ -116,7 +115,6 @@ class TelemetryData:
     fault_codes: tuple[float | None, ...] = ()
     feed_in_power_max_setting: float | None = None
     feed_in_power_max_effective: float | None = None
-    grid_connection_code: float | None = None
 
     # Read for the Modbus-disabled check, which needs both.
     inverter_rated_power: float | None = None
@@ -274,13 +272,6 @@ def calculate_derived_values(
         else (data.feed_in_power_max_setting, data.feed_in_power_max_effective)
     )
     calculated["feed_in_power_max"] = preferred if preferred is not None else fallback
-
-    # A guess from another product's protocol, so it says so in the value itself.
-    code = data.grid_connection_code
-    standard = None if code is None else GRID_CODE_STANDARDS.get(int(code))
-    calculated["grid_code_standard"] = (
-        f"{standard} (unverified)" if standard is not None else None
-    )
 
     battery_soc = data.battery_soc
     # The device reports its pack capacity in Wh.
