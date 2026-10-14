@@ -95,6 +95,21 @@ async def test_diagnostics_leave_out_the_address_and_most_of_the_serial(
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_diagnostics_show_whether_an_energy_total_is_held(
+    hass: HomeAssistant, set_up: SetUp
+) -> None:
+    entry = await set_up()
+
+    energy = (await async_get_config_entry_diagnostics(hass, entry))["energy"]
+
+    assert set(energy["counters"]) == set(const.DEVICE_ENERGY_KEYS)
+    assert "solar_today_raw" in energy["device_daily"]
+    assert energy["last_checked_time"] is not None
+    assert "solar_total" in energy["energy_accepted_at"]
+    assert energy["energy_resync_pending"] == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_battery_controls_are_unavailable_while_modbus_control_is_off(
     hass: HomeAssistant, set_up: SetUp
 ) -> None:

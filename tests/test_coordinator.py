@@ -1511,3 +1511,46 @@ def test_a_failed_poll_asks_for_the_serial_again(coordinator) -> None:
 
     assert not coordinator.identity_verified
     coordinator._modbus_client.block_writes.assert_called()
+
+
+def test_a_counter_from_a_pre_2_4_3_state_file_is_not_stuck_after_upgrade(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #169: a state file from before 2.4.3 has no energy_accepted_at.
+
+    The first poll after the upgrade comes back without the energy block, so the
+    counters are filled from the saved baseline. Every poll after must still be
+    able to accept the device's counters again.
+    """
+    saved = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    coordinator._store = SimpleNamespace(
+        async_load=AsyncMock(
+            return_value={
+                "last_checked_data": {
+                    "solar_total": 19903.49,
+                    "grid_export_total": 1548.73,
+                },
+                "last_checked_time": saved.isoformat(),
+            }
+        )
+    )
+    asyncio.run(coordinator.async_load_persisted_state())
+    coordinator._store = None
+
+    now = saved + timedelta(minutes=10)
+    result = run_update(coordinator, {"battery_soc": 50.0}, now, monkeypatch)
+    assert result["solar_total"] == 19903.49
+
+    solar, export = 19904.10, 1549.00
+    for _ in range(30):
+        now += timedelta(seconds=5)
+        solar, export = round(solar + 0.01, 2), round(export + 0.01, 2)
+        result = run_update(
+            coordinator,
+            {"solar_total": solar, "grid_export_total": export},
+            now,
+            monkeypatch,
+        )
+
+    assert result["solar_total"] == solar
+    assert result["grid_export_total"] == export

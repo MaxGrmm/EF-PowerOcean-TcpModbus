@@ -500,3 +500,219 @@ def test_a_damaged_saved_timestamp_is_treated_as_never_saved(
 
     assert restored.accepted_at == {"grid_import_total": accepted}
     assert restored.last_rollover is None
+
+
+# ── Counters restored without an acceptance time (issue #169) ─────────────────
+#
+# A state file written before 2.4.3 holds last_checked_data but no
+# energy_accepted_at. A counter that is held on its first poll after loading such
+# a file must still recover, and a counter that already has an acceptance time
+# must behave exactly as before.
+
+POLL = timedelta(seconds=5)
+NO_SOLAR = {"solar_total": 0.0}
+
+
+def poll_sequence(
+    processor: EnergyProcessor,
+    reads: list[float | None],
+    baseline: Mapping[str, float],
+    start: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    key: str = "solar_total",
+    interval: timedelta = POLL,
+) -> list[float]:
+    """Feed reads one poll apart, chaining the result like the coordinator does."""
+    previous_data: Mapping[str, float] = dict(baseline)
+    previous_time = start
+    now = start
+    published = []
+    for read in reads:
+        now += interval
+        result = validate_totals(
+            processor, {key: read}, previous_data, previous_time, now, monkeypatch
+        )
+        previous_data, previous_time = result, now
+        published.append(result[key])
+    return published
+
+
+def test_a_restored_counter_whose_first_read_is_missing_recovers(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Ten minutes of downtime, an empty first read, and five seconds later the
+    # counter shows the 0.8 kWh it gained meanwhile: well within 12 kW over the
+    # ten minutes since the baseline was saved, though not within five seconds.
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    first_poll = saved + timedelta(minutes=10)
+
+    held = validate_totals(
+        processor,
+        {"solar_total": None},
+        {"solar_total": 1000.0},
+        saved,
+        first_poll,
+        monkeypatch,
+    )
+    second = validate_totals(
+        processor,
+        {"solar_total": 1000.8},
+        held,
+        first_poll,
+        first_poll + POLL,
+        monkeypatch,
+    )
+
+    assert held["solar_total"] == 1000.0
+    assert second["solar_total"] == 1000.8
+
+
+def test_a_restored_counter_held_on_its_first_poll_is_not_held_forever(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The device reads erratically, so the counter can only recover through the
+    # rise budget accruing from when the baseline was saved: 2,600 kWh at 12 kW
+    # takes about 217 hours.
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    reads: list[float | None] = [2516.0 if hour % 2 else 2600.0 for hour in range(240)]
+    published = poll_sequence(
+        processor,
+        reads,
+        {"solar_total": 0.0},
+        saved,
+        monkeypatch,
+        interval=timedelta(hours=1),
+    )
+    assert published[:200] == [0.0] * 200
+    assert published[-1] > 2500
+
+
+def test_a_restored_counter_resyncs_once_the_device_counts_consistently(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    reads: list[float | None] = [round(2516.0 + 0.01 * poll, 2) for poll in range(30)]
+    published = poll_sequence(
+        processor, reads, {"solar_total": 0.0}, saved, monkeypatch
+    )
+
+    seconds_until_resync = (published.index(next(v for v in published if v)) + 1) * 5
+    assert seconds_until_resync >= const.ENERGY_RESYNC_MIN_S
+    assert seconds_until_resync <= const.ENERGY_RESYNC_MIN_S + 2 * POLL.seconds
+    assert published[-1] == reads[-1]
+    assert "solar_total" not in processor.resync_pending
+
+
+def test_a_resync_rebuilds_the_daily_counter_from_the_device(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 10, 1, 18, 0, tzinfo=UTC)
+    processor.daily_snapshots = {"solar_today": 0.0}
+    processor.last_rollover = now
+    processor.accepted_at = {}
+    processor.resync_pending = {"solar_total"}
+    processor.accepted_at["solar_total"] = now
+    processor.resync_candidates = {}
+
+    poll_sequence(
+        processor,
+        [round(2516.0 + 0.01 * poll, 2) for poll in range(20)],
+        {"solar_total": 0.0},
+        now,
+        monkeypatch,
+    )
+    monkeypatch.setattr(dt_util, "now", lambda: now + 20 * POLL)
+    derived, _ = processor.derive_daily(
+        {"solar_total": 2516.19, "solar_today_raw": 19.5}
+    )
+
+    assert derived["solar_today"] == 19.5
+
+
+def test_a_restored_counter_never_resyncs_downwards(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    reads: list[float | None] = [round(500.0 + 0.01 * poll, 2) for poll in range(60)]
+    published = poll_sequence(
+        processor, reads, {"solar_total": 1000.0}, saved, monkeypatch
+    )
+    assert published == [1000.0] * 60
+
+
+def test_a_restored_counter_does_not_resync_to_a_spike_that_does_not_last(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A garbage value held for a few polls, then the real counter again, which is
+    # itself far out of the budget of the baseline, and a missing read.
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    garbage: list[float | None] = [99999.0] * 5
+    recovering: list[float | None] = [2516.0, None, 2516.01, 99999.0, 2516.02]
+    reads = garbage + recovering * 3
+    published = poll_sequence(
+        processor, reads, {"solar_total": 0.0}, saved, monkeypatch
+    )
+    assert published == [0.0] * len(reads)
+
+
+def test_a_counter_with_an_acceptance_time_is_never_resynced(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Unchanged behaviour: a consistent over-budget counter is held until the
+    # rise budget covers it, however steadily the device counts.
+    start = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    processor.accepted_at = {"solar_total": start}
+    reads: list[float | None] = [round(2516.0 + 0.01 * poll, 2) for poll in range(240)]
+    published = poll_sequence(
+        processor, reads, {"solar_total": 0.0}, start, monkeypatch
+    )
+    assert published == [0.0] * 240
+    assert processor.resync_pending == set()
+
+
+def test_a_restored_counter_that_fits_is_accepted_as_before(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    published = poll_sequence(
+        processor, [1000.01, 1000.02], {"solar_total": 1000.0}, saved, monkeypatch
+    )
+    assert published == [1000.01, 1000.02]
+    assert processor.resync_pending == set()
+    assert processor.accepted_at["solar_total"] == saved + 2 * POLL
+
+
+def test_a_pending_resync_survives_a_restart(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    poll_sequence(processor, [2516.0], {"solar_total": 0.0}, saved, monkeypatch)
+
+    restarted = EnergyProcessor(LIMITS)
+    restarted.load_state(processor.dump_state())
+
+    assert restarted.resync_pending == {"solar_total"}
+    assert restarted.accepted_at["solar_total"] == saved
+
+
+def test_state_without_pending_resyncs_loads_as_before(
+    processor: EnergyProcessor,
+) -> None:
+    processor.load_state({"energy_accepted_at": {}, "daily_energy_snapshots": {}})
+    assert processor.resync_pending == set()
+
+
+def test_a_restored_counter_does_not_resync_to_a_value_that_never_rises(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A stuck register reads the same garbage for ten minutes. A real counter only
+    # takes over once it moves, which a solar counter at night waits for until
+    # the morning.
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    reads: list[float | None] = [65535.0] * 120
+    published = poll_sequence(
+        processor, reads, {"solar_total": 0.0}, saved, monkeypatch
+    )
+    assert published == [0.0] * 120
+    assert processor.resync_pending == {"solar_total"}

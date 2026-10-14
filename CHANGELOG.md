@@ -4,6 +4,7 @@
 
 ### Added
 
+- The diagnostics include the energy counters next to the device's daily counters, the time each total was last accepted and any total waiting to resync, which shows whether a total is held.
 - System Alerts sensor naming the active System State 2 bits as documented in EcoFlow's Open Modbus Protocol, or `none`.
 - Nothing is read from or written to the inverter, the heartbeat included, until it shows the entry's serial number. A different serial raises a repairs issue.
 
@@ -15,6 +16,7 @@
 
 ### Fixed
 
+- An energy counter restored from a state file written before 2.4.3 is no longer frozen for good when its first poll after loading is held, for example because that poll came back without the energy registers. It now recovers once the device has shown its counter rising plausibly for a minute, and its daily counter is rebuilt from the device's own (#169).
 - A reconnect no longer holds the Modbus connection during its backoff, which stalled writes and unloading for up to two minutes.
 - Self-use Mode and Intelligent Mode no longer both turn on for an undocumented operating status.
 - Sensors shown without decimals round their value instead of cutting it off, so 1499.7 W shows as 1500 W.

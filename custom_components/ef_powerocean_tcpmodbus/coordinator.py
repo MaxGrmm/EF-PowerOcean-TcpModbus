@@ -569,6 +569,26 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._mark_identity_unverified()
 
     @property
+    def energy_report(self) -> dict[str, Any]:
+        """Return the energy counters as published and as validated, for diagnostics.
+
+        The published counters next to the device's own daily counters and the time
+        each total was last accepted show whether a total is held, as in #169.
+        """
+        data = self.data or {}
+        return {
+            "last_checked_time": self._last_checked_time.isoformat()
+            if self._last_checked_time is not None
+            else None,
+            "counters": {key: data.get(key) for key in sorted(DEVICE_ENERGY_KEYS)},
+            "device_daily": {
+                key: data.get(key)
+                for key in sorted(self._energy_processor.raw_daily_values(data))
+            },
+            **self._energy_processor.dump_state(),
+        }
+
+    @property
     def unsupported_registers(self) -> frozenset[str]:
         """Return the optional registers the device refused, which are not polled."""
         return self._unsupported_keys
