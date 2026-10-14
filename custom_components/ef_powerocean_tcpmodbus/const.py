@@ -168,8 +168,8 @@ BATTERY_SOC_KEYS: Final = tuple(
     for battery_number in range(1, MAX_BATTERY_COUNT + 1)
 )
 
-# An optional read that fails this many polls in a row, while the required reads
-# before it succeed, is dropped like one the device refuses.
+# Polls in a row an optional read may time out or lose the link before it is no
+# longer polled.
 OPTIONAL_STALLS_TO_DROP: Final = 3
 
 # Every polled register, by absolute Modbus address. Order is for readability only;

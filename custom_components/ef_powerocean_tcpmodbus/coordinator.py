@@ -133,7 +133,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         config_entry: EcoflowConfigEntry,
     ) -> None:
         self.host: str = config_entry.data[CONF_HOST]
-        # Polls in a row an optional block failed after the required ones read.
+        # Polls in a row each optional block failed, by its start address.
         self._optional_stalls: dict[int, int] = {}
         self.port: int = config_entry.data.get(CONF_PORT, DEFAULT_PORT)
         self.scan_interval: int = config_entry.data.get(
@@ -788,18 +788,19 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_read_block(
         self, register_block: RegisterBlock, data: dict[str, Any]
     ) -> None:
-        """Read one block into data, probing an optional one register by register.
+        """Read one block into data.
 
-        A required block that fails raises as before. An optional one refused as
-        an invalid request is read again one register at a time, and each register
-        the device refuses on its own is dropped from polling until the integration
-        reloads. A refusal for the moment, such as device busy, only leaves the
-        block unread for this poll.
+        A required block that fails fails the poll. An optional block that fails
+        is kept from failing it again:
 
-        An optional block is read after the required ones, so one that times out or
-        loses the link while they did not points at its registers rather than the
-        connection. It still fails the poll, so the link is handled as ever, and
-        is dropped after OPTIONAL_STALLS_TO_DROP polls in a row.
+        - refused as an invalid address: read register by register, and each one
+          refused is no longer polled;
+        - refused for now, such as device busy: left empty for this poll;
+        - timed out or lost the link: fails this poll, and is no longer polled
+          after OPTIONAL_STALLS_TO_DROP in a row. Optional blocks are read last, so
+          with the required reads before it fine, the fault is the block's.
+
+        Registers no longer polled are tried again after a firmware change.
         """
         try:
             raw = await self._modbus_client.async_read(
