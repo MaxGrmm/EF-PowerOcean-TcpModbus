@@ -4,7 +4,7 @@
 
 ### Added
 
-- Grid Connection Code diagnostic sensor, with the grid standard it likely stands for as an unverified attribute.
+- Grid Connection Code diagnostic sensor: the grid standard the inverter was commissioned with, as EcoFlow numbers it.
 
 ### Changed
 
