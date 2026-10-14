@@ -4,7 +4,7 @@
 
 ### Added
 
-- Grid Connection Code diagnostic sensor, with the grid standard it likely stands for as an unverified attribute.
+- Grid Connection Code diagnostic sensor: the grid standard the inverter was commissioned with, as EcoFlow numbers it.
 - System Alerts sensor naming the active System State 2 bits as documented in EcoFlow's Open Modbus Protocol, or `none`.
 - Nothing is read from or written to the inverter, the heartbeat included, until it shows the entry's serial number. A different serial raises a repairs issue.
 

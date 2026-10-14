@@ -336,10 +336,9 @@ that need the EcoFlow app open, or that change device settings, are left to
 | Inverter Temperature  | °C   | Inverter temperature                                 |
 | Grid Connection Code  | –    | Grid standard code set by the installer (diagnostic) |
 
-The _Grid Connection Code_ shows the grid standard in its `grid_code_standard`
-attribute, such as `UK G99 (unverified)`. EcoFlow doesn't document the codes for these
-inverters; the names come from its cloud protocol for another product and may be wrong,
-so check the setting with your installer before acting on it.
+The _Grid Connection Code_ is the grid standard the inverter was commissioned with, as
+a number. EcoFlow doesn't document which standard each number stands for, so ask your
+installer if you need to know.
 
 ### Status
 
