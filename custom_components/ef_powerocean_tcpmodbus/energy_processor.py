@@ -14,14 +14,39 @@ from homeassistant.util import dt
 from .const import (
     DEFAULT_MAX_POWER,
     ENERGY_RESOLUTION_KWH,
-    ENERGY_RESYNC_MIN_POLLS,
-    ENERGY_RESYNC_MIN_S,
     ENERGY_SENSOR_MAP,
 )
 from .models import EnergySensorDef
 from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
+
+# A restored counter held since it was restored takes the device's counter over once
+# the device's lifetime counter and its daily counter, a separate register, have
+# risen together, plausibly, by at least this much over at least this many polls.
+RESYNC_MIN_RISE_KWH = 1.0
+RESYNC_MIN_POLLS = 3
+# How far the two rises may differ: register resolution plus a small share, which
+# no misscaled counter fits.
+RESYNC_TOLERANCE_KWH = 0.02
+RESYNC_TOLERANCE_SHARE = 0.02
+DAILY_OF_TOTAL = {
+    energy_sensor.total_source: energy_sensor.key
+    for energy_sensor in ENERGY_SENSOR_MAP
+    if energy_sensor.total_source is not None
+}
+
+
+@dataclass(slots=True)
+class ResyncRun:
+    """An unbroken run of plausible device reads of a held, restored counter."""
+
+    first_value: float
+    first_daily: float
+    last_value: float
+    last_daily: float
+    last_seen: datetime
+    polls: int = 1
 
 
 # The counters the processor validates and derives the daily values from.
@@ -33,15 +58,11 @@ ENERGY_KEYS: Final = frozenset(
 )
 
 
-@dataclass(slots=True)
-class ResyncCandidate:
-    """An unbroken run of plausible device reads of one held counter."""
-
-    first_value: float
-    first_seen: datetime
-    last_value: float
-    last_seen: datetime
-    polls: int = 1
+def _rises_agree(rise: float, daily_rise: float) -> bool:
+    """Whether a lifetime counter rose as much as its daily counter, never lower."""
+    return daily_rise >= 0 and abs(rise - daily_rise) <= (
+        RESYNC_TOLERANCE_KWH + RESYNC_TOLERANCE_SHARE * daily_rise
+    )
 
 
 class EnergyProcessor:
@@ -54,9 +75,6 @@ class EnergyProcessor:
       to reconstruct a missing snapshot or keep energy from before the first poll
       after midnight.
     - The daily reset is triggered when the local calendar date advances.
-    - A counter restored without the time it was last accepted is anchored to
-      when its baseline was saved, and may take the device's counter over once
-      the device has shown it counting plausibly (see _confirms_resync).
     """
 
     def __init__(self, limits: dict[str, Any]) -> None:
@@ -64,11 +82,11 @@ class EnergyProcessor:
         self.accepted_at: dict[str, datetime] = {}
         self.daily_snapshots: dict[str, float] = {}
         self.last_rollover: datetime | None = None
-        # Counters restored without an acceptance time and held since. Persisted,
-        # since the anchor recorded for them would otherwise hide them after a
-        # restart.
+        # Counters restored without an acceptance time and held since (#169).
+        # Saved, since the acceptance time recorded for them would otherwise hide
+        # them after a restart.
         self.resync_pending: set[str] = set()
-        self.resync_candidates: dict[str, ResyncCandidate] = {}
+        self.resync_runs: dict[str, ResyncRun] = {}
 
     def dump_state(self) -> dict[str, Any]:
         """Return the processor state in a JSON-serializable form."""
@@ -93,7 +111,7 @@ class EnergyProcessor:
         self.daily_snapshots = stored.get("daily_energy_snapshots") or {}
         self.last_rollover = parse_datetime(stored.get("last_daily_rollover"))
         self.resync_pending = set(stored.get("energy_resync_pending") or ())
-        self.resync_candidates = {}
+        self.resync_runs = {}
 
     def validate_totals(
         self,
@@ -131,11 +149,10 @@ class EnergyProcessor:
                 and previous_time is not None
                 and key not in self.accepted_at
             ):
-                # Restored without an acceptance time, as from a state file written
-                # before 2.4.3. The baseline was last validated when it was saved,
-                # so the rise budget accrues from then. Falling back to the previous
-                # poll on every poll instead would hold the counter for good once it
-                # was held once.
+                # A counter restored from a state file written before 2.4.3 has no
+                # acceptance time. Its baseline was accepted when it was saved, so
+                # record that, as for any other counter. Falling back to the
+                # previous poll instead holds it for good once it is held (#169).
                 self.accepted_at[key] = previous_time
                 self.resync_pending.add(key)
             accepted_at = self.accepted_at.get(key) or previous_time
@@ -160,15 +177,27 @@ class EnergyProcessor:
             )
 
             if energy_delta < 0 or energy_delta > max_believable_delta:
-                if (
-                    key in self.resync_pending
-                    and energy_delta > 0
-                    and self._confirms_resync(energy_sensor, current_energy, now)
+                if key in self.resync_pending and self._resync_confirmed(
+                    energy_sensor,
+                    current_energy,
+                    raw_data.get(DAILY_OF_TOTAL.get(key, "")),
+                    baseline,
+                    now,
                 ):
-                    self._resync(energy_sensor, baseline, current_energy, now)
+                    _LOGGER.info(
+                        "%s was held at %s since it was restored; taking the "
+                        "device's %s over",
+                        key,
+                        baseline,
+                        current_energy,
+                    )
+                    self._accept(key, now)
+                    # Rebuild today's counters from the device's daily counters
+                    # rather than count the whole gap as today's.
+                    for daily in ENERGY_SENSOR_MAP:
+                        if daily.total_source == key:
+                            self.daily_snapshots.pop(daily.key, None)
                     continue
-                if energy_delta < 0:
-                    self.resync_candidates.pop(key, None)
                 result[key] = baseline
                 _LOGGER.debug(
                     "Hold implausible %s! (raw energy: %s baseline: %s "
@@ -182,63 +211,56 @@ class EnergyProcessor:
                     accepted_at.time(),
                 )
             else:
-                self.accepted_at[key] = now
-                self.resync_pending.discard(key)
-                self.resync_candidates.pop(key, None)
+                self._accept(key, now)
 
         return result
 
-    def _confirms_resync(
-        self, energy_sensor: EnergySensorDef, value: float, now: datetime
-    ) -> bool:
-        """Track a held counter's device reads; return whether they now confirm it.
-
-        Each read must follow the one before as a counter would: never lower, and
-        no higher than the rise budget allows. The run must also last, span polls
-        and rise, so a garbage value that repeats is never taken for a counter.
-        """
-        key = energy_sensor.key
-        candidate = self.resync_candidates.get(key)
-        if candidate is not None and 0 <= (
-            value - candidate.last_value
-        ) <= self._max_believable_energy_delta(energy_sensor, candidate.last_seen, now):
-            candidate.last_value = value
-            candidate.last_seen = now
-            candidate.polls += 1
-        else:
-            candidate = ResyncCandidate(value, now, value, now)
-            self.resync_candidates[key] = candidate
-
-        return (
-            candidate.polls >= ENERGY_RESYNC_MIN_POLLS
-            and (now - candidate.first_seen).total_seconds() >= ENERGY_RESYNC_MIN_S
-            and candidate.last_value > candidate.first_value
-        )
-
-    def _resync(
-        self,
-        energy_sensor: EnergySensorDef,
-        baseline: float,
-        value: float,
-        now: datetime,
-    ) -> None:
-        """Take the device's counter over for a counter held since it was restored."""
-        key = energy_sensor.key
-        _LOGGER.info(
-            "%s was held at %s since it was restored without an acceptance time; "
-            "taking the device's %s over",
-            key,
-            baseline,
-            value,
-        )
+    def _accept(self, key: str, now: datetime) -> None:
         self.accepted_at[key] = now
         self.resync_pending.discard(key)
-        self.resync_candidates.pop(key, None)
-        # The daily counters derive from this total, so rebuild their snapshot from
-        # the device's daily counter rather than count the whole gap as today's.
-        for daily_sensor in ENERGY_SENSOR_MAP:
-            if daily_sensor.total_source == key:
-                self.daily_snapshots.pop(daily_sensor.key, None)
+        self.resync_runs.pop(key, None)
+
+    def _resync_confirmed(
+        self,
+        energy_sensor: EnergySensorDef,
+        value: float,
+        daily: Any,
+        baseline: float,
+        now: datetime,
+    ) -> bool:
+        """Track a held, restored counter's reads; return whether they confirm it.
+
+        Each read must follow the one before as a counter would, within the rise
+        budget and rising as much as the device's daily counter for the same
+        energy, a separate register, rose. Once that has risen by at least a kWh,
+        the whole run must agree too, so a spike, a repeating garbage value, a
+        misscaled counter or a corrupted daily read is never taken for the counter.
+        """
+        key = energy_sensor.key
+        if not isinstance(daily, (int, float)) or not math.isfinite(daily):
+            self.resync_runs.pop(key, None)
+            return False
+        if value < baseline:
+            self.resync_runs.pop(key, None)
+            return False
+        run = self.resync_runs.get(key)
+        if (
+            run is not None
+            and 0
+            <= value - run.last_value
+            <= self._max_believable_energy_delta(energy_sensor, run.last_seen, now)
+            and _rises_agree(value - run.last_value, daily - run.last_daily)
+        ):
+            run.last_value, run.last_daily = value, daily
+            run.last_seen, run.polls = now, run.polls + 1
+        else:
+            run = self.resync_runs[key] = ResyncRun(value, daily, value, daily, now)
+        daily_rise = run.last_daily - run.first_daily
+        return (
+            run.polls >= RESYNC_MIN_POLLS
+            and daily_rise >= RESYNC_MIN_RISE_KWH
+            and _rises_agree(run.last_value - run.first_value, daily_rise)
+        )
 
     def _max_believable_energy_delta(
         self, energy_sensor: EnergySensorDef, accepted_at: datetime, now: datetime

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -505,189 +505,225 @@ def test_a_damaged_saved_timestamp_is_treated_as_never_saved(
 # ── Counters restored without an acceptance time (issue #169) ─────────────────
 #
 # A state file written before 2.4.3 holds last_checked_data but no
-# energy_accepted_at. A counter that is held on its first poll after loading such
-# a file must still recover, and a counter that already has an acceptance time
-# must behave exactly as before.
+# energy_accepted_at. A counter restored from it is validated like a counter last
+# accepted when the state was saved; only if it is held may it resync (below).
 
 POLL = timedelta(seconds=5)
-NO_SOLAR = {"solar_total": 0.0}
+# (delay, lifetime counter) or (delay, lifetime counter, device daily counter)
+Read = tuple[timedelta, float | None] | tuple[timedelta, float | None, float | None]
 
 
 def poll_sequence(
     processor: EnergyProcessor,
-    reads: list[float | None],
-    baseline: Mapping[str, float],
-    start: datetime,
+    reads: Sequence[Read],
+    baseline: float,
+    saved: datetime,
     monkeypatch: pytest.MonkeyPatch,
-    *,
-    key: str = "solar_total",
-    interval: timedelta = POLL,
 ) -> list[float]:
-    """Feed reads one poll apart, chaining the result like the coordinator does."""
-    previous_data: Mapping[str, float] = dict(baseline)
-    previous_time = start
-    now = start
+    """Feed (delay, read) pairs, chaining the result like the coordinator does."""
+    previous_data: Mapping[str, float] = {"solar_total": baseline}
+    previous_time = now = saved
     published = []
-    for read in reads:
-        now += interval
+    for delay, read, *daily in reads:
+        now += delay
+        frame = {"solar_total": read} | ({"solar_today": daily[0]} if daily else {})
         result = validate_totals(
-            processor, {key: read}, previous_data, previous_time, now, monkeypatch
+            processor,
+            frame,
+            previous_data,
+            previous_time,
+            now,
+            monkeypatch,
         )
         previous_data, previous_time = result, now
-        published.append(result[key])
+        published.append(result["solar_total"])
     return published
+
+
+SEQUENCES: dict[str, Sequence[Read]] = {
+    # An empty first read after ten minutes down, then what was gained meanwhile.
+    "missing-first-read": [(timedelta(minutes=10), None), (POLL, 1000.8)],
+    # Held on its first poll, then the counter climbs back into the window.
+    "held-then-fits": [(POLL, 1500.0)] + [(timedelta(hours=1), 1500.0)] * 50,
+    # A decrease is held whatever the window.
+    "decrease": [(POLL, 500.0), (timedelta(days=30), 900.0)],
+    # A spike is held and the counter carries on.
+    "spike": [(POLL, 1000.01), (POLL, 99999.0), (POLL, 1000.02)],
+}
+
+
+@pytest.mark.parametrize("reads", SEQUENCES.values(), ids=SEQUENCES.keys())
+def test_a_restored_counter_is_validated_as_if_accepted_when_saved(
+    monkeypatch: pytest.MonkeyPatch,
+    reads: Sequence[Read],
+) -> None:
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    restored = EnergyProcessor(LIMITS)
+    known = EnergyProcessor(LIMITS)
+    known.accepted_at = {"solar_total": saved}
+
+    assert poll_sequence(restored, reads, 1000.0, saved, monkeypatch) == poll_sequence(
+        known, reads, 1000.0, saved, monkeypatch
+    )
 
 
 def test_a_restored_counter_whose_first_read_is_missing_recovers(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Ten minutes of downtime, an empty first read, and five seconds later the
-    # counter shows the 0.8 kWh it gained meanwhile: well within 12 kW over the
-    # ten minutes since the baseline was saved, though not within five seconds.
+    # Before the fix, the window fell back to the previous poll, five seconds,
+    # and the 0.8 kWh gained during the downtime was held for good.
     saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-    first_poll = saved + timedelta(minutes=10)
-
-    held = validate_totals(
+    published = poll_sequence(
         processor,
-        {"solar_total": None},
-        {"solar_total": 1000.0},
+        SEQUENCES["missing-first-read"],
+        1000.0,
         saved,
-        first_poll,
         monkeypatch,
     )
-    second = validate_totals(
-        processor,
-        {"solar_total": 1000.8},
-        held,
-        first_poll,
-        first_poll + POLL,
-        monkeypatch,
-    )
-
-    assert held["solar_total"] == 1000.0
-    assert second["solar_total"] == 1000.8
+    assert published == [1000.0, 1000.8]
 
 
 def test_a_restored_counter_held_on_its_first_poll_is_not_held_forever(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The device reads erratically, so the counter can only recover through the
-    # rise budget accruing from when the baseline was saved: 2,600 kWh at 12 kW
-    # takes about 217 hours.
+    # 2,516 kWh over the baseline at 12 kW fits once 210 hours have passed.
     saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-    reads: list[float | None] = [2516.0 if hour % 2 else 2600.0 for hour in range(240)]
-    published = poll_sequence(
-        processor,
-        reads,
-        {"solar_total": 0.0},
-        saved,
-        monkeypatch,
-        interval=timedelta(hours=1),
-    )
+    reads: list[Read] = [(POLL, 2516.0)]
+    reads += [(timedelta(hours=1), 2516.0)] * 240
+    published = poll_sequence(processor, reads, 0.0, saved, monkeypatch)
     assert published[:200] == [0.0] * 200
-    assert published[-1] > 2500
+    assert published[-1] == 2516.0
+    assert processor.accepted_at["solar_total"] > saved
 
 
-def test_a_restored_counter_resyncs_once_the_device_counts_consistently(
+def test_a_counter_with_an_acceptance_time_keeps_it(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    accepted = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    processor.accepted_at = {"solar_total": accepted}
+    poll_sequence(processor, [(POLL, 99999.0)], 1000.0, saved, monkeypatch)
+    assert processor.accepted_at["solar_total"] == accepted
+
+
+# A restored counter held since it was restored may take the device's counter over
+# sooner, once the device's lifetime and daily counters have risen together by a kWh.
+
+STEP = 0.02  # kWh a poll, within the 12 kW rise budget
+TAKEN_AT = 50  # polls after the run's first read until the daily rose a full kWh
+
+
+def counting(
+    start: float,
+    polls: int,
+    *,
+    daily: float = 5.0,
+    scale: float = 1.0,
+    step: float = STEP,
+) -> list[Read]:
+    """A device counting step a poll, its daily counter rising alongside."""
+    return [
+        (POLL, round(start + scale * step * poll, 3), round(daily + step * poll, 3))
+        for poll in range(polls)
+    ]
+
+
+def test_a_held_restored_counter_takes_the_device_over_once_confirmed(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-    reads: list[float | None] = [round(2516.0 + 0.01 * poll, 2) for poll in range(30)]
-    published = poll_sequence(
-        processor, reads, {"solar_total": 0.0}, saved, monkeypatch
-    )
+    reads = counting(13363.84, 60)
+    published = poll_sequence(processor, reads, 1548.73, saved, monkeypatch)
 
-    seconds_until_resync = (published.index(next(v for v in published if v)) + 1) * 5
-    assert seconds_until_resync >= const.ENERGY_RESYNC_MIN_S
-    assert seconds_until_resync <= const.ENERGY_RESYNC_MIN_S + 2 * POLL.seconds
-    assert published[-1] == reads[-1]
-    assert "solar_total" not in processor.resync_pending
+    assert published[:TAKEN_AT] == [1548.73] * TAKEN_AT
+    assert published[TAKEN_AT:] == [read[1] for read in reads[TAKEN_AT:]]
+    assert processor.resync_pending == set()
 
 
-def test_a_resync_rebuilds_the_daily_counter_from_the_device(
+def test_a_resync_rebuilds_today_from_the_device(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    now = datetime(2026, 10, 1, 18, 0, tzinfo=UTC)
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
     processor.daily_snapshots = {"solar_today": 0.0}
-    processor.last_rollover = now
-    processor.accepted_at = {}
-    processor.resync_pending = {"solar_total"}
-    processor.accepted_at["solar_total"] = now
-    processor.resync_candidates = {}
+    processor.last_rollover = saved
+    poll_sequence(processor, counting(2516.0, TAKEN_AT + 1), 0.0, saved, monkeypatch)
 
-    poll_sequence(
-        processor,
-        [round(2516.0 + 0.01 * poll, 2) for poll in range(20)],
-        {"solar_total": 0.0},
-        now,
-        monkeypatch,
-    )
-    monkeypatch.setattr(dt_util, "now", lambda: now + 20 * POLL)
+    monkeypatch.setattr(dt_util, "now", lambda: saved + (TAKEN_AT + 2) * POLL)
     derived, _ = processor.derive_daily(
-        {"solar_total": 2516.19, "solar_today_raw": 19.5}
+        {"solar_total": 2517.0, "solar_today_raw": 19.5}
     )
 
     assert derived["solar_today"] == 19.5
 
 
-def test_a_restored_counter_never_resyncs_downwards(
+REFUSED: dict[str, Sequence[Read]] = {
+    "repeating-garbage": [(POLL, 65535.0, 5.0)] * 200,
+    "lower-than-baseline": counting(500.0, 200),
+    "spikes-between-reads": [
+        (POLL, value, 5.0)
+        for _ in range(50)
+        for value in (2516.0, 99999.0, None, 2516.01)
+    ],
+    # Rising within the rise budget, but 10 % faster than the device counts today.
+    "misscaled-by-a-tenth": counting(13363.84, 200, scale=1.1),
+    # Ten times the device's count, at a flow low enough to fit the rise budget.
+    "misscaled-tenfold-at-low-flow": counting(13363.84, 1200, scale=10.0, step=0.001),
+    "no-daily-counter": [(POLL, round(2516.0 + STEP * p, 2)) for p in range(200)],
+    "daily-counter-stuck": [
+        (POLL, round(2516.0 + STEP * p, 2), 5.0) for p in range(200)
+    ],
+}
+
+
+@pytest.mark.parametrize("reads", REFUSED.values(), ids=REFUSED.keys())
+def test_a_held_restored_counter_refuses_what_is_not_a_counter(
+    processor: EnergyProcessor,
+    monkeypatch: pytest.MonkeyPatch,
+    reads: Sequence[Read],
+) -> None:
+    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    published = poll_sequence(processor, reads, 1000.0, saved, monkeypatch)
+    assert published == [1000.0] * len(reads)
+    assert processor.resync_pending == {"solar_total"}
+
+
+def test_a_daily_reset_mid_run_starts_the_run_again(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-    reads: list[float | None] = [round(500.0 + 0.01 * poll, 2) for poll in range(60)]
-    published = poll_sequence(
-        processor, reads, {"solar_total": 1000.0}, saved, monkeypatch
-    )
-    assert published == [1000.0] * 60
+    before = counting(13363.84, 30, daily=12.0)
+    after = counting(13364.44, 60, daily=0.0)
+    published = poll_sequence(processor, before + after, 1548.73, saved, monkeypatch)
+
+    assert published[: 30 + TAKEN_AT] == [1548.73] * (30 + TAKEN_AT)
+    assert published[30 + TAKEN_AT] == after[TAKEN_AT][1]
 
 
-def test_a_restored_counter_does_not_resync_to_a_spike_that_does_not_last(
+def test_a_counter_with_an_acceptance_time_never_resyncs(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A garbage value held for a few polls, then the real counter again, which is
-    # itself far out of the budget of the baseline, and a missing read.
     saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-    garbage: list[float | None] = [99999.0] * 5
-    recovering: list[float | None] = [2516.0, None, 2516.01, 99999.0, 2516.02]
-    reads = garbage + recovering * 3
+    processor.accepted_at = {"solar_total": saved}
     published = poll_sequence(
-        processor, reads, {"solar_total": 0.0}, saved, monkeypatch
+        processor, counting(13363.84, 240), 1548.73, saved, monkeypatch
     )
-    assert published == [0.0] * len(reads)
-
-
-def test_a_counter_with_an_acceptance_time_is_never_resynced(
-    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Unchanged behaviour: a consistent over-budget counter is held until the
-    # rise budget covers it, however steadily the device counts.
-    start = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-    processor.accepted_at = {"solar_total": start}
-    reads: list[float | None] = [round(2516.0 + 0.01 * poll, 2) for poll in range(240)]
-    published = poll_sequence(
-        processor, reads, {"solar_total": 0.0}, start, monkeypatch
-    )
-    assert published == [0.0] * 240
+    assert published == [1548.73] * 240
     assert processor.resync_pending == set()
 
 
-def test_a_restored_counter_that_fits_is_accepted_as_before(
+def test_a_restored_counter_that_fits_is_not_left_pending(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-    published = poll_sequence(
-        processor, [1000.01, 1000.02], {"solar_total": 1000.0}, saved, monkeypatch
-    )
-    assert published == [1000.01, 1000.02]
+    poll_sequence(processor, counting(1000.01, 2), 1000.0, saved, monkeypatch)
     assert processor.resync_pending == set()
-    assert processor.accepted_at["solar_total"] == saved + 2 * POLL
 
 
 def test_a_pending_resync_survives_a_restart(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-    poll_sequence(processor, [2516.0], {"solar_total": 0.0}, saved, monkeypatch)
+    poll_sequence(processor, [(POLL, 2516.0)], 0.0, saved, monkeypatch)
 
     restarted = EnergyProcessor(LIMITS)
     restarted.load_state(processor.dump_state())
@@ -696,23 +732,8 @@ def test_a_pending_resync_survives_a_restart(
     assert restarted.accepted_at["solar_total"] == saved
 
 
-def test_state_without_pending_resyncs_loads_as_before(
+def test_state_saved_before_this_fix_loads_with_nothing_pending(
     processor: EnergyProcessor,
 ) -> None:
     processor.load_state({"energy_accepted_at": {}, "daily_energy_snapshots": {}})
     assert processor.resync_pending == set()
-
-
-def test_a_restored_counter_does_not_resync_to_a_value_that_never_rises(
-    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # A stuck register reads the same garbage for ten minutes. A real counter only
-    # takes over once it moves, which a solar counter at night waits for until
-    # the morning.
-    saved = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-    reads: list[float | None] = [65535.0] * 120
-    published = poll_sequence(
-        processor, reads, {"solar_total": 0.0}, saved, monkeypatch
-    )
-    assert published == [0.0] * 120
-    assert processor.resync_pending == {"solar_total"}

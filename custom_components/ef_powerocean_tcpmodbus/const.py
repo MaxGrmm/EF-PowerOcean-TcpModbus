@@ -129,11 +129,6 @@ RECTIFIER_CAPACITY_KEY: Final = "limit_inv_max"
 SOLAR_EXPORT_CAP_MARGIN_W: Final = 100.0
 
 ENERGY_RESOLUTION_KWH: Final = 0.01
-# A counter restored without the time it was last accepted, as from a state file
-# written before 2.4.3, takes the device's counter over once the device has shown
-# it counting plausibly, and rising, for this long and this many polls in a row.
-ENERGY_RESYNC_MIN_S: Final = 60
-ENERGY_RESYNC_MIN_POLLS: Final = 3
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
 MODBUS_DISABLED_READ_THRESHOLD: Final = 3
