@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -1579,3 +1580,101 @@ def test_a_counter_from_a_2_4_0_state_file_is_not_stuck_after_upgrade(
         result = run_update(coordinator, {"solar_total": solar}, now, monkeypatch)
 
     assert result["solar_total"] == solar
+
+
+def _hold_export(coordinator, monkeypatch, now: datetime) -> dict[str, float]:
+    """Poll once with the device's export counter below the held total."""
+    return run_update(coordinator, {"grid_export_total": 507.5}, now, monkeypatch)
+
+
+@pytest.fixture
+def held_for_a_month(coordinator) -> datetime:
+    """Export held at 1,548.73 kWh, last accepted 30 days ago, as for MaxGrmm."""
+    accepted = datetime(2026, 9, 16, 21, 48, tzinfo=UTC)
+    now = accepted + timedelta(days=30)
+    coordinator._energy_processor.accepted_at = {"grid_export_total": accepted}
+    coordinator._last_checked_data = {"grid_export_total": 1548.73}
+    coordinator._last_checked_time = now - timedelta(seconds=5)
+    coordinator.async_request_refresh = AsyncMock()
+    return now
+
+
+def test_a_total_held_for_over_a_day_raises_a_fixable_issue_once(
+    coordinator, issues, held_for_a_month: datetime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = held_for_a_month
+    for poll in range(3):
+        _hold_export(coordinator, monkeypatch, now + poll * timedelta(seconds=5))
+
+    issues.created.assert_called_once()
+    _, kwargs = issues.created.call_args
+    assert kwargs["is_fixable"] is True
+    assert kwargs["translation_key"] == "energy_totals_held"
+    assert kwargs["data"] == {"entry_id": "entry"}
+    assert set(coordinator.long_held_totals) == {"grid_export_total"}
+
+
+def test_a_total_held_for_less_than_a_day_raises_nothing(
+    coordinator, issues, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 10, 16, 19, 24, tzinfo=UTC)
+    coordinator._energy_processor.accepted_at = {
+        "grid_export_total": now - timedelta(hours=23)
+    }
+    coordinator._last_checked_data = {"grid_export_total": 1548.73}
+    coordinator._last_checked_time = now - timedelta(seconds=5)
+
+    _hold_export(coordinator, monkeypatch, now)
+
+    issues.created.assert_not_called()
+    assert coordinator._energy_processor.held["grid_export_total"].device == 507.5
+
+
+def test_taking_the_device_totals_continues_from_the_inverter_and_clears_the_issue(
+    coordinator, issues, held_for_a_month: datetime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = held_for_a_month
+    _hold_export(coordinator, monkeypatch, now)
+
+    taken = asyncio.run(coordinator.async_take_device_totals())
+    after = run_update(
+        coordinator,
+        {"grid_export_total": 507.52},
+        now + timedelta(seconds=5),
+        monkeypatch,
+    )
+
+    assert taken == {"grid_export_total": 507.5}
+    assert after["grid_export_total"] == 507.52
+    issues.deleted.assert_called()
+    assert coordinator.long_held_totals == {}
+
+
+@pytest.mark.usefixtures("issues")
+def test_the_diagnostics_report_lists_held_totals(
+    coordinator, held_for_a_month: datetime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _hold_export(coordinator, monkeypatch, held_for_a_month)
+
+    held = coordinator.energy_report["held"]
+
+    assert held["grid_export_total"]["published"] == 1548.73
+    assert held["grid_export_total"]["device"] == 507.5
+    assert held["grid_export_total"]["since"].startswith("2026-09-16T21:48")
+
+
+@pytest.mark.usefixtures("issues")
+def test_the_issue_names_each_held_total_with_both_values(
+    coordinator, held_for_a_month: datetime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _hold_export(coordinator, monkeypatch, held_for_a_month)
+    registry = SimpleNamespace(async_get_entity_id=lambda *_: "sensor.grid_export")
+    monkeypatch.setattr(er, "async_get", lambda _: registry)
+    monkeypatch.setattr(dt_util, "as_local", lambda value: value)
+
+    text = coordinator.describe_held_totals()
+
+    assert text == (
+        "- sensor.grid_export: 1548.73 kWh shown, 507.50 kWh on the inverter, "
+        "held since 2026-09-16 21:48"
+    )

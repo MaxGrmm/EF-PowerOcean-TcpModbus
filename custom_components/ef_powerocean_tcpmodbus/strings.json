@@ -90,6 +90,20 @@
     "modbus_disabled": {
       "title": "Modbus is disabled on the inverter at {host}",
       "description": "The integration requires Modbus TCP to be enabled in the EcoFlow Pro app. Ask your installer to enable it and the integration will automatically start working."
+    },
+    "energy_totals_held": {
+      "title": "Energy totals of the inverter at {host} have been held for over a day",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Take the inverter's energy totals",
+            "description": "These lifetime energy totals have been held for more than 24 hours, because the inverter reports a value the integration does not consider plausible:\n\n{totals}\n\nThis usually means the inverter reset its counter, or a wrong value was accepted earlier. Submit to take the inverter's values; each total then continues from there.\n\nThe Energy dashboard records the difference in one step, and a lower value counts as a meter reset. You can correct the history afterwards under Developer tools → Statistics → Adjust sum."
+          }
+        },
+        "abort": {
+          "not_held": "These energy totals are no longer held."
+        }
+      }
     }
   },
   "selector": {

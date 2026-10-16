@@ -131,6 +131,10 @@ SOLAR_EXPORT_CAP_MARGIN_W: Final = 100.0
 ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
+# A lifetime total held this long while the inverter reports another value raises
+# a repairs issue offering to take the inverter's value. Longer than any glitch on
+# record, a bogus 0 that lasted hours.
+HELD_TOTAL_ISSUE_AFTER_S: Final = 24 * 3600
 MODBUS_DISABLED_READ_THRESHOLD: Final = 3
 
 

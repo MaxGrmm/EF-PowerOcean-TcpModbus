@@ -9,7 +9,10 @@ import pytest
 from homeassistant.util import dt as dt_util
 
 from custom_components.ef_powerocean_tcpmodbus import const
-from custom_components.ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
+from custom_components.ef_powerocean_tcpmodbus.energy_processor import (
+    EnergyProcessor,
+    HeldTotal,
+)
 
 LIMITS = {
     const.CONF_MAX_GRID_POWER: 15_000,
@@ -721,3 +724,159 @@ def test_raw_totals_echo_every_device_lifetime_counter() -> None:
     assert set(values) == {f"{key}_raw" for key in const.DEVICE_ENERGY_KEYS} - {
         f"{s.key}_raw" for s in const.ENERGY_SENSOR_MAP if s.resets_daily
     }
+
+
+# ── #169: a 0 baseline accepted by an earlier version, and long holds ────────
+
+STEP = 0.02  # kWh a poll, within the 12 kW rise budget
+TAKEN_AT = 50  # reads after the run's first until the daily counter rose a kWh
+
+
+def counting(
+    start: float,
+    reads: int,
+    *,
+    daily: float = 5.0,
+    scale: float = 1.0,
+    step: float = STEP,
+) -> list[Read]:
+    """A device counting step a read, its daily counter rising alongside."""
+    return [
+        (POLL, round(start + scale * step * n, 3), round(daily + step * n, 3))
+        for n in range(reads)
+    ]
+
+
+@pytest.fixture
+def old_zero(processor: EnergyProcessor) -> EnergyProcessor:
+    """A 0 baseline accepted by an earlier version, with its acceptance time."""
+    processor.accepted_at = {"solar_total": START}
+    return processor
+
+
+def test_an_old_zero_gives_way_once_the_daily_counter_confirms(
+    old_zero: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # FFreund3 on an existing install: held at 0 against 4,296.8 kWh.
+    reads = counting(4296.8, 60)
+    published = poll_sequence(old_zero, reads, monkeypatch, baseline=0.0)
+
+    assert published[:TAKEN_AT] == [0.0] * TAKEN_AT
+    assert published[TAKEN_AT:] == [read[1] for read in reads[TAKEN_AT:]]
+    assert "solar_total" not in old_zero.held
+
+
+REFUSED: dict[str, Sequence[Read]] = {
+    "repeating-garbage": [(POLL, 65535.0, 5.0)] * 200,
+    "spikes-between-reads": [
+        (POLL, value, 5.0)
+        for _ in range(50)
+        for value in (4296.8, 99999.0, None, 4296.81)
+    ],
+    "misscaled-by-a-tenth": counting(4296.8, 200, scale=1.1),
+    "misscaled-tenfold-at-low-flow": counting(4296.8, 1200, scale=10.0, step=0.001),
+    "no-daily-counter": [(POLL, round(4296.8 + STEP * n, 2)) for n in range(200)],
+    "daily-counter-stuck": [
+        (POLL, round(4296.8 + STEP * n, 2), 5.0) for n in range(200)
+    ],
+}
+
+
+@pytest.mark.parametrize("reads", REFUSED.values(), ids=REFUSED.keys())
+def test_an_old_zero_refuses_what_is_not_a_counter(
+    old_zero: EnergyProcessor,
+    monkeypatch: pytest.MonkeyPatch,
+    reads: Sequence[Read],
+) -> None:
+    published = poll_sequence(old_zero, reads, monkeypatch, baseline=0.0)
+
+    assert published == [0.0] * len(reads)
+
+
+def test_a_genuine_zero_with_an_acceptance_time_is_left_alone(
+    old_zero: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    published = poll_sequence(
+        old_zero, [(POLL, 0.0, 0.0)] * 100, monkeypatch, baseline=0.0
+    )
+
+    assert published == [0.0] * 100
+    assert old_zero.held == {}
+
+
+def test_a_non_zero_baseline_is_never_overridden_by_the_daily_counter(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Unchanged: a held rise from a real baseline waits for the rise budget.
+    processor.accepted_at = {"solar_total": START}
+    published = poll_sequence(
+        processor, counting(4296.8, 120), monkeypatch, baseline=1000.0
+    )
+
+    assert published == [1000.0] * 120
+
+
+def test_a_held_total_is_tracked_until_it_is_accepted(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    accepted = START - timedelta(days=30)
+    processor.accepted_at = {"grid_export_total": accepted}
+    previous = {"grid_export_total": 1548.73}
+
+    validate_totals(
+        processor,
+        {"grid_export_total": 507.5},
+        previous,
+        START,
+        START + POLL,
+        monkeypatch,
+    )
+    assert processor.held["grid_export_total"] == HeldTotal(1548.73, 507.5, accepted)
+
+    validate_totals(
+        processor,
+        {"grid_export_total": 1548.74},
+        previous,
+        START,
+        START + POLL,
+        monkeypatch,
+    )
+    assert processor.held == {}
+
+
+def test_taking_device_totals_accepts_them_and_rebuilds_today(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    processor.accepted_at = {"grid_export_total": START - timedelta(days=30)}
+    processor.daily_snapshots = {"grid_export_today": 1540.0}
+    validate_totals(
+        processor,
+        {"grid_export_total": 507.5},
+        {"grid_export_total": 1548.73},
+        START,
+        START + POLL,
+        monkeypatch,
+    )
+
+    taken = processor.take_device_totals(["grid_export_total", "solar_total"])
+
+    assert taken == {"grid_export_total": 507.5}
+    assert processor.accepted_at["grid_export_total"] == START + POLL
+    assert processor.held == {}
+    assert "grid_export_today" not in processor.daily_snapshots
+
+
+def test_a_device_value_of_zero_is_never_taken(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    processor.accepted_at = {"grid_export_total": START - timedelta(days=30)}
+    validate_totals(
+        processor,
+        {"grid_export_total": 0.0},
+        {"grid_export_total": 1548.73},
+        START,
+        START + POLL,
+        monkeypatch,
+    )
+
+    assert processor.take_device_totals(["grid_export_total"]) == {}

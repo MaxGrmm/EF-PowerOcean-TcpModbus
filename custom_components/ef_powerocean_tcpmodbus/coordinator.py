@@ -49,6 +49,7 @@ from .const import (
     ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
     FIRMWARE_VERSION,
+    HELD_TOTAL_ISSUE_AFTER_S,
     MAX_BATTERY_CHARGED_POWER,
     MAX_BATTERY_DISCHARGED_POWER,
     MODBUS_DISABLED_READ_THRESHOLD,
@@ -63,7 +64,7 @@ from .const import (
 )
 from .control import ControlManager
 from .control_test import ControlTest
-from .energy_processor import ENERGY_KEYS, EnergyProcessor
+from .energy_processor import ENERGY_KEYS, EnergyProcessor, HeldTotal
 from .modbus import ModbusClient, ModbusReadRejected, create_client
 from .models import (
     ControlFeature,
@@ -95,6 +96,10 @@ def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
     return f"identity_mismatch_{entry.entry_id}"
 
 
+def held_totals_issue_id(entry: ConfigEntry) -> str:
+    return f"energy_totals_held_{entry.entry_id}"
+
+
 type EcoflowConfigEntry = ConfigEntry[EcoflowCoordinator]
 
 
@@ -118,6 +123,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _identity_mismatch: bool = False
     # For entries still keyed by host:port.
     _pinned_serial: str | None = None
+    # The totals the held-totals issue was last raised for.
+    _held_issue_keys: frozenset[str] = frozenset()
 
     def __init__(
         self,
@@ -570,6 +577,82 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._mark_identity_unverified()
 
     @property
+    def long_held_totals(self) -> dict[str, HeldTotal]:
+        """Return the totals held for over a day while the device reports more than 0.
+
+        A healthy system never holds a total that long. What is left is a counter
+        the device reset, or a wrong value accepted earlier, which only the user
+        can tell apart: they are offered the device's value in a repairs issue.
+        """
+        now = dt.now()
+        return {
+            key: held
+            for key, held in self._energy_processor.held.items()
+            if held.device > 0
+            and held.since is not None
+            and (now - held.since).total_seconds() >= HELD_TOTAL_ISSUE_AFTER_S
+        }
+
+    def describe_held_totals(self) -> str:
+        """Return one line per long-held total, for the repairs issue."""
+        registry = entity_registry.async_get(self.hass)
+        lines = []
+        for key, held in sorted(self.long_held_totals.items()):
+            entity_id = registry.async_get_entity_id(
+                Platform.SENSOR, DOMAIN, f"{self.config_entry.entry_id}_{key}"
+            )
+            since = (
+                dt.as_local(held.since).strftime("%Y-%m-%d %H:%M")
+                if held.since is not None
+                else "?"
+            )
+            lines.append(
+                f"- {entity_id or key}: {held.published:.2f} kWh shown, "
+                f"{held.device:.2f} kWh on the inverter, held since {since}"
+            )
+        return "\n".join(lines)
+
+    @callback
+    def _async_update_held_totals_issue(self) -> None:
+        """Raise the held-totals issue when the set of long-held totals changes."""
+        keys = frozenset(self.long_held_totals)
+        if keys == self._held_issue_keys:
+            return
+        self._held_issue_keys = keys
+        issue_id = held_totals_issue_id(self.config_entry)
+        if not keys:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=True,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="energy_totals_held",
+            translation_placeholders={"host": str(self.host)},
+            data={"entry_id": self.config_entry.entry_id},
+        )
+
+    async def async_take_device_totals(self) -> dict[str, float]:
+        """Take the inverter's value for every long-held total, as the user asked.
+
+        Each total continues from the inverter's value from the next poll on.
+        """
+        taken = self._energy_processor.take_device_totals(self.long_held_totals)
+        for key, value in taken.items():
+            self._last_checked_data[key] = value
+            _LOGGER.warning(
+                "Took the inverter's %s of %s kWh, as confirmed in repairs", key, value
+            )
+        if self._store is not None:
+            self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
+        self._async_update_held_totals_issue()
+        await self.async_request_refresh()
+        return taken
+
+    @property
     def energy_report(self) -> dict[str, Any]:
         """Return the energy counters at every stage, for the diagnostics.
 
@@ -593,6 +676,14 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             },
             "device_daily": {
                 key: data.get(key) for key in sorted(processor.raw_daily_values({}))
+            },
+            "held": {
+                key: {
+                    "published": held.published,
+                    "device": held.device,
+                    "since": held.since.isoformat() if held.since else None,
+                }
+                for key, held in processor.held.items()
             },
             **processor.dump_state(),
         }
@@ -793,6 +884,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._status = CoordinatorStatus.SUCCESS
             if self._store is not None:
                 self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
+            self._async_update_held_totals_issue()
 
             return dict(result)
         except Exception:
