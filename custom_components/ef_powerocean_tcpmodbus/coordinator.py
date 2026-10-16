@@ -46,6 +46,7 @@ from .const import (
     DEVICE_INFO_BLOCK,
     DEVICE_INFO_EXTRA,
     DOMAIN,
+    ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
     FIRMWARE_VERSION,
     MAX_BATTERY_CHARGED_POWER,
@@ -569,6 +570,34 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._mark_identity_unverified()
 
     @property
+    def energy_report(self) -> dict[str, Any]:
+        """Return the energy counters at every stage, for the diagnostics.
+
+        Published values next to what the device reports, with the time each total
+        was last accepted and the limits it is checked against, show whether a
+        total is held and why.
+        """
+        data = self.data or {}
+        processor = self._energy_processor
+        return {
+            "last_checked_time": self._last_checked_time.isoformat()
+            if self._last_checked_time is not None
+            else None,
+            "limits_w": dict(processor.limits),
+            "published": {
+                energy_sensor.key: data.get(energy_sensor.key)
+                for energy_sensor in ENERGY_SENSOR_MAP
+            },
+            "device_totals": {
+                key: data.get(key) for key in sorted(processor.raw_total_values({}))
+            },
+            "device_daily": {
+                key: data.get(key) for key in sorted(processor.raw_daily_values({}))
+            },
+            **processor.dump_state(),
+        }
+
+    @property
     def unsupported_registers(self) -> frozenset[str]:
         """Return the optional registers the device refused, which are not polled."""
         return self._unsupported_keys
@@ -738,6 +767,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raw_data, self._last_checked_data, self._last_checked_time
             )
             result.update(self._energy_processor.raw_daily_values(raw_data))
+            result.update(self._energy_processor.raw_total_values(raw_data))
             result.update(self._device_info_values())
             result, is_daily_reset = self._energy_processor.derive_daily(result)
             calculated_results = calculate_derived_values(

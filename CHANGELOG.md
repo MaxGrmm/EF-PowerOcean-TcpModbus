@@ -6,6 +6,8 @@
 
 - System Alerts sensor naming the active System State 2 bits as documented in EcoFlow's Open Modbus Protocol, or `none`.
 - Nothing is read from or written to the inverter, the heartbeat included, until it shows the entry's serial number. A different serial raises a repairs issue.
+- Diagnostic sensors with the device's own lifetime energy totals, such as Solar Yield Total (Device), next to the checked totals. They have no state class, so they never feed the Energy dashboard.
+- The diagnostics download has an `energy` section: every counter as published and as the device reports it, when each total was last accepted, the daily snapshots and the maximum powers the totals are checked against.
 
 ### Changed
 
@@ -18,6 +20,8 @@
 - A reconnect no longer holds the Modbus connection during its backoff, which stalled writes and unloading for up to two minutes.
 - Self-use Mode and Intelligent Mode no longer both turn on for an undocumented operating status.
 - Sensors shown without decimals round their value instead of cutting it off, so 1499.7 W shows as 1500 W.
+- A lifetime energy total whose first read is 0 no longer holds the real value back for days. The 0 is shown but not trusted, and the first real value is taken once the next read follows it as a counter would (#169).
+- An energy total restored from a state file written by 2.4.0 is no longer frozen for good when its first poll after loading is held, for example because that poll came back without the energy registers (#169).
 
 ## [2.9.0] - 2026-10-10
 

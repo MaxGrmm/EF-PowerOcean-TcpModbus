@@ -774,6 +774,23 @@ DAILY_ENERGY_SENSORS_DEVICE_RAW: list[SensorDef] = [
 ]
 
 
+# The device's own lifetime counters, next to the validated totals, so a held total
+# can be told apart from a device that reports the same. No state class: a raw
+# counter can glitch or reset, and must never feed the Energy dashboard or its
+# long-term statistics.
+TOTAL_ENERGY_SENSORS_DEVICE_RAW: list[SensorDef] = [
+    SensorDef(
+        key=f"{energy_sensor.key}_raw",
+        unit=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=None,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    )
+    for energy_sensor in ENERGY_SENSOR_MAP
+    if not energy_sensor.is_calculated and not energy_sensor.resets_daily
+]
+
+
 BINARY_SENSOR_MAP: list[BinarySensorDef] = [
     BinarySensorDef("self_use_mode_ena"),
     BinarySensorDef("intelligent_mode_ena"),

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -500,3 +500,224 @@ def test_a_damaged_saved_timestamp_is_treated_as_never_saved(
 
     assert restored.accepted_at == {"grid_import_total": accepted}
     assert restored.last_rollover is None
+
+
+# ── #169: a bad first read and restored counters ─────────────────────────────
+
+POLL = timedelta(seconds=5)
+START = datetime(2026, 10, 10, 9, 31, tzinfo=UTC)
+
+# (delay, lifetime counter) or (delay, lifetime counter, device daily counter)
+Read = tuple[timedelta, float | None] | tuple[timedelta, float | None, float | None]
+
+
+def poll_sequence(
+    processor: EnergyProcessor,
+    reads: Sequence[Read],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    baseline: float | None = None,
+) -> list[float | None]:
+    """Feed reads one after another, chaining the result like the coordinator."""
+    previous_data: Mapping[str, float | None] = (
+        {} if baseline is None else {"solar_total": baseline}
+    )
+    previous_time: datetime | None = None if baseline is None else START
+    now = START
+    published = []
+    for delay, read, *daily in reads:
+        now += delay
+        frame = {"solar_total": read} | ({"solar_today": daily[0]} if daily else {})
+        result = validate_totals(
+            processor, frame, previous_data, previous_time, now, monkeypatch
+        )
+        previous_data, previous_time = result, now
+        published.append(result.get("solar_total"))
+    return published
+
+
+def test_a_first_read_of_zero_is_shown_but_not_trusted(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    published = poll_sequence(processor, [(POLL, 0.0)], monkeypatch)
+
+    assert published == [0.0]
+    assert "solar_total" not in processor.accepted_at
+
+
+def test_the_real_value_after_a_bogus_first_zero_is_taken(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # FFreund3: a 0 on the first poll, then the device's real 4,296.8 kWh.
+    # Before, the 0 became the baseline and the real value was held for days;
+    # now it is taken as soon as the next read follows it as a counter.
+    published = poll_sequence(
+        processor,
+        [(POLL, 0.0), (POLL, 0.0), (POLL, 4296.8), (POLL, 4296.81)],
+        monkeypatch,
+    )
+
+    assert published == [0.0, 0.0, 0.0, 4296.81]
+    assert processor.accepted_at["solar_total"] == START + 4 * POLL
+
+
+def test_a_spike_after_a_bogus_first_zero_is_not_taken(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Taken unchecked, the spike would hold every true read after it as a drop.
+    published = poll_sequence(
+        processor,
+        [(POLL, 0.0), (POLL, 99999.0), (POLL, 4296.8), (POLL, 4296.81)],
+        monkeypatch,
+    )
+
+    assert published == [0.0, 0.0, 0.0, 4296.81]
+
+
+def test_once_taken_the_counter_is_validated_as_before(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    published = poll_sequence(
+        processor,
+        [
+            (POLL, 0.0),
+            (POLL, 4296.8),
+            (POLL, 4296.8),
+            (POLL, 0.0),
+            (POLL, 99999.0),
+            (POLL, 4296.81),
+        ],
+        monkeypatch,
+    )
+
+    assert published == [0.0, 0.0, 4296.8, 4296.8, 4296.8, 4296.81]
+
+
+def test_a_genuine_zero_counter_stays_zero_until_it_counts(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Export on a system with feed-in limited to 0 W: 0 for good, then a first
+    # 0.01 kWh once it does export.
+    published = poll_sequence(
+        processor, [(POLL, 0.0)] * 5 + [(POLL, 0.01), (POLL, 0.02)], monkeypatch
+    )
+
+    assert published == [0.0] * 5 + [0.0, 0.02]
+
+
+def test_an_unconfirmed_zero_never_takes_a_negative_read(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    published = poll_sequence(
+        processor, [(POLL, 0.0), (POLL, -5.0), (POLL, 12.0), (POLL, 12.0)], monkeypatch
+    )
+
+    assert published == [0.0, 0.0, 0.0, 12.0]
+
+
+def test_a_zero_with_an_acceptance_time_is_validated_as_before(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A working system whose counter is genuinely 0 already has an acceptance
+    # time, so a spike is held exactly as it is today.
+    processor.accepted_at = {"solar_total": START}
+    published = poll_sequence(
+        processor,
+        [(POLL, 99999.0), (POLL, 0.0), (POLL, 0.01)],
+        monkeypatch,
+        baseline=0.0,
+    )
+
+    assert published == [0.0, 0.0, 0.01]
+
+
+def test_taking_the_real_value_rebuilds_today_from_the_device(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The day started from the bogus 0; without a rebuild, today would show the
+    # whole lifetime total.
+    poll_sequence(processor, [(POLL, 0.0)], monkeypatch)
+    processor.derive_daily({"solar_total": 0.0, "solar_today_raw": 0.0})
+    assert processor.daily_snapshots == {"solar_today": 0.0}
+
+    poll_sequence(
+        processor, [(POLL, 4296.8), (POLL, 4296.8)], monkeypatch, baseline=0.0
+    )
+    derived, _ = processor.derive_daily(
+        {"solar_total": 4296.8, "solar_today_raw": 12.5}
+    )
+
+    assert derived["solar_today"] == 12.5
+
+
+def test_a_restored_counter_without_acceptance_time_is_anchored(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A state file from 2.4.0 has a baseline but no acceptance time. An empty
+    # first read after ten minutes down, then what was gained meanwhile: before,
+    # the window fell back to the previous poll and this was held for good.
+    published = poll_sequence(
+        processor,
+        [(timedelta(minutes=10), None), (POLL, 1000.8), (POLL, 1000.81)],
+        monkeypatch,
+        baseline=1000.0,
+    )
+
+    assert published == [1000.0, 1000.8, 1000.81]
+
+
+def test_a_restored_counter_held_on_its_first_poll_is_not_held_forever(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2,516 kWh over the baseline at 12 kW fits once 210 hours have passed.
+    reads: list[Read] = [(POLL, 3516.0)]
+    reads += [(timedelta(hours=1), 3516.0)] * 240
+    published = poll_sequence(processor, reads, monkeypatch, baseline=1000.0)
+
+    assert published[:200] == [1000.0] * 200
+    assert published[-1] == 3516.0
+
+
+RESTORED = {
+    "missing-first-read": [(timedelta(minutes=10), None), (POLL, 1000.8)],
+    "held-then-fits": [(POLL, 1500.0)] + [(timedelta(hours=1), 1500.0)] * 50,
+    "decrease": [(POLL, 500.0), (timedelta(days=30), 900.0)],
+    "spike": [(POLL, 1000.01), (POLL, 99999.0), (POLL, 1000.02)],
+}
+
+
+@pytest.mark.parametrize("reads", RESTORED.values(), ids=RESTORED.keys())
+def test_a_restored_counter_behaves_as_if_its_acceptance_time_was_saved(
+    monkeypatch: pytest.MonkeyPatch, reads: list[Read]
+) -> None:
+    restored = EnergyProcessor(LIMITS)
+    saved = EnergyProcessor(LIMITS)
+    saved.accepted_at = {"solar_total": START}
+
+    assert poll_sequence(
+        restored, reads, monkeypatch, baseline=1000.0
+    ) == poll_sequence(saved, reads, monkeypatch, baseline=1000.0)
+
+
+def test_an_existing_acceptance_time_is_kept(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    accepted = START - timedelta(hours=3)
+    processor.accepted_at = {"solar_total": accepted}
+    poll_sequence(processor, [(POLL, 99999.0)], monkeypatch, baseline=1000.0)
+
+    assert processor.accepted_at["solar_total"] == accepted
+
+
+def test_raw_totals_echo_every_device_lifetime_counter() -> None:
+    raw = {"solar_total": 4296.8, "solar_today": 35.78, "grid_export_total": None}
+
+    values = EnergyProcessor.raw_total_values(raw)
+
+    assert values["solar_total_raw"] == 4296.8
+    assert values["grid_export_total_raw"] is None
+    assert "solar_today_raw" not in values
+    assert "house_energy_total_raw" not in values
+    assert set(values) == {f"{key}_raw" for key in const.DEVICE_ENERGY_KEYS} - {
+        f"{s.key}_raw" for s in const.ENERGY_SENSOR_MAP if s.resets_daily
+    }

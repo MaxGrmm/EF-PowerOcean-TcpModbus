@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import struct
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import timedelta
 from typing import Any
 
 import pytest
-from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.const import STATE_UNAVAILABLE, EntityCategory
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
@@ -184,3 +185,53 @@ async def test_a_setting_the_register_cannot_hold_is_never_sent(
     assert [
         words for address, words in inverter.writes if address == setting.register
     ] == [[50]]
+
+
+def _serve_float(inverter: FakeInverter, address: int, value: float) -> None:
+    """Write a FLOAT register the way the device sends it, low word first."""
+    low, high = struct.unpack("<HH", struct.pack("<f", value))
+    inverter.registers[address] = low
+    inverter.registers[address + 1] = high
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_device_totals_are_diagnostic_sensors_without_statistics(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    entry = await set_up()
+
+    entity_id = _entity_id(hass, entry, "sensor", "solar_total_raw")
+    state = hass.states.get(entity_id)
+    entity = er.async_get(hass).async_get(entity_id)
+
+    assert state is not None
+    assert float(state.state) == pytest.approx(4296.8)
+    assert "state_class" not in state.attributes
+    assert entity is not None
+    assert entity.entity_category is EntityCategory.DIAGNOSTIC
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_diagnostics_show_every_energy_counter_at_every_stage(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    entry = await set_up()
+
+    energy = (await async_get_config_entry_diagnostics(hass, entry))["energy"]
+
+    assert energy["published"]["solar_total"] == pytest.approx(4296.8)
+    assert energy["device_totals"]["solar_total_raw"] == pytest.approx(4296.8)
+    assert set(energy["device_totals"]) == {
+        f"{s.key}_raw"
+        for s in const.ENERGY_SENSOR_MAP
+        if not s.is_calculated and not s.resets_daily
+    }
+    assert "solar_today_raw" in energy["device_daily"]
+    assert energy["limits_w"][const.CONF_MAX_SOLAR_POWER] > 0
+    assert energy["last_checked_time"] is not None
+    assert "solar_total" in energy["energy_accepted_at"]
+    # The fake inverter reads 0 everywhere else: shown, but not yet accepted.
+    assert energy["published"]["grid_export_total"] == 0.0
+    assert "grid_export_total" not in energy["energy_accepted_at"]

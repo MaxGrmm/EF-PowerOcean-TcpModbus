@@ -279,6 +279,9 @@
       "inverter_ac_in_total": {
         "name": "Wechselrichter AC-Eingang Gesamt"
       },
+      "inverter_ac_in_total_raw": {
+        "name": "Wechselrichter AC-Eingang Gesamt (Gerät)"
+      },
       "inverter_ac_in_today": {
         "name": "Wechselrichter AC-Eingang Heute"
       },
@@ -287,6 +290,9 @@
       },
       "inverter_ac_out_total": {
         "name": "Wechselrichter AC-Ausgang Gesamt"
+      },
+      "inverter_ac_out_total_raw": {
+        "name": "Wechselrichter AC-Ausgang Gesamt (Gerät)"
       },
       "inverter_ac_out_today": {
         "name": "Wechselrichter AC-Ausgang Heute"
@@ -361,17 +367,32 @@
       "solar_total": {
         "name": "Solarenergie Gesamt"
       },
+      "solar_total_raw": {
+        "name": "Solarenergie Gesamt (Gerät)"
+      },
       "grid_import_total": {
         "name": "Netzbezugsenergie Gesamt"
+      },
+      "grid_import_total_raw": {
+        "name": "Netzbezugsenergie Gesamt (Gerät)"
       },
       "grid_export_total": {
         "name": "Netzeinspeiseenergie Gesamt"
       },
+      "grid_export_total_raw": {
+        "name": "Netzeinspeiseenergie Gesamt (Gerät)"
+      },
       "bat_charged_total": {
         "name": "Batterieladeenergie Gesamt"
       },
+      "bat_charged_total_raw": {
+        "name": "Batterieladeenergie Gesamt (Gerät)"
+      },
       "bat_discharged_total": {
         "name": "Batterieentladeenergie Gesamt"
+      },
+      "bat_discharged_total_raw": {
+        "name": "Batterieentladeenergie Gesamt (Gerät)"
       },
       "bat_net_energy": {
         "name": "Batterieverlustenergie Gesamt"
