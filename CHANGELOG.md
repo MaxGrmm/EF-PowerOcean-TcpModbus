@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.9.1] - 2026-10-17
+
 ### Added
 
 - System Alerts sensor naming the active System State 2 bits as documented in EcoFlow's Open Modbus Protocol, or `none`.
