@@ -40,6 +40,10 @@ class EnergyProcessor:
       to reconstruct a missing snapshot or keep energy from before the first poll
       after midnight.
     - The daily reset is triggered when the local calendar date advances.
+    - A first read of 0 is published but not trusted as a baseline, since a
+      lifetime counter has been seen reading a bogus 0 for hours (#169). The
+      first non-zero read after it is taken once the next read follows it as a
+      counter would, so a one-off spike cannot take its place.
     """
 
     def __init__(self, limits: dict[str, Any]) -> None:
@@ -47,6 +51,10 @@ class EnergyProcessor:
         self.accepted_at: dict[str, datetime] = {}
         self.daily_snapshots: dict[str, float] = {}
         self.last_rollover: datetime | None = None
+        # The first non-zero read after an unconfirmed 0, waiting for the next read
+        # to follow it as a counter would. Not saved: after a restart the 0 is
+        # still unconfirmed, and the next two reads confirm again.
+        self.first_reads: dict[str, tuple[float, datetime]] = {}
 
     def dump_state(self) -> dict[str, Any]:
         """Return the processor state in a JSON-serializable form."""
@@ -101,6 +109,19 @@ class EnergyProcessor:
             key = energy_sensor.key
             current_energy = result.get(key)
             baseline = previous_data.get(key)
+            # A 0 that was read first and never followed by a real value has no
+            # acceptance time: it is shown, but never holds back the next read.
+            unconfirmed_zero = baseline == 0 and key not in self.accepted_at
+            if (
+                baseline is not None
+                and previous_time is not None
+                and not unconfirmed_zero
+            ):
+                # A counter restored from a state file written by 2.4.0 has no
+                # acceptance time. Its baseline was accepted when it was saved, so
+                # record that, as for any other counter. Falling back to the
+                # previous poll instead holds it for good once it is held (#169).
+                self.accepted_at.setdefault(key, previous_time)
             accepted_at = self.accepted_at.get(key) or previous_time
 
             if current_energy is None:
@@ -113,7 +134,24 @@ class EnergyProcessor:
                     )
                 continue
 
-            if baseline is None or accepted_at is None:
+            if baseline is None:
+                # A first read, taken as the device reports it. A 0 gets no
+                # acceptance time, so it never holds back the real value (#169).
+                if current_energy != 0:
+                    self.accepted_at[key] = now
+                continue
+
+            if unconfirmed_zero:
+                if current_energy > 0 and self._confirms_first_read(
+                    energy_sensor, current_energy, now
+                ):
+                    self.accepted_at[key] = now
+                    self._restart_daily_from_device(key)
+                else:
+                    result[key] = baseline
+                continue
+
+            if accepted_at is None:
                 self.accepted_at[key] = now
                 continue
 
@@ -139,6 +177,39 @@ class EnergyProcessor:
                 self.accepted_at[key] = now
 
         return result
+
+    def _confirms_first_read(
+        self, energy_sensor: EnergySensorDef, value: float, now: datetime
+    ) -> bool:
+        """Whether this read confirms the non-zero read before it as the counter.
+
+        It must follow the earlier read as a counter would: never lower, and no
+        higher than the configured power allows for the time between them.
+        Otherwise this read becomes the one waiting for confirmation.
+        """
+        key = energy_sensor.key
+        earlier = self.first_reads.get(key)
+        if earlier is not None:
+            earlier_value, earlier_time = earlier
+            if (
+                0
+                <= value - earlier_value
+                <= self._max_believable_energy_delta(energy_sensor, earlier_time, now)
+            ):
+                del self.first_reads[key]
+                return True
+        self.first_reads[key] = (value, now)
+        return False
+
+    def _restart_daily_from_device(self, total_key: str) -> None:
+        """Rebuild the daily counters of a total from the device's daily counters.
+
+        Their snapshot was taken from a 0 that turned out not to be the counter,
+        so today would otherwise count the whole lifetime total.
+        """
+        for energy_sensor in ENERGY_SENSOR_MAP:
+            if energy_sensor.total_source == total_key:
+                self.daily_snapshots.pop(energy_sensor.key, None)
 
     def _max_believable_energy_delta(
         self, energy_sensor: EnergySensorDef, accepted_at: datetime, now: datetime
@@ -224,6 +295,19 @@ class EnergyProcessor:
             return False
 
         return True
+
+    @staticmethod
+    def raw_total_values(raw_data: Mapping[str, Any]) -> dict[str, Any]:
+        """Echo each device lifetime register under a *_raw diagnostic key.
+
+        Shows what the device reports next to the validated total, so a held
+        total can be told apart from a device that reports the same.
+        """
+        return {
+            f"{energy_sensor.key}_raw": raw_data.get(energy_sensor.key)
+            for energy_sensor in ENERGY_SENSOR_MAP
+            if not energy_sensor.is_calculated and not energy_sensor.resets_daily
+        }
 
     @staticmethod
     def raw_daily_values(raw_data: dict[str, Any]) -> dict[str, Any]:

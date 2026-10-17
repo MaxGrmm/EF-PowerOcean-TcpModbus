@@ -279,6 +279,9 @@
       "inverter_ac_in_total": {
         "name": "Inverter AC Input Total"
       },
+      "inverter_ac_in_total_raw": {
+        "name": "Inverter AC Input Total (Device)"
+      },
       "inverter_ac_in_today": {
         "name": "Inverter AC Input Today"
       },
@@ -287,6 +290,9 @@
       },
       "inverter_ac_out_total": {
         "name": "Inverter AC Output Total"
+      },
+      "inverter_ac_out_total_raw": {
+        "name": "Inverter AC Output Total (Device)"
       },
       "inverter_ac_out_today": {
         "name": "Inverter AC Output Today"
@@ -361,17 +367,32 @@
       "solar_total": {
         "name": "Solar Yield Total"
       },
+      "solar_total_raw": {
+        "name": "Solar Yield Total (Device)"
+      },
       "grid_import_total": {
         "name": "Grid Import Total"
+      },
+      "grid_import_total_raw": {
+        "name": "Grid Import Total (Device)"
       },
       "grid_export_total": {
         "name": "Grid Export Total"
       },
+      "grid_export_total_raw": {
+        "name": "Grid Export Total (Device)"
+      },
       "bat_charged_total": {
         "name": "Battery Charged Total"
       },
+      "bat_charged_total_raw": {
+        "name": "Battery Charged Total (Device)"
+      },
       "bat_discharged_total": {
         "name": "Battery Discharged Total"
+      },
+      "bat_discharged_total_raw": {
+        "name": "Battery Discharged Total (Device)"
       },
       "bat_net_energy": {
         "name": "Battery Energy Loss"

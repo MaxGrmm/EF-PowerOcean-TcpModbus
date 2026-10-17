@@ -1511,3 +1511,71 @@ def test_a_failed_poll_asks_for_the_serial_again(coordinator) -> None:
 
     assert not coordinator.identity_verified
     coordinator._modbus_client.block_writes.assert_called()
+
+
+def test_a_bogus_zero_on_the_first_poll_does_not_hold_back_the_real_total(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#169, FFreund3: the first solar read was 0, then the real 4,296.8 kWh.
+
+    Before, the 0 became the baseline and the real total was held for days,
+    with solar today at 0 and house energy negative.
+    """
+    now = datetime(2026, 10, 10, 9, 31, tzinfo=UTC)
+    first = run_update(
+        coordinator, {"solar_total": 0.0, "solar_today": 0.0}, now, monkeypatch
+    )
+    assert first["solar_total"] == 0.0
+
+    second = run_update(
+        coordinator,
+        {"solar_total": 4296.8, "solar_today": 12.5},
+        now + timedelta(seconds=5),
+        monkeypatch,
+    )
+    assert second["solar_total"] == 0.0
+    assert second["solar_total_raw"] == 4296.8
+
+    third = run_update(
+        coordinator,
+        {"solar_total": 4296.81, "solar_today": 12.51},
+        now + timedelta(seconds=10),
+        monkeypatch,
+    )
+
+    assert third["solar_total"] == 4296.81
+    assert third["solar_today"] == 12.51
+
+
+def test_a_counter_from_a_2_4_0_state_file_is_not_stuck_after_upgrade(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A state file from 2.4.0 has no energy_accepted_at.
+
+    The first poll after the upgrade comes back without the energy registers, so
+    the counters are filled from the saved baseline; the polls after must still
+    accept the device's counters again.
+    """
+    saved = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    coordinator._store = SimpleNamespace(
+        async_load=AsyncMock(
+            return_value={
+                "last_checked_data": {"solar_total": 19903.49},
+                "last_checked_time": saved.isoformat(),
+            }
+        )
+    )
+    asyncio.run(coordinator.async_load_persisted_state())
+    coordinator._store = None
+
+    now = saved + timedelta(minutes=10)
+    result = run_update(coordinator, {"battery_soc": 50.0}, now, monkeypatch)
+    assert result["solar_total"] == 19903.49
+
+    solar = 19904.10
+    for _ in range(3):
+        now += timedelta(seconds=5)
+        solar = round(solar + 0.01, 2)
+        result = run_update(coordinator, {"solar_total": solar}, now, monkeypatch)
+
+    assert result["solar_total"] == solar

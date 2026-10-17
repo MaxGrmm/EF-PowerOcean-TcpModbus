@@ -34,6 +34,7 @@ from .const import (
     DAILY_ENERGY_SENSORS_DEVICE_RAW,
     ENERGY_SENSOR_MAP,
     SENSOR_MAP,
+    TOTAL_ENERGY_SENSORS_DEVICE_RAW,
     UNIT_OF_RATIO,
     WRITABLE_NUMBERS_MAP,
 )
@@ -92,6 +93,7 @@ async def async_setup_entry(
     energy_sensors: list[SensorDef | EnergySensorDef] = [
         *ENERGY_SENSOR_MAP,
         *DAILY_ENERGY_SENSORS_DEVICE_RAW,
+        *TOTAL_ENERGY_SENSORS_DEVICE_RAW,
     ]
     entities.extend(
         EcoflowSensor(coordinator, entry, sensor) for sensor in energy_sensors

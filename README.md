@@ -412,6 +412,22 @@ Daily energy values are calculated from the corresponding lifetime counters beca
 | Battery Discharged Total | kWh  | Lifetime energy discharged            |
 | Battery Energy Loss      | kWh  | Charged minus discharged (diagnostic) |
 
+#### Energy - Lifetime (Diagnostic)
+
+The lifetime totals above are checked before they are published: a value that drops, or rises faster than the configured maximum power allows, is held. These diagnostic sensors show what the device itself reports, so a held total can be told apart from a device that reports the same. They have no state class, so they never feed the Energy dashboard or long-term statistics.
+
+| Sensor                            | Entity key                  | Unit |
+| --------------------------------- | --------------------------- | ---- |
+| Solar Yield Total (Device)        | `solar_total_raw`           | kWh  |
+| Grid Import Total (Device)        | `grid_import_total_raw`     | kWh  |
+| Grid Export Total (Device)        | `grid_export_total_raw`     | kWh  |
+| Battery Charged Total (Device)    | `bat_charged_total_raw`     | kWh  |
+| Battery Discharged Total (Device) | `bat_discharged_total_raw`  | kWh  |
+| Inverter AC Input Total (Device)  | `inverter_ac_in_total_raw`  | kWh  |
+| Inverter AC Output Total (Device) | `inverter_ac_out_total_raw` | kWh  |
+
+The diagnostics download has an `energy` section with every counter as published, as the device reports it (totals and today), the time each total was last accepted, the daily snapshots and the maximum powers the totals are checked against.
+
 ---
 
 ## Debug Logging
