@@ -1678,3 +1678,15 @@ def test_the_issue_names_each_held_total_with_both_values(
         "- sensor.grid_export: 1548.73 kWh shown, 507.50 kWh on the inverter, "
         "held since 2026-09-16 21:48"
     )
+
+
+def test_an_error_in_the_held_totals_issue_never_fails_the_poll(
+    coordinator, issues, held_for_a_month: datetime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    issues.created.side_effect = RuntimeError("issue registry unavailable")
+
+    result = _hold_export(coordinator, monkeypatch, held_for_a_month)
+
+    issues.created.assert_called_once()
+    assert result["grid_export_total"] == 1548.73
+    assert result["grid_export_total_raw"] == 507.5

@@ -35,9 +35,15 @@ class HeldTotalsRepairFlow(RepairsFlow):
         return coordinator
 
     async def async_step_init(
-        self, user_input: dict[str, str] | None = None
+        self,
+        user_input: dict[str, str] | None = None,  # noqa: ARG002 - not a submission
     ) -> RepairsFlowResult:
-        return await self.async_step_confirm(user_input)
+        """Always show the confirmation first.
+
+        Home Assistant passes the issue id as this step's input, which must never
+        count as the user confirming.
+        """
+        return await self.async_step_confirm()
 
     async def async_step_confirm(
         self, user_input: dict[str, str] | None = None

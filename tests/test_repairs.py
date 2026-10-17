@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
+from string import Formatter
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -115,3 +117,29 @@ def test_the_flow_aborts_when_nothing_is_held_anymore() -> None:
 
     assert result["type"] == "abort"
     assert result["reason"] == "not_held"
+
+
+def test_the_issue_id_home_assistant_passes_in_is_not_a_confirmation() -> None:
+    coordinator = _held_coordinator()
+    result = asyncio.run(_flow(coordinator).async_step_init({"issue_id": "issue"}))
+
+    assert result["type"] == "form"
+    coordinator.async_take_device_totals.assert_not_called()
+
+
+def test_every_language_uses_exactly_the_placeholders_the_flow_provides() -> None:
+    component = Path(const.__file__).parent
+    files = [component / "strings.json", *sorted(component.glob("translations/*.json"))]
+    result = asyncio.run(_flow(_held_coordinator()).async_step_init())
+    provided = set(result.get("description_placeholders") or {})
+
+    for path in files:
+        issue = json.loads(path.read_text(encoding="utf-8"))["issues"][
+            "energy_totals_held"
+        ]
+        description = issue["fix_flow"]["step"]["confirm"]["description"]
+        used = {name for _, name, _, _ in Formatter().parse(description) if name}
+        assert used == provided, path.name
+        assert {
+            name for _, name, _, _ in Formatter().parse(issue["title"]) if name
+        } == {"host"}, path.name

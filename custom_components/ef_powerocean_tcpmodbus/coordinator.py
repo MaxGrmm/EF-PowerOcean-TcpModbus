@@ -613,6 +613,18 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return "\n".join(lines)
 
     @callback
+    def _async_update_held_totals_issue_safely(self) -> None:
+        """Update the held-totals issue without ever failing the poll it follows.
+
+        The issue is a convenience; an error in it must not make every entity
+        unavailable.
+        """
+        try:
+            self._async_update_held_totals_issue()
+        except Exception:
+            _LOGGER.exception("Could not update the held energy totals issue")
+
+    @callback
     def _async_update_held_totals_issue(self) -> None:
         """Raise the held-totals issue when the set of long-held totals changes."""
         keys = frozenset(self.long_held_totals)
@@ -884,7 +896,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._status = CoordinatorStatus.SUCCESS
             if self._store is not None:
                 self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
-            self._async_update_held_totals_issue()
+            self._async_update_held_totals_issue_safely()
 
             return dict(result)
         except Exception:
