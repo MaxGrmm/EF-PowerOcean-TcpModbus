@@ -97,7 +97,7 @@
         "step": {
           "confirm": {
             "title": "Energiezähler des Wechselrichters übernehmen",
-            "description": "Diese Gesamtzähler werden seit mehr als 24 Stunden festgehalten, weil der Wechselrichter einen Wert meldet, den die Integration nicht für plausibel hält:\n\n{totals}\n\nMeist hat der Wechselrichter seinen Zähler zurückgesetzt, oder es wurde früher ein falscher Wert übernommen. Mit Absenden werden die Werte des Wechselrichters übernommen; jeder Zähler läuft dann von dort weiter.\n\nDas Energie-Dashboard erfasst den Unterschied in einem Schritt, ein niedrigerer Wert zählt als Zählerwechsel. Den Verlauf kannst du danach unter Entwicklerwerkzeuge → Statistiken → Summe anpassen korrigieren."
+            "description": "Diese Gesamtzähler werden seit mehr als 24 Stunden festgehalten, weil der Wechselrichter einen Wert meldet, den die Integration nicht für plausibel hält:\n\n{totals}\n\nMeist hat der Wechselrichter seinen Zähler zurückgesetzt, oder es wurde früher ein falscher Wert übernommen. Mit Absenden werden die Werte des Wechselrichters übernommen; jeder Zähler läuft dann von dort weiter.\n\nDas Energie-Dashboard erfasst den Unterschied in einem Schritt, ein niedrigerer Wert zählt als Zählerwechsel. Den Verlauf kannst du danach unter Entwicklerwerkzeuge → Statistiken → Summe anpassen korrigieren.\n\nWenn du diese Werte für falsch hältst, sende nicht ab. Öffne stattdessen die [Geräteseite]({device_page}) des Wechselrichters, wähle im ⋮-Menü **Diagnosedaten herunterladen** und hänge die Datei an diesen bereits ausgefüllten [Fehlerbericht]({report_url}) an."
           }
         },
         "abort": {

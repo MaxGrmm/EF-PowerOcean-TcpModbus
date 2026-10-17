@@ -7,7 +7,7 @@
 - System Alerts sensor naming the active System State 2 bits as documented in EcoFlow's Open Modbus Protocol, or `none`.
 - Nothing is read from or written to the inverter, the heartbeat included, until it shows the entry's serial number. A different serial raises a repairs issue.
 - Diagnostic sensors with the device's own lifetime energy totals, such as Solar Yield Total (Device), next to the checked totals. They have no state class, so they never feed the Energy dashboard.
-- A repairs issue when an energy total has been held for more than 24 hours while the inverter reports another value, offering to take the inverter's value.
+- A repairs issue when an energy total has been held for more than 24 hours while the inverter reports another value, offering to take the inverter's value, or to report it with a filled-in bug report and the diagnostics.
 - The diagnostics download has an `energy` section: every counter as published and as the device reports it, when each total was last accepted, which totals are held, the daily snapshots and the maximum powers the totals are checked against.
 
 ### Changed
