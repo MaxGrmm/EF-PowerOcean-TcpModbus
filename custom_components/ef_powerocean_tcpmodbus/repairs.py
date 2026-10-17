@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
 import voluptuous as vol
-from homeassistant.components.repairs import RepairsFlow, RepairsFlowResult
+from homeassistant.components.repairs import RepairsFlow
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry
@@ -14,6 +14,11 @@ from homeassistant.loader import async_get_integration
 
 from .const import BUG_REPORT_URL, DOMAIN
 from .coordinator import EcoflowCoordinator
+
+if TYPE_CHECKING:
+    # Only for annotations: Home Assistant 2025.12, the oldest supported, does not
+    # export it yet.
+    from homeassistant.components.repairs import RepairsFlowResult
 
 
 class HeldTotalsRepairFlow(RepairsFlow):
