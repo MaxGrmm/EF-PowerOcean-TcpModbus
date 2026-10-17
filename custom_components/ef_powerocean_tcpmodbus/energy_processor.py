@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final
 
@@ -30,6 +31,51 @@ ENERGY_KEYS: Final = frozenset(
 )
 
 
+# The device's daily counter for each lifetime total, a separate register.
+DAILY_OF_TOTAL: Final = {
+    energy_sensor.total_source: energy_sensor.key
+    for energy_sensor in ENERGY_SENSOR_MAP
+    if energy_sensor.total_source is not None
+}
+
+# A 0 baseline held against a large device total gives way once the device's total
+# has risen in step with its daily counter by this much, over this many reads.
+WITNESS_MIN_RISE_KWH: Final = 1.0
+WITNESS_MIN_READS: Final = 3
+# How far the two rises may differ: register resolution plus a share no misscaled
+# counter fits.
+WITNESS_TOLERANCE_KWH: Final = 0.02
+WITNESS_TOLERANCE_SHARE: Final = 0.02
+
+
+@dataclass(slots=True)
+class WitnessRun:
+    """Reads of a held total and its daily counter that have risen together."""
+
+    first_total: float
+    first_daily: float
+    last_total: float
+    last_daily: float
+    last_seen: datetime
+    reads: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class HeldTotal:
+    """A lifetime total the processor holds while the device reports another value."""
+
+    published: float
+    device: float
+    since: datetime | None
+
+
+def _rises_agree(total_rise: float, daily_rise: float) -> bool:
+    """Whether a lifetime counter rose as much as its daily counter, never lower."""
+    return daily_rise >= 0 and abs(total_rise - daily_rise) <= (
+        WITNESS_TOLERANCE_KWH + WITNESS_TOLERANCE_SHARE * daily_rise
+    )
+
+
 class EnergyProcessor:
     """Processor to validate and derive energy sensors.
 
@@ -44,6 +90,8 @@ class EnergyProcessor:
       lifetime counter has been seen reading a bogus 0 for hours (#169). The
       first non-zero read after it is taken once the next read follows it as a
       counter would, so a one-off spike cannot take its place.
+    - A 0 baseline that an earlier version accepted gives way to the device's total
+      once that total rises in step with the device's daily counter (#169).
     """
 
     def __init__(self, limits: dict[str, Any]) -> None:
@@ -55,6 +103,10 @@ class EnergyProcessor:
         # to follow it as a counter would. Not saved: after a restart the 0 is
         # still unconfirmed, and the next two reads confirm again.
         self.first_reads: dict[str, tuple[float, datetime]] = {}
+        self.witness_runs: dict[str, WitnessRun] = {}
+        # Totals held on their latest read, with what the device reported. Not
+        # saved: the next poll after a restart finds them again.
+        self.held: dict[str, HeldTotal] = {}
 
     def dump_state(self) -> dict[str, Any]:
         """Return the processor state in a JSON-serializable form."""
@@ -139,6 +191,7 @@ class EnergyProcessor:
                 # acceptance time, so it never holds back the real value (#169).
                 if current_energy != 0:
                     self.accepted_at[key] = now
+                self.held.pop(key, None)
                 continue
 
             if unconfirmed_zero:
@@ -149,6 +202,7 @@ class EnergyProcessor:
                     self._restart_daily_from_device(key)
                 else:
                     result[key] = baseline
+                self.held.pop(key, None)
                 continue
 
             if accepted_at is None:
@@ -161,7 +215,30 @@ class EnergyProcessor:
             )
 
             if energy_delta < 0 or energy_delta > max_believable_delta:
+                if (
+                    baseline == 0
+                    and energy_delta > 0
+                    and self._daily_confirms(
+                        energy_sensor,
+                        current_energy,
+                        raw_data.get(DAILY_OF_TOTAL.get(key, "")),
+                        now,
+                    )
+                ):
+                    _LOGGER.info(
+                        "%s was held at 0 while the device counted %s in step with "
+                        "its daily counter; taking the device's total",
+                        key,
+                        current_energy,
+                    )
+                    self.accepted_at[key] = now
+                    self.held.pop(key, None)
+                    self._restart_daily_from_device(key)
+                    continue
                 result[key] = baseline
+                self.held[key] = HeldTotal(
+                    baseline, current_energy, self.accepted_at.get(key)
+                )
                 _LOGGER.debug(
                     "Hold implausible %s! (raw energy: %s baseline: %s "
                     "delta energy: %s "
@@ -175,8 +252,69 @@ class EnergyProcessor:
                 )
             else:
                 self.accepted_at[key] = now
+                self.held.pop(key, None)
+                self.witness_runs.pop(key, None)
 
         return result
+
+    def _daily_confirms(
+        self,
+        energy_sensor: EnergySensorDef,
+        total: float,
+        daily: Any,
+        now: datetime,
+    ) -> bool:
+        """Track a total held at 0; return whether its daily counter confirms it.
+
+        Each read must follow the one before as a counter would, within the rise
+        budget and rising as much as the device's daily counter for the same
+        energy, a separate register, rose. Once that has risen by a kWh, the whole
+        run must agree too, so a spike, a repeating garbage value or a misscaled
+        counter is never taken for the counter.
+        """
+        key = energy_sensor.key
+        if not isinstance(daily, (int, float)) or not math.isfinite(daily):
+            self.witness_runs.pop(key, None)
+            return False
+        run = self.witness_runs.get(key)
+        if (
+            run is not None
+            and 0
+            <= total - run.last_total
+            <= self._max_believable_energy_delta(energy_sensor, run.last_seen, now)
+            and _rises_agree(total - run.last_total, daily - run.last_daily)
+        ):
+            run.last_total, run.last_daily = total, daily
+            run.last_seen, run.reads = now, run.reads + 1
+        else:
+            run = self.witness_runs[key] = WitnessRun(total, daily, total, daily, now)
+        daily_rise = run.last_daily - run.first_daily
+        if (
+            run.reads >= WITNESS_MIN_READS
+            and daily_rise >= WITNESS_MIN_RISE_KWH
+            and _rises_agree(run.last_total - run.first_total, daily_rise)
+        ):
+            del self.witness_runs[key]
+            return True
+        return False
+
+    def take_device_totals(self, keys: Iterable[str]) -> dict[str, float]:
+        """Accept what the device reports for held totals, as the user asked.
+
+        Returns the totals taken, for the caller to use as their new baseline. A
+        device value of 0 is never taken: it is the glitch these holds exist for.
+        """
+        now = dt.now()
+        taken: dict[str, float] = {}
+        for key in keys:
+            held = self.held.pop(key, None)
+            if held is None or held.device <= 0:
+                continue
+            self.accepted_at[key] = now
+            self.witness_runs.pop(key, None)
+            self._restart_daily_from_device(key)
+            taken[key] = held.device
+        return taken
 
     def _confirms_first_read(
         self, energy_sensor: EnergySensorDef, value: float, now: datetime

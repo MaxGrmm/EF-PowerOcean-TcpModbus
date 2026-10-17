@@ -18,6 +18,7 @@ from .control import ControlInputs
 from .coordinator import (
     EcoflowConfigEntry,
     EcoflowCoordinator,
+    held_totals_issue_id,
     identity_mismatch_issue_id,
 )
 from .modbus import async_prepare
@@ -165,6 +166,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
 
     ir.async_delete_issue(hass, DOMAIN, _modbus_disabled_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, identity_mismatch_issue_id(entry))
+    ir.async_delete_issue(hass, DOMAIN, held_totals_issue_id(entry))
     # close connection and shutdown
     await entry.runtime_data.async_client_shutdown()
 

@@ -8,11 +8,15 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
+from homeassistant.components.repairs import repairs_flow_manager
 from homeassistant.const import STATE_UNAVAILABLE, EntityCategory
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.translation import async_get_translations
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -235,3 +239,55 @@ async def test_diagnostics_show_every_energy_counter_at_every_stage(
     # The fake inverter reads 0 everywhere else: shown, but not yet accepted.
     assert energy["published"]["grid_export_total"] == 0.0
     assert "grid_export_total" not in energy["energy_accepted_at"]
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_the_held_totals_repair_runs_end_to_end_in_home_assistant(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    """The fix flow through Home Assistant's own Repairs, as the frontend runs it.
+
+    Home Assistant loads repairs.py itself and passes the issue id as the first
+    step's input, which must never count as the user confirming.
+    """
+    assert await async_setup_component(hass, "repairs", {})
+    _serve_float(inverter, const.REGISTERS_BY_KEY["grid_export_total"].address, 507.5)
+    entry = await set_up()
+    coordinator = entry.runtime_data
+    # Export held at 1,548.73 kWh, last accepted a month ago.
+    coordinator._last_checked_data["grid_export_total"] = 1548.73
+    coordinator._energy_processor.accepted_at["grid_export_total"] = (
+        dt_util.now() - timedelta(days=30)
+    )
+    coordinator._last_checked_time = dt_util.now() - timedelta(minutes=1)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    issue_id = f"energy_totals_held_{entry.entry_id}"
+    issue = ir.async_get(hass).async_get_issue(const.DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.is_fixable
+
+    manager = repairs_flow_manager(hass)
+    assert manager is not None
+    form = await manager.async_init(const.DOMAIN, data={"issue_id": issue_id})
+
+    assert form["type"] == "form"
+    assert form["step_id"] == "confirm"
+    assert coordinator.data["grid_export_total"] == 1548.73
+    translations = await async_get_translations(hass, "en", "issues", [const.DOMAIN])
+    prefix = f"component.{const.DOMAIN}.issues.energy_totals_held"
+    description = translations[f"{prefix}.fix_flow.step.confirm.description"]
+    rendered = description.format(**(form.get("description_placeholders") or {}))
+    assert "507.50 kWh on the inverter" in rendered
+    assert "github.com" in rendered
+    assert translations[f"{prefix}.title"].format(
+        **(issue.translation_placeholders or {})
+    )
+
+    done = await manager.async_configure(form["flow_id"], {})
+    await hass.async_block_till_done()
+
+    assert done["type"] == "create_entry"
+    assert coordinator.data["grid_export_total"] == pytest.approx(507.5)
+    assert ir.async_get(hass).async_get_issue(const.DOMAIN, issue_id) is None

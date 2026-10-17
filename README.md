@@ -426,7 +426,9 @@ The lifetime totals above are checked before they are published: a value that dr
 | Inverter AC Input Total (Device)  | `inverter_ac_in_total_raw`  | kWh  |
 | Inverter AC Output Total (Device) | `inverter_ac_out_total_raw` | kWh  |
 
-The diagnostics download has an `energy` section with every counter as published, as the device reports it (totals and today), the time each total was last accepted, the daily snapshots and the maximum powers the totals are checked against.
+If a total has been held for more than 24 hours while the device reports a value above 0, a repairs issue lists it with both values and offers to take the device's value. If the values look wrong instead, it links to a filled-in bug report and to the device page for the diagnostics download. This happens when the inverter resets a counter or a wrong value was accepted earlier. A total held at 0 while the device's total rises in step with its own daily counter is corrected automatically.
+
+The diagnostics download has an `energy` section with every counter as published, as the device reports it (totals and today), the time each total was last accepted, which totals are held, the daily snapshots and the maximum powers the totals are checked against.
 
 ---
 
