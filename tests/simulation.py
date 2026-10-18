@@ -78,6 +78,9 @@ class FakeInverter:
     export_cap: float | None = None
     # What the export limit took from the solar on the last poll.
     curtailed: float = 0.0
+    # The backup reserve set in the EcoFlow app (40536), below which the inverter
+    # does not discharge when it runs itself. None for a frame without it.
+    app_reserve: float | None = None
 
     async def async_write(
         self,
@@ -123,6 +126,9 @@ class FakeInverter:
             target = self.solar + self.system_setpoint - self.house
         else:
             target = self.solar - self.house
+            if self.app_reserve is not None and self.soc <= self.app_reserve:
+                # Its own self-consumption stops discharging at the app's reserve.
+                target = max(target, 0.0)
         if self.ramp_w is not None:
             step = max(-self.ramp_w, min(self.ramp_w, target - self.battery))
             target = self.battery + step
@@ -146,6 +152,8 @@ class FakeInverter:
             # Whole percent, as the inverter reports it.
             "battery_soc": float(round(self.soc)),
         }
+        if self.app_reserve is not None:
+            frame["min_soc_limit"] = self.app_reserve
         if self.export_cap is not None and math.isinf(self.export_cap):
             frame["grid_feed_mode"] = models.GridFeedMode.UNLIMITED
         elif self.export_cap is not None:
@@ -229,9 +237,12 @@ class Simulation:
         charge_limit: float = 100.0,
         reserve: float = 0.0,
         export_cap: float | None = None,
+        app_reserve: float | None = None,
         model: models.InverterModel = const.DEFAULT_INVERTER_MODEL,
     ) -> None:
-        self.inverter = FakeInverter(soc=soc, export_cap=export_cap)
+        self.inverter = FakeInverter(
+            soc=soc, export_cap=export_cap, app_reserve=app_reserve
+        )
         self.now = START
         monkeypatch.setattr(dt_util, "now", lambda *_args, **_kwargs: self.now)
         self.heartbeat = FakeHeartbeat(self.inverter, clock=lambda: self.now)

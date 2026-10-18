@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- An emulated Battery Reserve no longer takes control once the battery is at the backup reserve set in the EcoFlow app, which the inverter keeps by itself. On the PowerOcean Plus holding it there made the battery charge a little and discharge again in a loop. Automatic and Export solar first now leave it to the inverter, as with a native reserve; a manual command is still held at the reserve, and an app reserve below the Battery Reserve is still guarded.
+
 ## [2.9.1] - 2026-10-17
 
 ### Added

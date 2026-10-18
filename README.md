@@ -146,7 +146,10 @@ attribute:
 - **Emulated** (every other model): the integration keeps it while Modbus Control is
   on. The PowerOcean Plus takes a write to its reserve register but keeps acting on the
   app's value, and the other models are unproven. The app's own reserve still applies
-  whenever the integration is not in control, and shows as _App Backup Reserve_.
+  whenever the integration is not in control, and shows as _App Backup Reserve_. Once
+  the battery is at the app's reserve, the inverter stops discharging there by itself,
+  so in Automatic the integration leaves it to the inverter as with a native reserve.
+  That is whenever the Battery Reserve is at or below the app's.
 
 The integration options are set to the model's; change them only to test a model, and
 `scripts/control_feature_scan.py --reserve-probe` shows whether one acts on a written

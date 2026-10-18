@@ -258,6 +258,52 @@ def test_a_reserve_raised_as_the_battery_fills_keeps_its_hand_back(
     assert sim.inverter.method_writes == 2
 
 
+@pytest.mark.parametrize("app_reserve", (20.0, 25.0))
+def test_a_reached_app_reserve_is_left_to_the_inverter(
+    monkeypatch: pytest.MonkeyPatch, app_reserve: float
+) -> None:
+    """Once the battery is at the backup reserve set in the app, the inverter stops
+    discharging there by itself, as a native reserve does. Holding it as well only
+    takes control from the inverter, which on the PowerOcean Plus charges the battery
+    a little and discharges it again in a loop. So the inverter is left to run
+    itself, as with a native reserve."""
+    sim = Simulation(
+        monkeypatch,
+        soc=20.0,
+        reserve=20.0,
+        app_reserve=app_reserve,
+        model=models.InverterModel.POWEROCEAN_PLUS,
+    )
+
+    dusk = sim.run(polls=60, solar=0, house=1000)
+    clouds = sim.run(polls=720, solar=[2000] * 6 + [200] * 6, house=900)
+
+    assert min(dusk.battery) >= 0
+    assert min(dusk.soc + clouds.soc) >= 20
+    assert set(dusk.method + clouds.method) == {AUTOMATIC}
+    assert sim.inverter.method_writes == 0
+
+
+def test_an_app_reserve_below_the_battery_reserve_is_still_guarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Left to itself, the inverter would discharge past the Battery Reserve down to
+    the app's lower one, so the guard keeps holding the battery."""
+    sim = Simulation(
+        monkeypatch,
+        soc=20.0,
+        reserve=20.0,
+        app_reserve=10.0,
+        model=models.InverterModel.POWEROCEAN_PLUS,
+    )
+
+    run = sim.run(polls=60, solar=0, house=1000)
+
+    assert min(run.battery) >= 0
+    assert sim.inverter.method == BATTERY_LIMITS
+    assert set(run.status) == {models.ControlStatus.RESERVE_REACHED}
+
+
 def test_an_untouched_install_never_touches_the_inverter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -584,6 +630,22 @@ def test_export_solar_first_holds_at_the_battery_reserve(
     assert max(-watts for watts in run.battery) <= const.HOLD_SETPOINT_W
     assert sim.inverter.method == BATTERY_LIMITS
     assert set(run.status) == {models.ControlStatus.RESERVE_REACHED}
+
+
+def test_export_solar_first_leaves_a_reached_app_reserve_to_the_inverter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """At the app's reserve Automatic no longer discharges, so there is nothing to
+    hold."""
+    sim = Simulation(
+        monkeypatch, soc=10.0, reserve=10.0, app_reserve=10.0, export_cap=CAP
+    )
+    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+
+    run = sim.run(polls=60, solar=0, house=1500)
+
+    assert min(run.battery) >= 0
+    assert set(run.method) == {AUTOMATIC}
 
 
 def test_export_solar_first_saves_the_midday_solar_that_automatic_curtails(

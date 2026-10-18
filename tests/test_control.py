@@ -1897,6 +1897,39 @@ def test_a_native_reserve_is_left_to_the_inverter_in_automatic_only(
     assert native_control._commanded_feature is not Feature.DISCHARGE_BATTERY
 
 
+@pytest.mark.parametrize(
+    ("app_reserve", "left_to_inverter"), ((20, True), (30, True), (10, False))
+)
+def test_an_emulated_reserve_is_left_to_the_inverter_at_the_app_reserve(
+    control, monkeypatch: pytest.MonkeyPatch, app_reserve: int, left_to_inverter: bool
+) -> None:
+    """At the app's reserve the inverter keeps it as it does a native one, in
+    Automatic only. An app reserve below ours would let it discharge past ours."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_battery_reserve_soc(20))
+    at_reserve = {
+        "battery_soc": 20.0,
+        const.BATTERY_RESERVE_REGISTER_KEY: app_reserve,
+        "solar_power": 0.0,
+        "house_power": 900.0,
+        "grid_power": 900.0,
+        "battery_power": 0.0,
+    }
+
+    asyncio.run(control.async_apply(at_reserve))
+    if left_to_inverter:
+        assert control.status is Status.AUTOMATIC
+        assert control._commanded_feature is Feature.AUTOMATIC
+    else:
+        assert control.status is Status.RESERVE_REACHED
+        assert control._commanded_feature is not Feature.AUTOMATIC
+
+    asyncio.run(control.async_set_command(Feature.DISCHARGE_BATTERY, power=2000.0))
+    asyncio.run(control.async_apply(at_reserve))
+    assert control.status is Status.RESERVE_REACHED
+    assert control._commanded_feature is not Feature.DISCHARGE_BATTERY
+
+
 def test_a_native_reserve_never_charges_in_the_integration(
     native_control, monkeypatch: pytest.MonkeyPatch
 ) -> None:

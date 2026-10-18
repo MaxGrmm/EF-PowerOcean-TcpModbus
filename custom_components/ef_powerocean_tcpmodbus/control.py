@@ -1374,13 +1374,30 @@ class ControlManager:
         """Return whether the reserve guard has to hold *step* back.
 
         A native reserve is the inverter's to keep while it runs itself, which it
-        does faster and even with Home Assistant down. A manual command outranks it
-        there, as a hold outranks the reserve on the PowerOcean Plus, so the guard
-        still keeps it under one.
+        does faster and even with Home Assistant down. So is an emulated one once
+        the battery is at the backup reserve set in the app, which the inverter keeps
+        the same way. A manual command outranks it there, as a hold outranks the
+        reserve on the PowerOcean Plus, so the guard still keeps it under one.
         """
         if not self._reserve_guard:
             return False
-        return not (self._reserve_native and step.command is ControlFeature.AUTOMATIC)
+        if step.command is not ControlFeature.AUTOMATIC:
+            return True
+        return not (self._reserve_native or self._at_app_reserve())
+
+    def _at_app_reserve(self) -> bool:
+        """Return whether the battery is at the backup reserve set in the app.
+
+        The guard being on means the battery is at or below the Battery Reserve, so
+        with the app's reserve at or above it, it is at the app's too. Judged on the
+        two reserves rather than the state of charge, so it lasts as long as the
+        guard does instead of turning with each percent. An app reserve below ours
+        is no help: the inverter would discharge past ours to reach it.
+        """
+        app_reserve = self._inputs.min_soc_limit
+        return app_reserve is not None and self._battery_reserve_soc <= float(
+            app_reserve
+        )
 
     def _grid_cannot_take(self, inputs: ControlInputs, surplus: float | None) -> bool:
         """Return whether holding the battery would export more than the device lets
