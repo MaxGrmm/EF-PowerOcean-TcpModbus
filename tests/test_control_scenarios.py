@@ -8,6 +8,7 @@ must never happen across the whole run.
 from __future__ import annotations
 
 import asyncio
+import copy
 import itertools
 import math
 
@@ -346,6 +347,60 @@ def test_charging_to_a_reserve_the_app_keeps_is_left_to_the_inverter(
     assert run.soc[-1] == 30
     assert set(run.method) == {AUTOMATIC}
     assert sim.inverter.method_writes == 0
+
+
+@pytest.mark.parametrize(
+    "guards",
+    (
+        # A brief sun lifts the battery inside the reserve's band.
+        {"soc": 20.0, "reserve": 20.0, "app_reserve": 10.0},
+        # An evening load lowers it inside the charge limit's band.
+        {"soc": 80.0, "charge_limit": 80.0},
+    ),
+)
+def test_a_guard_latched_inside_its_band_survives_a_restart(
+    monkeypatch: pytest.MonkeyPatch, guards: dict
+) -> None:
+    """A guard stays on until the state of charge has moved well clear of its
+    limit. A restart inside that band used to come back with it off, so the battery
+    did something else than it would have without the restart."""
+    model = models.InverterModel.POWEROCEAN_PLUS
+    charging = "reserve" in guards
+    # (solar, house) into the band, then for the rest of the run.
+    before = (2800, 800) if charging else (0, 1500)
+    after = (0, 800) if charging else (4000, 500)
+
+    kept = Simulation(monkeypatch, model=model, **guards)
+    kept.run(polls=30, solar=after[0], house=after[1])
+    kept.run(polls=110 if charging else 120, solar=before[0], house=before[1])
+    soc, saved = kept.inverter.soc, copy.deepcopy(kept.control.dump_state())
+    expected = kept.run(polls=360, solar=after[0], house=after[1])
+
+    # Built after the first has finished, since each takes over the clock.
+    restarted = Simulation(monkeypatch, model=model, **{**guards, "soc": soc})
+    restarted.control.load_state(saved)
+    run = restarted.run(polls=360, solar=after[0], house=after[1])
+
+    assert run.battery == expected.battery
+    assert run.status == expected.status
+
+
+def test_a_discharge_the_export_limit_cuts_short_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no export allowed, a discharge only covers the house. That is the
+    export limit, not a battery still ramping up to the target."""
+    capped = Simulation(monkeypatch, export_cap=0.0)
+    select(capped, models.ControlFeature.DISCHARGE_BATTERY)
+    run = capped.run(polls=24, solar=0, house=400)
+
+    uncapped = Simulation(monkeypatch, export_cap=CAP)
+    select(uncapped, models.ControlFeature.DISCHARGE_BATTERY)
+    free = uncapped.run(polls=24, solar=0, house=400)
+
+    assert max(run.battery) >= -400
+    assert run.status[-1] == "unreachable_export_limit"
+    assert free.status[-1] is models.ControlStatus.ACTIVE
 
 
 def test_an_untouched_install_never_touches_the_inverter(

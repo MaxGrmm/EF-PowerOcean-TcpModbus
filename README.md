@@ -133,7 +133,7 @@ inverter never has to curtail solar.
 The guards apply in every mode and only ever stop the battery, never reverse it. In
 Automatic, the battery can still power the house under the Charge Limit, and still
 charge from solar under the Battery Reserve. A guard releases once the charge has moved
-5 % back. Both are off by default.
+5 % back, and stays on across a restart until then. Both are off by default.
 
 The Battery Reserve is **native** or **emulated**, shown in its `implementation`
 attribute:
@@ -203,6 +203,7 @@ doesn't expose a hard power limit over Modbus. See
 | Below solar export limit    | Export solar first is exporting the whole surplus                |
 | Unreachable: battery full   | The target needs the battery to charge, but it's full            |
 | Unreachable: battery empty  | The target needs the battery to discharge, but it's empty        |
+| Unreachable: export limit   | The target needs more export than the export limit lets out      |
 | Not accepted by inverter    | The inverter doesn't report the command, even after resending it |
 | Off-grid                    | Grid outage; control steps aside until the grid is back          |
 | Battery disconnected        | The battery dropped off; control steps aside until it's back     |

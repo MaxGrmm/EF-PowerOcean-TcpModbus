@@ -385,6 +385,9 @@ class ControlStatus(StrEnum):
     LIMITED_BY_INVERTER = "limited_by_inverter"
     UNREACHABLE_BATTERY_FULL = "unreachable_battery_full"
     UNREACHABLE_BATTERY_EMPTY = "unreachable_battery_empty"
+    # The grid already takes all the export the device lets out, so the command
+    # cannot export the rest.
+    UNREACHABLE_EXPORT_LIMIT = "unreachable_export_limit"
     # The inverter does not report the commanded method, even after re-sending it.
     NOT_ACCEPTED = "not_accepted"
     # Running off-grid during an outage; control steps aside until the grid is back.
@@ -540,8 +543,13 @@ def deviation_state(
     soc: float | None,
     min_soc: float,
     battery: float | None = None,
+    exporting_at_limit: bool = False,
 ) -> ControlStatus:
-    """Compare what we command with what the inverter reports."""
+    """Compare what we command with what the inverter reports.
+
+    exporting_at_limit is whether the grid takes all the export the device lets
+    out, which explains a command that would export more falling short.
+    """
     if measured is None:
         return ControlStatus.ACTIVE
 
@@ -560,6 +568,12 @@ def deviation_state(
             return ControlStatus.UNREACHABLE_BATTERY_FULL
         if error < 0 and not_charging and soc <= min_soc + BATTERY_EMPTY_MARGIN_SOC:
             return ControlStatus.UNREACHABLE_BATTERY_EMPTY
+
+    # Short in the exporting direction, with nothing more allowed out: neither
+    # ramping nor overruled, but capped by the export limit.
+    short_of_export = error < 0 and signed_target < 0 and measured > signed_target
+    if short_of_export and exporting_at_limit:
+        return ControlStatus.UNREACHABLE_EXPORT_LIMIT
 
     # Ramping lies between zero and the target. Going the other way, or past the
     # target, is not the battery getting there but the inverter doing something

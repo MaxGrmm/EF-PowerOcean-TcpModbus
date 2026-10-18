@@ -134,6 +134,10 @@ class FakeInverter:
             elif self.app_reserve is not None and round(self.soc) <= self.app_reserve:
                 # At the app's reserve its own self-consumption stops discharging.
                 target = max(target, 0.0)
+        if self.export_cap is not None:
+            # With the solar curtailed to nothing, a discharge still exports only
+            # what the export limit lets out.
+            target = max(target, -(self.house + self.export_cap))
         if self.ramp_w is not None:
             step = max(-self.ramp_w, min(self.ramp_w, target - self.battery))
             target = self.battery + step

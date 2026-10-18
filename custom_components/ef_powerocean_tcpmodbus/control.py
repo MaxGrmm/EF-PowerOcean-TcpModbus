@@ -72,6 +72,10 @@ _LOGGER = logging.getLogger(__name__)
 # Device states in which control steps aside and leaves the inverter to itself.
 _STEPPED_ASIDE = frozenset({ControlStatus.OFF_GRID, ControlStatus.BATTERY_DISCONNECTED})
 
+# Latches the next frame alone could bring back wrong, kept across a restart under
+# these names: each is its attribute without the leading underscore.
+_LATCHES = ("charge_guard", "reserve_guard")
+
 # The statuses of the state-of-charge guards, as opposed to a mode's own.
 _GUARDS = frozenset(
     {
@@ -599,6 +603,7 @@ class ControlManager:
             "battery_saver": self._battery_saver,
             "grid_feed_restore": self._grid_feed_restore,
             "grid_feed_stopped": self._grid_feed_stopped,
+            "latches": {name: getattr(self, f"_{name}") for name in _LATCHES},
         }
 
     def load_state(self, stored: dict[str, Any]) -> None:
@@ -622,6 +627,11 @@ class ControlManager:
             self._battery_saver = bool(saver)
         self._grid_feed_restore = stored.get("grid_feed_restore") or None
         self._grid_feed_stopped = bool(stored.get("grid_feed_stopped"))
+        # Inside a guard's band the next frame cannot tell whether it was on, so it
+        # comes back as it was; outside it, the next frame decides as ever.
+        for name, latched in (stored.get("latches") or {}).items():
+            if name in _LATCHES:
+                setattr(self, f"_{name}", bool(latched))
 
     def start(self) -> None:
         """Begin holding control authority, if the user switched control on."""
@@ -1544,6 +1554,7 @@ class ControlManager:
             battery=None
             if (battery := inputs.battery_power) is None
             else float(battery),
+            exporting_at_limit=self._exporting_at_limit(inputs),
         )
 
         if state is ControlStatus.ACTIVE:
@@ -1558,6 +1569,13 @@ class ControlManager:
         self._deviation_polls += 1
         if self._deviation_polls >= CONTROL_STATUS_DAMPING_POLLS:
             self._deviation = state
+
+    def _exporting_at_limit(self, inputs: ControlInputs) -> bool:
+        """Return whether the grid takes all the export the device lets out."""
+        limit = _device_export_limit(inputs)
+        if limit is None or math.isinf(limit) or inputs.grid_power is None:
+            return False
+        return -float(inputs.grid_power) >= limit - POWER_TOLERANCE_W
 
     def _turning_around(self) -> bool:
         """Return whether the current command is too new to call it overruled."""
