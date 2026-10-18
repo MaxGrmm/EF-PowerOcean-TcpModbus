@@ -133,7 +133,11 @@ inverter never has to curtail solar.
 The guards apply in every mode and only ever stop the battery, never reverse it. In
 Automatic, the battery can still power the house under the Charge Limit, and still
 charge from solar under the Battery Reserve. A guard releases once the charge has moved
-5 % back, and stays on across a restart until then. Both are off by default.
+5 % back, and stays on across a restart until then. Until it does, the battery can
+still use that band: charge it took above the reserve can be discharged again down to
+the reserve, and a battery a little below the Charge Limit can refill up to it. Once
+stopped at a limit, it has to move 2 % away first, so a state of charge flickering by a
+percent does not charge and discharge it in turn. Both are off by default.
 
 The Battery Reserve is **native** or **emulated**, shown in its `implementation`
 attribute:

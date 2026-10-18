@@ -38,6 +38,7 @@ from .const import (
     GUARD_HANDBACK_S,
     GUARD_HANDBACK_W,
     GUARD_POWER_DEADBAND_W,
+    GUARD_RETURN_SOC,
     GUARD_SETTLE_S,
     GUARD_SOC_HYSTERESIS,
     GUARD_TRACKING_STEP_W,
@@ -74,7 +75,7 @@ _STEPPED_ASIDE = frozenset({ControlStatus.OFF_GRID, ControlStatus.BATTERY_DISCON
 
 # Latches the next frame alone could bring back wrong, kept across a restart under
 # these names: each is its attribute without the leading underscore.
-_LATCHES = ("charge_guard", "reserve_guard")
+_LATCHES = ("charge_guard", "reserve_guard", "charge_stopped", "reserve_stopped")
 
 # The statuses of the state-of-charge guards, as opposed to a mode's own.
 _GUARDS = frozenset(
@@ -298,6 +299,9 @@ class ControlManager:
         self._battery_reserve_soc = DEFAULT_BATTERY_RESERVE_SOC
         self._charge_guard = False
         self._reserve_guard = False
+        # Whether the battery is stopped at a guard's limit (see _at_limit).
+        self._charge_stopped = False
+        self._reserve_stopped = False
         # Whether the Battery Reserve also charges from the grid up to it, as the
         # app's backup reserve does, and whether it is doing so now.
         self._reserve_charge = False
@@ -975,6 +979,18 @@ class ControlManager:
         elif soc >= self._battery_reserve_soc + GUARD_SOC_HYSTERESIS:
             self._reserve_guard = False
 
+        if not self._charge_guard or soc <= self._charge_limit_soc - GUARD_RETURN_SOC:
+            self._charge_stopped = False
+        elif soc >= self._charge_limit_soc:
+            self._charge_stopped = True
+        if (
+            not self._reserve_guard
+            or soc >= self._battery_reserve_soc + GUARD_RETURN_SOC
+        ):
+            self._reserve_stopped = False
+        elif soc <= self._battery_reserve_soc:
+            self._reserve_stopped = True
+
         # Charging stops at the reserve itself, where the reserve guard's floor
         # takes over, as the app does. The Charge Limit outranks it.
         # A native reserve charges up to itself in the inverter, as the app's does.
@@ -1046,6 +1062,7 @@ class ControlManager:
         self,
         inputs: ControlInputs,
         forbidden: frozenset[Way],
+        latched: frozenset[Way],
         blocked: ControlStatus,
     ) -> Decision:
         """Reproduce Automatic on the battery setpoint, the allowed way only.
@@ -1053,11 +1070,15 @@ class ControlManager:
         The battery setpoint is a target and zero means no limit, so no single value
         says "do not charge, but discharge freely". We therefore clamp the natural
         battery power to the allowed direction.
+
+        *latched* are the ways the guards on forbid, which decide when the
+        inverter is left to run itself; *forbidden* are those the battery is at the
+        limit of, which are clamped. Inside a guard's band nothing is clamped.
         """
         self._one_way_ran = True
-        if forbidden != self._handback_for:
+        if latched != self._handback_for:
             self._handback = GuardHandback()
-            self._handback_for = forbidden
+            self._handback_for = latched
         natural = self._natural_battery_power(inputs)
         if natural is None:
             self._handback.take_back(dt.now())
@@ -1075,10 +1096,15 @@ class ControlManager:
             if from_grid_side is not None and from_solar_side is not None:
                 natural = min(from_grid_side, from_solar_side)
 
-        if self._advance_handback(natural, forbidden):
+        if self._advance_handback(natural, latched):
             return Decision(ControlFeature.AUTOMATIC, 0.0, blocked, bypass_dwell=True)
 
         if not tracks:
+            if not forbidden:
+                # Holding is all these can do, and inside the band nothing needs it.
+                return Decision(
+                    ControlFeature.AUTOMATIC, 0.0, blocked, bypass_dwell=True
+                )
             return self._hold(inputs, blocked)
 
         if CHARGE in forbidden:
@@ -1354,7 +1380,8 @@ class ControlManager:
     ) -> Decision:
         """Send *step*, holding the battery wherever it would move a forbidden way."""
         command = step.command
-        forbidden = self._forbidden_ways(step)
+        latched = self._forbidden_ways(step)
+        forbidden = self._stopping_now(latched, step)
         guard = self._engaged_guard(step)
 
         if command is ControlFeature.AUTOMATIC and guard is not None:
@@ -1363,7 +1390,9 @@ class ControlManager:
             # the house changes, which a guard near its limit can afford but a mode
             # running all day cannot, so a step's own never holds instead, below.
             self._stopped = None
-            return self._one_way_automatic(inputs, frozenset(forbidden), guard)
+            return self._one_way_automatic(
+                inputs, frozenset(forbidden), frozenset(latched), guard
+            )
 
         if command is ControlFeature.HOLD_BATTERY:
             self._stopped = None
@@ -1413,6 +1442,33 @@ class ControlManager:
         if self._reserve_guards(step):
             forbidden[DISCHARGE] = ControlStatus.RESERVE_REACHED
         return forbidden
+
+    def _stopping_now(
+        self, forbidden: dict[Way, ControlStatus | None], step: Step
+    ) -> dict[Way, ControlStatus | None]:
+        """Return the forbidden ways the battery may not move in right now.
+
+        A step's own never always applies; a guard's only once the battery is at
+        its limit (see _at_limit).
+        """
+        return {
+            way: status
+            for way, status in forbidden.items()
+            if way == step.never or self._at_limit(way)
+        }
+
+    def _at_limit(self, way: Way) -> bool:
+        """Return whether the battery is stopped at the limit of the guard on *way*.
+
+        A guard stays on until the battery has moved well clear of its limit, so
+        that it does not engage and release with every percent. In between, the
+        battery may still move back towards the limit: a battery that charged a
+        little above the reserve can use that again, and one that discharged a
+        little below the charge limit can refill. Once stopped at the limit, it
+        only may again after moving GUARD_RETURN_SOC away, so a state of charge
+        flickering by a percent does not charge and discharge it in turn.
+        """
+        return self._charge_stopped if way is CHARGE else self._reserve_stopped
 
     def _reserve_guards(self, step: Step) -> bool:
         """Return whether the reserve guard has to hold *step* back.

@@ -349,6 +349,55 @@ def test_charging_to_a_reserve_the_app_keeps_is_left_to_the_inverter(
     assert sim.inverter.method_writes == 0
 
 
+def test_a_battery_inside_the_reserve_band_can_use_it_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A brief sun lifts the battery a few percent above the reserve, inside the
+    band where the guard stays on. That charge used to be held all night; now the
+    house uses it down to the reserve, which still holds from there."""
+    sim = Simulation(
+        monkeypatch,
+        soc=20.0,
+        reserve=20.0,
+        app_reserve=10.0,
+        model=models.InverterModel.POWEROCEAN_PLUS,
+    )
+    sim.run(polls=30, solar=0, house=800)
+    morning = sim.run(polls=110, solar=2800, house=800)
+    writes = sim.inverter.method_writes
+
+    night = sim.run(polls=720, solar=0, house=800)
+
+    assert morning.soc[-1] == 23
+    assert night.soc[-1] == 20
+    assert min(night.soc) == 20
+    assert sim.inverter.method_writes - writes <= 1
+
+
+def test_a_battery_inside_the_charge_limit_band_can_refill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An evening load takes the battery a little below the charge limit, inside
+    the band where the guard stays on. The next sun used to leave it there all
+    day; now it refills up to the limit, which still holds from there."""
+    sim = Simulation(
+        monkeypatch,
+        soc=80.0,
+        charge_limit=80.0,
+        model=models.InverterModel.POWEROCEAN_PLUS,
+    )
+    sim.run(polls=30, solar=3000, house=500)
+    evening = sim.run(polls=120, solar=0, house=1500)
+    writes = sim.inverter.method_writes
+
+    day = sim.run(polls=720, solar=4000, house=500)
+
+    assert evening.soc[-1] == 78
+    assert day.soc[-1] == 80
+    assert max(day.soc) == 80
+    assert sim.inverter.method_writes - writes <= 1
+
+
 @pytest.mark.parametrize(
     "guards",
     (
@@ -721,7 +770,10 @@ def test_export_solar_first_is_automatic_under_a_reached_charge_limit(
     """With solar hovering around the house load, the hold kept ending early, and
     while it cooled down the mode ran plain Automatic, which charged the battery
     past the limit. Once nothing may go into the battery, the mode has nothing of
-    its own to decide, so it does what Automatic does under the charge limit."""
+    its own to decide, so it does what Automatic does under the charge limit.
+
+    Once the battery has moved GUARD_RETURN_SOC below the limit it may refill, so
+    from there both only have to keep it from going past the limit."""
     runs = {}
     for mode in (
         models.ControlFeature.EXPORT_SOLAR_FIRST,
@@ -733,9 +785,14 @@ def test_export_solar_first_is_automatic_under_a_reached_charge_limit(
 
     solar_first, solar_first_inverter = runs[models.ControlFeature.EXPORT_SOLAR_FIRST]
     automatic, automatic_inverter = runs[models.ControlFeature.AUTOMATIC]
-    assert solar_first.battery == automatic.battery
+    stopped = next(
+        (step for step, soc in enumerate(automatic.soc) if soc <= 80.0 - 2.0),
+        len(automatic.soc),
+    )
+    assert solar_first.battery[:stopped] == automatic.battery[:stopped]
+    assert max(solar_first.battery[:stopped]) <= const.HOLD_SETPOINT_W
+    assert max(solar_first.soc + automatic.soc) <= 80.0
     assert solar_first_inverter.method_writes == automatic_inverter.method_writes == 1
-    assert max(solar_first.battery) <= const.HOLD_SETPOINT_W
 
 
 def test_export_solar_first_holds_at_the_battery_reserve(
