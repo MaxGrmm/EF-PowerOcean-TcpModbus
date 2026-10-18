@@ -159,7 +159,14 @@ With an emulated reserve, turn on **Charge to Battery Reserve** to also charge f
 grid up to it, as the app's backup reserve does. Below the reserve the battery then
 charges at the Charge Battery power, whatever mode is selected, and the reserve holds it
 from there. The Charge Limit still applies, and a Charge Battery power of 0 W leaves the
-reserve a floor only. A native reserve does this in the inverter.
+reserve a floor only. A native reserve does this in the inverter, so it has no such
+switch.
+
+While the battery is below the backup reserve set in the EcoFlow app, the inverter
+charges up to that reserve by itself, so the switch shows on and cannot be turned off
+until the battery gets there; its `set_by_app_backup_reserve` attribute says so. In
+Automatic, an app reserve at or above the Battery Reserve is left to the inverter to
+charge to.
 
 Turn off schedules in the EcoFlow app, since the inverter follows them whenever it runs
 on its own.

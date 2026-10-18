@@ -1930,6 +1930,56 @@ def test_an_emulated_reserve_is_left_to_the_inverter_at_the_app_reserve(
     assert control._commanded_feature is not Feature.DISCHARGE_BATTERY
 
 
+def test_the_app_reserve_above_the_soc_turns_charge_to_reserve_on(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The inverter charges up to its app reserve by itself, so the option is on
+    until the battery gets there, cannot be turned off meanwhile, and keeps what it
+    was set to for afterwards."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_battery_reserve_soc(30))
+    below = {
+        "battery_soc": 22.0,
+        const.BATTERY_RESERVE_REGISTER_KEY: 25,
+        "solar_power": 0.0,
+        "house_power": 900.0,
+        "grid_power": 900.0,
+        "battery_power": 0.0,
+    }
+
+    asyncio.run(control.async_apply(below))
+    assert control.reserve_charge_forced is True
+    assert control.reserve_charge is False
+    assert control.status is Status.CHARGING_TO_RESERVE
+    with pytest.raises(HomeAssistantError):
+        asyncio.run(control.async_set_reserve_charge(False))
+
+    asyncio.run(control.async_apply({**below, "battery_soc": 25.0}))
+    assert control.reserve_charge_forced is False
+    assert control.status is Status.RESERVE_REACHED
+    asyncio.run(control.async_set_reserve_charge(False))
+
+
+def test_a_native_reserve_is_never_charged_by_the_app_reserve_rule(
+    native_control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A native reserve is the app's reserve, which the inverter charges itself."""
+    allow_writes(native_control, monkeypatch)
+    asyncio.run(
+        native_control.async_apply(
+            {
+                "battery_soc": 20.0,
+                const.BATTERY_RESERVE_REGISTER_KEY: 30,
+                "solar_power": 0.0,
+                "house_power": 900.0,
+            }
+        )
+    )
+
+    assert native_control.reserve_charge_forced is False
+    assert native_control.status is not Status.CHARGING_TO_RESERVE
+
+
 def test_a_native_reserve_never_charges_in_the_integration(
     native_control, monkeypatch: pytest.MonkeyPatch
 ) -> None:

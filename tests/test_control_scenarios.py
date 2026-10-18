@@ -304,6 +304,50 @@ def test_an_app_reserve_below_the_battery_reserve_is_still_guarded(
     assert set(run.status) == {models.ControlStatus.RESERVE_REACHED}
 
 
+def test_the_app_reserve_still_charges_below_a_higher_battery_reserve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Below the app's reserve the inverter charges up to it by itself, so Charge to
+    Battery Reserve counts as on until it gets there, even when switched off. Holding
+    the battery instead kept it below the app's reserve all night."""
+    sim = Simulation(
+        monkeypatch,
+        soc=22.0,
+        reserve=30.0,
+        app_reserve=25.0,
+        model=models.InverterModel.POWEROCEAN_PLUS,
+    )
+
+    run = sim.run(polls=720, solar=0, house=800)
+
+    assert run.soc[-1] == 25
+    assert models.ControlStatus.CHARGING_TO_RESERVE in run.status
+    assert run.status[-1] is models.ControlStatus.RESERVE_REACHED
+
+
+def test_charging_to_a_reserve_the_app_keeps_is_left_to_the_inverter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the app's reserve at or above the Battery Reserve, the inverter charges
+    past ours by itself in Automatic, so the integration does not take over to do
+    the first part of it."""
+    sim = Simulation(
+        monkeypatch,
+        soc=15.0,
+        reserve=20.0,
+        app_reserve=30.0,
+        model=models.InverterModel.POWEROCEAN_PLUS,
+    )
+    asyncio.run(sim.control.async_set_reserve_charge(True))
+    sim.inverter.method_writes = 0
+
+    run = sim.run(polls=1440, solar=0, house=800)
+
+    assert run.soc[-1] == 30
+    assert set(run.method) == {AUTOMATIC}
+    assert sim.inverter.method_writes == 0
+
+
 def test_an_untouched_install_never_touches_the_inverter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -368,6 +412,27 @@ def test_a_reserve_above_the_charge_limit_freezes_the_battery(
 
     assert max(abs(watts) for watts in run.battery) <= const.HOLD_SETPOINT_W
     assert run.soc[-1] == run.soc[0]
+
+
+def test_a_frozen_battery_stays_frozen_at_the_app_reserve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the Charge Limit on too, Automatic is reproduced on the battery setpoint,
+    and a commanded discharge outranks the app's reserve. So the battery stays held
+    rather than handed to the inverter at the app's reserve."""
+    sim = Simulation(
+        monkeypatch,
+        soc=55.0,
+        charge_limit=50.0,
+        reserve=60.0,
+        app_reserve=60.0,
+        model=models.InverterModel.POWEROCEAN_PLUS,
+    )
+
+    run = sim.run(polls=120, solar=[0] * 13 + [4000] * 13, house=1000)
+
+    assert max(abs(watts) for watts in run.battery) <= const.HOLD_SETPOINT_W
+    assert sim.inverter.method_writes == 1
 
 
 def test_a_full_battery_leaves_the_inverter_to_balance(

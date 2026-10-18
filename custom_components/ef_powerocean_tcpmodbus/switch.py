@@ -7,8 +7,10 @@ from typing import Any, Final
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .const import DOMAIN
 from .control import ControlManager
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
@@ -59,10 +61,16 @@ RESERVE_CHARGE_SWITCH: Final = SwitchDef(
     key="battery_reserve_charge",
     icon="mdi:battery-arrow-up",
     # A Battery Reserve above the SOC then charges from the grid up to it, at the
-    # Charge Battery power, as the app's backup reserve does.
-    is_on=lambda coordinator: coordinator.control.reserve_charge,
+    # Charge Battery power, as the app's backup reserve does. Below the app's own
+    # reserve it is on anyway, since the inverter charges up to that by itself.
+    is_on=lambda coordinator: (
+        coordinator.control.reserve_charge or coordinator.control.reserve_charge_forced
+    ),
     turn=ControlManager.async_set_reserve_charge,
     available=lambda coordinator: requires_modbus_control(coordinator.control.status),
+    attributes=lambda coordinator: {
+        "set_by_app_backup_reserve": coordinator.control.reserve_charge_forced,
+    },
 )
 
 SWITCHES: Final = (
@@ -74,21 +82,28 @@ SWITCHES: Final = (
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,  # noqa: ARG001 - required by the platform API
+    hass: HomeAssistant,
     entry: EcoflowConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up EcoFlow switches from a config entry."""
     coordinator = entry.runtime_data
+    native = coordinator.control.reserve_native
 
     async_add_entities(
         EcoFlowSwitch(coordinator, entry, definition)
         for definition in SWITCHES
         # A native reserve charges up to itself in the inverter.
-        if not (
-            definition is RESERVE_CHARGE_SWITCH and coordinator.control.reserve_native
-        )
+        if not (definition is RESERVE_CHARGE_SWITCH and native)
     )
+    # One left from when the reserve was emulated would stay as unavailable.
+    registry = er.async_get(hass)
+    if native and (
+        stale := registry.async_get_entity_id(
+            "switch", DOMAIN, f"{entry.entry_id}_{RESERVE_CHARGE_SWITCH.key}"
+        )
+    ):
+        registry.async_remove(stale)
 
 
 class EcoFlowSwitch(EcoFlowBaseEntity[SwitchDef], SwitchEntity):

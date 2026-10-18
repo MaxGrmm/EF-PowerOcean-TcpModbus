@@ -81,6 +81,8 @@ class FakeInverter:
     # The backup reserve set in the EcoFlow app (40536), below which the inverter
     # does not discharge when it runs itself. None for a frame without it.
     app_reserve: float | None = None
+    # How fast it charges up to that reserve when the battery is below it.
+    app_reserve_charge_w: float = 1500.0
 
     async def async_write(
         self,
@@ -126,8 +128,11 @@ class FakeInverter:
             target = self.solar + self.system_setpoint - self.house
         else:
             target = self.solar - self.house
-            if self.app_reserve is not None and self.soc <= self.app_reserve:
-                # Its own self-consumption stops discharging at the app's reserve.
+            if self.app_reserve is not None and round(self.soc) < self.app_reserve:
+                # Below the app's reserve it charges up to it, from the grid if need be.
+                target = max(target, self.app_reserve_charge_w)
+            elif self.app_reserve is not None and round(self.soc) <= self.app_reserve:
+                # At the app's reserve its own self-consumption stops discharging.
                 target = max(target, 0.0)
         if self.ramp_w is not None:
             step = max(-self.ramp_w, min(self.ramp_w, target - self.battery))

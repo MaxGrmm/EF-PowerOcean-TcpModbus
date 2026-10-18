@@ -298,6 +298,9 @@ class ControlManager:
         # app's backup reserve does, and whether it is doing so now.
         self._reserve_charge = False
         self._reserve_charging = False
+        # Whether the app's backup reserve is above the SOC, which charges the
+        # battery up to it whatever Charge to Battery Reserve is set to.
+        self._app_reserve_charges = False
         # When a command sent with an expiry returns to automatic, unless renewed.
         self._expires_at: datetime | None = None
         # Which guard, if any, is forcing the current command.
@@ -475,6 +478,16 @@ class ControlManager:
     def reserve_charge(self) -> bool:
         """Return whether the Battery Reserve charges from the grid up to itself."""
         return self._reserve_charge
+
+    @property
+    def reserve_charge_forced(self) -> bool:
+        """Return whether the app's backup reserve charges the battery anyway.
+
+        Below it the inverter charges up to it from the grid by itself, so with an
+        emulated reserve Charge to Battery Reserve is on, whatever it is set to,
+        until the battery gets there.
+        """
+        return self._app_reserve_charges
 
     @property
     def battery_saver_commanded(self) -> bool:
@@ -758,6 +771,12 @@ class ControlManager:
         cannot be set over Modbus: its register takes a write but the inverter
         keeps acting on the app's value.
         """
+        if not enabled and self._app_reserve_charges:
+            raise HomeAssistantError(
+                "The battery is below the backup reserve set in the EcoFlow app, "
+                "which charges it up to that reserve anyway. Lower that reserve in "
+                "the app to turn this off; nothing was changed."
+            )
         if enabled == self._reserve_charge:
             return
         self._reserve_charge = enabled
@@ -949,10 +968,25 @@ class ControlManager:
         # Charging stops at the reserve itself, where the reserve guard's floor
         # takes over, as the app does. The Charge Limit outranks it.
         # A native reserve charges up to itself in the inverter, as the app's does.
+        app_reserve = inputs.min_soc_limit
+        self._app_reserve_charges = (
+            not self._reserve_native
+            and app_reserve is not None
+            and float(app_reserve) > soc
+        )
+        # In Automatic, an app reserve at or above ours is reached by the inverter
+        # itself, which the reserve guard leaves it to; a manual command outranks
+        # the app's reserve, so the integration still charges under one.
+        inverter_charges = (
+            self._feature is ControlFeature.AUTOMATIC
+            and app_reserve is not None
+            and float(app_reserve) >= self._battery_reserve_soc
+        )
         self._reserve_charging = (
-            self._reserve_charge
+            (self._reserve_charge or self._app_reserve_charges)
             and not self._reserve_native
             and not self._charge_guard
+            and not inverter_charges
             and soc < self._battery_reserve_soc
         )
 
@@ -1393,7 +1427,12 @@ class ControlManager:
         two reserves rather than the state of charge, so it lasts as long as the
         guard does instead of turning with each percent. An app reserve below ours
         is no help: the inverter would discharge past ours to reach it.
+
+        Not while the Charge Limit is on too: Automatic is then reproduced on the
+        battery setpoint, and a commanded discharge outranks the app's reserve.
         """
+        if self._charge_guard:
+            return False
         app_reserve = self._inputs.min_soc_limit
         return app_reserve is not None and self._battery_reserve_soc <= float(
             app_reserve
