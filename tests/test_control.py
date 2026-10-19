@@ -471,7 +471,8 @@ def test_export_solar_first_holds_the_meter_at_its_limit_under_the_cap(
                 const.INVERTER_CAPACITY_KEY: 8000.0,
                 "inverter_rated_power": 10_000.0,
             },
-            8000.0,
+            # The capacity moves from poll to poll, so it caps only what is sent.
+            10_000.0,
         ),
         (
             {"grid_feed_mode": Feed.UNLIMITED, "inverter_rated_power": 10_000.0},
@@ -1425,7 +1426,8 @@ def test_the_grid_feed_switch_refuses_without_a_restore_or_modbus_control(
 
 
 def test_discharge_and_export_are_capped_by_the_inverter_capacity(control) -> None:
-    """40546 is the most the inverter turns from DC into AC."""
+    """40546 is the most the inverter turns from DC into AC. It moves with the
+    battery, so it caps what is sent, while the numbers go up to the rating."""
     control._limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] = 25_000
     control._limits[const.CONF_MAX_BATTERY_CHARGED_POWER] = 25_000
     control._inputs = control_module.ControlInputs.from_mapping(
@@ -1437,10 +1439,40 @@ def test_discharge_and_export_are_capped_by_the_inverter_capacity(control) -> No
         }
     )
 
-    assert control.feature_power_max(Feature.DISCHARGE_BATTERY) == 8000.0
-    assert control.feature_power_max(Feature.EXPORT_TO_GRID) == 8000.0
+    assert control._clamp_power(25_000, Feature.DISCHARGE_BATTERY) == 8000.0
+    assert control._clamp_power(25_000, Feature.EXPORT_TO_GRID) == 8000.0
+    assert control.feature_power_max(Feature.DISCHARGE_BATTERY) == 10000.0
+    assert control.feature_power_max(Feature.EXPORT_TO_GRID) == 10000.0
     # PV on the DC side charges alongside the rectifier, so its capacity is no cap.
     assert control.feature_power_max(Feature.CHARGE_BATTERY) == 10000.0
+
+
+@pytest.mark.parametrize(
+    "feature",
+    (Feature.DISCHARGE_BATTERY, Feature.EXPORT_TO_GRID, Feature.EXPORT_SOLAR_FIRST),
+)
+def test_a_moving_inverter_capacity_leaves_the_power_numbers_alone(
+    control, feature: Feature
+) -> None:
+    """40546 moves with the battery from poll to poll. As the numbers' maximum it
+    changed their capabilities so often that Home Assistant warned about it, and a
+    value set while it was low was cut to it for good. It caps only what is sent."""
+    control._limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] = 25_000
+    maxima = set()
+    for capacity in (8000.0, 7400.0, 7900.0, 6100.0):
+        control._inputs = control_module.ControlInputs.from_mapping(
+            {
+                const.INVERTER_CAPACITY_KEY: capacity,
+                "grid_feed_mode": Feed.UNLIMITED,
+                "inverter_rated_power": 10_000.0,
+            }
+        )
+        maxima.add(control.feature_power_max(feature))
+    assert maxima == {10_000.0}
+
+    asyncio.run(control.async_set_feature_power(feature, 9000))
+    assert control.feature_power(feature) == 9000.0
+    assert control._clamp_power(control.feature_power(feature), feature) == 6100.0
 
 
 def test_import_from_grid_is_capped_by_the_grid_connection_not_the_inverter(
@@ -1460,7 +1492,7 @@ def test_import_from_grid_is_capped_by_the_grid_connection_not_the_inverter(
     asyncio.run(control.async_set_feature_power(Feature.IMPORT_FROM_GRID, 12_000))
     assert control.feature_power(Feature.IMPORT_FROM_GRID) == 12_000.0
     # Export still has to pass the inverter, so its capacity keeps capping it.
-    assert control.feature_power_max(Feature.EXPORT_TO_GRID) == 6850.0
+    assert control._clamp_power(15_000, Feature.EXPORT_TO_GRID) == 6850.0
 
     # An unconfigured grid connection bounds nothing.
     control._limits[const.CONF_MAX_GRID_POWER] = 0

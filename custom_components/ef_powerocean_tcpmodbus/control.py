@@ -563,7 +563,8 @@ class ControlManager:
         return self._feature_power.get(feature, 0.0)
 
     def feature_power_max(self, feature: ControlFeature) -> float:
-        return self._control_power_ceiling(feature)
+        """Return the most *feature* can be set to, which only settings move."""
+        return self._control_power_ceiling(feature, live=False)
 
     @property
     def status(self) -> ControlStatus:
@@ -736,7 +737,7 @@ class ControlManager:
             self._require_modbus_control()
 
         if power is not None:
-            self._feature_power[feature] = self._clamp_power(power, feature)
+            self._feature_power[feature] = self._clamp_power(power, feature, live=False)
         if charge_limit_soc is not None:
             self._update_limits(charge_limit_soc, self._battery_reserve_soc)
         if feature is not self._feature:
@@ -754,7 +755,7 @@ class ControlManager:
         self, feature: ControlFeature, watts: float
     ) -> None:
         """Set a mode's power. Editable whether or not that mode is selected."""
-        self._feature_power[feature] = self._clamp_power(watts, feature)
+        self._feature_power[feature] = self._clamp_power(watts, feature, live=False)
         await self.async_apply(force=True)
 
     async def async_set_charge_limit_soc(self, soc: float) -> None:
@@ -905,8 +906,13 @@ class ControlManager:
             _LOGGER.debug("Grid feed settings to restore are now %s", updated)
         self._grid_feed_restore = updated
 
-    def _control_power_ceiling(self, feature: ControlFeature) -> float:
+    def _control_power_ceiling(
+        self, feature: ControlFeature, *, live: bool = True
+    ) -> float:
         """Return the lowest ceiling that applies to *feature*.
+
+        Without *live*, the inverter capacity is left out: it moves with the
+        battery from poll to poll, so it caps what is sent but not what can be set.
 
         Nothing that passes the inverter can exceed its AC rating, and a ceiling the
         firmware publishes caps it further. Import from Grid targets the meter, which
@@ -930,8 +936,10 @@ class ControlManager:
             ceilings.append(float(limit))
         # Power that has to pass the inverter's DC to AC stage cannot exceed it. Zero
         # or missing means the firmware did not report it, which bounds nothing.
-        if definition.capacity_key is not None and (
-            capacity := self._inputs.value(definition.capacity_key)
+        if (
+            live
+            and definition.capacity_key is not None
+            and (capacity := self._inputs.value(definition.capacity_key))
         ):
             ceilings.append(float(capacity))
         if definition.bounded_by_rating and (
@@ -950,9 +958,12 @@ class ControlManager:
 
         return min(ceilings)
 
-    def _clamp_power(self, watts: float, feature: ControlFeature) -> float:
+    def _clamp_power(
+        self, watts: float, feature: ControlFeature, *, live: bool = True
+    ) -> float:
         """Clamp a magnitude to zero and the inverter's own ceiling for *feature*."""
-        return max(0.0, min(float(watts), self._control_power_ceiling(feature)))
+        ceiling = self._control_power_ceiling(feature, live=live)
+        return max(0.0, min(float(watts), ceiling))
 
     def _update_guards(self, inputs: ControlInputs) -> None:
         """Latch both guards, each releasing well clear of where it engaged.
