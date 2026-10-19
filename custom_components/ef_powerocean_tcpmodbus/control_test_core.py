@@ -417,6 +417,7 @@ def judge(
     elif last_state in (
         ControlStatus.UNREACHABLE_BATTERY_FULL,
         ControlStatus.UNREACHABLE_BATTERY_EMPTY,
+        ControlStatus.UNREACHABLE_EXPORT_LIMIT,
     ):
         verdict, detail = Verdict.UNREACHABLE, str(last_state)
     else:

@@ -133,7 +133,11 @@ inverter never has to curtail solar.
 The guards apply in every mode and only ever stop the battery, never reverse it. In
 Automatic, the battery can still power the house under the Charge Limit, and still
 charge from solar under the Battery Reserve. A guard releases once the charge has moved
-5 % back. Both are off by default.
+5 % back, and stays on across a restart until then. Until it does, the battery can
+still use that band: charge it took above the reserve can be discharged again down to
+the reserve, and a battery a little below the Charge Limit can refill up to it. Once
+stopped at a limit, it has to move 2 % away first, so a state of charge flickering by a
+percent does not charge and discharge it in turn. Both are off by default.
 
 The Battery Reserve is **native** or **emulated**, shown in its `implementation`
 attribute:
@@ -146,7 +150,10 @@ attribute:
 - **Emulated** (every other model): the integration keeps it while Modbus Control is
   on. The PowerOcean Plus takes a write to its reserve register but keeps acting on the
   app's value, and the other models are unproven. The app's own reserve still applies
-  whenever the integration is not in control, and shows as _App Backup Reserve_.
+  whenever the integration is not in control, and shows as _App Backup Reserve_. Once
+  the battery is at the app's reserve, the inverter stops discharging there by itself,
+  so in Automatic the integration leaves it to the inverter as with a native reserve.
+  That is whenever the Battery Reserve is at or below the app's.
 
 The integration options are set to the model's; change them only to test a model, and
 `scripts/control_feature_scan.py --reserve-probe` shows whether one acts on a written
@@ -156,7 +163,14 @@ With an emulated reserve, turn on **Charge to Battery Reserve** to also charge f
 grid up to it, as the app's backup reserve does. Below the reserve the battery then
 charges at the Charge Battery power, whatever mode is selected, and the reserve holds it
 from there. The Charge Limit still applies, and a Charge Battery power of 0 W leaves the
-reserve a floor only. A native reserve does this in the inverter.
+reserve a floor only. A native reserve does this in the inverter, so it has no such
+switch.
+
+While the battery is below the backup reserve set in the EcoFlow app, the inverter
+charges up to that reserve by itself, so the switch shows on and cannot be turned off
+until the battery gets there; its `set_by_app_backup_reserve` attribute says so. In
+Automatic, an app reserve at or above the Battery Reserve is left to the inverter to
+charge to.
 
 Turn off schedules in the EcoFlow app, since the inverter follows them whenever it runs
 on its own.
@@ -193,6 +207,7 @@ doesn't expose a hard power limit over Modbus. See
 | Below solar export limit    | Export solar first is exporting the whole surplus                |
 | Unreachable: battery full   | The target needs the battery to charge, but it's full            |
 | Unreachable: battery empty  | The target needs the battery to discharge, but it's empty        |
+| Unreachable: export limit   | The target needs more export than the export limit lets out      |
 | Not accepted by inverter    | The inverter doesn't report the command, even after resending it |
 | Off-grid                    | Grid outage; control steps aside until the grid is back          |
 | Battery disconnected        | The battery dropped off; control steps aside until it's back     |

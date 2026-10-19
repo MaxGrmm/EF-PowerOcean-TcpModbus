@@ -38,6 +38,7 @@ from .const import (
     GUARD_HANDBACK_S,
     GUARD_HANDBACK_W,
     GUARD_POWER_DEADBAND_W,
+    GUARD_RETURN_SOC,
     GUARD_SETTLE_S,
     GUARD_SOC_HYSTERESIS,
     GUARD_TRACKING_STEP_W,
@@ -71,6 +72,10 @@ _LOGGER = logging.getLogger(__name__)
 
 # Device states in which control steps aside and leaves the inverter to itself.
 _STEPPED_ASIDE = frozenset({ControlStatus.OFF_GRID, ControlStatus.BATTERY_DISCONNECTED})
+
+# Latches the next frame alone could bring back wrong, kept across a restart under
+# these names: each is its attribute without the leading underscore.
+_LATCHES = ("charge_guard", "reserve_guard", "charge_stopped", "reserve_stopped")
 
 # The statuses of the state-of-charge guards, as opposed to a mode's own.
 _GUARDS = frozenset(
@@ -294,10 +299,16 @@ class ControlManager:
         self._battery_reserve_soc = DEFAULT_BATTERY_RESERVE_SOC
         self._charge_guard = False
         self._reserve_guard = False
+        # Whether the battery is stopped at a guard's limit (see _at_limit).
+        self._charge_stopped = False
+        self._reserve_stopped = False
         # Whether the Battery Reserve also charges from the grid up to it, as the
         # app's backup reserve does, and whether it is doing so now.
         self._reserve_charge = False
         self._reserve_charging = False
+        # Whether the app's backup reserve is above the SOC, which charges the
+        # battery up to it whatever Charge to Battery Reserve is set to.
+        self._app_reserve_charges = False
         # When a command sent with an expiry returns to automatic, unless renewed.
         self._expires_at: datetime | None = None
         # Which guard, if any, is forcing the current command.
@@ -477,6 +488,16 @@ class ControlManager:
         return self._reserve_charge
 
     @property
+    def reserve_charge_forced(self) -> bool:
+        """Return whether the app's backup reserve charges the battery anyway.
+
+        Below it the inverter charges up to it from the grid by itself, so with an
+        emulated reserve Charge to Battery Reserve is on, whatever it is set to,
+        until the battery gets there.
+        """
+        return self._app_reserve_charges
+
+    @property
     def battery_saver_commanded(self) -> bool:
         """Return whether battery saver mode is being commanded."""
         return self._battery_saver
@@ -542,7 +563,8 @@ class ControlManager:
         return self._feature_power.get(feature, 0.0)
 
     def feature_power_max(self, feature: ControlFeature) -> float:
-        return self._control_power_ceiling(feature)
+        """Return the most *feature* can be set to, which only settings move."""
+        return self._control_power_ceiling(feature, live=False)
 
     @property
     def status(self) -> ControlStatus:
@@ -586,6 +608,7 @@ class ControlManager:
             "battery_saver": self._battery_saver,
             "grid_feed_restore": self._grid_feed_restore,
             "grid_feed_stopped": self._grid_feed_stopped,
+            "latches": {name: getattr(self, f"_{name}") for name in _LATCHES},
         }
 
     def load_state(self, stored: dict[str, Any]) -> None:
@@ -609,6 +632,11 @@ class ControlManager:
             self._battery_saver = bool(saver)
         self._grid_feed_restore = stored.get("grid_feed_restore") or None
         self._grid_feed_stopped = bool(stored.get("grid_feed_stopped"))
+        # Inside a guard's band the next frame cannot tell whether it was on, so it
+        # comes back as it was; outside it, the next frame decides as ever.
+        for name, latched in (stored.get("latches") or {}).items():
+            if name in _LATCHES:
+                setattr(self, f"_{name}", bool(latched))
 
     def start(self) -> None:
         """Begin holding control authority, if the user switched control on."""
@@ -709,7 +737,7 @@ class ControlManager:
             self._require_modbus_control()
 
         if power is not None:
-            self._feature_power[feature] = self._clamp_power(power, feature)
+            self._feature_power[feature] = self._clamp_power(power, feature, live=False)
         if charge_limit_soc is not None:
             self._update_limits(charge_limit_soc, self._battery_reserve_soc)
         if feature is not self._feature:
@@ -727,7 +755,7 @@ class ControlManager:
         self, feature: ControlFeature, watts: float
     ) -> None:
         """Set a mode's power. Editable whether or not that mode is selected."""
-        self._feature_power[feature] = self._clamp_power(watts, feature)
+        self._feature_power[feature] = self._clamp_power(watts, feature, live=False)
         await self.async_apply(force=True)
 
     async def async_set_charge_limit_soc(self, soc: float) -> None:
@@ -758,6 +786,12 @@ class ControlManager:
         cannot be set over Modbus: its register takes a write but the inverter
         keeps acting on the app's value.
         """
+        if not enabled and self._app_reserve_charges:
+            raise HomeAssistantError(
+                "The battery is below the backup reserve set in the EcoFlow app, "
+                "which charges it up to that reserve anyway. Lower that reserve in "
+                "the app to turn this off; nothing was changed."
+            )
         if enabled == self._reserve_charge:
             return
         self._reserve_charge = enabled
@@ -872,8 +906,13 @@ class ControlManager:
             _LOGGER.debug("Grid feed settings to restore are now %s", updated)
         self._grid_feed_restore = updated
 
-    def _control_power_ceiling(self, feature: ControlFeature) -> float:
+    def _control_power_ceiling(
+        self, feature: ControlFeature, *, live: bool = True
+    ) -> float:
         """Return the lowest ceiling that applies to *feature*.
+
+        Without *live*, the inverter capacity is left out: it moves with the
+        battery from poll to poll, so it caps what is sent but not what can be set.
 
         Nothing that passes the inverter can exceed its AC rating, and a ceiling the
         firmware publishes caps it further. Import from Grid targets the meter, which
@@ -897,8 +936,10 @@ class ControlManager:
             ceilings.append(float(limit))
         # Power that has to pass the inverter's DC to AC stage cannot exceed it. Zero
         # or missing means the firmware did not report it, which bounds nothing.
-        if definition.capacity_key is not None and (
-            capacity := self._inputs.value(definition.capacity_key)
+        if (
+            live
+            and definition.capacity_key is not None
+            and (capacity := self._inputs.value(definition.capacity_key))
         ):
             ceilings.append(float(capacity))
         if definition.bounded_by_rating and (
@@ -917,9 +958,12 @@ class ControlManager:
 
         return min(ceilings)
 
-    def _clamp_power(self, watts: float, feature: ControlFeature) -> float:
+    def _clamp_power(
+        self, watts: float, feature: ControlFeature, *, live: bool = True
+    ) -> float:
         """Clamp a magnitude to zero and the inverter's own ceiling for *feature*."""
-        return max(0.0, min(float(watts), self._control_power_ceiling(feature)))
+        ceiling = self._control_power_ceiling(feature, live=live)
+        return max(0.0, min(float(watts), ceiling))
 
     def _update_guards(self, inputs: ControlInputs) -> None:
         """Latch both guards, each releasing well clear of where it engaged.
@@ -946,13 +990,40 @@ class ControlManager:
         elif soc >= self._battery_reserve_soc + GUARD_SOC_HYSTERESIS:
             self._reserve_guard = False
 
+        if not self._charge_guard or soc <= self._charge_limit_soc - GUARD_RETURN_SOC:
+            self._charge_stopped = False
+        elif soc >= self._charge_limit_soc:
+            self._charge_stopped = True
+        if (
+            not self._reserve_guard
+            or soc >= self._battery_reserve_soc + GUARD_RETURN_SOC
+        ):
+            self._reserve_stopped = False
+        elif soc <= self._battery_reserve_soc:
+            self._reserve_stopped = True
+
         # Charging stops at the reserve itself, where the reserve guard's floor
         # takes over, as the app does. The Charge Limit outranks it.
         # A native reserve charges up to itself in the inverter, as the app's does.
+        app_reserve = inputs.min_soc_limit
+        self._app_reserve_charges = (
+            not self._reserve_native
+            and app_reserve is not None
+            and float(app_reserve) > soc
+        )
+        # In Automatic, an app reserve at or above ours is reached by the inverter
+        # itself, which the reserve guard leaves it to; a manual command outranks
+        # the app's reserve, so the integration still charges under one.
+        inverter_charges = (
+            self._feature is ControlFeature.AUTOMATIC
+            and app_reserve is not None
+            and float(app_reserve) >= self._battery_reserve_soc
+        )
         self._reserve_charging = (
-            self._reserve_charge
+            (self._reserve_charge or self._app_reserve_charges)
             and not self._reserve_native
             and not self._charge_guard
+            and not inverter_charges
             and soc < self._battery_reserve_soc
         )
 
@@ -1002,6 +1073,7 @@ class ControlManager:
         self,
         inputs: ControlInputs,
         forbidden: frozenset[Way],
+        latched: frozenset[Way],
         blocked: ControlStatus,
     ) -> Decision:
         """Reproduce Automatic on the battery setpoint, the allowed way only.
@@ -1009,11 +1081,15 @@ class ControlManager:
         The battery setpoint is a target and zero means no limit, so no single value
         says "do not charge, but discharge freely". We therefore clamp the natural
         battery power to the allowed direction.
+
+        *latched* are the ways the guards on forbid, which decide when the
+        inverter is left to run itself; *forbidden* are those the battery is at the
+        limit of, which are clamped. Inside a guard's band nothing is clamped.
         """
         self._one_way_ran = True
-        if forbidden != self._handback_for:
+        if latched != self._handback_for:
             self._handback = GuardHandback()
-            self._handback_for = forbidden
+            self._handback_for = latched
         natural = self._natural_battery_power(inputs)
         if natural is None:
             self._handback.take_back(dt.now())
@@ -1031,10 +1107,15 @@ class ControlManager:
             if from_grid_side is not None and from_solar_side is not None:
                 natural = min(from_grid_side, from_solar_side)
 
-        if self._advance_handback(natural, forbidden):
+        if self._advance_handback(natural, latched):
             return Decision(ControlFeature.AUTOMATIC, 0.0, blocked, bypass_dwell=True)
 
         if not tracks:
+            if not forbidden:
+                # Holding is all these can do, and inside the band nothing needs it.
+                return Decision(
+                    ControlFeature.AUTOMATIC, 0.0, blocked, bypass_dwell=True
+                )
             return self._hold(inputs, blocked)
 
         if CHARGE in forbidden:
@@ -1310,7 +1391,8 @@ class ControlManager:
     ) -> Decision:
         """Send *step*, holding the battery wherever it would move a forbidden way."""
         command = step.command
-        forbidden = self._forbidden_ways(step)
+        latched = self._forbidden_ways(step)
+        forbidden = self._stopping_now(latched, step)
         guard = self._engaged_guard(step)
 
         if command is ControlFeature.AUTOMATIC and guard is not None:
@@ -1319,7 +1401,9 @@ class ControlManager:
             # the house changes, which a guard near its limit can afford but a mode
             # running all day cannot, so a step's own never holds instead, below.
             self._stopped = None
-            return self._one_way_automatic(inputs, frozenset(forbidden), guard)
+            return self._one_way_automatic(
+                inputs, frozenset(forbidden), frozenset(latched), guard
+            )
 
         if command is ControlFeature.HOLD_BATTERY:
             self._stopped = None
@@ -1370,17 +1454,66 @@ class ControlManager:
             forbidden[DISCHARGE] = ControlStatus.RESERVE_REACHED
         return forbidden
 
+    def _stopping_now(
+        self, forbidden: dict[Way, ControlStatus | None], step: Step
+    ) -> dict[Way, ControlStatus | None]:
+        """Return the forbidden ways the battery may not move in right now.
+
+        A step's own never always applies; a guard's only once the battery is at
+        its limit (see _at_limit).
+        """
+        return {
+            way: status
+            for way, status in forbidden.items()
+            if way == step.never or self._at_limit(way)
+        }
+
+    def _at_limit(self, way: Way) -> bool:
+        """Return whether the battery is stopped at the limit of the guard on *way*.
+
+        A guard stays on until the battery has moved well clear of its limit, so
+        that it does not engage and release with every percent. In between, the
+        battery may still move back towards the limit: a battery that charged a
+        little above the reserve can use that again, and one that discharged a
+        little below the charge limit can refill. Once stopped at the limit, it
+        only may again after moving GUARD_RETURN_SOC away, so a state of charge
+        flickering by a percent does not charge and discharge it in turn.
+        """
+        return self._charge_stopped if way is CHARGE else self._reserve_stopped
+
     def _reserve_guards(self, step: Step) -> bool:
         """Return whether the reserve guard has to hold *step* back.
 
         A native reserve is the inverter's to keep while it runs itself, which it
-        does faster and even with Home Assistant down. A manual command outranks it
-        there, as a hold outranks the reserve on the PowerOcean Plus, so the guard
-        still keeps it under one.
+        does faster and even with Home Assistant down. So is an emulated one once
+        the battery is at the backup reserve set in the app, which the inverter keeps
+        the same way. A manual command outranks it there, as a hold outranks the
+        reserve on the PowerOcean Plus, so the guard still keeps it under one.
         """
         if not self._reserve_guard:
             return False
-        return not (self._reserve_native and step.command is ControlFeature.AUTOMATIC)
+        if step.command is not ControlFeature.AUTOMATIC:
+            return True
+        return not (self._reserve_native or self._at_app_reserve())
+
+    def _at_app_reserve(self) -> bool:
+        """Return whether the battery is at the backup reserve set in the app.
+
+        The guard being on means the battery is at or below the Battery Reserve, so
+        with the app's reserve at or above it, it is at the app's too. Judged on the
+        two reserves rather than the state of charge, so it lasts as long as the
+        guard does instead of turning with each percent. An app reserve below ours
+        is no help: the inverter would discharge past ours to reach it.
+
+        Not while the Charge Limit is on too: Automatic is then reproduced on the
+        battery setpoint, and a commanded discharge outranks the app's reserve.
+        """
+        if self._charge_guard:
+            return False
+        app_reserve = self._inputs.min_soc_limit
+        return app_reserve is not None and self._battery_reserve_soc <= float(
+            app_reserve
+        )
 
     def _grid_cannot_take(self, inputs: ControlInputs, surplus: float | None) -> bool:
         """Return whether holding the battery would export more than the device lets
@@ -1488,6 +1621,7 @@ class ControlManager:
             battery=None
             if (battery := inputs.battery_power) is None
             else float(battery),
+            exporting_at_limit=self._exporting_at_limit(inputs),
         )
 
         if state is ControlStatus.ACTIVE:
@@ -1502,6 +1636,13 @@ class ControlManager:
         self._deviation_polls += 1
         if self._deviation_polls >= CONTROL_STATUS_DAMPING_POLLS:
             self._deviation = state
+
+    def _exporting_at_limit(self, inputs: ControlInputs) -> bool:
+        """Return whether the grid takes all the export the device lets out."""
+        limit = _device_export_limit(inputs)
+        if limit is None or math.isinf(limit) or inputs.grid_power is None:
+            return False
+        return -float(inputs.grid_power) >= limit - POWER_TOLERANCE_W
 
     def _turning_around(self) -> bool:
         """Return whether the current command is too new to call it overruled."""

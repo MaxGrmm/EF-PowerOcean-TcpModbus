@@ -920,6 +920,9 @@ DEFAULT_CHARGE_LIMIT_SOC: Final = 100.0
 DEFAULT_BATTERY_RESERVE_SOC: Final = 0.0
 
 GUARD_SOC_HYSTERESIS: Final = 5.0
+# How far a battery stopped at a guard's limit must move away before it may move
+# back towards it, so a state of charge flickering by a percent stays stopped.
+GUARD_RETURN_SOC: Final = 2.0
 GUARD_POWER_DEADBAND_W: Final = 200.0
 # Resolution of a guard's tracked setpoint, so an ordinary load does not rewrite it
 # every poll. Always rounded towards zero, which leaves the remainder to the grid.

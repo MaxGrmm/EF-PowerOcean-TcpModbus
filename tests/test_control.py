@@ -471,7 +471,8 @@ def test_export_solar_first_holds_the_meter_at_its_limit_under_the_cap(
                 const.INVERTER_CAPACITY_KEY: 8000.0,
                 "inverter_rated_power": 10_000.0,
             },
-            8000.0,
+            # The capacity moves from poll to poll, so it caps only what is sent.
+            10_000.0,
         ),
         (
             {"grid_feed_mode": Feed.UNLIMITED, "inverter_rated_power": 10_000.0},
@@ -1425,7 +1426,8 @@ def test_the_grid_feed_switch_refuses_without_a_restore_or_modbus_control(
 
 
 def test_discharge_and_export_are_capped_by_the_inverter_capacity(control) -> None:
-    """40546 is the most the inverter turns from DC into AC."""
+    """40546 is the most the inverter turns from DC into AC. It moves with the
+    battery, so it caps what is sent, while the numbers go up to the rating."""
     control._limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] = 25_000
     control._limits[const.CONF_MAX_BATTERY_CHARGED_POWER] = 25_000
     control._inputs = control_module.ControlInputs.from_mapping(
@@ -1437,10 +1439,40 @@ def test_discharge_and_export_are_capped_by_the_inverter_capacity(control) -> No
         }
     )
 
-    assert control.feature_power_max(Feature.DISCHARGE_BATTERY) == 8000.0
-    assert control.feature_power_max(Feature.EXPORT_TO_GRID) == 8000.0
+    assert control._clamp_power(25_000, Feature.DISCHARGE_BATTERY) == 8000.0
+    assert control._clamp_power(25_000, Feature.EXPORT_TO_GRID) == 8000.0
+    assert control.feature_power_max(Feature.DISCHARGE_BATTERY) == 10000.0
+    assert control.feature_power_max(Feature.EXPORT_TO_GRID) == 10000.0
     # PV on the DC side charges alongside the rectifier, so its capacity is no cap.
     assert control.feature_power_max(Feature.CHARGE_BATTERY) == 10000.0
+
+
+@pytest.mark.parametrize(
+    "feature",
+    (Feature.DISCHARGE_BATTERY, Feature.EXPORT_TO_GRID, Feature.EXPORT_SOLAR_FIRST),
+)
+def test_a_moving_inverter_capacity_leaves_the_power_numbers_alone(
+    control, feature: Feature
+) -> None:
+    """40546 moves with the battery from poll to poll. As the numbers' maximum it
+    changed their capabilities so often that Home Assistant warned about it, and a
+    value set while it was low was cut to it for good. It caps only what is sent."""
+    control._limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] = 25_000
+    maxima = set()
+    for capacity in (8000.0, 7400.0, 7900.0, 6100.0):
+        control._inputs = control_module.ControlInputs.from_mapping(
+            {
+                const.INVERTER_CAPACITY_KEY: capacity,
+                "grid_feed_mode": Feed.UNLIMITED,
+                "inverter_rated_power": 10_000.0,
+            }
+        )
+        maxima.add(control.feature_power_max(feature))
+    assert maxima == {10_000.0}
+
+    asyncio.run(control.async_set_feature_power(feature, 9000))
+    assert control.feature_power(feature) == 9000.0
+    assert control._clamp_power(control.feature_power(feature), feature) == 6100.0
 
 
 def test_import_from_grid_is_capped_by_the_grid_connection_not_the_inverter(
@@ -1460,7 +1492,7 @@ def test_import_from_grid_is_capped_by_the_grid_connection_not_the_inverter(
     asyncio.run(control.async_set_feature_power(Feature.IMPORT_FROM_GRID, 12_000))
     assert control.feature_power(Feature.IMPORT_FROM_GRID) == 12_000.0
     # Export still has to pass the inverter, so its capacity keeps capping it.
-    assert control.feature_power_max(Feature.EXPORT_TO_GRID) == 6850.0
+    assert control._clamp_power(15_000, Feature.EXPORT_TO_GRID) == 6850.0
 
     # An unconfigured grid connection bounds nothing.
     control._limits[const.CONF_MAX_GRID_POWER] = 0
@@ -1895,6 +1927,89 @@ def test_a_native_reserve_is_left_to_the_inverter_in_automatic_only(
     asyncio.run(native_control.async_apply(below))
     assert native_control.status is Status.RESERVE_REACHED
     assert native_control._commanded_feature is not Feature.DISCHARGE_BATTERY
+
+
+@pytest.mark.parametrize(
+    ("app_reserve", "left_to_inverter"), ((20, True), (30, True), (10, False))
+)
+def test_an_emulated_reserve_is_left_to_the_inverter_at_the_app_reserve(
+    control, monkeypatch: pytest.MonkeyPatch, app_reserve: int, left_to_inverter: bool
+) -> None:
+    """At the app's reserve the inverter keeps it as it does a native one, in
+    Automatic only. An app reserve below ours would let it discharge past ours."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_battery_reserve_soc(20))
+    at_reserve = {
+        "battery_soc": 20.0,
+        const.BATTERY_RESERVE_REGISTER_KEY: app_reserve,
+        "solar_power": 0.0,
+        "house_power": 900.0,
+        "grid_power": 900.0,
+        "battery_power": 0.0,
+    }
+
+    asyncio.run(control.async_apply(at_reserve))
+    if left_to_inverter:
+        assert control.status is Status.AUTOMATIC
+        assert control._commanded_feature is Feature.AUTOMATIC
+    else:
+        assert control.status is Status.RESERVE_REACHED
+        assert control._commanded_feature is not Feature.AUTOMATIC
+
+    asyncio.run(control.async_set_command(Feature.DISCHARGE_BATTERY, power=2000.0))
+    asyncio.run(control.async_apply(at_reserve))
+    assert control.status is Status.RESERVE_REACHED
+    assert control._commanded_feature is not Feature.DISCHARGE_BATTERY
+
+
+def test_the_app_reserve_above_the_soc_turns_charge_to_reserve_on(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The inverter charges up to its app reserve by itself, so the option is on
+    until the battery gets there, cannot be turned off meanwhile, and keeps what it
+    was set to for afterwards."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_battery_reserve_soc(30))
+    below = {
+        "battery_soc": 22.0,
+        const.BATTERY_RESERVE_REGISTER_KEY: 25,
+        "solar_power": 0.0,
+        "house_power": 900.0,
+        "grid_power": 900.0,
+        "battery_power": 0.0,
+    }
+
+    asyncio.run(control.async_apply(below))
+    assert control.reserve_charge_forced is True
+    assert control.reserve_charge is False
+    assert control.status is Status.CHARGING_TO_RESERVE
+    with pytest.raises(HomeAssistantError):
+        asyncio.run(control.async_set_reserve_charge(False))
+
+    asyncio.run(control.async_apply({**below, "battery_soc": 25.0}))
+    assert control.reserve_charge_forced is False
+    assert control.status is Status.RESERVE_REACHED
+    asyncio.run(control.async_set_reserve_charge(False))
+
+
+def test_a_native_reserve_is_never_charged_by_the_app_reserve_rule(
+    native_control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A native reserve is the app's reserve, which the inverter charges itself."""
+    allow_writes(native_control, monkeypatch)
+    asyncio.run(
+        native_control.async_apply(
+            {
+                "battery_soc": 20.0,
+                const.BATTERY_RESERVE_REGISTER_KEY: 30,
+                "solar_power": 0.0,
+                "house_power": 900.0,
+            }
+        )
+    )
+
+    assert native_control.reserve_charge_forced is False
+    assert native_control.status is not Status.CHARGING_TO_RESERVE
 
 
 def test_a_native_reserve_never_charges_in_the_integration(
