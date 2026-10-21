@@ -1,7 +1,11 @@
 # EF-PowerOcean-TcpModbus
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![GitHub release](https://img.shields.io/github/release/MaxGrmm/EF-PowerOcean-TcpModbus.svg)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases)
+[![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
+[![GitHub release](https://img.shields.io/github/v/release/MaxGrmm/EF-PowerOcean-TcpModbus)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases)
+[![Validate](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/actions/workflows/validate.yml/badge.svg)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/actions/workflows/validate.yml)
+[![License: MIT](https://img.shields.io/github/license/MaxGrmm/EF-PowerOcean-TcpModbus)](LICENSE)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.12.0%2B-41BDF5.svg)](https://www.home-assistant.io/)
+
 
 **Local Modbus TCP integration for the EcoFlow PowerOcean home battery system.**
 
