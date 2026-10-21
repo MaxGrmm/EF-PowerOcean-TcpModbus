@@ -1,11 +1,12 @@
 # EF-PowerOcean-TcpModbus
 
 [![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
-[![GitHub release](https://img.shields.io/github/v/release/MaxGrmm/EF-PowerOcean-TcpModbus)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases)
-[![Validate](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/actions/workflows/validate.yml/badge.svg)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/actions/workflows/validate.yml)
-[![License: MIT](https://img.shields.io/github/license/MaxGrmm/EF-PowerOcean-TcpModbus)](LICENSE)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.12.0%2B-41BDF5.svg)](https://www.home-assistant.io/)
-
+[![GitHub release](https://img.shields.io/github/v/release/MaxGrmm/EF-PowerOcean-TcpModbus)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases)
+[![Validate](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/actions/workflows/validate.yml)
+[![Downloads total](https://img.shields.io/github/downloads/MaxGrmm/EF-PowerOcean-TcpModbus/total?label=downloads%20(total))](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases)
+[![Downloads latest](https://img.shields.io/github/downloads/MaxGrmm/EF-PowerOcean-TcpModbus/latest/total?label=downloads%20(latest))](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/MaxGrmm/EF-PowerOcean-TcpModbus)](LICENSE)
 
 **Local Modbus TCP integration for the EcoFlow PowerOcean home battery system.**
 
