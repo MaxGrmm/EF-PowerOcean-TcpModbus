@@ -65,15 +65,14 @@ The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled b
 
 ### Via HACS (recommended)
 
-[![Add to Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MaxGrmm&repository=EF-PowerOcean-TcpModbus&category=integration)
+[![Open your Home Assistant instance and open the repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MaxGrmm&repository=EF-PowerOcean-TcpModbus&category=integration)
 
-To add it manually instead:
+Or install it from within HACS:
 
-1. Open HACS in Home Assistant
-2. Go to **Integrations** → **⋮** → **Custom repositories**
-3. Add `https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus` as category **Integration**
-4. Open the repository in HACS and click **Install**
-5. Restart Home Assistant
+1. Open **HACS** in Home Assistant
+2. Search for **EF-PowerOcean-TcpModbus**
+3. Open it and click **Download**
+4. Restart Home Assistant
 
 ### Manual
 
