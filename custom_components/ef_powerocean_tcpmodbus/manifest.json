@@ -14,6 +14,8 @@
   "loggers": [
     "custom_components.ef_powerocean_tcpmodbus"
   ],
-  "requirements": [],
+  "requirements": [
+    "pymodbus>=3.11"
+  ],
   "version": "2.9.1"
 }
