@@ -15,7 +15,7 @@ this integration's register handling.
 - [Data types and word order](#data-types-and-word-order)
 - [How the integration reads](#how-the-integration-reads)
 - [Not yet mapped](#not-yet-mapped)
-- [Reverse-engineered regions](#reverse-engineered-regions)
+- [Where the specification and the hardware disagree](#where-the-specification-and-the-hardware-disagree)
 - [Values only available in the Cloud API](#values-only-available-in-the-cloud-api)
 - [Writing registers](#writing-registers)
 - [Battery power limits](#battery-power-limits)
@@ -23,13 +23,19 @@ this integration's register handling.
 
 ## Sources
 
-1. **Cross-checks against the EcoFlow web portal.** Live values read over Modbus,
+1. **EcoFlow Open Modbus Protocol V1.0** (10 June 2026).
+   EcoFlow's own register table for the PowerOcean and Ocean2 series. Every
+   register the integration reads is in it, at the address it gives plus 40001.
+   Where it disagrees with the hardware, the hardware wins, see
+   [Where the specification and the hardware disagree](#where-the-specification-and-the-hardware-disagree).
+   A copy is kept in [docs/EcoFlow_Open_Modbus_Protocol_V1.0_June_2026.pdf](docs/EcoFlow_Open_Modbus_Protocol_V1.0_June_2026.pdf).
+2. **Cross-checks against the EcoFlow web portal.** Live values read over Modbus,
    compared against what the portal reported for the same system at the same
    moment. This is what settles any disagreement about what a register holds.
-2. **Community reverse engineering.** The original version of this document was
+3. **Community reverse engineering.** The original version of this document was
    produced by scanning 40001–44096 on a PowerOcean Plus and matching values
-   against the Cloud API. Several regions the integration still depends on come
-   from that work.
+   against the Cloud API, before the specification was published. It has since
+   confirmed every region the integration reads.
 
 ## Enabling Modbus
 
@@ -46,13 +52,17 @@ Modbus stays off until the inverter is switched into Modbus control mode:
 | Port           | 502                                                       |
 | Unit / slave   | 1 (the device answers on effectively any unit ID)         |
 | Functions      | `0x03` read holding registers, `0x06` / `0x10` for writes |
-| Addressing     | Direct 4xxxx addresses                                    |
+| Addressing     | Direct 4xxxx addresses (specification address + 40001)    |
 | Address window | 40001–44096, and nothing outside it                       |
 
 The window was measured by probing 0–60000 and bisecting the edges. `0x04` read
 input registers answers over exactly the same range, and `0x01` / `0x02` answer
 nothing at all, so there is no second address space to search: anything reachable
 is reachable through `0x03`.
+
+The specification gives its addresses from 0x0000 and says "Starting address:
+40001 (Decimal) onwards". That is literal: register 0x0206 is read at address
+40519 on the wire, not at 518 as the usual 4xxxx convention would have it.
 
 Best practice is to configure a static IP in your router's admin interface. Otherwise there is a risk that the integration stops working if the inverter gets a new IP.
 
@@ -134,16 +144,24 @@ reads. Several are settings rather than measurements, so they are left alone by
 default. Some of them are **signed** 32-bit values, which `RegisterType.INT32` and
 `decode_register` both handle.
 
-## Reverse-engineered regions
+## Where the specification and the hardware disagree
 
-Two regions in active use come from community scanning rather than any published
-specification. They are confirmed against the portal, but they are the parts most
-likely to shift with a firmware update:
+The specification is a trial version, and the hardware departs from it in a few
+places. Each of these is measured, and the code follows the hardware:
 
-- **40574–40607**, battery voltage, current and temperature; per-phase voltage and
-  current; inverter temperature; grid frequency; PV string voltages and currents.
-- **42161–42260**, lifetime and daily energy counters for grid import/export,
-  battery charge/discharge and solar.
+| Specification                                                                                   | Hardware                                                                                                                               |
+| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| "Starting address: 40001 (Decimal) onwards"                                                     | Literal: specification address + 40001 on the wire, see [Connection](#connection)                                                      |
+| "Data storage method: big end", yet Note 1 has `0x12345678` on the wire as `56781234`           | Reads are low word first, as Note 1 says. Writes are high word first, as the header says. See [word order](#data-types-and-word-order) |
+| 32-bit values low word first on every product                                                   | The three-phase Ocean 2 and the single-phase Ocean 2 Plus read high word first (`high_word_first`)                                     |
+| Energy counters in kWh                                                                          | The three-phase Ocean 2 and the single-phase Ocean 2 Plus report Wh (`energy_in_watt_hours`)                                           |
+| System Control Command (40534) and Heartbeat (40608) are write-only                             | Reading 40534 is answered on the PowerOcean Plus. 40608 is kept out of the reads                                                       |
+| Backup Power Ratio (40536) is read-write                                                        | The PowerOcean Plus stores a written value but keeps acting on the app's (`battery_reserve` trait)                                     |
+| Limitation Percentage of Feed to Grid (40573) and Maximum Grid Feed Power Current (40609) exist | Not on the PowerOcean Plus, see `unsupported_models` and the model traits                                                              |
+
+Product Number (40003) only names the three PowerOcean products, so an Ocean 2
+cannot be told apart by it. The model the device reports only pre-fills the setup
+form, and the one chosen there is what the integration uses.
 
 ## Values only available in the Cloud API
 
@@ -211,8 +229,9 @@ but it works.
 
 ## Disclaimer
 
-Parts of this map are community reverse engineering. Firmware updates may invalidate
-any of it.
+The register map follows EcoFlow's Open Modbus Protocol V1.0, a trial version, as
+corrected by measurements on real inverters. Firmware updates may invalidate any of
+it.
 
 - Use at your own risk.
 - Do not write registers unless you understand the consequences.

@@ -524,8 +524,9 @@ Special thanks to all contributors for the massive amount of time and effort tha
 
 ## Disclaimer
 
-This integration was developed through community reverse engineering.
-EcoFlow does not officially support or document this Modbus interface.
+This integration follows EcoFlow's Open Modbus Protocol V1.0, a trial version,
+corrected by community measurements where the hardware differs from it. See the
+[protocol notes](EcoFlow_PowerOcean_Modbus.md#where-the-specification-and-the-hardware-disagree).
 Use at your own risk. Not affiliated with EcoFlow Technology Co., Ltd.
 
 ---
