@@ -42,7 +42,7 @@
 | EcoFlow PowerOcean DC Fit    | ❓ Untested  | ❓ Untested  |
 | EcoFlow Ocean 2 3-phase      | ✅ Confirmed | ❓ Untested  |
 | EcoFlow Ocean 2 1-phase      | ✅ Confirmed | ❓ Untested  |
-| EcoFlow Ocean 2 Plus 1-phase | ✅ Confirmed | ❓ Untested  |
+| EcoFlow Ocean 2 Plus 1-phase | ✅ Confirmed |  ✅ Confirmed |
 
 Running an untested model? [scripts/register_scan.py](scripts/register_scan.py) produces a read-only report comparing your inverter against the register map this integration expects. Attaching its output to an issue is what makes a device supportable, see [Register Scan](CONTRIBUTING.md#register-scan).
 
