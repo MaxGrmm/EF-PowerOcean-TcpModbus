@@ -6,7 +6,6 @@
 [![Validate](https://img.shields.io/github/actions/workflow/status/MaxGrmm/EF-PowerOcean-TcpModbus/validate.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=validate)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/github/license/MaxGrmm/EF-PowerOcean-TcpModbus?style=flat-square&color=lightgrey)](LICENSE)
 
-
 **Local Modbus TCP integration for the EcoFlow PowerOcean home battery system.**
 
 > ⚠️ This integration communicates directly with your device over your local network via Modbus TCP. No cloud connection required.
