@@ -1,7 +1,10 @@
 # EF-PowerOcean-TcpModbus
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![GitHub release](https://img.shields.io/github/release/MaxGrmm/EF-PowerOcean-TcpModbus.svg)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases)
+[![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5?style=flat-square&logo=homeassistantcommunitystore&logoColor=white)](https://github.com/hacs/integration)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.12.0%2B-18BCF2?style=flat-square&logo=homeassistant&logoColor=white)](https://www.home-assistant.io/)
+[![Release](https://img.shields.io/github/v/release/MaxGrmm/EF-PowerOcean-TcpModbus?style=flat-square&logo=github&color=blue)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases)
+[![Validate](https://img.shields.io/github/actions/workflow/status/MaxGrmm/EF-PowerOcean-TcpModbus/validate.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=validate)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/actions/workflows/validate.yml)
+[![License: MIT](https://img.shields.io/github/license/MaxGrmm/EF-PowerOcean-TcpModbus?style=flat-square&color=lightgrey)](LICENSE)
 
 **Local Modbus TCP integration for the EcoFlow PowerOcean home battery system.**
 
@@ -39,7 +42,7 @@
 | EcoFlow PowerOcean DC Fit    | ❓ Untested  | ❓ Untested  |
 | EcoFlow Ocean 2 3-phase      | ✅ Confirmed | ❓ Untested  |
 | EcoFlow Ocean 2 1-phase      | ✅ Confirmed | ❓ Untested  |
-| EcoFlow Ocean 2 Plus 1-phase | ✅ Confirmed | ❓ Untested  |
+| EcoFlow Ocean 2 Plus 1-phase | ✅ Confirmed | ✅ Confirmed |
 
 Running an untested model? [scripts/register_scan.py](scripts/register_scan.py) produces a read-only report comparing your inverter against the register map this integration expects. Attaching its output to an issue is what makes a device supportable, see [Register Scan](CONTRIBUTING.md#register-scan).
 
@@ -61,15 +64,14 @@ The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled b
 
 ### Via HACS (recommended)
 
-[![Add to Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MaxGrmm&repository=EF-PowerOcean-TcpModbus&category=integration)
+[![Open your Home Assistant instance and open the repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MaxGrmm&repository=EF-PowerOcean-TcpModbus&category=integration)
 
-To add it manually instead:
+Or install it from within HACS:
 
-1. Open HACS in Home Assistant
-2. Go to **Integrations** → **⋮** → **Custom repositories**
-3. Add `https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus` as category **Integration**
-4. Open the repository in HACS and click **Install**
-5. Restart Home Assistant
+1. Open **HACS** in Home Assistant
+2. Search for **EF-PowerOcean-TcpModbus**
+3. Open it and click **Download**
+4. Restart Home Assistant
 
 ### Manual
 
