@@ -353,8 +353,11 @@ that need the EcoFlow app open, or that change device settings, are left to
 | Inverter Temperature  | °C   | Inverter temperature                                 |
 | Grid Connection Code  | –    | Grid standard code set by the installer (diagnostic) |
 
-The _Grid Connection Code_ is the grid standard the inverter was commissioned with, as
-a number. EcoFlow doesn't document which standard each number stands for, so ask your
+The _Grid Connection Code_ is the grid standard the inverter was commissioned with, as a
+raw number. EcoFlow doesn't document which standard each number stands for and (in my testing)
+the mapping used by other EcoFlow products doesn't full match the PowerOcean series.
+
+, so ask your
 installer if you need to know.
 
 ### Status
