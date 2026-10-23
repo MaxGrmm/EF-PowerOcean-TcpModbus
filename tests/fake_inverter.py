@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import struct
 from collections import defaultdict
+from collections.abc import Mapping
+from typing import Any
 
 HOST = "127.0.0.1"
 MBAP = struct.Struct(">HHHB")  # transaction, protocol, length, unit
@@ -31,6 +33,12 @@ class FakeInverter:
             self.registers[address + word] = (ord(padded[offset]) << 8) | ord(
                 padded[offset + 1]
             )
+
+    def load_diagnostics(self, diagnostics: Mapping[str, Any]) -> None:
+        """Serve the words a diagnostics download recorded, as the device sent them."""
+        for start, words in diagnostics["raw_registers"].items():
+            for offset, word in enumerate(words):
+                self.registers[int(start) + offset] = word
 
     def answer(self, pdu: bytes) -> bytes:
         self.requests += 1

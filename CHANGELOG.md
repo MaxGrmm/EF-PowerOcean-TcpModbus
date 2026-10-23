@@ -5,6 +5,7 @@
 ### Added
 
 - Grid Connection Code diagnostic sensor: the grid standard the inverter was commissioned with, as EcoFlow numbers it.
+- The diagnostics download has a `raw_registers` section: every word the last poll read, undecoded, which the test suite's fake inverter can serve again.
 
 ### Changed
 
