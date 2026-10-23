@@ -77,6 +77,15 @@ Register changes need stronger evidence than a field name or a successful read:
 - Treat missing or invalid telemetry as unavailable. Do not replace it with zero, especially for `total_increasing` energy sensors, because that can corrupt Home Assistant long-term statistics.
 - Use synthetic values and placeholder identifiers in tests and fixtures.
 
+### Replaying a Diagnostics Download
+
+The `raw_registers` section of a diagnostics download is every word the last poll
+read, undecoded. `FakeInverter.load_diagnostics()` in
+[tests/fake_inverter.py](tests/fake_inverter.py) serves them again, so a decoding
+bug on a model you do not own can be reproduced in a test from the reporter's
+download. Trim the download to what the test needs and replace any identifiers
+with placeholders before committing it.
+
 ### Register Scan
 
 [scripts/register_scan.py](scripts/register_scan.py) compares a live inverter against the register map in [const.py](custom_components/ef_powerocean_tcpmodbus/const.py) and prints a report to attach to an issue. It is read-only: it never writes a register and never takes Modbus control away from the EcoFlow app. The map, the decoding and the block planning are imported from the integration, so the report cannot drift from the code.

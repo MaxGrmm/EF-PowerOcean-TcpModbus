@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import struct
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import timedelta
@@ -97,6 +98,33 @@ async def test_diagnostics_leave_out_the_address_and_most_of_the_serial(
     assert SERIAL not in text
     assert diagnostics["serial_number"] == SERIAL[:4]
     assert diagnostics["modbus_connection"] in ("shared", "own")
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_diagnostics_replay_on_the_fake_inverter(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    """A user's diagnostics download makes the same poll in a test."""
+    entry = await set_up()
+    coordinator = entry.runtime_data
+    _serve_float(inverter, const.REGISTERS_BY_KEY["grid_power"].address, -1234.5)
+    await coordinator.async_refresh()
+    recorded = coordinator.raw_registers
+    assert recorded
+
+    # As downloaded: JSON, with the addresses as strings.
+    diagnostics = json.loads(
+        json.dumps(await async_get_config_entry_diagnostics(hass, entry), default=str)
+    )
+    inverter.registers.clear()
+    inverter.serve_serial(SERIAL, const.SERIAL_NUMBER.address)
+    inverter.load_diagnostics(diagnostics)
+    await coordinator.async_refresh()
+
+    assert coordinator.raw_registers == recorded
+    replayed = await coordinator.async_get_raw_data()
+    assert replayed is not None
+    assert replayed["grid_power"] == -1234.5
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

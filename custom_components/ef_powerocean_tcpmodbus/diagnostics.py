@@ -71,6 +71,9 @@ async def async_get_config_entry_diagnostics(
             "control_power": coordinator.control.power,
             "control_command": f"0x{coordinator.control.command:08X}",
             "unsupported_registers": sorted(coordinator.unsupported_registers),
+            # The words the last poll read, undecoded, which the test suite's fake
+            # inverter can serve again. The serial number is not among them.
+            "raw_registers": coordinator.raw_registers,
             # Every energy counter as published and as the device reports it.
             "energy": coordinator.energy_report,
             # The last control test run here, the report to attach to an issue.

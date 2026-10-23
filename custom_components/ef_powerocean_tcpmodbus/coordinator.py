@@ -163,6 +163,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             config_entry.data.get(CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL)
         )
         self._register_blocks = register_blocks_for(self.inverter_model)
+        # The words the last poll read, by the address each read started at.
+        self._raw_blocks: dict[int, list[int]] = {}
         self._registers_by_key = {
             register.key: register
             for block in self._register_blocks
@@ -546,6 +548,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
                         return None
 
+                self._raw_blocks = {}
                 # A probe may replan the blocks.
                 for register_block in tuple(self._register_blocks):
                     await self._async_read_block(register_block, data)
@@ -709,6 +712,15 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._unsupported_keys
 
     @property
+    def raw_registers(self) -> dict[int, list[int]]:
+        """Return the words the last poll read, by the address each read started at.
+
+        Undecoded, so a report reproduces exactly what the device sent, word order
+        and units included.
+        """
+        return dict(sorted(self._raw_blocks.items()))
+
+    @property
     def polled_registers(self) -> frozenset[str]:
         """Return the keys of the registers the poll reads."""
         return frozenset(
@@ -826,6 +838,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise
         self._optional_stalls.pop(register_block.start, None)
 
+        self._raw_blocks[register_block.start] = list(raw)
         for register in register_block.registers:
             data[register.key] = self._decode(
                 register_block.registers_for(raw, register), register
@@ -861,6 +874,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     refused.add(register.key)
                 data[register.key] = None
                 continue
+            self._raw_blocks[register.address] = list(raw)
             data[register.key] = self._decode(list(raw), register)
 
         if refused:
