@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import struct
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import timedelta
@@ -97,6 +98,78 @@ async def test_diagnostics_leave_out_the_address_and_most_of_the_serial(
     assert SERIAL not in text
     assert diagnostics["serial_number"] == SERIAL[:4]
     assert diagnostics["modbus_connection"] in ("shared", "own")
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_raw_registers_in_the_diagnostics_never_hold_the_serial_number(
+    hass: HomeAssistant, set_up: SetUp
+) -> None:
+    """Not even from a read that covers it."""
+    entry = await set_up()
+    serial = const.SERIAL_NUMBER
+    words = list(range(1, serial.end - 40001 + 3))
+    entry.runtime_data._raw_blocks = {40001: words}
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    raw = diagnostics["raw_registers"][40001]
+    assert len(raw) == len(words)
+    for offset, word in enumerate(raw):
+        if serial.address <= 40001 + offset < serial.end:
+            assert word is None
+        else:
+            assert word == words[offset]
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_diagnostics_replay_on_the_fake_inverter(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    """A user's diagnostics download makes the same poll in a test."""
+    entry = await set_up()
+    coordinator = entry.runtime_data
+    _serve_float(inverter, const.REGISTERS_BY_KEY["grid_power"].address, -1234.5)
+    await coordinator.async_refresh()
+    recorded = coordinator.raw_registers
+    assert recorded
+
+    # As downloaded: JSON, with the addresses as strings.
+    diagnostics = json.loads(
+        json.dumps(await async_get_config_entry_diagnostics(hass, entry), default=str)
+    )
+    inverter.registers.clear()
+    inverter.serve_serial(SERIAL, const.SERIAL_NUMBER.address)
+    inverter.load_diagnostics(diagnostics)
+    await coordinator.async_refresh()
+
+    assert coordinator.raw_registers == recorded
+    replayed = await coordinator.async_get_raw_data()
+    assert replayed is not None
+    assert replayed["grid_power"] == -1234.5
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_active_faults_are_named_where_the_code_is_known(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    entry = await set_up()
+    inverter.registers[const.REGISTERS_BY_KEY["fault_count"].address] = 2
+    inverter.registers[const.REGISTERS_BY_KEY["fault_1"].address] = 521
+    inverter.registers[const.REGISTERS_BY_KEY["fault_2"].address] = 9999
+    coordinator = entry.runtime_data
+    # A poll within a second of the last one returns the last frame.
+    coordinator._last_checked_time = dt_util.now() - timedelta(seconds=5)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    state = hass.states.get(_entity_id(hass, entry, "sensor", "active_faults"))
+
+    assert state is not None
+    assert state.state == "521, 9999"
+    assert state.attributes["faults"] == [
+        {"code": 521, "name": "Energy storage communication error"},
+        {"code": 9999, "name": None},
+    ]
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

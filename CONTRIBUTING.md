@@ -77,6 +77,32 @@ Register changes need stronger evidence than a field name or a successful read:
 - Treat missing or invalid telemetry as unavailable. Do not replace it with zero, especially for `total_increasing` energy sensors, because that can corrupt Home Assistant long-term statistics.
 - Use synthetic values and placeholder identifiers in tests and fixtures.
 
+### Replaying a Diagnostics Download
+
+The `raw_registers` section of a diagnostics download is every word the last poll
+read, undecoded, with the serial number's words left out as `null`. `FakeInverter.load_diagnostics()` in
+[tests/fake_inverter.py](tests/fake_inverter.py) serves them again, so a decoding
+bug on a model you do not own can be reproduced in a test from the reporter's
+download. Trim the download to what the test needs and replace any identifiers
+with placeholders before committing it.
+
+### Fault Names
+
+The Fault Event registers hold one code each, and EcoFlow's protocol refers to a
+fault definition it does not include. The names come from the event history in the
+EcoFlow portal (user-portal.ecoflow.com), whose `errorCode` is the code the
+registers report, in decimal.
+
+The names live in the translations, under `selector.fault_code.options`, keyed by
+the decimal code:
+
+- To add a code, add it to [translations/en.json](custom_components/ef_powerocean_tcpmodbus/translations/en.json),
+  and to every other language you can. A language without a code shows the English name.
+- To add a language, add its `translations/<language>.json` with the codes it names.
+  Switching the portal's language shows the same history in that language.
+
+Use the portal's `errorName` as the name, and leave out serial numbers.
+
 ### Register Scan
 
 [scripts/register_scan.py](scripts/register_scan.py) compares a live inverter against the register map in [const.py](custom_components/ef_powerocean_tcpmodbus/const.py) and prints a report to attach to an issue. It is read-only: it never writes a register and never takes Modbus control away from the EcoFlow app. The map, the decoding and the block planning are imported from the integration, so the report cannot drift from the code.

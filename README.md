@@ -24,7 +24,7 @@
 - Per-phase AC measurements: voltage, current, frequency
 - Energy counters: daily and lifetime for grid, solar, battery charge/discharge, house consumption
 - Operating mode, grid mode and system status as dedicated entities
-- Fault reporting: active fault count and raw fault codes
+- Fault reporting: active fault count, and the fault codes with their names where known
 - Serial number and firmware version read from the device. The model it reports pre-fills the setup form; the model you select is the one the integration uses
 - Reconfigurable after setup via **Settings → Configure** (no re-install needed)
 - Debug logging toggle directly in the HA UI
@@ -345,12 +345,20 @@ that need the EcoFlow app open, or that change device settings, are left to
 
 ### AC Grid
 
-| Sensor                | Unit | Description          |
-| --------------------- | ---- | -------------------- |
-| Grid Voltage L1/L2/L3 | V    | Per-phase voltage    |
-| Grid Current L1/L2/L3 | A    | Per-phase current    |
-| Grid Frequency        | Hz   | Grid frequency       |
-| Inverter Temperature  | °C   | Inverter temperature |
+| Sensor                | Unit | Description                                          |
+| --------------------- | ---- | ---------------------------------------------------- |
+| Grid Voltage L1/L2/L3 | V    | Per-phase voltage                                    |
+| Grid Current L1/L2/L3 | A    | Per-phase current                                    |
+| Grid Frequency        | Hz   | Grid frequency                                       |
+| Inverter Temperature  | °C   | Inverter temperature                                 |
+| Grid Connection Code  | –    | Grid standard code set by the installer (diagnostic) |
+
+The _Grid Connection Code_ is the grid standard the inverter was commissioned with, as a
+raw number. EcoFlow doesn't document which standard each number stands for and (in my testing)
+the mapping used by other EcoFlow products doesn't full match the PowerOcean series.
+
+, so ask your
+installer if you need to know.
 
 ### Status
 
@@ -371,9 +379,14 @@ that need the EcoFlow app open, or that change device settings, are left to
 | Sensor             | Description                                               |
 | ------------------ | --------------------------------------------------------- |
 | Active Fault Count | Number of faults the device is currently reporting (0–20) |
-| Active Fault Codes | Comma-separated raw fault codes                           |
+| Active Fault Codes | Comma-separated fault codes, in decimal                   |
 
-The meaning of the fault codes is not known, so we only publish the raw values.
+The fault codes are shown in decimal, as the EcoFlow app and web portal show them.
+The `faults` attribute of Active Fault Codes lists each code with its name in Home
+Assistant's language, or `null` for a code nobody has named yet. EcoFlow's protocol
+does not include its fault definitions, so the names are collected from the event
+history in the EcoFlow portal. To add one, see
+[CONTRIBUTING.md](CONTRIBUTING.md#fault-names).
 
 ### Inverter Limits (Diagnostic)
 
@@ -446,6 +459,9 @@ The lifetime totals above are checked before they are published: a value that dr
 If a total has been held for more than 24 hours while the device reports a value above 0, a repairs issue lists it with both values and offers to take the device's value. If the values look wrong instead, it links to a filled-in bug report and to the device page for the diagnostics download. This happens when the inverter resets a counter or a wrong value was accepted earlier. A total held at 0 while the device's total rises in step with its own daily counter is corrected automatically.
 
 The diagnostics download has an `energy` section with every counter as published, as the device reports it (totals and today), the time each total was last accepted, which totals are held, the daily snapshots and the maximum powers the totals are checked against.
+Its `raw_registers` section holds every word the last poll read, undecoded, by the
+address each read started at, so a report shows exactly what the inverter sent.
+The serial number is never included.
 
 ---
 
@@ -474,9 +490,10 @@ To enable debug logging without editing `configuration.yaml`:
 - **Writes:** Function Code 6 for one register and Function Code 16 for multiple
   registers; multi-register values are encoded high word first
 - **Float encoding:** 32-bit IEEE 754
-- **Read strategy:** 3 block reads per poll cycle, grouped automatically from the
-  register addresses, plus one device-information read when the connection opens.
-  Registers only disabled sensors would show are left out
+- **Read strategy:** block reads grouped automatically from the register
+  addresses (five per poll cycle on a PowerOcean Plus), plus one
+  device-information read when the connection opens. The write-only heartbeat
+  (40608) is never read. Registers only disabled sensors would show are left out
 - **Tested firmware:** 3.0.19.19 + 3.0.20.54(PO+)
 - **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 
@@ -516,8 +533,9 @@ Special thanks to all contributors for the massive amount of time and effort tha
 
 ## Disclaimer
 
-This integration was developed through community reverse engineering.
-EcoFlow does not officially support or document this Modbus interface.
+This integration follows EcoFlow's Open Modbus Protocol V1.0, a trial version,
+corrected by community measurements where the hardware differs from it. See the
+[protocol notes](EcoFlow_PowerOcean_Modbus.md#where-the-specification-and-the-hardware-disagree).
 Use at your own risk. Not affiliated with EcoFlow Technology Co., Ltd.
 
 ---

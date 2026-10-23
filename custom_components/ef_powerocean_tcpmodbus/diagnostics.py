@@ -8,7 +8,7 @@ from typing import Any
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_HOST, CONTROL_FEATURES, DOMAIN
+from .const import CONF_HOST, CONTROL_FEATURES, DOMAIN, SERIAL_NUMBER
 from .coordinator import EcoflowConfigEntry
 from .modbus import is_shared
 
@@ -30,6 +30,23 @@ PROTOCOL_REPORT_KEYS = (
     "limit_inv_max",
     "inverter_rated_power",
 )
+
+
+def redact_raw_registers(
+    raw_registers: dict[int, list[int]],
+) -> dict[int, list[int | None]]:
+    """Return the raw reads with any word of the serial number replaced by None.
+
+    The polls do not read it today; this keeps it out should a read ever cover it.
+    """
+    serial = range(SERIAL_NUMBER.address, SERIAL_NUMBER.end)
+    return {
+        start: [
+            None if start + offset in serial else word
+            for offset, word in enumerate(words)
+        ]
+        for start, words in raw_registers.items()
+    }
 
 
 async def async_get_config_entry_diagnostics(
@@ -71,6 +88,9 @@ async def async_get_config_entry_diagnostics(
             "control_power": coordinator.control.power,
             "control_command": f"0x{coordinator.control.command:08X}",
             "unsupported_registers": sorted(coordinator.unsupported_registers),
+            # The words the last poll read, undecoded, which the test suite's fake
+            # inverter can serve again. Never the serial number.
+            "raw_registers": redact_raw_registers(coordinator.raw_registers),
             # Every energy counter as published and as the device reports it.
             "energy": coordinator.energy_report,
             # The last control test run here, the report to attach to an issue.

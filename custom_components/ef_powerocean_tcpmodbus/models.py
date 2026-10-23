@@ -90,9 +90,9 @@ class ModelTraits:
     max_register_gap: int = MAX_REGISTER_GAP
     # Whether the lifetime and daily energy counters arrive in Wh rather than kWh.
     energy_in_watt_hours: bool = False
-    # Whether a read that reaches over an address the firmware does not implement
-    # is refused as a whole. Registers marked optional are then read on their own,
-    # so one the firmware lacks cannot take the registers around it down with it.
+    # Whether a read over an address the firmware lacks is refused as a whole,
+    # rather than answered with zeros. Optional registers then always get reads of
+    # their own.
     rejects_unimplemented: bool = False
     # Whether 40609 holds the export cap in force after the internal
     # safety rules. Where it does not, the configured cap at 40538 stands in.
@@ -646,8 +646,8 @@ class RegisterDef:
     address_overrides: Mapping[InverterModel, int] = field(default_factory=dict)
     # Where writes go when the register is read from somewhere else.
     write_address: int | None = None
-    # Not confirmed on every model. On a model that rejects reads over
-    # unimplemented addresses it is read apart from the registers that are.
+    # Not confirmed on every model. If reading it fails, it stops being polled,
+    # where a required register would fail the poll.
     optional: bool = False
 
     def for_model(self, inverter_model: InverterModel) -> RegisterDef:
@@ -714,19 +714,51 @@ def plan_blocks(
 ) -> tuple[RegisterBlock, ...]:
     """Group registers into the fewest Modbus reads.
 
-    A new read starts when the next register is too far away to be worth reading
-    through, when the block would outgrow a single Modbus response, or when reading
-    through would take in an address in avoid. With isolate_optional, optional
-    registers are never read together with required ones.
+    A read ends where the next register is more than max_gap away, where it would
+    exceed one Modbus response, or where it would cross an address in avoid.
+
+    Optional registers never widen a required read. One joins a required read only
+    if that read already covers its address, and otherwise gets a read of its own.
+    With isolate_optional, they always get their own.
     """
     registers = tuple(registers)
+    required = [register for register in registers if not register.optional]
+    optional = [register for register in registers if register.optional]
+    if not optional or not required:
+        return _group(registers, avoid=avoid, max_gap=max_gap)
+    required_blocks = _group(required, avoid=avoid, max_gap=max_gap)
     if isolate_optional:
-        required = [register for register in registers if not register.optional]
-        optional = [register for register in registers if register.optional]
-        return plan_blocks(required, avoid=avoid, max_gap=max_gap) + plan_blocks(
-            optional, avoid=avoid, max_gap=max_gap
-        )
+        return required_blocks + _group(optional, avoid=avoid, max_gap=max_gap)
 
+    joined = [list(block.registers) for block in required_blocks]
+    apart: list[RegisterDef] = []
+    for register in optional:
+        home = next(
+            (
+                index
+                for index, block in enumerate(required_blocks)
+                if block.start <= register.address
+                and register.end <= block.start + block.count
+            ),
+            None,
+        )
+        if home is None:
+            apart.append(register)
+        else:
+            joined[home].append(register)
+    return tuple(
+        RegisterBlock(tuple(sorted(block, key=lambda register: register.address)))
+        for block in joined
+    ) + _group(apart, avoid=avoid, max_gap=max_gap)
+
+
+def _group(
+    registers: Iterable[RegisterDef],
+    *,
+    avoid: Collection[int] = (),
+    max_gap: int = MAX_REGISTER_GAP,
+) -> tuple[RegisterBlock, ...]:
+    """Group registers into reads by distance alone."""
     blocks: list[RegisterBlock] = []
     current: list[RegisterDef] = []
 

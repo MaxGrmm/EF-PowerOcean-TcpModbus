@@ -54,6 +54,7 @@ from .const import (
     MAX_BATTERY_DISCHARGED_POWER,
     MODBUS_DISABLED_READ_THRESHOLD,
     MODBUS_POLL_BUDGET_S,
+    OPTIONAL_STALLS_TO_DROP,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
     REGISTERS_BY_KEY,
@@ -132,6 +133,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         config_entry: EcoflowConfigEntry,
     ) -> None:
         self.host: str = config_entry.data[CONF_HOST]
+        # Polls in a row each optional block failed, by its start address.
+        self._optional_stalls: dict[int, int] = {}
         self.port: int = config_entry.data.get(CONF_PORT, DEFAULT_PORT)
         self.scan_interval: int = config_entry.data.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_S
@@ -160,6 +163,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             config_entry.data.get(CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL)
         )
         self._register_blocks = register_blocks_for(self.inverter_model)
+        # The words the last poll read, by the address each read started at.
+        self._raw_blocks: dict[int, list[int]] = {}
         self._registers_by_key = {
             register.key: register
             for block in self._register_blocks
@@ -543,6 +548,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
                         return None
 
+                self._raw_blocks = {}
                 # A probe may replan the blocks.
                 for register_block in tuple(self._register_blocks):
                     await self._async_read_block(register_block, data)
@@ -706,6 +712,15 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._unsupported_keys
 
     @property
+    def raw_registers(self) -> dict[int, list[int]]:
+        """Return the words the last poll read, by the address each read started at.
+
+        Undecoded, so a report reproduces exactly what the device sent, word order
+        and units included.
+        """
+        return dict(sorted(self._raw_blocks.items()))
+
+    @property
     def polled_registers(self) -> frozenset[str]:
         """Return the keys of the registers the poll reads."""
         return frozenset(
@@ -785,13 +800,19 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_read_block(
         self, register_block: RegisterBlock, data: dict[str, Any]
     ) -> None:
-        """Read one block into data, probing an optional one register by register.
+        """Read one block into data.
 
-        A required block that fails raises as before. An optional one refused as
-        an invalid request is read again one register at a time, and each register
-        the device refuses on its own is dropped from polling until the integration
-        reloads. A refusal for the moment, such as device busy, only leaves the
-        block unread for this poll.
+        A required block that fails fails the poll. An optional block that fails
+        is kept from failing it again:
+
+        - refused as an invalid address: read register by register, and each one
+          refused is no longer polled;
+        - refused for now, such as device busy: left empty for this poll;
+        - timed out or lost the link: fails this poll, and is no longer polled
+          after OPTIONAL_STALLS_TO_DROP in a row. Optional blocks are read last, so
+          with the required reads before it fine, the fault is the block's.
+
+        Registers no longer polled are tried again after a firmware change.
         """
         try:
             raw = await self._modbus_client.async_read(
@@ -805,11 +826,39 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return
             await self._async_probe_optional_block(register_block, data)
             return
+        # Cancelled is the poll budget running out on it, and is always re-raised.
+        except (
+            TimeoutError,
+            ConnectionError,
+            ModbusException,
+            asyncio.CancelledError,
+        ):
+            if register_block.optional:
+                self._note_optional_stall(register_block)
+            raise
+        self._optional_stalls.pop(register_block.start, None)
 
+        self._raw_blocks[register_block.start] = list(raw)
         for register in register_block.registers:
             data[register.key] = self._decode(
                 register_block.registers_for(raw, register), register
             )
+
+    def _note_optional_stall(self, register_block: RegisterBlock) -> None:
+        stalls = self._optional_stalls.get(register_block.start, 0) + 1
+        self._optional_stalls[register_block.start] = stalls
+        if stalls < OPTIONAL_STALLS_TO_DROP:
+            return
+        del self._optional_stalls[register_block.start]
+        dropped = {register.key for register in register_block.registers}
+        _LOGGER.warning(
+            "Reading %s failed %s polls in a row while the rest succeeded; they are "
+            "no longer read",
+            ", ".join(sorted(dropped)),
+            stalls,
+        )
+        self._unsupported_keys = self._unsupported_keys | dropped
+        self._plan_reads()
 
     async def _async_probe_optional_block(
         self, register_block: RegisterBlock, data: dict[str, Any]
@@ -825,6 +874,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     refused.add(register.key)
                 data[register.key] = None
                 continue
+            self._raw_blocks[register.address] = list(raw)
             data[register.key] = self._decode(list(raw), register)
 
         if refused:

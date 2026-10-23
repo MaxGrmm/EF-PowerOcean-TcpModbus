@@ -33,6 +33,7 @@ from .const import (
     CONTROL_TEST_SENSOR,
     DAILY_ENERGY_SENSORS_DEVICE_RAW,
     ENERGY_SENSOR_MAP,
+    FAULT_KEYS,
     SENSOR_MAP,
     TOTAL_ENERGY_SENSORS_DEVICE_RAW,
     UNIT_OF_RATIO,
@@ -40,11 +41,15 @@ from .const import (
 )
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
+from .fault_names import async_get_fault_names
 from .models import EnergySensorDef, SensorDef
+from .telemetry import active_fault_codes
 
 type SensorValue = StateType | date | datetime | Decimal
 
 _LOGGER = logging.getLogger(__name__)
+
+ACTIVE_FAULTS_KEY: Final = "active_faults"
 
 
 VALUE_PRECISION: Final = {
@@ -88,7 +93,12 @@ async def async_setup_entry(
             or coordinator.inverter_model in sensor.unsupported_models
         ):
             continue
-        entities.append(EcoflowSensor(coordinator, entry, sensor))
+        entity_class = (
+            EcoFlowActiveFaultsSensor
+            if sensor.key == ACTIVE_FAULTS_KEY
+            else EcoflowSensor
+        )
+        entities.append(entity_class(coordinator, entry, sensor))
 
     energy_sensors: list[SensorDef | EnergySensorDef] = [
         *ENERGY_SENSOR_MAP,
@@ -258,3 +268,31 @@ class EcoflowSensor(EcoFlowBaseEntity[SensorDef | EnergySensorDef], RestoreSenso
         if precision is None:
             return int(number)
         return round(number, precision) if precision else round(number)
+
+
+class EcoFlowActiveFaultsSensor(EcoflowSensor):
+    """The fault codes the device reports, each named where the code is known."""
+
+    def __init__(
+        self,
+        coordinator: EcoflowCoordinator,
+        entry: ConfigEntry,
+        definition: SensorDef | EnergySensorDef,
+    ) -> None:
+        super().__init__(coordinator, entry, definition)
+        self._fault_names: dict[int, str] = {}
+
+    async def async_added_to_hass(self) -> None:
+        self._fault_names = await async_get_fault_names(self.hass)
+        await super().async_added_to_hass()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Name each active code, or None for a code nobody has named yet."""
+        data = self.coordinator.data or {}
+        codes = active_fault_codes(data.get(key) for key in FAULT_KEYS)
+        return {
+            "faults": [
+                {"code": code, "name": self._fault_names.get(code)} for code in codes
+            ]
+        }
