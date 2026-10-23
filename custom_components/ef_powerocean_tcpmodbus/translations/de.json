@@ -441,6 +441,23 @@
           "unknown": "Unbekannt"
         }
       },
+      "working_mode": {
+        "name": "Arbeitsmodus-Einstellung",
+        "state": {
+          "self_consumption": "Eigenverbrauch",
+          "ai": "KI",
+          "unknown": "Unbekannt"
+        }
+      },
+      "grid_net_today": {
+        "name": "Netz-Nettoenergie Heute (Gerät)"
+      },
+      "inverter_net_today": {
+        "name": "Wechselrichter-Nettoenergie Heute (Gerät)"
+      },
+      "battery_net_today": {
+        "name": "Batterie-Nettoenergie Heute (Gerät)"
+      },
       "fault_count": {
         "name": "Anzahl aktiver Fehler"
       },

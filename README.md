@@ -395,6 +395,7 @@ The meaning of the fault codes is not known, so we only publish the raw values.
 | Maximum feed-in Power (Effective)  | W    | Export cap after the safety rules (40609), not on the PO Plus   |
 | Maximum feed-in Power (Percent)    | %    | Export cap as a share of the rated power, not on the PO Plus    |
 | Grid Feed-in Mode                  | –    | Whether the export is limited in watts, in percent or unlimited |
+| Working Mode Setting               | –    | Self-consumption or AI, as set for Modbus mode (40558)          |
 | System Modes                       | –    | Raw system status                                               |
 | Coordinator Status                 | –    | Integration polling state                                       |
 
@@ -424,6 +425,17 @@ Daily energy values are calculated from the corresponding lifetime counters beca
 | Grid Export Today (Device)        | `grid_export_today_raw`    | kWh  |
 | Battery Charged Today (Device)    | `bat_charged_today_raw`    | kWh  |
 | Battery Discharged Today (Device) | `bat_discharged_today_raw` | kWh  |
+
+The device also reports net energy since midnight, signed as the specification
+defines it: drawn from the grid, rectified by the inverter and charged into the
+battery count positive. These are disabled by default and never feed the Energy
+dashboard.
+
+| Sensor                             | Entity key           | Unit |
+| ---------------------------------- | -------------------- | ---- |
+| Grid Net Energy Today (Device)     | `grid_net_today`     | kWh  |
+| Inverter Net Energy Today (Device) | `inverter_net_today` | kWh  |
+| Battery Net Energy Today (Device)  | `battery_net_today`  | kWh  |
 
 ### Energy – Lifetime
 
@@ -482,9 +494,10 @@ To enable debug logging without editing `configuration.yaml`:
 - **Writes:** Function Code 6 for one register and Function Code 16 for multiple
   registers; multi-register values are encoded high word first
 - **Float encoding:** 32-bit IEEE 754
-- **Read strategy:** 3 block reads per poll cycle, grouped automatically from the
-  register addresses, plus one device-information read when the connection opens.
-  Registers only disabled sensors would show are left out
+- **Read strategy:** block reads grouped automatically from the register
+  addresses (five per poll cycle on a PowerOcean Plus), plus one
+  device-information read when the connection opens. The write-only heartbeat
+  (40608) is never read. Registers only disabled sensors would show are left out
 - **Tested firmware:** 3.0.19.19 + 3.0.20.54(PO+)
 - **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 

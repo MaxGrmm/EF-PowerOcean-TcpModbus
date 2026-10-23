@@ -16,6 +16,7 @@ from .models import (
     OperatingMode,
     RegisterType,
     SystemAlert,
+    WorkingMode,
 )
 
 # Bits 4-6 of the System Status (40530): one enumeration, not three flags.
@@ -112,6 +113,7 @@ class TelemetryData:
     system_state_2: float | None = None
     battery_capacity: float | None = None
     grid_feed_mode: float | None = None
+    working_mode: float | None = None
     fault_codes: tuple[float | None, ...] = ()
     feed_in_power_max_setting: float | None = None
     feed_in_power_max_effective: float | None = None
@@ -362,5 +364,6 @@ def calculate_derived_values(
     # Replaces the register's own 0/1 with the enum the sensor and the grid feed
     # switch both read.
     calculated["grid_feed_mode"] = GridFeedMode.from_register(data.grid_feed_mode)
+    calculated["working_mode"] = WorkingMode.from_register(data.working_mode)
 
     return calculated

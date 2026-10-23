@@ -184,6 +184,8 @@ class EcoflowSensor(EcoFlowBaseEntity[SensorDef | EnergySensorDef], RestoreSenso
         self._attr_state_class = self._definition.state_class
         if isinstance(definition, SensorDef) and definition.options:
             self._attr_options = list(definition.options)
+        if isinstance(definition, SensorDef):
+            self._attr_entity_registry_enabled_default = not definition.advanced
         self._last_written_value: SensorValue = None
         self._last_written_attributes: dict[str, Any] | None = None
 

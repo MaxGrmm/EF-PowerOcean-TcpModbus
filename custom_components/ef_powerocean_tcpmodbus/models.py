@@ -261,6 +261,25 @@ class OperatingMode(StrEnum):
     UNKNOWN = "unknown"
 
 
+class WorkingMode(StrEnum):
+    """The System Working Mode Setting (40558), as opposed to the mode it runs in."""
+
+    SELF_CONSUMPTION = "self_consumption"
+    AI = "ai"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def from_register(cls, value: float | str | None) -> WorkingMode | None:
+        """Map the register to a mode, or unknown for a value with no known meaning."""
+        if value is None:
+            return None
+        # A frame processed a second time already holds the mode.
+        if isinstance(value, str):
+            return cls(value)
+        # AI is reserved, and there is no standby.
+        return {1: cls.SELF_CONSUMPTION, 2: cls.AI}.get(int(value), cls.UNKNOWN)
+
+
 class GridMode(StrEnum):
     GRID = "grid"
     ISLANDED = "islanded"
@@ -818,6 +837,8 @@ class SensorDef:
     # Data keys published as state attributes, such as the raw word a value is
     # decoded from.
     attribute_keys: tuple[str, ...] = ()
+    # Disabled until enabled, and so not read until then.
+    advanced: bool = False
 
 
 @dataclass(frozen=True)

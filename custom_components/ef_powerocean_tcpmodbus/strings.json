@@ -441,6 +441,23 @@
           "unknown": "Unknown"
         }
       },
+      "working_mode": {
+        "name": "Working Mode Setting",
+        "state": {
+          "self_consumption": "Self-consumption",
+          "ai": "AI",
+          "unknown": "Unknown"
+        }
+      },
+      "grid_net_today": {
+        "name": "Grid Net Energy Today (Device)"
+      },
+      "inverter_net_today": {
+        "name": "Inverter Net Energy Today (Device)"
+      },
+      "battery_net_today": {
+        "name": "Battery Net Energy Today (Device)"
+      },
       "fault_count": {
         "name": "Active Fault Count"
       },

@@ -878,6 +878,33 @@ def test_reads_ocean_2_energy_counters_as_kilowatt_hours(coordinator) -> None:
     assert result == {"solar_today": 11.84, "grid_power": 517.0}
 
 
+def test_reads_ocean_2_net_energy_counters_as_kilowatt_hours(coordinator) -> None:
+    """The net counters come in the same unit as the others, and keep their sign."""
+    coordinator.inverter_model = models.InverterModel.OCEAN_2_THREE_PHASE
+    coordinator._register_blocks = (
+        models.RegisterBlock(
+            tuple(
+                models.RegisterDef(key, 100 + 2 * index)
+                for index, key in enumerate(const.DEVICE_NET_ENERGY_KEYS)
+            )
+        ),
+    )
+    coordinator._modbus_client.connected = True
+    coordinator._modbus_client.async_read = AsyncMock(
+        return_value=[
+            *_float_words(-4250.0, high_word_first=True),
+            *_float_words(1500.0, high_word_first=True),
+            *_float_words(-750.0, high_word_first=True),
+        ]
+    )
+
+    assert asyncio.run(coordinator.async_get_raw_data()) == {
+        "grid_net_today": -4.25,
+        "inverter_net_today": 1.5,
+        "battery_net_today": -0.75,
+    }
+
+
 def test_other_models_report_energy_counters_in_kilowatt_hours(coordinator) -> None:
     result = _read_energy_and_power(
         coordinator, models.InverterModel.POWEROCEAN_PLUS, 11.84, 517.0
@@ -1371,18 +1398,16 @@ def test_optional_registers_share_no_read_where_the_model_rejects_them(
 def test_the_powerocean_reads_optional_registers_without_extra_requests() -> None:
     """They sit inside the live block, which reads through unmapped addresses.
 
-    The Grid Connection Code lies before it, so it gets a read of its own rather
-    than widening the one the poll depends on.
+    The Grid Connection Code lies before it and the net energy counters between the
+    fault and energy reads, so each gets a read of its own rather than widening one
+    the poll depends on.
     """
     optional_keys = {
-        register.key
-        for register in const.MODBUS_REGISTERS
-        if register.optional and register.key != "grid_connection_code"
+        register.key for register in const.MODBUS_REGISTERS if register.optional
     }
-    optional_keys.add("grid_connection_code")
     model = models.InverterModel.POWEROCEAN_PLUS
 
-    assert len(const.register_blocks_for(model)) == 1 + len(
+    assert len(const.register_blocks_for(model)) == 2 + len(
         const.register_blocks_for(model, exclude=optional_keys)
     )
 

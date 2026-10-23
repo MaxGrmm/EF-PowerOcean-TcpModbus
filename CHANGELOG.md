@@ -5,6 +5,8 @@
 ### Added
 
 - Grid Connection Code diagnostic sensor: the grid standard the inverter was commissioned with, as EcoFlow numbers it.
+- Working Mode Setting diagnostic sensor (40558): Self-consumption or AI, as set for Modbus mode.
+- Grid, Inverter and Battery Net Energy Today (Device) diagnostic sensors, the device's signed net energy since midnight. Disabled by default and without a state class, so they never feed the Energy dashboard.
 
 ### Changed
 

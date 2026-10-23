@@ -290,6 +290,28 @@ def test_decodes_every_grid_feed_mode(raw, expected) -> None:
 
 
 @pytest.mark.parametrize(
+    ("raw", "expected"),
+    (
+        (1, "self_consumption"),
+        (2, "ai"),
+        (0, "unknown"),
+        (7, "unknown"),
+        (None, None),
+        # A frame processed a second time already holds the mode.
+        ("ai", "ai"),
+    ),
+)
+def test_decodes_every_working_mode(raw, expected) -> None:
+    calculated = calculate_derived_values(
+        TelemetryData(working_mode=raw),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+
+    assert calculated["working_mode"] == expected
+
+
+@pytest.mark.parametrize(
     ("method_bits", "expected"),
     (
         (0, "default"),

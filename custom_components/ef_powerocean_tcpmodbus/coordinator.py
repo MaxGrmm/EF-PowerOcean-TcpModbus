@@ -45,6 +45,7 @@ from .const import (
     DEVICE_ENERGY_KEYS,
     DEVICE_INFO_BLOCK,
     DEVICE_INFO_EXTRA,
+    DEVICE_NET_ENERGY_KEYS,
     DOMAIN,
     ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
@@ -877,7 +878,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if (
             value is not None
             and traits.energy_in_watt_hours
-            and register.key in DEVICE_ENERGY_KEYS
+            and (
+                register.key in DEVICE_ENERGY_KEYS
+                or register.key in DEVICE_NET_ENERGY_KEYS
+            )
         ):
             value = round(value / 1000, 3)
         return value

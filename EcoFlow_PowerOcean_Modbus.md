@@ -123,12 +123,17 @@ A new block starts when the gap to the next register exceeds `MAX_REGISTER_GAP`
 trip — or when a block would exceed `MAX_REGISTERS_PER_READ` (125, the ceiling for
 a single Modbus response).
 
-The main blocks are the following:
+The write-only heartbeat (40608) is never read, so the effective feed-in cap after
+it takes a read of its own. Optional registers outside the required reads, such as
+the grid connection code, get reads of their own too. On a PowerOcean Plus with
+the default entities:
 
 | Block       | Start | Words | Contents                               |
 | ----------- | ----- | ----- | -------------------------------------- |
 | Device info | 40002 | 12    | Product type, serial number, firmware  |
+| Grid code   | 40513 | 1     | Grid connection code                   |
 | Live        | 40519 | 89    | Power, limits, voltages, currents, PV  |
+| Feed-in cap | 40609 | 2     | Effective export cap                   |
 | Faults      | 42049 | 45    | Fault count and codes, per-battery SOC |
 | Energy      | 42161 | 100   | Lifetime and daily energy counters\*   |
 
@@ -139,10 +144,14 @@ integrates to 190 Wh.
 
 ## Not yet mapped
 
-The configuration region below 40574 holds more registers than the integration
-reads. Several are settings rather than measurements, so they are left alone by
-default. Some of them are **signed** 32-bit values, which `RegisterType.INT32` and
-`decode_register` both handle.
+The specification documents a few registers the integration does not read:
+
+- **40514** UTC time, whose format the specification leaves open ("Note
+  compatibility").
+- **40518** time zone, which the specification says is unused.
+
+Every other register in the specification is mapped. Some of them are **signed**
+32-bit values, which `RegisterType.INT32` and `decode_register` both handle.
 
 ## Where the specification and the hardware disagree
 

@@ -36,6 +36,7 @@ from .models import (
     RegisterDef,
     RegisterType,
     SensorDef,
+    WorkingMode,
     plan_blocks_for_model,
     requires_modbus_control,
 )
@@ -172,6 +173,14 @@ BATTERY_SOC_KEYS: Final = tuple(
 # longer polled.
 OPTIONAL_STALLS_TO_DROP: Final = 3
 
+# Signed net counters since midnight, in the same unit as the device's other energy
+# counters.
+DEVICE_NET_ENERGY_KEYS: Final = (
+    "grid_net_today",
+    "inverter_net_today",
+    "battery_net_today",
+)
+
 # Every polled register, by absolute Modbus address. Order is for readability only;
 # the reads are worked out by plan_blocks().
 MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
@@ -204,6 +213,7 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("battery_capacity", 40552, RegisterType.UINT32),
     RegisterDef("battery_discharge_power_limit", 40554, RegisterType.UINT32),
     RegisterDef("battery_charge_power_limit", 40556, RegisterType.UINT32),
+    RegisterDef("working_mode", 40558, RegisterType.UINT16, optional=True),
     # Measured at the grid connection, unlike voltage_l1 and current_l1 below which
     # are the inverter's own phases.
     RegisterDef("grid_current_l1", 40559, optional=True),
@@ -242,6 +252,14 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     *(
         RegisterDef(key, 42081 + battery_number, RegisterType.UINT16)
         for battery_number, key in enumerate(BATTERY_SOC_KEYS, start=1)
+    ),
+    # Net energy since midnight: drawn positive and fed negative at the meter,
+    # rectified positive at the inverter, charged positive at the battery.
+    *(
+        RegisterDef(key, address, optional=True)
+        for key, address in zip(
+            DEVICE_NET_ENERGY_KEYS, (42113, 42129, 42145), strict=True
+        )
     ),
     RegisterDef("grid_import_total", 42161),
     RegisterDef("grid_import_today", 42163),
@@ -639,6 +657,26 @@ SENSOR_MAP: list[SensorDef] = [
         device_class=SensorDeviceClass.ENUM,
         options=tuple(OperatingMode),
         icon="mdi:home-lightning-bolt",
+    ),
+    SensorDef(
+        key="working_mode",
+        device_class=SensorDeviceClass.ENUM,
+        options=tuple(WorkingMode),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:home-lightning-bolt-outline",
+    ),
+    # The device's net energy since midnight. Signed and reset daily, so no state
+    # class: they must never feed the Energy dashboard. Off by default, as they cost
+    # a read of their own.
+    *(
+        SensorDef(
+            key=key,
+            unit=UnitOfEnergy.KILO_WATT_HOUR,
+            device_class=SensorDeviceClass.ENERGY,
+            entity_category=EntityCategory.DIAGNOSTIC,
+            advanced=True,
+        )
+        for key in DEVICE_NET_ENERGY_KEYS
     ),
     SensorDef(
         key="system_alerts",

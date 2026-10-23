@@ -73,6 +73,35 @@ def _serve_serial(inverter: FakeInverter, serial: str) -> None:
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_the_net_energy_counters_are_off_and_not_read(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    """Each costs a read of its own on a model that reads optional registers apart."""
+    _serve_serial(inverter, SERIAL)
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    for key in const.DEVICE_NET_ENERGY_KEYS:
+        entity_id = registry.async_get_entity_id(
+            "sensor", const.DOMAIN, f"{entry.entry_id}_{key}"
+        )
+        assert entity_id is not None, key
+        entity = registry.async_get(entity_id)
+        assert entity is not None
+        assert entity.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    assert not set(const.DEVICE_NET_ENERGY_KEYS) & entry.runtime_data.polled_registers
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_an_entry_keyed_by_address_takes_the_serial_number(
     hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
