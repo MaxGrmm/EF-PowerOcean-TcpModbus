@@ -13,6 +13,7 @@ from custom_components.ef_powerocean_tcpmodbus.const import (
 from custom_components.ef_powerocean_tcpmodbus.models import RegisterType
 from custom_components.ef_powerocean_tcpmodbus.telemetry import (
     TelemetryData,
+    active_fault_codes,
     calculate_derived_values,
     decode_firmware_version,
     decode_register,
@@ -390,3 +391,28 @@ def test_the_operating_status_is_one_enumeration_not_three_flags(
     assert calculated["operating_mode"] == mode
     assert calculated["self_use_mode_ena"] is self_use
     assert calculated["intelligent_mode_ena"] is intelligent
+
+
+def test_lists_the_active_fault_codes_in_decimal() -> None:
+    """As the EcoFlow app and portal show them, one code per Fault Event register."""
+    calculated = calculate_derived_values(
+        TelemetryData(fault_codes=(521.0, 0.0, 100.0)),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+
+    assert calculated["active_faults"] == "521, 100"
+
+
+def test_no_fault_codes_read_as_none() -> None:
+    calculated = calculate_derived_values(
+        TelemetryData(fault_codes=(0.0, None)),
+        calculate_solar_power=False,
+        startup_voltage=0,
+    )
+
+    assert calculated["active_faults"] == "none"
+
+
+def test_active_fault_codes_leave_out_empty_registers() -> None:
+    assert active_fault_codes([100.0, 0.0, None, 521.0]) == [100, 521]

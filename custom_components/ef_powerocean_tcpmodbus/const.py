@@ -163,6 +163,10 @@ DEVICE_INFO_BLOCK: Final = RegisterBlock(
 # Read one at a time, so a model that refuses one still reports the other.
 DEVICE_INFO_EXTRA: Final = (PROTOCOL_VERSION, DEVICE_ADDRESS)
 
+FAULT_KEYS: Final = tuple(
+    f"fault_{fault_number}" for fault_number in range(1, MAX_FAULT_EVENTS + 1)
+)
+
 BATTERY_SOC_KEYS: Final = tuple(
     f"soc_battery_{battery_number}"
     for battery_number in range(1, MAX_BATTERY_COUNT + 1)
@@ -235,8 +239,8 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef(FEED_IN_POWER_MAX_EFFECTIVE_KEY, 40609, RegisterType.UINT32),
     RegisterDef("fault_count", 42049, RegisterType.UINT16),
     *(
-        RegisterDef(f"fault_{fault_number}", 42049 + fault_number, RegisterType.UINT16)
-        for fault_number in range(1, MAX_FAULT_EVENTS + 1)
+        RegisterDef(key, 42049 + fault_number, RegisterType.UINT16)
+        for fault_number, key in enumerate(FAULT_KEYS, start=1)
     ),
     RegisterDef("battery_count", 42081, RegisterType.UINT16),
     *(

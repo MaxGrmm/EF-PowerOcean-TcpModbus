@@ -24,7 +24,7 @@
 - Per-phase AC measurements: voltage, current, frequency
 - Energy counters: daily and lifetime for grid, solar, battery charge/discharge, house consumption
 - Operating mode, grid mode and system status as dedicated entities
-- Fault reporting: active fault count and raw fault codes
+- Fault reporting: active fault count, and the fault codes with their names where known
 - Serial number and firmware version read from the device. The model it reports pre-fills the setup form; the model you select is the one the integration uses
 - Reconfigurable after setup via **Settings → Configure** (no re-install needed)
 - Debug logging toggle directly in the HA UI
@@ -379,9 +379,14 @@ installer if you need to know.
 | Sensor             | Description                                               |
 | ------------------ | --------------------------------------------------------- |
 | Active Fault Count | Number of faults the device is currently reporting (0–20) |
-| Active Fault Codes | Comma-separated raw fault codes                           |
+| Active Fault Codes | Comma-separated fault codes, in decimal                   |
 
-The meaning of the fault codes is not known, so we only publish the raw values.
+The fault codes are shown in decimal, as the EcoFlow app and web portal show them.
+The `faults` attribute of Active Fault Codes lists each code with its name in Home
+Assistant's language, or `null` for a code nobody has named yet. EcoFlow's protocol
+does not include its fault definitions, so the names are collected from the event
+history in the EcoFlow portal. To add one, see
+[CONTRIBUTING.md](CONTRIBUTING.md#fault-names).
 
 ### Inverter Limits (Diagnostic)
 

@@ -123,6 +123,26 @@
         "native": "Nativ",
         "emulated": "Emuliert"
       }
+    },
+    "fault_code": {
+      "options": {
+        "100": "Stromausfall",
+        "101": "Unterspannung im Netz",
+        "102": "Überspannung im Netz",
+        "105": "Unterfrequenz im Netz",
+        "128": "Schnelle Bus-Überspannung",
+        "139": "Flicker-Alarm",
+        "140": "Alarm bei plötzlicher Phasenänderung in Netzspannung",
+        "156": "Warten auf Netzanschluss und Wiederanschluss",
+        "163": "12-V-Hilfsstromfehler",
+        "179": "Benachrichtigung beim Einschalten des Wechselrichtermoduls",
+        "203": "Benachrichtigung beim Einschalten des BP-Moduls",
+        "521": "Kommunikationsfehler des Energiespeichers",
+        "532": "Fehler in 12-V-Hilfsspannung",
+        "700": "Netzunabhängiges Ereignis des Geräts",
+        "702": "Energiesparmodus",
+        "703": "Benachrichtigung beim Einschalten des EMS-Moduls"
+      }
     }
   },
   "entity": {

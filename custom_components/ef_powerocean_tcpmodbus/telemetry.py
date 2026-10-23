@@ -249,8 +249,17 @@ def system_alerts(state_2: int) -> str:
     return ",".join(shown) + (f",+{hidden}" if hidden else "")
 
 
+def active_fault_codes(fault_codes: Iterable[float | None]) -> list[int]:
+    """Return the codes of the Fault Event registers that hold one, in order.
+
+    Each register holds one code, and an empty one reads 0.
+    """
+    return [int(code) for code in fault_codes if code]
+
+
 def _format_active_faults(fault_codes: tuple[float | None, ...]) -> str:
-    active = [f"0x{int(code):04X}" for code in fault_codes if code]
+    """Return the codes in decimal, as the EcoFlow app and portal show them."""
+    active = [str(code) for code in active_fault_codes(fault_codes)]
     return ", ".join(active) if active else "none"
 
 

@@ -149,6 +149,30 @@ async def test_diagnostics_replay_on_the_fake_inverter(
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_active_faults_are_named_where_the_code_is_known(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    entry = await set_up()
+    inverter.registers[const.REGISTERS_BY_KEY["fault_count"].address] = 2
+    inverter.registers[const.REGISTERS_BY_KEY["fault_1"].address] = 521
+    inverter.registers[const.REGISTERS_BY_KEY["fault_2"].address] = 9999
+    coordinator = entry.runtime_data
+    # A poll within a second of the last one returns the last frame.
+    coordinator._last_checked_time = dt_util.now() - timedelta(seconds=5)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    state = hass.states.get(_entity_id(hass, entry, "sensor", "active_faults"))
+
+    assert state is not None
+    assert state.state == "521, 9999"
+    assert state.attributes["faults"] == [
+        {"code": 521, "name": "Energy storage communication error"},
+        {"code": 9999, "name": None},
+    ]
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_battery_controls_are_unavailable_while_modbus_control_is_off(
     hass: HomeAssistant, set_up: SetUp
 ) -> None:
