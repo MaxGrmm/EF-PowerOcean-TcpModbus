@@ -917,7 +917,7 @@ class ControlManager:
         Nothing that passes the inverter can exceed its AC rating, and a ceiling the
         firmware publishes caps it further. Import from Grid targets the meter, which
         the house adds to, so the configured grid connection bounds it instead. The
-        battery modes are bounded by the configured module count instead: the
+        battery modes are bounded by the battery's size instead: the
         inverter's charge and discharge limit registers report the limit set in the
         EcoFlow app, which Modbus control ignores, so honouring them would cap the
         user below what the hardware accepts.

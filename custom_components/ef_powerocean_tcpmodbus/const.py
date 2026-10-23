@@ -19,6 +19,7 @@ from homeassistant.const import (
 
 from .models import (
     UNKNOWN_STATE,
+    BatteryModule,
     BinarySensorDef,
     ControlEntityDef,
     ControlFeature,
@@ -65,9 +66,23 @@ CONF_CALC_SOLAR_POWER: Final = "calc_solar_power"
 CONF_MODBUS_CONTROL: Final = "modbus_control"
 CONF_INVERTER_MODEL: Final = "inverter_model"
 
-MAX_BATTERY_CHARGED_POWER: Final = 2500
-MAX_BATTERY_DISCHARGED_POWER: Final = 3300
 MAX_BATTERY_COUNT: Final = 12
+# At most 12 of the 8 kWh modules, with some margin.
+MAX_BATTERY_CAPACITY_WH: Final = 100_000
+
+# Old and new 5 kWh modules. They are similar enough to not affect the behaviour.
+BATTERY_5KWH: Final = BatteryModule(5000, charge_w=2500, discharge_w=4080)
+BATTERY_8KWH: Final = BatteryModule(8030, charge_w=4100, discharge_w=6400)
+BATTERY_MODULES: Final = (BATTERY_5KWH, BATTERY_8KWH)
+# Modules can be mixed in any way and the capacity does not show the mix, so take
+# the highest rate of any module to never set a limit too low.
+BATTERY_CHARGE_W_PER_WH: Final = max(
+    module.charge_w / module.reported_wh for module in BATTERY_MODULES
+)
+BATTERY_DISCHARGE_W_PER_WH: Final = max(
+    module.discharge_w / module.reported_wh for module in BATTERY_MODULES
+)
+
 MAX_FAULT_EVENTS: Final = 20
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
