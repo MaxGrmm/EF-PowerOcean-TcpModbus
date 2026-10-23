@@ -157,7 +157,7 @@ Each Battery Mode is one entry in `MODES` in [plans.py](custom_components/ef_pow
 When adding or changing an entity:
 
 - Update the entity definition and its platform implementation as needed.
-- Keep [strings.json](custom_components/ef_powerocean_tcpmodbus/strings.json), [translations/en.json](custom_components/ef_powerocean_tcpmodbus/translations/en.json), and [translations/de.json](custom_components/ef_powerocean_tcpmodbus/translations/de.json) in sync.
+- Add new strings to [translations/en.json](custom_components/ef_powerocean_tcpmodbus/translations/en.json), the English source, and keep [translations/de.json](custom_components/ef_powerocean_tcpmodbus/translations/de.json) in sync with it. Home Assistant loads only the `translations/` folder, so there is no `strings.json` to maintain.
 - Add state translations for enum entities.
 - Update the entity tables or behavior documentation in [README.md](README.md).
 - Preserve entity keys and unique IDs unless a migration is included. Changing them can orphan existing entities and dashboard references.

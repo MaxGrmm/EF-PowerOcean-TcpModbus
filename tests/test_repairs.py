@@ -129,7 +129,8 @@ def test_the_issue_id_home_assistant_passes_in_is_not_a_confirmation() -> None:
 
 def test_every_language_uses_exactly_the_placeholders_the_flow_provides() -> None:
     component = Path(const.__file__).parent
-    files = [component / "strings.json", *sorted(component.glob("translations/*.json"))]
+    files = sorted(component.glob("translations/*.json"))
+    assert files
     result = asyncio.run(_flow(_held_coordinator()).async_step_init())
     provided = set(result.get("description_placeholders") or {})
 
