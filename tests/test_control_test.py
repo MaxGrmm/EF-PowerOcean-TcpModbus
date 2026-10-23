@@ -599,7 +599,9 @@ def test_the_sensor_offers_every_state_the_test_can_be_in() -> None:
     assert const.CONTROL_TEST_SENSOR.options == tuple(ControlTestState)
 
     strings = json.loads(
-        (Path(const.__file__).parent / "strings.json").read_text(encoding="utf-8")
+        (Path(const.__file__).parent / "translations" / "en.json").read_text(
+            encoding="utf-8"
+        )
     )
     states = strings["entity"]["sensor"]["control_test"]["state"]
     assert set(states) == set(ControlTestState)
