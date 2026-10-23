@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.9.3] - 2026-10-23
+
 ### Added
 
 - Active Fault Codes names each code it knows in a `faults` attribute, in English or German. The names come from the EcoFlow portal; a code without one is listed with `null`.
