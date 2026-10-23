@@ -92,7 +92,7 @@ Or install it from within HACS:
 | IP Address                 | –                      | Local IP of your PowerOcean inverter                                                                                                                             |
 | Port                       | 502                    | Modbus TCP port                                                                                                                                                  |
 | Inverter model             | PowerOcean Three Phase |                                                                                                                                                                  |
-| Number of Batteries        | 0                      | Number of installed battery modules (0–12); required for safe battery-control power limits                                                                       |
+| Number of Batteries        | 0                      | Number of installed battery modules (0–12), of any size. Sets the battery power limits until the inverter reports its total capacity                             |
 | Maximum solar power        | 12 kW                  | Installed solar power (1–60 kW)                                                                                                                                  |
 | Maximum grid power         | 15 kW                  | Your grid connection (main fuse), not the inverter rating. Rejects implausible readings and caps Import from Grid (1–60 kW)                                      |
 | Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
@@ -321,7 +321,7 @@ that need the EcoFlow app open, or that change device settings, are left to
 | Battery SOC                       | %    | System state of charge                                           |
 | Battery 1–12 SOC                  | %    | Per-module state of charge (diagnostic)                          |
 | Battery Module Count              | –    | Modules reported online by the device (diagnostic)               |
-| Battery Remaining Energy          | kWh  | Estimated: 5 kWh × modules × SOC                                 |
+| Battery Remaining Energy          | kWh  | Estimated: Battery Nominal Capacity × SOC                        |
 | Battery Voltage                   | V    | Pack voltage                                                     |
 | Battery Current                   | A    | Positive = charging, negative = discharging                      |
 | Battery Temperature               | °C   | Mean module temperature                                          |

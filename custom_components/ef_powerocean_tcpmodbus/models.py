@@ -59,6 +59,17 @@ class ProductId(NamedTuple):
     category: ProductCategory | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class BatteryModule:
+    """One battery module's datasheet power ratings."""
+
+    # What the module adds to the capacity in 40552, not always its nominal capacity.
+    reported_wh: int
+    charge_w: int
+    # The datasheet's maximum, so energy checks and commands never sit below it.
+    discharge_w: int
+
+
 class ReserveSupport(StrEnum):
     """Whether the inverter or the integration enforces the Battery Reserve."""
 

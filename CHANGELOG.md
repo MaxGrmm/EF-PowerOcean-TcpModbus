@@ -13,6 +13,10 @@
 - Active Fault Codes shows the codes in decimal, as the EcoFlow app and portal do, instead of hexadecimal. Automations matching a code such as `0x0209` need `521` instead.
 - An optional register is only read together with required ones when that read already covers it, and one that makes polls fail three times in a row is no longer read, so an unconfirmed register cannot take the poll down.
 
+### Fixed
+
+- Support for the new 8 kWh battery modules, alone or mixed with the original ones.
+
 ## [2.9.2] - 2026-10-21
 
 ### Fixed

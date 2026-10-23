@@ -23,7 +23,10 @@ from pymodbus.exceptions import ModbusException
 
 from .const import (
     ATTR_MODE,
+    BATTERY_CHARGE_W_PER_WH,
+    BATTERY_DISCHARGE_W_PER_WH,
     BATTERY_MODE_SELECT,
+    BATTERY_MODULES,
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
     CONF_CALC_SOLAR_POWER,
@@ -50,8 +53,7 @@ from .const import (
     EVENT_COMMAND_EXPIRED,
     FIRMWARE_VERSION,
     HELD_TOTAL_ISSUE_AFTER_S,
-    MAX_BATTERY_CHARGED_POWER,
-    MAX_BATTERY_DISCHARGED_POWER,
+    MAX_BATTERY_CAPACITY_WH,
     MODBUS_DISABLED_READ_THRESHOLD,
     MODBUS_POLL_BUDGET_S,
     OPTIONAL_STALLS_TO_DROP,
@@ -101,6 +103,14 @@ def held_totals_issue_id(entry: ConfigEntry) -> str:
     return f"energy_totals_held_{entry.entry_id}"
 
 
+def battery_power_limits(capacity_wh: float) -> tuple[int, int]:
+    """Return the charge and discharge power of a battery of this capacity."""
+    return (
+        round(capacity_wh * BATTERY_CHARGE_W_PER_WH),
+        round(capacity_wh * BATTERY_DISCHARGE_W_PER_WH),
+    )
+
+
 type EcoflowConfigEntry = ConfigEntry[EcoflowCoordinator]
 
 
@@ -139,24 +149,20 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.scan_interval: int = config_entry.data.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_S
         )
+        battery_count = config_entry.data.get(CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT)
+        # Until the capacity is read, count every module as the largest kind.
+        largest_module_wh = max(module.reported_wh for module in BATTERY_MODULES)
+        charge_w, discharge_w = battery_power_limits(battery_count * largest_module_wh)
         self.limits = {
-            CONF_BATTERY_COUNT: config_entry.data.get(
-                CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT
-            ),
+            CONF_BATTERY_COUNT: battery_count,
             CONF_MAX_GRID_POWER: config_entry.data.get(
                 CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER
             ),
             CONF_MAX_SOLAR_POWER: config_entry.data.get(
                 CONF_MAX_SOLAR_POWER, DEFAULT_MAX_SOLAR_POWER
             ),
-            CONF_MAX_BATTERY_CHARGED_POWER: config_entry.data.get(
-                CONF_MAX_BATTERY_CHARGED_POWER, MAX_BATTERY_CHARGED_POWER
-            )
-            * config_entry.data.get(CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT),
-            CONF_MAX_BATTERY_DISCHARGED_POWER: config_entry.data.get(
-                CONF_MAX_BATTERY_DISCHARGED_POWER, MAX_BATTERY_DISCHARGED_POWER
-            )
-            * config_entry.data.get(CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT),
+            CONF_MAX_BATTERY_CHARGED_POWER: charge_w,
+            CONF_MAX_BATTERY_DISCHARGED_POWER: discharge_w,
         }
         self._ena_calc_solar_power = config_entry.data.get(CONF_CALC_SOLAR_POWER, False)
         self.inverter_model = InverterModel(
@@ -916,6 +922,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         try:
+            self._size_battery_limits(raw_data.get("battery_capacity"))
             result = self._energy_processor.validate_totals(
                 raw_data, self._last_checked_data, self._last_checked_time
             )
@@ -954,6 +961,20 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # entities unavailable, rather than publishing an empty frame.
             self._status = CoordinatorStatus.PROCESSING_FAILED
             raise
+
+    def _size_battery_limits(self, capacity_wh: float | None) -> None:
+        """Scale the battery power limits to the capacity the inverter reports.
+
+        Module sizes can be mixed, so the module count alone does not tell how much
+        power the battery takes. Until a plausible capacity is read, the limits stay
+        as worked out from the module count.
+        """
+        if not capacity_wh or capacity_wh > MAX_BATTERY_CAPACITY_WH:
+            return
+        (
+            self.limits[CONF_MAX_BATTERY_CHARGED_POWER],
+            self.limits[CONF_MAX_BATTERY_DISCHARGED_POWER],
+        ) = battery_power_limits(capacity_wh)
 
     # ── Parameter and setpoint writes ─────────────────────────────────────────
 

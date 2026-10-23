@@ -143,6 +143,56 @@ async def test_modbus_control_enablement_comes_from_config_entry(
 
 
 @pytest.mark.parametrize(
+    ("capacity_wh", "charge_w", "discharge_w"),
+    (
+        (10_000, 5_106, 8_160),  # 10000 Wh, as two old 5 kWh modules read
+        (0, 5_000, 6_600),  # a zero reading keeps the module-count limits
+        (589_824_000, 5_000, 6_600),  # an absurd reading too
+    ),
+)
+def test_battery_limits_follow_the_reported_capacity(
+    coordinator,
+    monkeypatch: pytest.MonkeyPatch,
+    capacity_wh: float,
+    charge_w: int,
+    discharge_w: int,
+) -> None:
+    run_update(
+        coordinator,
+        {"battery_capacity": capacity_wh},
+        datetime(2026, 10, 23, 12, tzinfo=UTC),
+        monkeypatch,
+    )
+
+    assert coordinator.limits[const.CONF_MAX_BATTERY_CHARGED_POWER] == charge_w
+    assert coordinator.limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] == discharge_w
+    assert coordinator._energy_processor.limits is coordinator.limits
+
+
+# Every real module as its datasheet rates it, unlike the merged const table.
+DATASHEET_MODULES = (
+    models.BatteryModule(5000, charge_w=2500, discharge_w=3300),  # EF BD-5.1-S1
+    models.BatteryModule(5024, charge_w=2500, discharge_w=4080),  # EF BD-5-S2
+    models.BatteryModule(8030, charge_w=4100, discharge_w=6400),  # EF BD-8-S2
+)
+
+
+def test_any_battery_mix_is_rated_at_least_its_datasheet_power() -> None:
+    for counts in itertools.product(range(5), repeat=len(DATASHEET_MODULES)):
+        mix = [
+            module
+            for module, count in zip(DATASHEET_MODULES, counts, strict=True)
+            for _ in range(count)
+        ]
+        capacity = sum(module.reported_wh for module in mix)
+
+        charge_w, discharge_w = coordinator_module.battery_power_limits(capacity)
+
+        assert sum(module.charge_w for module in mix) <= charge_w, counts
+        assert sum(module.discharge_w for module in mix) <= discharge_w, counts
+
+
+@pytest.mark.parametrize(
     ("disabled_reads", "expected"),
     (
         (0, False),
