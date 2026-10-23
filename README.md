@@ -456,6 +456,7 @@ If a total has been held for more than 24 hours while the device reports a value
 The diagnostics download has an `energy` section with every counter as published, as the device reports it (totals and today), the time each total was last accepted, which totals are held, the daily snapshots and the maximum powers the totals are checked against.
 Its `raw_registers` section holds every word the last poll read, undecoded, by the
 address each read started at, so a report shows exactly what the inverter sent.
+The serial number is never included.
 
 ---
 

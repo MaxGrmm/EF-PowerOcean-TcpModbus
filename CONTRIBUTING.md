@@ -80,7 +80,7 @@ Register changes need stronger evidence than a field name or a successful read:
 ### Replaying a Diagnostics Download
 
 The `raw_registers` section of a diagnostics download is every word the last poll
-read, undecoded. `FakeInverter.load_diagnostics()` in
+read, undecoded, with the serial number's words left out as `null`. `FakeInverter.load_diagnostics()` in
 [tests/fake_inverter.py](tests/fake_inverter.py) serves them again, so a decoding
 bug on a model you do not own can be reproduced in a test from the reporter's
 download. Trim the download to what the test needs and replace any identifiers

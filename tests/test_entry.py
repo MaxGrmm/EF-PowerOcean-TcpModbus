@@ -101,6 +101,27 @@ async def test_diagnostics_leave_out_the_address_and_most_of_the_serial(
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_raw_registers_in_the_diagnostics_never_hold_the_serial_number(
+    hass: HomeAssistant, set_up: SetUp
+) -> None:
+    """Not even from a read that covers it."""
+    entry = await set_up()
+    serial = const.SERIAL_NUMBER
+    words = list(range(1, serial.end - 40001 + 3))
+    entry.runtime_data._raw_blocks = {40001: words}
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    raw = diagnostics["raw_registers"][40001]
+    assert len(raw) == len(words)
+    for offset, word in enumerate(raw):
+        if serial.address <= 40001 + offset < serial.end:
+            assert word is None
+        else:
+            assert word == words[offset]
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_diagnostics_replay_on_the_fake_inverter(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:

@@ -35,10 +35,14 @@ class FakeInverter:
             )
 
     def load_diagnostics(self, diagnostics: Mapping[str, Any]) -> None:
-        """Serve the words a diagnostics download recorded, as the device sent them."""
+        """Serve the words a diagnostics download recorded, as the device sent them.
+
+        Redacted words, such as the serial number's, are left as they are.
+        """
         for start, words in diagnostics["raw_registers"].items():
             for offset, word in enumerate(words):
-                self.registers[int(start) + offset] = word
+                if word is not None:
+                    self.registers[int(start) + offset] = word
 
     def answer(self, pdu: bytes) -> bytes:
         self.requests += 1
