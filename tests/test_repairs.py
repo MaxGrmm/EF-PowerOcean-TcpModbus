@@ -22,7 +22,10 @@ from custom_components.ef_powerocean_tcpmodbus.repairs import (
 )
 
 BUG_FORM = Path(__file__).parents[1] / ".github" / "ISSUE_TEMPLATE" / "bug_report.yml"
-HELD = "- sensor.grid_export_total: 1548.73 kWh shown, 507.50 kWh on the inverter"
+HELD = (
+    "- sensor.grid_export_total: 1548.73 kWh in Home Assistant, "
+    "507.50 kWh on the inverter"
+)
 
 
 @pytest.fixture(autouse=True)

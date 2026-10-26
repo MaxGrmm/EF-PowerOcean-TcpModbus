@@ -633,7 +633,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 else "?"
             )
             lines.append(
-                f"- {entity_id or key}: {held.published:.2f} kWh shown, "
+                f"- {entity_id or key}: {held.published:.2f} kWh in Home Assistant, "
                 f"{held.device:.2f} kWh on the inverter, held since {since}"
             )
         return "\n".join(lines)
@@ -692,7 +692,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @callback
     def async_keep_shown_totals(self) -> None:
-        """Correct every long-held total to continue from the value shown.
+        """Correct every long-held total to count on from its value in Home Assistant.
 
         The offset that brings the device's value up to the shown one is added to
         the total's offset, saved to the entry and applied by its reload.

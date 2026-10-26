@@ -1732,7 +1732,8 @@ def test_the_issue_names_each_held_total_with_both_values(
     text = coordinator.describe_held_totals()
 
     assert text == (
-        "- sensor.grid_export: 1548.73 kWh shown, 507.50 kWh on the inverter, "
+        "- sensor.grid_export: 1548.73 kWh in Home Assistant, "
+        "507.50 kWh on the inverter, "
         "held since 2026-09-16 21:48"
     )
 

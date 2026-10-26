@@ -188,7 +188,7 @@ class EnergyProcessor:
 
         A total whose offset changed moves to its last device read plus the new
         offset and is accepted there, so the correction is not held as a jump.
-        That also continues a held total from the value shown when its offset was
+        That also keeps a held total at its published value when its offset was
         worked out from it. Today's value stays as it was.
         """
         result = dict(last_data)

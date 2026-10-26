@@ -926,7 +926,7 @@ def test_without_offsets_reads_pass_through_unchanged(
     assert processor.apply_offsets(raw) == raw
 
 
-def test_a_held_total_continues_from_the_value_shown(
+def test_a_held_total_keeps_its_published_value(
     processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The repair's choice: the offset is worked out from the held total."""

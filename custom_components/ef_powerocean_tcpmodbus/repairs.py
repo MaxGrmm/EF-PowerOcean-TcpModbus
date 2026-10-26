@@ -65,7 +65,7 @@ class HeldTotalsRepairFlow(RepairsFlow):
         self,
         user_input: dict[str, str] | None = None,  # noqa: ARG002 - a menu choice
     ) -> RepairsFlowResult:
-        """Continue each held total from the value shown, with an offset."""
+        """Keep each held total at its value in Home Assistant, with an offset."""
         if (coordinator := self._held_coordinator()) is None:
             return self.async_abort(reason="not_held")
         coordinator.async_keep_shown_totals()
@@ -75,7 +75,7 @@ class HeldTotalsRepairFlow(RepairsFlow):
         self,
         user_input: dict[str, str] | None = None,  # noqa: ARG002 - a menu choice
     ) -> RepairsFlowResult:
-        """Take the inverter's value for each held total."""
+        """Switch each held total to the inverter's value."""
         if (coordinator := self._held_coordinator()) is None:
             return self.async_abort(reason="not_held")
         await coordinator.async_take_device_totals()

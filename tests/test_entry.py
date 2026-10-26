@@ -389,7 +389,7 @@ async def test_the_held_totals_repair_runs_end_to_end_in_home_assistant(
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_a_held_total_continues_from_the_value_shown_after_the_repair(
+async def test_a_held_total_keeps_its_value_in_home_assistant_after_the_repair(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
     entry, issue_id = await _held_export_issue(hass, set_up, inverter)
