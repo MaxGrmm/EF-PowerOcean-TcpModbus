@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import socket
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -211,3 +213,20 @@ async def test_an_address_nothing_answers_on_is_reported(hass: HomeAssistant) ->
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "cannot_connect"}
+
+
+def test_section_descriptions_are_plain_text_in_every_language() -> None:
+    """The frontend shows a section's description as plain text, unlike a field's.
+
+    A link or placeholder there shows up raw, so those belong in data_description.
+    """
+    component = Path(const.__file__).parent
+    files = sorted(component.glob("translations/*.json"))
+    assert files
+
+    for path in files:
+        steps = json.loads(path.read_text(encoding="utf-8"))["options"]["step"]
+        for step in steps.values():
+            for name, section in step.get("sections", {}).items():
+                assert "](" not in section["description"], (path.name, name)
+                assert "{" not in section["description"], (path.name, name)

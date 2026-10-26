@@ -79,7 +79,7 @@
         "sections": {
           "energy_totals": {
             "name": "Correct energy totals",
-            "description": "Only needed if the inverter reset one of its lifetime energy counters. Enter the value from [EcoFlow's portal]({portal_url}) for each total that is wrong, and leave the others as they are. The difference is added to what the inverter reports from now on; today's values stay as they are.\n\nTo remove a correction, enter the value of the total's (Device) sensor. A total set lower than before counts as a meter reset in the Energy dashboard.",
+            "description": "Only needed if the inverter reset one of its lifetime energy counters. Enter the value from EcoFlow's portal for each total that is wrong and leave the others as they are. The difference is added to what the inverter reports from now on, and today's values stay as they are. To remove a correction, enter the value of the total's (Device) sensor. A total set lower than before counts as a meter reset in the Energy dashboard.",
             "data": {
               "grid_import_total": "Grid Import Total",
               "grid_export_total": "Grid Export Total",
@@ -88,6 +88,15 @@
               "solar_total": "Solar Yield Total",
               "inverter_ac_in_total": "Inverter AC Input Total",
               "inverter_ac_out_total": "Inverter AC Output Total"
+            },
+            "data_description": {
+              "grid_import_total": "As shown in [EcoFlow's portal]({portal_url}).",
+              "grid_export_total": "As shown in [EcoFlow's portal]({portal_url}).",
+              "bat_charged_total": "As shown in [EcoFlow's portal]({portal_url}).",
+              "bat_discharged_total": "As shown in [EcoFlow's portal]({portal_url}).",
+              "solar_total": "As shown in [EcoFlow's portal]({portal_url}).",
+              "inverter_ac_in_total": "As shown in [EcoFlow's portal]({portal_url}).",
+              "inverter_ac_out_total": "As shown in [EcoFlow's portal]({portal_url})."
             }
           }
         }

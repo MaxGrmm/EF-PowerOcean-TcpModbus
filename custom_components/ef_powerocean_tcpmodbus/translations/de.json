@@ -79,7 +79,7 @@
         "sections": {
           "energy_totals": {
             "name": "Energiezähler korrigieren",
-            "description": "Nur nötig, wenn der Wechselrichter einen seiner Gesamtzähler zurückgesetzt hat. Trage für jeden falschen Zähler den Wert aus dem [EcoFlow-Portal]({portal_url}) ein und lass die anderen unverändert. Die Differenz wird ab jetzt zu dem addiert, was der Wechselrichter meldet; die heutigen Werte bleiben unverändert.\n\nUm eine Korrektur zu entfernen, trage den Wert des zugehörigen (Gerät)-Sensors ein. Ein niedrigerer Wert als zuvor zählt im Energie-Dashboard als Zählerwechsel.",
+            "description": "Nur nötig, wenn der Wechselrichter einen seiner Gesamtzähler zurückgesetzt hat. Trage für jeden falschen Zähler den Wert aus dem EcoFlow-Portal ein und lass die anderen unverändert. Die Differenz wird ab jetzt zu dem addiert, was der Wechselrichter meldet, die heutigen Werte bleiben unverändert. Um eine Korrektur zu entfernen, trage den Wert des zugehörigen (Gerät)-Sensors ein. Ein niedrigerer Wert als zuvor zählt im Energie-Dashboard als Zählerwechsel.",
             "data": {
               "grid_import_total": "Netzbezugsenergie Gesamt",
               "grid_export_total": "Netzeinspeiseenergie Gesamt",
@@ -88,6 +88,15 @@
               "solar_total": "Solarenergie Gesamt",
               "inverter_ac_in_total": "Wechselrichter AC-Eingang Gesamt",
               "inverter_ac_out_total": "Wechselrichter AC-Ausgang Gesamt"
+            },
+            "data_description": {
+              "grid_import_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt.",
+              "grid_export_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt.",
+              "bat_charged_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt.",
+              "bat_discharged_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt.",
+              "solar_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt.",
+              "inverter_ac_in_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt.",
+              "inverter_ac_out_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt."
             }
           }
         }
