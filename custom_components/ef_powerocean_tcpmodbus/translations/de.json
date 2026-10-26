@@ -45,6 +45,13 @@
     "step": {
       "init": {
         "title": "EcoFlow PowerOcean - Einstellungen",
+        "menu_options": {
+          "connection": "Verbindung und Parameter",
+          "energy_totals": "Energiezähler korrigieren"
+        }
+      },
+      "connection": {
+        "title": "EcoFlow PowerOcean - Einstellungen",
         "description": "Verbindungsdaten",
         "data": {
           "host": "IP-Adresse",
@@ -76,10 +83,26 @@
           "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden.",
           "battery_reserve": "Nativ: Der Wechselrichter hält die Reserve selbst, wie die in der EcoFlow-App eingestellte, aber nicht jedes Modell übernimmt eine Änderung über Modbus. Emuliert: Die Integration bildet die Reserve der App mit eigener Logik nach, solange die Modbus-Steuerung an ist. Für dein Modell voreingestellt; nur ändern, um ein Modell zu testen."
         }
+      },
+      "energy_totals": {
+        "title": "Energiezähler korrigieren",
+        "description": "Nur nötig, wenn der Wechselrichter einen seiner Gesamtzähler zurückgesetzt hat. Trage für jeden falschen Zähler den Wert aus dem [EcoFlow-Portal]({portal_url}) ein und lass die anderen unverändert. Die Integration addiert die Differenz ab jetzt zu dem, was der Wechselrichter meldet: Der Zähler läuft vom eingetragenen Wert weiter, der heutige Wert bleibt unverändert.\n\nUm eine Korrektur zu entfernen, trage den Wert des zugehörigen (Gerät)-Sensors ein. Ein niedrigerer Wert als zuvor zählt im Energie-Dashboard als Zählerwechsel.",
+        "data": {
+          "grid_import_total": "Netzbezugsenergie Gesamt",
+          "grid_export_total": "Netzeinspeiseenergie Gesamt",
+          "bat_charged_total": "Batterieladeenergie Gesamt",
+          "bat_discharged_total": "Batterieentladeenergie Gesamt",
+          "solar_total": "Solarenergie Gesamt",
+          "inverter_ac_in_total": "Wechselrichter AC-Eingang Gesamt",
+          "inverter_ac_out_total": "Wechselrichter AC-Ausgang Gesamt"
+        }
       }
     },
     "error": {
       "cannot_connect": "Verbindung fehlgeschlagen - IP-Adresse und Port prüfen"
+    },
+    "abort": {
+      "no_energy_totals": "Der Wechselrichter hat seine Energiezähler noch nicht gemeldet. Versuche es erneut, sobald die Integration verbunden ist."
     }
   },
   "issues": {
@@ -95,9 +118,13 @@
       "title": "Energiezähler des Wechselrichters unter {host} werden seit über einem Tag festgehalten",
       "fix_flow": {
         "step": {
-          "confirm": {
-            "title": "Energiezähler des Wechselrichters übernehmen",
-            "description": "Diese Gesamtzähler werden seit mehr als 24 Stunden festgehalten, weil der Wechselrichter einen Wert meldet, den die Integration nicht für plausibel hält:\n\n{totals}\n\nMeist hat der Wechselrichter seinen Zähler zurückgesetzt, oder es wurde früher ein falscher Wert übernommen. Mit Absenden werden die Werte des Wechselrichters übernommen; jeder Zähler läuft dann von dort weiter.\n\nDas Energie-Dashboard erfasst den Unterschied in einem Schritt, ein niedrigerer Wert zählt als Zählerwechsel. Den Verlauf kannst du danach unter Entwicklerwerkzeuge → Statistiken → Summe anpassen korrigieren.\n\nWenn du diese Werte für falsch hältst, sende nicht ab. Öffne stattdessen die [Geräteseite]({device_page}) des Wechselrichters, wähle im ⋮-Menü **Diagnosedaten herunterladen** und hänge die Datei an diesen bereits ausgefüllten [Fehlerbericht]({report_url}) an."
+          "init": {
+            "title": "Energiezähler festgehalten",
+            "description": "Diese Gesamtzähler werden seit mehr als 24 Stunden festgehalten, weil der Wechselrichter einen Wert meldet, den die Integration nicht für plausibel hält:\n\n{totals}\n\nMeist hat der Wechselrichter seinen Zähler zurückgesetzt, oder es wurde früher ein falscher Wert übernommen.\n\n**Vom angezeigten Wert weiterzählen** lässt jeden Zähler, wo er ist, und addiert die Differenz ab jetzt zu dem, was der Wechselrichter meldet. Wähle dies, wenn der Wechselrichter seinen Zähler zurückgesetzt hat: Das Energie-Dashboard läuft ohne Sprung weiter. Die Zähler kannst du später in den [Einstellungen]({settings_page}) der Integration unter Konfigurieren → Energiezähler korrigieren an das EcoFlow-Portal angleichen.\n\n**Wert des Wechselrichters übernehmen** lässt jeden Zähler vom Wert des Wechselrichters weiterlaufen. Das Energie-Dashboard erfasst den Unterschied in einem Schritt, ein niedrigerer Wert zählt als Zählerwechsel. Den Verlauf kannst du danach unter Entwicklerwerkzeuge → Statistiken → Summe anpassen korrigieren.\n\nWenn du diese Werte für falsch hältst, wähle keins von beiden. Öffne stattdessen die [Geräteseite]({device_page}) des Wechselrichters, wähle im ⋮-Menü **Diagnosedaten herunterladen** und hänge die Datei an diesen bereits ausgefüllten [Fehlerbericht]({report_url}) an.",
+            "menu_options": {
+              "keep_shown": "Vom angezeigten Wert weiterzählen",
+              "take_device": "Wert des Wechselrichters übernehmen"
+            }
           }
         },
         "abort": {

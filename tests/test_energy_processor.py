@@ -12,6 +12,7 @@ from custom_components.ef_powerocean_tcpmodbus import const
 from custom_components.ef_powerocean_tcpmodbus.energy_processor import (
     EnergyProcessor,
     HeldTotal,
+    offsets_from,
 )
 
 LIMITS = {
@@ -880,3 +881,152 @@ def test_a_device_value_of_zero_is_never_taken(
     )
 
     assert processor.take_device_totals(["grid_export_total"]) == {}
+
+
+# ── Offsets for a counter the inverter reset ─────────────────────────────────
+
+
+def corrected_poll(
+    processor: EnergyProcessor,
+    device: Mapping[str, float | None],
+    previous_data: Mapping[str, float | None],
+    now: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, float]:
+    """Validate a read with the offsets applied and echo the device's totals."""
+    result = validate_totals(
+        processor,
+        processor.apply_offsets(device),
+        previous_data,
+        now - POLL,
+        now,
+        monkeypatch,
+    )
+    return result | processor.raw_total_values(device)
+
+
+def test_an_offset_is_added_to_real_reads_only(processor: EnergyProcessor) -> None:
+    processor.offsets = {"grid_export_total": 1041.23, "solar_total": 10.0}
+
+    corrected = processor.apply_offsets(
+        {"grid_export_total": 507.5, "solar_total": 0.0, "grid_import_total": 80.0}
+    )
+
+    assert corrected["grid_export_total"] == pytest.approx(1548.73)
+    # A bogus 0 stays 0, for the validation to hold back (#169).
+    assert corrected["solar_total"] == 0.0
+    assert corrected["grid_import_total"] == 80.0
+
+
+def test_without_offsets_reads_pass_through_unchanged(
+    processor: EnergyProcessor,
+) -> None:
+    raw = {"grid_export_total": 507.5, "solar_total": None}
+
+    assert processor.apply_offsets(raw) == raw
+
+
+def test_a_held_total_continues_from_the_value_shown(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The repair's choice: the offset is worked out from the held total."""
+    processor.accepted_at = {"grid_export_total": START - timedelta(days=2)}
+    processor.daily_snapshots = {"grid_export_today": 1540.0}
+    now = START + POLL
+    last = corrected_poll(
+        processor,
+        {"grid_export_total": 507.5},
+        {"grid_export_total": 1548.73},
+        now,
+        monkeypatch,
+    )
+    held = processor.held["grid_export_total"]
+
+    last = processor.change_offsets(
+        {"grid_export_total": held.published - held.device}, last
+    )
+    now += POLL
+    result = corrected_poll(
+        processor, {"grid_export_total": 507.52}, last, now, monkeypatch
+    )
+
+    assert result["grid_export_total"] == pytest.approx(1548.75)
+    assert result["grid_export_total_raw"] == 507.52
+    assert processor.held == {}
+    assert processor.daily_snapshots["grid_export_today"] == pytest.approx(1540.0)
+
+
+def test_a_total_set_to_a_new_value_keeps_todays_energy(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The settings' choice: the user enters the value from EcoFlow's portal."""
+    processor.accepted_at = {"solar_total": START}
+    processor.daily_snapshots = {"solar_today": 4290.0}
+    now = START + POLL
+    last = corrected_poll(
+        processor, {"solar_total": 4296.8}, {"solar_total": 4296.8}, now, monkeypatch
+    )
+
+    last = processor.change_offsets({"solar_total": 4400.0 - 4296.8}, last)
+    now += POLL
+    result = corrected_poll(processor, {"solar_total": 4296.8}, last, now, monkeypatch)
+    daily, _ = derive_daily(processor, result, now, monkeypatch)
+
+    assert result["solar_total"] == pytest.approx(4400.0)
+    assert processor.held == {}
+    assert daily["solar_today"] == pytest.approx(6.8)
+
+
+def test_removing_an_offset_returns_the_total_to_the_device_value(
+    processor: EnergyProcessor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    processor.offsets = {"solar_total": 100.0}
+    processor.accepted_at = {"solar_total": START}
+    now = START + POLL
+    last = corrected_poll(
+        processor, {"solar_total": 50.0}, {"solar_total": 150.0}, now, monkeypatch
+    )
+
+    last = processor.change_offsets({}, last)
+    result = corrected_poll(
+        processor, {"solar_total": 50.0}, last, now + POLL, monkeypatch
+    )
+
+    assert result["solar_total"] == pytest.approx(50.0)
+    assert processor.held == {}
+
+
+def test_unchanged_offsets_leave_the_totals_alone(processor: EnergyProcessor) -> None:
+    processor.offsets = {"solar_total": 100.0}
+    last = {"solar_total": 150.0, "solar_total_raw": 49.0}
+
+    assert processor.change_offsets({"solar_total": 100.0}, last) == last
+    assert processor.accepted_at == {}
+
+
+def test_offsets_are_saved_with_the_state_they_are_part_of(
+    processor: EnergyProcessor,
+) -> None:
+    processor.offsets = {"grid_export_total": 1041.23}
+    restored = EnergyProcessor(LIMITS)
+
+    restored.load_state(processor.dump_state())
+
+    assert restored.offsets == {"grid_export_total": 1041.23}
+
+
+@pytest.mark.parametrize(
+    "stored",
+    (
+        None,
+        [1.0],
+        {"house_energy_total": 5.0},
+        {"solar_today": 5.0},
+        {"solar_total": "5"},
+        {"solar_total": float("nan")},
+        {"solar_total": True},
+        {"solar_total": 0},
+    ),
+)
+def test_a_damaged_offset_corrects_nothing(stored: object) -> None:
+    assert offsets_from(stored) == {}

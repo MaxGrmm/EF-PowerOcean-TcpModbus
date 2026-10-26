@@ -98,7 +98,7 @@ Or install it from within HACS:
 | Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
 | Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
 
-To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**
+To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure → Connection and parameters**. **Correct energy totals** in the same menu is for a lifetime counter the inverter reset; see [Correcting a lifetime total](#correcting-a-lifetime-total).
 
 ---
 
@@ -456,7 +456,16 @@ The lifetime totals above are checked before they are published: a value that dr
 | Inverter AC Input Total (Device)  | `inverter_ac_in_total_raw`  | kWh  |
 | Inverter AC Output Total (Device) | `inverter_ac_out_total_raw` | kWh  |
 
-If a total has been held for more than 24 hours while the device reports a value above 0, a repairs issue lists it with both values and offers to take the device's value. If the values look wrong instead, it links to a filled-in bug report and to the device page for the diagnostics download. This happens when the inverter resets a counter or a wrong value was accepted earlier. A total held at 0 while the device's total rises in step with its own daily counter is corrected automatically.
+If a total has been held for more than 24 hours while the device reports a value above 0, a repairs issue lists it with both values. It offers to continue the total from the value shown, or to take the device's value. If the values look wrong instead, it links to a filled-in bug report and to the device page for the diagnostics download. This happens when the inverter resets a counter or a wrong value was accepted earlier. A total held at 0 while the device's total rises in step with its own daily counter is corrected automatically.
+
+#### Correcting a lifetime total
+
+Some inverters reset a lifetime counter, while EcoFlow's portal keeps counting. A total can be corrected so it continues as before, by adding an offset to what the device reports:
+
+- **Continue from the value shown** in the repairs issue works the offset out from the held total, so the Energy dashboard continues without a jump.
+- **Configure → Correct energy totals** sets a total to a value you enter, such as the one under historical data in [EcoFlow's portal](https://user-portal.ecoflow.com/user/eu/en/main/home/dashboard/historicalData). Leave the totals that are right as they are. To remove a correction, enter the value of the total's (Device) sensor.
+
+Today's values are not changed by a correction, and the (Device) sensors keep showing what the inverter reports. A total set lower than before counts as a meter reset in the Energy dashboard. House Consumption Total is calculated from the corrected totals, so it moves with a correction: up in one step, or held until it has caught up if the correction lowers it. The offsets are in the diagnostics download under `energy_offsets`.
 
 The diagnostics download has an `energy` section with every counter as published, as the device reports it (totals and today), the time each total was last accepted, which totals are held, the daily snapshots and the maximum powers the totals are checked against.
 Its `raw_registers` section holds every word the last poll read, undecoded, by the

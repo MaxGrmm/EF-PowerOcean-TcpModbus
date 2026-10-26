@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -92,16 +93,19 @@ async def _change_options(
     hass: HomeAssistant, entry: MockConfigEntry, host: str, port: int = 502
 ):
     result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "connection"}
+    )
     return await hass.config_entries.options.async_configure(
         result["flow_id"], {const.CONF_HOST: host, const.CONF_PORT: port}
     )
 
 
-def _configured_entry(hass: HomeAssistant) -> MockConfigEntry:
+def _configured_entry(hass: HomeAssistant, **data: Any) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=const.DOMAIN,
         unique_id=SERIAL,
-        data={const.CONF_HOST: "192.168.1.10", const.CONF_PORT: 502},
+        data={const.CONF_HOST: "192.168.1.10", const.CONF_PORT: 502, **data},
     )
     entry.add_to_hass(hass)
     return entry
@@ -121,6 +125,36 @@ async def test_options_keep_the_address_without_testing_it_again(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     device_settings.assert_not_awaited()
     assert entry.data[const.CONF_SCAN_INTERVAL] == 10
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
+async def test_changing_the_settings_keeps_the_energy_corrections(
+    hass: HomeAssistant,
+) -> None:
+    offsets = {"grid_export_total": 1041.23}
+    entry = _configured_entry(hass, **{const.CONF_ENERGY_OFFSETS: offsets})
+
+    result = await _change_options(hass, entry, "192.168.1.10")
+    await hass.config_entries.options.async_configure(
+        result["flow_id"], {const.CONF_SCAN_INTERVAL: 10}
+    )
+
+    assert entry.data[const.CONF_ENERGY_OFFSETS] == offsets
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_energy_totals_wait_for_the_inverter_to_report_them(
+    hass: HomeAssistant,
+) -> None:
+    entry = _configured_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "energy_totals"}
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "no_energy_totals"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

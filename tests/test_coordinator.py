@@ -91,6 +91,7 @@ def coordinator():
         on_command_expired=Mock(),
     )
     instance._energy_processor = EnergyProcessor(instance.limits)
+    instance._energy_offsets = {}
     return instance
 
 
@@ -1802,3 +1803,79 @@ def test_an_optional_read_that_recovers_starts_counting_again(coordinator) -> No
         asyncio.run(coordinator.async_get_raw_data())
 
     assert coordinator.unsupported_registers == frozenset()
+
+
+def test_an_offset_corrects_the_total_but_not_its_device_sensor(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    coordinator._energy_processor.offsets = {"grid_export_total": 1041.23}
+
+    result = run_update(
+        coordinator,
+        {"grid_export_total": 507.5},
+        datetime(2026, 8, 7, 12, 0, tzinfo=UTC),
+        monkeypatch,
+    )
+
+    assert result["grid_export_total"] == pytest.approx(1548.73)
+    assert result["grid_export_total_raw"] == 507.5
+
+
+def _saved_before_a_correction(coordinator) -> dict[str, Any]:
+    coordinator._last_checked_data = {
+        "solar_total": 4296.8,
+        "solar_total_raw": 4296.8,
+        "grid_import_total": 80.0,
+        "grid_import_total_raw": 80.0,
+    }
+    coordinator._last_checked_time = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
+    coordinator._energy_processor.daily_snapshots = {"solar_today": 4290.0}
+    return coordinator._persisted_state()
+
+
+def _load(coordinator, stored: dict[str, Any], offsets: dict[str, float]) -> None:
+    coordinator._energy_offsets = offsets
+    coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
+    asyncio.run(coordinator.async_load_persisted_state())
+
+
+def test_a_new_offset_moves_its_total_when_the_entry_loads(coordinator) -> None:
+    stored = _saved_before_a_correction(coordinator)
+
+    _load(coordinator, stored, {"solar_total": 103.2})
+
+    assert coordinator._last_checked_data["solar_total"] == pytest.approx(4400.0)
+    assert coordinator._last_checked_data["grid_import_total"] == 80.0
+    assert coordinator._energy_processor.daily_snapshots["solar_today"] == (
+        pytest.approx(4393.2)
+    )
+
+
+def test_an_offset_moves_its_total_only_once(coordinator) -> None:
+    _load(coordinator, _saved_before_a_correction(coordinator), {"solar_total": 103.2})
+
+    _load(coordinator, coordinator._persisted_state(), {"solar_total": 103.2})
+
+    assert coordinator._last_checked_data["solar_total"] == pytest.approx(4400.0)
+
+
+def test_offsets_for_entered_totals_are_worked_out_from_the_device(
+    coordinator,
+) -> None:
+    coordinator._energy_offsets = {"grid_export_total": 1041.23}
+    coordinator.data = {
+        "solar_total": 4296.8,
+        "solar_total_raw": 4296.8,
+        "grid_import_total": 0.0,
+        "grid_import_total_raw": 0.0,
+    }
+
+    assert coordinator.correctable_totals == {"solar_total": 4296.8}
+    assert coordinator.energy_offsets_for({"solar_total": 4400.0}) == {
+        "grid_export_total": 1041.23,
+        "solar_total": pytest.approx(103.2),
+    }
+    # Entering the device's value removes the correction.
+    assert coordinator.energy_offsets_for({"solar_total": 4296.8}) == {
+        "grid_export_total": 1041.23
+    }

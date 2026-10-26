@@ -45,6 +45,13 @@
     "step": {
       "init": {
         "title": "EcoFlow PowerOcean - Settings",
+        "menu_options": {
+          "connection": "Connection and parameters",
+          "energy_totals": "Correct energy totals"
+        }
+      },
+      "connection": {
+        "title": "EcoFlow PowerOcean - Settings",
         "description": "Adjust the connection details for your inverter.",
         "data": {
           "host": "IP Address",
@@ -76,10 +83,26 @@
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
           "battery_reserve": "Native: the inverter enforces the reserve itself, like the one set in the EcoFlow app, but not every model accepts a change to it over Modbus. Emulated: the integration imitates the app's reserve with its own logic, while Modbus Control is on. Set for your model; change it only to test a model."
         }
+      },
+      "energy_totals": {
+        "title": "Correct energy totals",
+        "description": "Use this only if the inverter reset one of its lifetime energy counters. Enter the value from [EcoFlow's portal]({portal_url}) for each total that is wrong, and leave the others as they are. The integration adds the difference to what the inverter reports from now on, so the total continues from the value entered and today's value stays as it is.\n\nTo remove a correction, enter the value of the total's (Device) sensor. A total set lower than before counts as a meter reset in the Energy dashboard.",
+        "data": {
+          "grid_import_total": "Grid Import Total",
+          "grid_export_total": "Grid Export Total",
+          "bat_charged_total": "Battery Charged Total",
+          "bat_discharged_total": "Battery Discharged Total",
+          "solar_total": "Solar Yield Total",
+          "inverter_ac_in_total": "Inverter AC Input Total",
+          "inverter_ac_out_total": "Inverter AC Output Total"
+        }
       }
     },
     "error": {
       "cannot_connect": "Connection failed - please check IP address and port"
+    },
+    "abort": {
+      "no_energy_totals": "The inverter has not reported its energy totals yet. Try again once the integration is connected."
     }
   },
   "issues": {
@@ -95,9 +118,13 @@
       "title": "Energy totals of the inverter at {host} have been held for over a day",
       "fix_flow": {
         "step": {
-          "confirm": {
-            "title": "Take the inverter's energy totals",
-            "description": "These lifetime energy totals have been held for more than 24 hours, because the inverter reports a value the integration does not consider plausible:\n\n{totals}\n\nThis usually means the inverter reset its counter, or a wrong value was accepted earlier. Submit to take the inverter's values; each total then continues from there.\n\nThe Energy dashboard records the difference in one step, and a lower value counts as a meter reset. You can correct the history afterwards under Developer tools → Statistics → Adjust sum.\n\nIf you believe these values are wrong, don't submit. Instead, open the inverter's [device page]({device_page}), choose **Download diagnostics** from its ⋮ menu, and attach the file to this [bug report]({report_url}), which is already filled in."
+          "init": {
+            "title": "Energy totals held for over a day",
+            "description": "These lifetime energy totals have been held for more than 24 hours, because the inverter reports a value the integration does not consider plausible:\n\n{totals}\n\nThis usually means the inverter reset its counter, or a wrong value was accepted earlier.\n\n**Continue from the value shown** keeps each total where it is and adds the difference to what the inverter reports from now on. Use it if the inverter reset its counter: the Energy dashboard continues without a jump. You can fine-tune the totals to EcoFlow's portal later under the integration's [settings]({settings_page}) → Configure → Correct energy totals.\n\n**Take the inverter's value** continues each total from what the inverter reports. The Energy dashboard records the difference in one step, and a lower value counts as a meter reset. You can correct the history afterwards under Developer tools → Statistics → Adjust sum.\n\nIf you believe these values are wrong, choose neither. Instead, open the inverter's [device page]({device_page}), choose **Download diagnostics** from its ⋮ menu, and attach the file to this [bug report]({report_url}), which is already filled in.",
+            "menu_options": {
+              "keep_shown": "Continue from the value shown",
+              "take_device": "Take the inverter's value"
+            }
           }
         },
         "abort": {

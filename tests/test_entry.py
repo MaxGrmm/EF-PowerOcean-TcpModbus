@@ -314,20 +314,14 @@ async def test_diagnostics_show_every_energy_counter_at_every_stage(
     assert "grid_export_total" not in energy["energy_accepted_at"]
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
-async def test_the_held_totals_repair_runs_end_to_end_in_home_assistant(
+async def _held_export_issue(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
-) -> None:
-    """The fix flow through Home Assistant's own Repairs, as the frontend runs it.
-
-    Home Assistant loads repairs.py itself and passes the issue id as the first
-    step's input, which must never count as the user confirming.
-    """
+) -> tuple[MockConfigEntry, str]:
+    """Set up an entry whose export total was held at 1,548.73 kWh for a month."""
     assert await async_setup_component(hass, "repairs", {})
     _serve_float(inverter, const.REGISTERS_BY_KEY["grid_export_total"].address, 507.5)
     entry = await set_up()
     coordinator = entry.runtime_data
-    # Export held at 1,548.73 kWh, last accepted a month ago.
     coordinator._last_checked_data["grid_export_total"] = 1548.73
     coordinator._energy_processor.accepted_at["grid_export_total"] = (
         dt_util.now() - timedelta(days=30)
@@ -340,27 +334,127 @@ async def test_the_held_totals_repair_runs_end_to_end_in_home_assistant(
     issue = ir.async_get(hass).async_get_issue(const.DOMAIN, issue_id)
     assert issue is not None
     assert issue.is_fixable
+    return entry, issue_id
 
+
+async def _poll_a_minute_later(entry: MockConfigEntry) -> None:
+    coordinator = entry.runtime_data
+    coordinator._last_checked_time = dt_util.now() - timedelta(minutes=1)
+    await coordinator.async_refresh()
+
+
+async def _choose(hass: HomeAssistant, issue_id: str, choice: str) -> None:
     manager = repairs_flow_manager(hass)
     assert manager is not None
-    form = await manager.async_init(const.DOMAIN, data={"issue_id": issue_id})
+    menu = await manager.async_init(const.DOMAIN, data={"issue_id": issue_id})
+    assert menu["type"] == "menu"
+    done = await manager.async_configure(menu["flow_id"], {"next_step_id": choice})
+    await hass.async_block_till_done()
+    assert done["type"] == "create_entry"
 
-    assert form["type"] == "form"
-    assert form["step_id"] == "confirm"
-    assert coordinator.data["grid_export_total"] == 1548.73
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_the_held_totals_repair_runs_end_to_end_in_home_assistant(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    """The fix flow through Home Assistant's own Repairs, as the frontend runs it.
+
+    Home Assistant loads repairs.py itself and passes the issue id as the first
+    step's input, which must never count as the user choosing.
+    """
+    entry, issue_id = await _held_export_issue(hass, set_up, inverter)
+    manager = repairs_flow_manager(hass)
+    assert manager is not None
+    menu = await manager.async_init(const.DOMAIN, data={"issue_id": issue_id})
+
+    assert menu["type"] == "menu"
+    assert entry.runtime_data.data["grid_export_total"] == 1548.73
     translations = await async_get_translations(hass, "en", "issues", [const.DOMAIN])
     prefix = f"component.{const.DOMAIN}.issues.energy_totals_held"
-    description = translations[f"{prefix}.fix_flow.step.confirm.description"]
-    rendered = description.format(**(form.get("description_placeholders") or {}))
+    description = translations[f"{prefix}.fix_flow.step.init.description"]
+    rendered = description.format(**(menu.get("description_placeholders") or {}))
     assert "507.50 kWh on the inverter" in rendered
     assert "github.com" in rendered
+    issue = ir.async_get(hass).async_get_issue(const.DOMAIN, issue_id)
+    assert issue is not None
     assert translations[f"{prefix}.title"].format(
         **(issue.translation_placeholders or {})
     )
+    manager.async_abort(menu["flow_id"])
 
-    done = await manager.async_configure(form["flow_id"], {})
+    await _choose(hass, issue_id, "take_device")
+
+    assert entry.runtime_data.data["grid_export_total"] == pytest.approx(507.5)
+    assert ir.async_get(hass).async_get_issue(const.DOMAIN, issue_id) is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_held_total_continues_from_the_value_shown_after_the_repair(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    entry, issue_id = await _held_export_issue(hass, set_up, inverter)
+
+    await _choose(hass, issue_id, "keep_shown")
+    _serve_float(inverter, const.REGISTERS_BY_KEY["grid_export_total"].address, 507.51)
+    await _poll_a_minute_later(entry)
     await hass.async_block_till_done()
 
-    assert done["type"] == "create_entry"
-    assert coordinator.data["grid_export_total"] == pytest.approx(507.5)
+    data = entry.runtime_data.data
+    assert entry.data[const.CONF_ENERGY_OFFSETS] == {
+        "grid_export_total": pytest.approx(1041.23)
+    }
+    assert data["grid_export_total"] == pytest.approx(1548.74, abs=0.001)
+    assert data["grid_export_total_raw"] == pytest.approx(507.51)
     assert ir.async_get(hass).async_get_issue(const.DOMAIN, issue_id) is None
+
+
+async def _energy_totals_form(hass: HomeAssistant, entry: MockConfigEntry) -> Any:
+    menu = await hass.config_entries.options.async_init(entry.entry_id)
+    assert menu["type"] == "menu"
+    return await hass.config_entries.options.async_configure(
+        menu["flow_id"], {"next_step_id": "energy_totals"}
+    )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_total_set_in_the_settings_continues_from_the_value_entered(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    entry = await set_up()
+    today = entry.runtime_data.data["solar_today"]
+
+    form = await _energy_totals_form(hass, entry)
+    assert form["type"] == "form"
+    assert "eu/en/" in (form.get("description_placeholders") or {})["portal_url"]
+    done = await hass.config_entries.options.async_configure(
+        form["flow_id"], {"solar_total": 4400.0}
+    )
+    await hass.async_block_till_done()
+
+    data = entry.runtime_data.data
+    assert done["type"] == "create_entry"
+    assert data["solar_total"] == pytest.approx(4400.0)
+    assert data["solar_total_raw"] == pytest.approx(4296.8)
+    assert data["solar_today"] == pytest.approx(today)
+    assert _state(hass, _entity_id(hass, entry, "sensor", "solar_total")) == "4400.0"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_total_left_as_shown_is_not_corrected(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    entry = await set_up()
+
+    form = await _energy_totals_form(hass, entry)
+    # The total counts on while the form is open.
+    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.81)
+    await _poll_a_minute_later(entry)
+    await hass.config_entries.options.async_configure(
+        form["flow_id"], {"solar_total": 4296.8}
+    )
+    await hass.async_block_till_done()
+
+    assert const.CONF_ENERGY_OFFSETS not in entry.data
+    assert entry.runtime_data.data["solar_total"] == pytest.approx(4296.81, abs=0.001)

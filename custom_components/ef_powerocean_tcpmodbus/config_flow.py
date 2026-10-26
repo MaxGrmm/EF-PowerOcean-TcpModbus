@@ -15,6 +15,9 @@ from homeassistant.config_entries import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -38,6 +41,8 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_S,
     DEVICE_INFO_BLOCK,
     DOMAIN,
+    ECOFLOW_PORTAL_HISTORY_URL,
+    ENERGY_RESOLUTION_KWH,
     MAX_BATTERY_COUNT,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
@@ -245,8 +250,19 @@ class EcoflowOptionsFlow(OptionsFlow):
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._config_entry = config_entry
         self._user_input: dict[str, Any] = {}
+        # The totals as the form showed them, so a field left alone, while the
+        # total kept counting, is not taken for a correction.
+        self._shown_totals: dict[str, float] = {}
 
     async def async_step_init(
+        self,
+        user_input: dict[str, Any] | None = None,  # noqa: ARG002 - a menu
+    ) -> ConfigFlowResult:
+        return self.async_show_menu(
+            step_id="init", menu_options=["connection", "energy_totals"]
+        )
+
+    async def async_step_connection(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -271,7 +287,7 @@ class EcoflowOptionsFlow(OptionsFlow):
                 return await self.async_step_parameters()
 
         return self.async_show_form(
-            step_id="init",
+            step_id="connection",
             data_schema=vol.Schema(
                 {
                     vol.Required(
@@ -372,4 +388,55 @@ class EcoflowOptionsFlow(OptionsFlow):
                 }
             ),
             errors=errors,
+        )
+
+    async def async_step_energy_totals(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Correct lifetime totals to the values in EcoFlow's portal.
+
+        A changed field becomes an offset to what the inverter reports; the entry's
+        reload then continues the total from the value entered.
+        """
+        coordinator = getattr(self._config_entry, "runtime_data", None)
+        if coordinator is None or not coordinator.correctable_totals:
+            return self.async_abort(reason="no_energy_totals")
+
+        if user_input is not None:
+            changed = {
+                key: float(value)
+                for key, value in user_input.items()
+                if key in self._shown_totals
+                and abs(value - self._shown_totals[key]) >= ENERGY_RESOLUTION_KWH / 2
+            }
+            if changed:
+                coordinator.async_set_energy_offsets(
+                    coordinator.energy_offsets_for(changed)
+                )
+            return self.async_create_entry(title="", data={})
+
+        self._shown_totals = {
+            key: round(value, 2)
+            for key, value in coordinator.correctable_totals.items()
+        }
+        field = NumberSelector(
+            NumberSelectorConfig(
+                min=0,
+                step=ENERGY_RESOLUTION_KWH,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="kWh",
+            )
+        )
+        language = "de" if self.hass.config.language.startswith("de") else "en"
+        return self.async_show_form(
+            step_id="energy_totals",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(key, default=value): field
+                    for key, value in self._shown_totals.items()
+                }
+            ),
+            description_placeholders={
+                "portal_url": ECOFLOW_PORTAL_HISTORY_URL.format(language=language)
+            },
         )
