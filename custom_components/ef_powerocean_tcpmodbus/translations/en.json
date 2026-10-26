@@ -79,7 +79,7 @@
         "sections": {
           "energy_totals": {
             "name": "Correct energy totals",
-            "description": "Only needed if the inverter reset one of its lifetime energy counters. Enter the value from EcoFlow's portal for each total that is wrong and leave the others as they are. The difference is added to what the inverter reports from now on, and today's values stay as they are. To remove a correction, enter the value of the total's (Device) sensor. A total set lower than before counts as a meter reset in the Energy dashboard.",
+            "description": "Only needed if the inverter reset one of its lifetime energy counters. Enter the value from EcoFlow's portal for each total that is wrong and leave the others as they are. Use a comma or a point for decimals, without thousands separators. The difference is added to what the inverter reports from now on, and today's values stay as they are. To remove a correction, enter the value of the total's (Device) sensor. A total set lower than before counts as a meter reset in the Energy dashboard.",
             "data": {
               "grid_import_total": "Grid Import Total",
               "grid_export_total": "Grid Export Total",
@@ -105,7 +105,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Connection failed - please check IP address and port"
+      "cannot_connect": "Connection failed - please check IP address and port",
+      "invalid_energy_total": "Enter each energy total as a number, with a comma or a point for decimals and without thousands separators."
     }
   },
   "issues": {

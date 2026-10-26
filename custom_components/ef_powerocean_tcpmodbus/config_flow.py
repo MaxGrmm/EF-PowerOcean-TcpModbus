@@ -16,12 +16,12 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
     BooleanSelector,
-    NumberSelector,
-    NumberSelectorConfig,
-    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
 )
 
 from .const import (
@@ -53,7 +53,7 @@ from .const import (
 from .modbus import TRANSPORT_ERRORS, ModbusClient, async_temporary_client
 from .models import InverterModel, ReserveSupport, battery_reserve_for
 from .telemetry import decode_register, decode_serial_number
-from .util import portal_history_url
+from .util import parse_kwh, portal_history_url
 
 if TYPE_CHECKING:
     from .coordinator import EcoflowCoordinator
@@ -310,17 +310,22 @@ class EcoflowOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            corrected = self._energy_offsets(user_input.pop(ENERGY_TOTALS, {}))
-            self._user_input.update(user_input)
-            self.hass.config_entries.async_update_entry(
-                self._config_entry,
-                data={
-                    **self._config_entry.data,
-                    **self._user_input,
-                    **corrected,
-                },
-            )
-            return self.async_create_entry(title="", data={})
+            entered = user_input.pop(ENERGY_TOTALS, {})
+            try:
+                corrected = self._energy_offsets(entered)
+            except ValueError:
+                errors["base"] = "invalid_energy_total"
+            else:
+                self._user_input.update(user_input)
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry,
+                    data={
+                        **self._config_entry.data,
+                        **self._user_input,
+                        **corrected,
+                    },
+                )
+                return self.async_create_entry(title="", data={})
 
         fields: dict[Any, Any] = {
             vol.Required(
@@ -381,11 +386,17 @@ class EcoflowOptionsFlow(OptionsFlow):
                 )
             ),
         }
-        if energy_totals := self._energy_totals_section():
+        if energy_totals := self._energy_totals_section(collapsed=not errors):
             fields[vol.Required(ENERGY_TOTALS)] = energy_totals
+        schema = vol.Schema(fields)
+        if user_input is not None:
+            # Shown again with an error: keep what the user typed.
+            schema = self.add_suggested_values_to_schema(
+                schema, {**user_input, ENERGY_TOTALS: entered}
+            )
         return self.async_show_form(
             step_id="parameters",
-            data_schema=vol.Schema(fields),
+            data_schema=schema,
             errors=errors,
             description_placeholders={
                 "portal_url": portal_history_url(self.hass.config.language)
@@ -398,34 +409,34 @@ class EcoflowOptionsFlow(OptionsFlow):
         )
         return coordinator
 
-    def _energy_totals_section(self) -> section | None:
-        """Return the collapsed section to correct the lifetime totals.
+    def _energy_totals_section(self, *, collapsed: bool) -> section | None:
+        """Return the section to correct the lifetime totals.
 
         Left out until the inverter has reported its totals, which needs the entry
-        to be loaded.
+        to be loaded. The totals are text fields: a number field on an iPhone set
+        to a region with a decimal comma offers only the comma, which the field
+        then refuses.
         """
         coordinator = self._coordinator()
         if coordinator is None or not coordinator.correctable_totals:
             return None
-        self._shown_totals = {
-            key: round(value, 2)
-            for key, value in coordinator.correctable_totals.items()
-        }
-        field = NumberSelector(
-            NumberSelectorConfig(
-                min=0,
-                step=ENERGY_RESOLUTION_KWH,
-                mode=NumberSelectorMode.BOX,
-                unit_of_measurement="kWh",
-            )
+        if not self._shown_totals:
+            # Kept when the form is shown again, so the comparison stays with
+            # what the user saw.
+            self._shown_totals = {
+                key: round(value, 2)
+                for key, value in coordinator.correctable_totals.items()
+            }
+        field = TextSelector(
+            TextSelectorConfig(type=TextSelectorType.TEXT, suffix="kWh")
         )
         fields: dict[Any, Any] = {
-            vol.Required(key, default=value): field
+            vol.Required(key, default=str(value)): field
             for key, value in self._shown_totals.items()
         }
         if self._config_entry.data.get(CONF_ENERGY_OFFSETS):
             fields[vol.Required(REMOVE_CORRECTIONS, default=False)] = BooleanSelector()
-        return section(vol.Schema(fields), {"collapsed": True})
+        return section(vol.Schema(fields), {"collapsed": collapsed})
 
     def _energy_offsets(self, entered: dict[str, Any]) -> dict[str, Any]:
         """Return the entry data for the totals the user changed in the section.
@@ -433,15 +444,20 @@ class EcoflowOptionsFlow(OptionsFlow):
         A changed total becomes an offset to what the inverter reports, and the
         entry's reload continues it from the value entered. A field left as shown,
         while the total kept counting, changes nothing. The remove toggle drops
-        every correction, whatever was entered.
+        every correction, whatever was entered. Raises ValueError for a value
+        that is not a total.
         """
         if entered.get(REMOVE_CORRECTIONS):
             return {CONF_ENERGY_OFFSETS: {}}
-        changed = {
-            key: float(value)
-            for key, value in entered.items()
+        values = {
+            key: parse_kwh(text)
+            for key, text in entered.items()
             if key in self._shown_totals
-            and abs(value - self._shown_totals[key]) >= ENERGY_RESOLUTION_KWH / 2
+        }
+        changed = {
+            key: value
+            for key, value in values.items()
+            if abs(value - self._shown_totals[key]) >= ENERGY_RESOLUTION_KWH / 2
         }
         coordinator = self._coordinator()
         if not changed or coordinator is None:

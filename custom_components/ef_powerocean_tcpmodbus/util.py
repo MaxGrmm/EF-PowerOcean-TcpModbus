@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Any
 
@@ -28,3 +29,19 @@ def portal_history_url(language: str) -> str:
     if base not in ECOFLOW_PORTAL_LANGUAGES:
         base = ECOFLOW_PORTAL_LANGUAGES[0]
     return ECOFLOW_PORTAL_HISTORY_URL.format(language=base)
+
+
+def parse_kwh(text: Any) -> float:
+    """Parse an energy total as typed, with a decimal comma or a decimal point.
+
+    Spaces are ignored. A value with both a comma and a point is refused rather
+    than guessed at, since either may be a thousands separator. Raises ValueError
+    for anything that is not a number of 0 or more.
+    """
+    cleaned = str(text).replace(" ", "").replace("\u00a0", "")
+    if "," in cleaned and "." in cleaned:
+        raise ValueError(f"Ambiguous decimal separator in {text!r}")
+    value = float(cleaned.replace(",", "."))
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"Not an energy total: {text!r}")
+    return value

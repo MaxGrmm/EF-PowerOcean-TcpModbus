@@ -437,16 +437,39 @@ async def test_a_total_set_in_the_settings_continues_from_the_value_entered(
     assert "remove_corrections" not in _section_fields(form)
     assert "eu/en/" in (form.get("description_placeholders") or {})["portal_url"]
     done = await hass.config_entries.options.async_configure(
-        form["flow_id"], {"energy_totals": {"solar_total": 4400.0}}
+        form["flow_id"], {"energy_totals": {"solar_total": "4400,5"}}
     )
     await hass.async_block_till_done()
 
     data = entry.runtime_data.data
     assert done["type"] == "create_entry"
-    assert data["solar_total"] == pytest.approx(4400.0)
+    assert data["solar_total"] == pytest.approx(4400.5)
     assert data["solar_total_raw"] == pytest.approx(4296.8)
     assert data["solar_today"] == pytest.approx(today)
-    assert _state(hass, _entity_id(hass, entry, "sensor", "solar_total")) == "4400.0"
+    assert _state(hass, _entity_id(hass, entry, "sensor", "solar_total")) == "4400.5"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_total_that_is_not_a_number_is_asked_for_again(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    entry = await set_up()
+
+    form = await _parameters_form(hass, entry, inverter)
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {const.CONF_SCAN_INTERVAL: 10, "energy_totals": {"solar_total": "4.400,5"}},
+    )
+
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "invalid_energy_total"}
+    schema = result["data_schema"]
+    assert schema is not None
+    fields = {str(key): value for key, value in schema.schema.items()}
+    assert fields["energy_totals"].options["collapsed"] is False
+    assert const.CONF_ENERGY_OFFSETS not in entry.data
+    assert const.CONF_SCAN_INTERVAL not in entry.data
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -462,7 +485,7 @@ async def test_removing_the_corrections_returns_every_total_to_the_inverter(
     assert "remove_corrections" in _section_fields(form)
     await hass.config_entries.options.async_configure(
         form["flow_id"],
-        {"energy_totals": {"solar_total": 4500.0, "remove_corrections": True}},
+        {"energy_totals": {"solar_total": "4500", "remove_corrections": True}},
     )
     await hass.async_block_till_done()
 
@@ -484,7 +507,7 @@ async def test_a_total_left_as_shown_is_not_corrected(
     _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.81)
     await _poll_a_minute_later(entry)
     await hass.config_entries.options.async_configure(
-        form["flow_id"], {"energy_totals": {"solar_total": 4296.8}}
+        form["flow_id"], {"energy_totals": {"solar_total": "4296.8"}}
     )
     await hass.async_block_till_done()
 
