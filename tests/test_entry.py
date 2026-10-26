@@ -408,11 +408,12 @@ async def test_a_held_total_keeps_its_value_in_home_assistant_after_the_repair(
     assert ir.async_get(hass).async_get_issue(const.DOMAIN, issue_id) is None
 
 
-async def _energy_totals_form(hass: HomeAssistant, entry: MockConfigEntry) -> Any:
-    menu = await hass.config_entries.options.async_init(entry.entry_id)
-    assert menu["type"] == "menu"
+async def _parameters_form(
+    hass: HomeAssistant, entry: MockConfigEntry, inverter: FakeInverter
+) -> Any:
+    form = await hass.config_entries.options.async_init(entry.entry_id)
     return await hass.config_entries.options.async_configure(
-        menu["flow_id"], {"next_step_id": "energy_totals"}
+        form["flow_id"], {const.CONF_HOST: HOST, const.CONF_PORT: inverter.port}
     )
 
 
@@ -424,11 +425,12 @@ async def test_a_total_set_in_the_settings_continues_from_the_value_entered(
     entry = await set_up()
     today = entry.runtime_data.data["solar_today"]
 
-    form = await _energy_totals_form(hass, entry)
-    assert form["type"] == "form"
+    form = await _parameters_form(hass, entry, inverter)
+    fields = {str(key): value for key, value in form["data_schema"].schema.items()}
+    assert fields["energy_totals"].options["collapsed"] is True
     assert "eu/en/" in (form.get("description_placeholders") or {})["portal_url"]
     done = await hass.config_entries.options.async_configure(
-        form["flow_id"], {"solar_total": 4400.0}
+        form["flow_id"], {"energy_totals": {"solar_total": 4400.0}}
     )
     await hass.async_block_till_done()
 
@@ -447,12 +449,12 @@ async def test_a_total_left_as_shown_is_not_corrected(
     _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
     entry = await set_up()
 
-    form = await _energy_totals_form(hass, entry)
+    form = await _parameters_form(hass, entry, inverter)
     # The total counts on while the form is open.
     _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.81)
     await _poll_a_minute_later(entry)
     await hass.config_entries.options.async_configure(
-        form["flow_id"], {"solar_total": 4296.8}
+        form["flow_id"], {"energy_totals": {"solar_total": 4296.8}}
     )
     await hass.async_block_till_done()
 

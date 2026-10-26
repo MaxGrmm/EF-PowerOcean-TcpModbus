@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import voluptuous as vol
 from homeassistant.config_entries import (
@@ -13,6 +13,7 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
@@ -27,6 +28,7 @@ from .const import (
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
     CONF_CALC_SOLAR_POWER,
+    CONF_ENERGY_OFFSETS,
     CONF_HOST,
     CONF_INVERTER_MODEL,
     CONF_MAX_GRID_POWER,
@@ -53,7 +55,13 @@ from .models import InverterModel, ReserveSupport, battery_reserve_for
 from .telemetry import decode_register, decode_serial_number
 from .util import portal_history_url
 
+if TYPE_CHECKING:
+    from .coordinator import EcoflowCoordinator
+
 _LOGGER = logging.getLogger(__name__)
+
+# The collapsed section of the parameters step that corrects the lifetime totals.
+ENERGY_TOTALS: Final = "energy_totals"
 
 MIN_CONFIG_POWER: Final = 1000
 MAX_CONFIG_POWER: Final = 60000
@@ -255,14 +263,6 @@ class EcoflowOptionsFlow(OptionsFlow):
         self._shown_totals: dict[str, float] = {}
 
     async def async_step_init(
-        self,
-        user_input: dict[str, Any] | None = None,  # noqa: ARG002 - a menu
-    ) -> ConfigFlowResult:
-        return self.async_show_menu(
-            step_id="init", menu_options=["connection", "energy_totals"]
-        )
-
-    async def async_step_connection(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -287,7 +287,7 @@ class EcoflowOptionsFlow(OptionsFlow):
                 return await self.async_step_parameters()
 
         return self.async_show_form(
-            step_id="connection",
+            step_id="init",
             data_schema=vol.Schema(
                 {
                     vol.Required(
@@ -308,113 +308,103 @@ class EcoflowOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            corrected = self._energy_offsets(user_input.pop(ENERGY_TOTALS, {}))
             self._user_input.update(user_input)
             self.hass.config_entries.async_update_entry(
                 self._config_entry,
                 data={
                     **self._config_entry.data,
                     **self._user_input,
+                    **corrected,
                 },
             )
             return self.async_create_entry(title="", data={})
 
+        fields: dict[Any, Any] = {
+            vol.Required(
+                CONF_INVERTER_MODEL,
+                default=self._config_entry.data.get(
+                    CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL
+                ),
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=[model.value for model in InverterModel],
+                    translation_key=CONF_INVERTER_MODEL,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Required(
+                CONF_BATTERY_COUNT,
+                default=self._config_entry.data.get(
+                    CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT
+                ),
+            ): vol.All(int, vol.Range(min=0, max=MAX_BATTERY_COUNT)),
+            vol.Required(
+                CONF_MAX_SOLAR_POWER,
+                default=self._config_entry.data.get(
+                    CONF_MAX_SOLAR_POWER, DEFAULT_MAX_SOLAR_POWER
+                ),
+            ): vol.All(int, vol.Range(min=MIN_CONFIG_POWER, max=MAX_CONFIG_POWER)),
+            vol.Required(
+                CONF_MAX_GRID_POWER,
+                default=self._config_entry.data.get(
+                    CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER
+                ),
+            ): vol.All(int, vol.Range(min=MIN_CONFIG_POWER, max=MAX_CONFIG_POWER)),
+            vol.Required(
+                CONF_SCAN_INTERVAL,
+                default=self._config_entry.data.get(
+                    CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_S
+                ),
+            ): vol.All(int, vol.Range(min=2, max=30)),
+            vol.Required(
+                CONF_CALC_SOLAR_POWER,
+                default=self._config_entry.data.get(CONF_CALC_SOLAR_POWER, False),
+            ): BooleanSelector({}),
+            vol.Required(
+                CONF_BATTERY_RESERVE,
+                default=battery_reserve_for(
+                    InverterModel(
+                        self._config_entry.data.get(
+                            CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL
+                        )
+                    ),
+                    self._config_entry.data.get(CONF_BATTERY_RESERVE),
+                ).value,
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=[support.value for support in ReserveSupport],
+                    translation_key=CONF_BATTERY_RESERVE,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
+        }
+        if energy_totals := self._energy_totals_section():
+            fields[vol.Required(ENERGY_TOTALS)] = energy_totals
         return self.async_show_form(
             step_id="parameters",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_INVERTER_MODEL,
-                        default=self._config_entry.data.get(
-                            CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL
-                        ),
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[model.value for model in InverterModel],
-                            translation_key=CONF_INVERTER_MODEL,
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                    vol.Required(
-                        CONF_BATTERY_COUNT,
-                        default=self._config_entry.data.get(
-                            CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT
-                        ),
-                    ): vol.All(int, vol.Range(min=0, max=MAX_BATTERY_COUNT)),
-                    vol.Required(
-                        CONF_MAX_SOLAR_POWER,
-                        default=self._config_entry.data.get(
-                            CONF_MAX_SOLAR_POWER, DEFAULT_MAX_SOLAR_POWER
-                        ),
-                    ): vol.All(
-                        int, vol.Range(min=MIN_CONFIG_POWER, max=MAX_CONFIG_POWER)
-                    ),
-                    vol.Required(
-                        CONF_MAX_GRID_POWER,
-                        default=self._config_entry.data.get(
-                            CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER
-                        ),
-                    ): vol.All(
-                        int, vol.Range(min=MIN_CONFIG_POWER, max=MAX_CONFIG_POWER)
-                    ),
-                    vol.Required(
-                        CONF_SCAN_INTERVAL,
-                        default=self._config_entry.data.get(
-                            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_S
-                        ),
-                    ): vol.All(int, vol.Range(min=2, max=30)),
-                    vol.Required(
-                        CONF_CALC_SOLAR_POWER,
-                        default=self._config_entry.data.get(
-                            CONF_CALC_SOLAR_POWER, False
-                        ),
-                    ): BooleanSelector({}),
-                    vol.Required(
-                        CONF_BATTERY_RESERVE,
-                        default=battery_reserve_for(
-                            InverterModel(
-                                self._config_entry.data.get(
-                                    CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL
-                                )
-                            ),
-                            self._config_entry.data.get(CONF_BATTERY_RESERVE),
-                        ).value,
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[support.value for support in ReserveSupport],
-                            translation_key=CONF_BATTERY_RESERVE,
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                }
-            ),
+            data_schema=vol.Schema(fields),
             errors=errors,
+            description_placeholders={
+                "portal_url": portal_history_url(self.hass.config.language)
+            },
         )
 
-    async def async_step_energy_totals(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Correct lifetime totals to the values in EcoFlow's portal.
+    def _coordinator(self) -> EcoflowCoordinator | None:
+        coordinator: EcoflowCoordinator | None = getattr(
+            self._config_entry, "runtime_data", None
+        )
+        return coordinator
 
-        A changed field becomes an offset to what the inverter reports; the entry's
-        reload then continues the total from the value entered.
+    def _energy_totals_section(self) -> section | None:
+        """Return the collapsed section to correct the lifetime totals.
+
+        Left out until the inverter has reported its totals, which needs the entry
+        to be loaded.
         """
-        coordinator = getattr(self._config_entry, "runtime_data", None)
+        coordinator = self._coordinator()
         if coordinator is None or not coordinator.correctable_totals:
-            return self.async_abort(reason="no_energy_totals")
-
-        if user_input is not None:
-            changed = {
-                key: float(value)
-                for key, value in user_input.items()
-                if key in self._shown_totals
-                and abs(value - self._shown_totals[key]) >= ENERGY_RESOLUTION_KWH / 2
-            }
-            if changed:
-                coordinator.async_set_energy_offsets(
-                    coordinator.energy_offsets_for(changed)
-                )
-            return self.async_create_entry(title="", data={})
-
+            return None
         self._shown_totals = {
             key: round(value, 2)
             for key, value in coordinator.correctable_totals.items()
@@ -427,15 +417,30 @@ class EcoflowOptionsFlow(OptionsFlow):
                 unit_of_measurement="kWh",
             )
         )
-        return self.async_show_form(
-            step_id="energy_totals",
-            data_schema=vol.Schema(
+        return section(
+            vol.Schema(
                 {
                     vol.Required(key, default=value): field
                     for key, value in self._shown_totals.items()
                 }
             ),
-            description_placeholders={
-                "portal_url": portal_history_url(self.hass.config.language)
-            },
+            {"collapsed": True},
         )
+
+    def _energy_offsets(self, entered: dict[str, Any]) -> dict[str, Any]:
+        """Return the entry data for the totals the user changed in the section.
+
+        A changed total becomes an offset to what the inverter reports, and the
+        entry's reload continues it from the value entered. A field left as shown,
+        while the total kept counting, changes nothing.
+        """
+        changed = {
+            key: float(value)
+            for key, value in entered.items()
+            if key in self._shown_totals
+            and abs(value - self._shown_totals[key]) >= ENERGY_RESOLUTION_KWH / 2
+        }
+        coordinator = self._coordinator()
+        if not changed or coordinator is None:
+            return {}
+        return {CONF_ENERGY_OFFSETS: coordinator.energy_offsets_for(changed)}

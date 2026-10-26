@@ -93,9 +93,6 @@ async def _change_options(
     hass: HomeAssistant, entry: MockConfigEntry, host: str, port: int = 502
 ):
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "connection"}
-    )
     return await hass.config_entries.options.async_configure(
         result["flow_id"], {const.CONF_HOST: host, const.CONF_PORT: port}
     )
@@ -148,13 +145,10 @@ async def test_energy_totals_wait_for_the_inverter_to_report_them(
 ) -> None:
     entry = _configured_entry(hass)
 
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "energy_totals"}
-    )
+    result = await _change_options(hass, entry, "192.168.1.10")
 
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "no_energy_totals"
+    assert result["step_id"] == "parameters"
+    assert config_flow.ENERGY_TOTALS not in result["data_schema"].schema
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

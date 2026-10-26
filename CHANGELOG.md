@@ -4,11 +4,7 @@
 
 ### Added
 
-- Lifetime energy totals can be corrected for a counter the inverter reset. The held-totals repairs issue offers to keep Home Assistant's totals and count on from them, and **Configure → Correct energy totals** sets a total to the value in EcoFlow's portal. The correction is added to what the inverter reports from then on, without changing today's values.
-
-### Changed
-
-- **Configure** opens a menu: the existing settings are under **Connection and parameters**.
+- Lifetime energy totals can be corrected for a counter the inverter reset. The held-totals repairs issue offers to keep Home Assistant's totals and count on from them, and a collapsed **Correct energy totals** section in **Configure** sets a total to the value in EcoFlow's portal. The correction is added to what the inverter reports from then on, without changing today's values.
 
 ## [2.9.3] - 2026-10-23
 

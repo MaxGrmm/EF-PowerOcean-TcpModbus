@@ -98,7 +98,7 @@ Or install it from within HACS:
 | Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
 | Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
 
-To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure → Connection and parameters**. **Correct energy totals** in the same menu is for a lifetime counter the inverter reset; see [Correcting a lifetime total](#correcting-a-lifetime-total).
+To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**. The collapsed **Correct energy totals** section on the second page is for a lifetime counter the inverter reset; see [Correcting a lifetime total](#correcting-a-lifetime-total).
 
 ---
 
@@ -463,7 +463,7 @@ If a total has been held for more than 24 hours while the device reports a value
 Some inverters reset a lifetime counter, while EcoFlow's portal keeps counting. A total can be corrected so it continues as before, by adding an offset to what the device reports:
 
 - **Keep Home Assistant's totals** in the repairs issue keeps each held total at its value in Home Assistant and works the offset out from it, so the Energy dashboard continues without a jump.
-- **Configure → Correct energy totals** sets a total to a value you enter, such as the one under historical data in [EcoFlow's portal](https://user-portal.ecoflow.com/user/eu/en/main/home/dashboard/historicalData). Leave the totals that are right as they are. To remove a correction, enter the value of the total's (Device) sensor.
+- **Correct energy totals**, a collapsed section on the second page of **Configure**, sets a total to a value you enter, such as the one under historical data in [EcoFlow's portal](https://user-portal.ecoflow.com/user/eu/en/main/home/dashboard/historicalData). Leave the totals that are right as they are. To remove a correction, enter the value of the total's (Device) sensor.
 
 Today's values are not changed by a correction, and the (Device) sensors keep showing what the inverter reports. A total set lower than before counts as a meter reset in the Energy dashboard. House Consumption Total is calculated from the corrected totals, so it moves with a correction: up in one step, or held until it has caught up if the correction lowers it. The offsets are in the diagnostics download under `energy_offsets`.
 
