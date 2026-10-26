@@ -87,7 +87,8 @@
               "bat_discharged_total": "Battery Discharged Total",
               "solar_total": "Solar Yield Total",
               "inverter_ac_in_total": "Inverter AC Input Total",
-              "inverter_ac_out_total": "Inverter AC Output Total"
+              "inverter_ac_out_total": "Inverter AC Output Total",
+              "remove_corrections": "Reset all totals to the inverter's values"
             },
             "data_description": {
               "grid_import_total": "As shown in [EcoFlow's portal]({portal_url}).",
@@ -96,7 +97,8 @@
               "bat_discharged_total": "As shown in [EcoFlow's portal]({portal_url}).",
               "solar_total": "As shown in [EcoFlow's portal]({portal_url}).",
               "inverter_ac_in_total": "As shown in [EcoFlow's portal]({portal_url}).",
-              "inverter_ac_out_total": "As shown in [EcoFlow's portal]({portal_url})."
+              "inverter_ac_out_total": "As shown in [EcoFlow's portal]({portal_url}).",
+              "remove_corrections": "Removes every correction, so each total shows what the inverter reports. The values above are ignored."
             }
           }
         }

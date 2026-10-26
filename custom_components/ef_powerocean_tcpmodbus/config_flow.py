@@ -62,6 +62,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # The collapsed section of the parameters step that corrects the lifetime totals.
 ENERGY_TOTALS: Final = "energy_totals"
+# Its toggle that removes every correction, offered while there is one.
+REMOVE_CORRECTIONS: Final = "remove_corrections"
 
 MIN_CONFIG_POWER: Final = 1000
 MAX_CONFIG_POWER: Final = 60000
@@ -417,23 +419,24 @@ class EcoflowOptionsFlow(OptionsFlow):
                 unit_of_measurement="kWh",
             )
         )
-        return section(
-            vol.Schema(
-                {
-                    vol.Required(key, default=value): field
-                    for key, value in self._shown_totals.items()
-                }
-            ),
-            {"collapsed": True},
-        )
+        fields: dict[Any, Any] = {
+            vol.Required(key, default=value): field
+            for key, value in self._shown_totals.items()
+        }
+        if self._config_entry.data.get(CONF_ENERGY_OFFSETS):
+            fields[vol.Required(REMOVE_CORRECTIONS, default=False)] = BooleanSelector()
+        return section(vol.Schema(fields), {"collapsed": True})
 
     def _energy_offsets(self, entered: dict[str, Any]) -> dict[str, Any]:
         """Return the entry data for the totals the user changed in the section.
 
         A changed total becomes an offset to what the inverter reports, and the
         entry's reload continues it from the value entered. A field left as shown,
-        while the total kept counting, changes nothing.
+        while the total kept counting, changes nothing. The remove toggle drops
+        every correction, whatever was entered.
         """
+        if entered.get(REMOVE_CORRECTIONS):
+            return {CONF_ENERGY_OFFSETS: {}}
         changed = {
             key: float(value)
             for key, value in entered.items()

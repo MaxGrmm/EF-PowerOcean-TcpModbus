@@ -87,7 +87,8 @@
               "bat_discharged_total": "Batterieentladeenergie Gesamt",
               "solar_total": "Solarenergie Gesamt",
               "inverter_ac_in_total": "Wechselrichter AC-Eingang Gesamt",
-              "inverter_ac_out_total": "Wechselrichter AC-Ausgang Gesamt"
+              "inverter_ac_out_total": "Wechselrichter AC-Ausgang Gesamt",
+              "remove_corrections": "Alle Zähler auf die Werte des Wechselrichters zurücksetzen"
             },
             "data_description": {
               "grid_import_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt.",
@@ -96,7 +97,8 @@
               "bat_discharged_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt.",
               "solar_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt.",
               "inverter_ac_in_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt.",
-              "inverter_ac_out_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt."
+              "inverter_ac_out_total": "Wie im [EcoFlow-Portal]({portal_url}) angezeigt.",
+              "remove_corrections": "Entfernt alle Korrekturen, sodass jeder Zähler den Wert des Wechselrichters zeigt. Die Werte oben werden ignoriert."
             }
           }
         }

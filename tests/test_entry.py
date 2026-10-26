@@ -408,6 +408,11 @@ async def test_a_held_total_keeps_its_value_in_home_assistant_after_the_repair(
     assert ir.async_get(hass).async_get_issue(const.DOMAIN, issue_id) is None
 
 
+def _section_fields(form: Any) -> set[str]:
+    fields = {str(key): value for key, value in form["data_schema"].schema.items()}
+    return {str(key) for key in fields["energy_totals"].schema.schema}
+
+
 async def _parameters_form(
     hass: HomeAssistant, entry: MockConfigEntry, inverter: FakeInverter
 ) -> Any:
@@ -428,6 +433,8 @@ async def test_a_total_set_in_the_settings_continues_from_the_value_entered(
     form = await _parameters_form(hass, entry, inverter)
     fields = {str(key): value for key, value in form["data_schema"].schema.items()}
     assert fields["energy_totals"].options["collapsed"] is True
+    # Nothing to remove yet.
+    assert "remove_corrections" not in _section_fields(form)
     assert "eu/en/" in (form.get("description_placeholders") or {})["portal_url"]
     done = await hass.config_entries.options.async_configure(
         form["flow_id"], {"energy_totals": {"solar_total": 4400.0}}
@@ -440,6 +447,29 @@ async def test_a_total_set_in_the_settings_continues_from_the_value_entered(
     assert data["solar_total_raw"] == pytest.approx(4296.8)
     assert data["solar_today"] == pytest.approx(today)
     assert _state(hass, _entity_id(hass, entry, "sensor", "solar_total")) == "4400.0"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_removing_the_corrections_returns_every_total_to_the_inverter(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    entry = await set_up(**{const.CONF_ENERGY_OFFSETS: {"solar_total": 103.2}})
+    assert entry.runtime_data.data["solar_total"] == pytest.approx(4400.0)
+    today = entry.runtime_data.data["solar_today"]
+
+    form = await _parameters_form(hass, entry, inverter)
+    assert "remove_corrections" in _section_fields(form)
+    await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {"energy_totals": {"solar_total": 4500.0, "remove_corrections": True}},
+    )
+    await hass.async_block_till_done()
+
+    data = entry.runtime_data.data
+    assert entry.data[const.CONF_ENERGY_OFFSETS] == {}
+    assert data["solar_total"] == pytest.approx(4296.8)
+    assert data["solar_today"] == pytest.approx(today)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
