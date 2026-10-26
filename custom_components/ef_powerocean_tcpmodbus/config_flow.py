@@ -41,7 +41,6 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_S,
     DEVICE_INFO_BLOCK,
     DOMAIN,
-    ECOFLOW_PORTAL_HISTORY_URL,
     ENERGY_RESOLUTION_KWH,
     MAX_BATTERY_COUNT,
     PRODUCT_CATEGORY,
@@ -52,6 +51,7 @@ from .const import (
 from .modbus import TRANSPORT_ERRORS, ModbusClient, async_temporary_client
 from .models import InverterModel, ReserveSupport, battery_reserve_for
 from .telemetry import decode_register, decode_serial_number
+from .util import portal_history_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -427,7 +427,6 @@ class EcoflowOptionsFlow(OptionsFlow):
                 unit_of_measurement="kWh",
             )
         )
-        language = "de" if self.hass.config.language.startswith("de") else "en"
         return self.async_show_form(
             step_id="energy_totals",
             data_schema=vol.Schema(
@@ -437,6 +436,6 @@ class EcoflowOptionsFlow(OptionsFlow):
                 }
             ),
             description_placeholders={
-                "portal_url": ECOFLOW_PORTAL_HISTORY_URL.format(language=language)
+                "portal_url": portal_history_url(self.hass.config.language)
             },
         )

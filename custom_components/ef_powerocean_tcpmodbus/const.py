@@ -156,7 +156,9 @@ HELD_TOTAL_ISSUE_AFTER_S: Final = 24 * 3600
 # Where a user reports a held total they believe is wrong, with the bug form's
 # fields filled in from the device.
 BUG_REPORT_URL: Final = "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues/new"
-# EcoFlow's portal page with the lifetime energy totals, in "de" or "en".
+# EcoFlow's portal page with the lifetime energy totals, in one of the languages
+# below. The first is used for any other language.
+ECOFLOW_PORTAL_LANGUAGES: Final = ("en", "de")
 ECOFLOW_PORTAL_HISTORY_URL: Final = "https://user-portal.ecoflow.com/user/eu/{language}/main/home/dashboard/historicalData"
 MODBUS_DISABLED_READ_THRESHOLD: Final = 3
 
