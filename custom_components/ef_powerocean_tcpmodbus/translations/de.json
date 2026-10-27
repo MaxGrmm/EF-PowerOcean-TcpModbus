@@ -79,7 +79,7 @@
         "sections": {
           "energy_totals": {
             "name": "Energiezähler korrigieren",
-            "description": "Nur nötig, wenn der Wechselrichter einen seiner Gesamtzähler zurückgesetzt hat. Trage für jeden falschen Zähler den Wert aus dem EcoFlow-Portal ein und lass die anderen unverändert. Trenne Dezimalstellen mit Komma oder Punkt und lass Tausendertrennzeichen weg. Die Differenz wird ab jetzt zu dem addiert, was der Wechselrichter meldet, die heutigen Werte bleiben unverändert. Um eine Korrektur zu entfernen, trage den Wert des zugehörigen (Gerät)-Sensors ein.",
+            "description": "Nur nötig, wenn der Wechselrichter einen seiner Gesamtzähler zurückgesetzt hat. Trage für jeden falschen Zähler den Wert aus dem EcoFlow-Portal ein und lass die anderen unverändert.",
             "data": {
               "grid_import_total": "Netzbezugsenergie Gesamt",
               "grid_export_total": "Netzeinspeiseenergie Gesamt",
