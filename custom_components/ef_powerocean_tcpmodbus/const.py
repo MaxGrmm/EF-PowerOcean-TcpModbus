@@ -160,6 +160,17 @@ BUG_REPORT_URL: Final = "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issu
 # below. The first is used for any other language.
 ECOFLOW_PORTAL_LANGUAGES: Final = ("en", "de")
 ECOFLOW_PORTAL_HISTORY_URL: Final = "https://user-portal.ecoflow.com/user/eu/{language}/main/home/dashboard/historicalData"
+# The lifetime totals EcoFlow's portal shows, so the ones a user can correct to it.
+# The inverter's AC input and output totals are not among them.
+ECOFLOW_PORTAL_TOTALS: Final = frozenset(
+    {
+        "solar_total",
+        "bat_discharged_total",
+        "bat_charged_total",
+        "grid_import_total",
+        "grid_export_total",
+    }
+)
 MODBUS_DISABLED_READ_THRESHOLD: Final = 3
 
 

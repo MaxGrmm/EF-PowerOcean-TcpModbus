@@ -43,6 +43,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_S,
     DEVICE_INFO_BLOCK,
     DOMAIN,
+    ECOFLOW_PORTAL_TOTALS,
     ENERGY_RESOLUTION_KWH,
     MAX_BATTERY_COUNT,
     PRODUCT_CATEGORY,
@@ -418,13 +419,14 @@ class EcoflowOptionsFlow(OptionsFlow):
     def _energy_totals_section(self, *, collapsed: bool) -> section | None:
         """Return the section to correct the lifetime totals.
 
-        Left out until the inverter has reported its totals, which needs the entry
-        to be loaded. The totals are text fields: a number field on an iPhone set
+        Holds the totals EcoFlow's portal shows, to correct them to it, and is left
+        out until the inverter has reported them, which needs the entry to be
+        loaded. The totals are text fields: a number field on an iPhone set
         to a region with a decimal comma offers only the comma, which the field
         then refuses.
         """
         coordinator = self._coordinator()
-        if coordinator is None or not coordinator.correctable_totals:
+        if coordinator is None:
             return None
         if not self._shown_totals:
             # Kept when the form is shown again, so the comparison stays with
@@ -432,7 +434,10 @@ class EcoflowOptionsFlow(OptionsFlow):
             self._shown_totals = {
                 key: round(value, 2)
                 for key, value in coordinator.correctable_totals.items()
+                if key in ECOFLOW_PORTAL_TOTALS
             }
+        if not self._shown_totals:
+            return None
         field = TextSelector(
             TextSelectorConfig(type=TextSelectorType.TEXT, suffix="kWh")
         )
@@ -452,20 +457,18 @@ class EcoflowOptionsFlow(OptionsFlow):
         A changed total becomes an offset to what the inverter reports, and the
         entry's reload continues it from the value entered. A field left as shown,
         while the total kept counting, changes nothing. The remove toggle drops
-        every correction, whatever was entered, returning each total to the
-        inverter's value. Raises ValueError for a value that is not a total.
+        every correction, also of totals not in the section, whatever was entered,
+        returning each total to the inverter's value. Raises ValueError for a
+        value that is not a total.
         """
         coordinator = self._coordinator()
         if coordinator is None:
             return {}, {}
         if entered.get(REMOVE_CORRECTIONS):
             data = coordinator.data or {}
-            device = {
-                key: data[f"{key}_raw"]
-                for key in self._shown_totals
-                if isinstance(data.get(f"{key}_raw"), (int, float))
-            }
-            return {CONF_ENERGY_OFFSETS: {}}, self._lowered(device)
+            shown = coordinator.correctable_totals
+            device = {key: data[f"{key}_raw"] for key in shown}
+            return {CONF_ENERGY_OFFSETS: {}}, _lowered(device, shown)
         values = {
             key: parse_kwh(text)
             for key, text in entered.items()
@@ -480,18 +483,19 @@ class EcoflowOptionsFlow(OptionsFlow):
             return {}, {}
         return (
             {CONF_ENERGY_OFFSETS: coordinator.energy_offsets_for(changed)},
-            self._lowered(changed),
+            _lowered(changed, self._shown_totals),
         )
 
-    def _lowered(self, totals: dict[str, float]) -> dict[str, float]:
-        """Return the totals that would end up below the value the form showed.
 
-        Home Assistant's statistics record a drop as negative energy, or as a new
-        meter cycle adding the whole value when it is over 10%, so it is confirmed
-        first.
-        """
-        return {
-            key: round(value, 2)
-            for key, value in totals.items()
-            if value < self._shown_totals[key] - ENERGY_RESOLUTION_KWH / 2
-        }
+def _lowered(totals: dict[str, float], shown: dict[str, float]) -> dict[str, float]:
+    """Return the totals that would end up below the value shown for them.
+
+    Home Assistant's statistics record a drop as negative energy, or as a new
+    meter cycle adding the whole value when it is over 10%, so it is confirmed
+    first.
+    """
+    return {
+        key: round(value, 2)
+        for key, value in totals.items()
+        if value < shown[key] - ENERGY_RESOLUTION_KWH / 2
+    }

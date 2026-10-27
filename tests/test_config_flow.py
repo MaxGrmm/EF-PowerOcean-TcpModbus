@@ -230,3 +230,16 @@ def test_section_descriptions_are_plain_text_in_every_language() -> None:
             for name, section in step.get("sections", {}).items():
                 assert "](" not in section["description"], (path.name, name)
                 assert "{" not in section["description"], (path.name, name)
+
+
+def test_every_portal_total_names_its_portal_term_in_every_language() -> None:
+    component = Path(const.__file__).parent
+    files = sorted(component.glob("translations/*.json"))
+    assert files
+
+    for path in files:
+        steps = json.loads(path.read_text(encoding="utf-8"))["options"]["step"]
+        section = steps["parameters"]["sections"][config_flow.ENERGY_TOTALS]
+        totals = set(section["data"]) - {config_flow.REMOVE_CORRECTIONS}
+        assert totals == const.ECOFLOW_PORTAL_TOTALS, path.name
+        assert set(section["data_description"]) >= totals, path.name

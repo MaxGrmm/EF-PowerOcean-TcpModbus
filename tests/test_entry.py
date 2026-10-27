@@ -450,6 +450,38 @@ async def test_a_total_set_in_the_settings_continues_from_the_value_entered(
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_only_the_totals_in_ecoflows_portal_can_be_corrected(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    for key in ("solar_total", "inverter_ac_in_total"):
+        _serve_float(inverter, const.REGISTERS_BY_KEY[key].address, 1234.5)
+    entry = await set_up()
+
+    fields = _section_fields(await _parameters_form(hass, entry, inverter))
+
+    assert "solar_total" in fields
+    assert "inverter_ac_in_total" not in fields
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_removing_a_correction_outside_the_section_is_confirmed_too(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    for key in ("solar_total", "inverter_ac_in_total"):
+        _serve_float(inverter, const.REGISTERS_BY_KEY[key].address, 1234.5)
+    entry = await set_up(**{const.CONF_ENERGY_OFFSETS: {"inverter_ac_in_total": 50.0}})
+    form = await _parameters_form(hass, entry, inverter)
+    remove = {"energy_totals": {"remove_corrections": True}}
+
+    warned = await hass.config_entries.options.async_configure(form["flow_id"], remove)
+    assert warned["errors"] == {"base": "energy_total_lowered"}
+    await hass.config_entries.options.async_configure(form["flow_id"], remove)
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.data["inverter_ac_in_total"] == pytest.approx(1234.5)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_a_total_that_is_not_a_number_is_asked_for_again(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
