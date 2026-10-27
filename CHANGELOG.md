@@ -10,7 +10,7 @@
 ### Changed
 
 - **Configure** opens on the settings; the IP address and port moved to **Reconfigure**.
-- The settings are stored in the entry's options instead of its data. Existing entries are migrated on first start. After that, going back to an earlier release needs the integration set up again.
+- The settings are read from the entry's options instead of its data. Existing entries are migrated on first start. An earlier release still loads after a downgrade, with the settings as they were at the migration.
 
 ## [2.9.3] - 2026-10-23
 

@@ -55,14 +55,15 @@ async def test_the_serial_number_is_the_unique_id(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].unique_id == SERIAL
-    # The connection in the data, everything else in the options.
-    assert result["result"].data == {
+    # The settings are read from the options, and kept in the data as well for an
+    # earlier release after a downgrade.
+    entry = result["result"]
+    assert entry.options[const.CONF_SCAN_INTERVAL] == const.DEFAULT_SCAN_INTERVAL_S
+    assert entry.data == {
         const.CONF_HOST: "192.168.1.10",
         const.CONF_PORT: 502,
+        **entry.options,
     }
-    assert result["result"].options[const.CONF_SCAN_INTERVAL] == (
-        const.DEFAULT_SCAN_INTERVAL_S
-    )
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -114,7 +115,7 @@ def _configured_entry(
     entry = MockConfigEntry(
         domain=const.DOMAIN,
         unique_id=unique_id,
-        version=2,
+        minor_version=2,
         title="EcoFlow PowerOcean (192.168.1.10)",
         data={const.CONF_HOST: "192.168.1.10", const.CONF_PORT: port},
         options=options or {},

@@ -136,7 +136,7 @@ async def test_modbus_control_enablement_comes_from_config_entry(
     )
     config_entry = MockConfigEntry(
         domain=const.DOMAIN,
-        version=2,
+        minor_version=2,
         data={const.CONF_HOST: "192.0.2.10"},
         options=entry_options,
     )

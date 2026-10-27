@@ -10,7 +10,6 @@ from typing import Any
 
 import pytest
 from homeassistant.components.repairs import repairs_flow_manager
-from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE, EntityCategory
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -56,7 +55,7 @@ async def set_up(hass: HomeAssistant, inverter: FakeInverter) -> AsyncIterator[S
         entry = MockConfigEntry(
             domain=const.DOMAIN,
             unique_id=SERIAL,
-            version=2,
+            minor_version=2,
             data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
             options=options,
         )
@@ -592,10 +591,13 @@ async def test_a_total_left_as_shown_is_not_corrected(
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_a_version_1_entry_moves_its_settings_to_the_options(
+async def test_an_older_entry_copies_its_settings_to_the_options(
     hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
-    """An entry from an earlier release keeps every setting, now in its options."""
+    """The settings are read from the options, and stay in the data as well.
+
+    An earlier release after a downgrade still finds them there.
+    """
     inverter.serve_serial(SERIAL, const.SERIAL_NUMBER.address)
     settings = {
         const.CONF_INVERTER_MODEL: "powerocean_plus",
@@ -603,37 +605,16 @@ async def test_a_version_1_entry_moves_its_settings_to_the_options(
         const.CONF_SCAN_INTERVAL: 10,
         const.CONF_ENERGY_OFFSETS: {"solar_total": 12.5},
     }
-    entry = MockConfigEntry(
-        domain=const.DOMAIN,
-        unique_id=SERIAL,
-        version=1,
-        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port, **settings},
-    )
+    data = {const.CONF_HOST: HOST, const.CONF_PORT: inverter.port, **settings}
+    entry = MockConfigEntry(domain=const.DOMAIN, unique_id=SERIAL, data=data)
     entry.add_to_hass(hass)
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert entry.version == 2
-    assert entry.data == {const.CONF_HOST: HOST, const.CONF_PORT: inverter.port}
+    assert (entry.version, entry.minor_version) == (1, 2)
+    assert entry.data == data
     assert entry.options == settings
     assert entry.runtime_data.inverter_model == "powerocean_plus"
     assert entry.runtime_data.scan_interval == 10
     await hass.config_entries.async_unload(entry.entry_id)
-
-
-@pytest.mark.usefixtures("enable_custom_integrations")
-async def test_an_entry_from_a_newer_version_is_not_loaded(
-    hass: HomeAssistant,
-) -> None:
-    """After a downgrade, the entry fails loudly rather than run on defaults."""
-    entry = MockConfigEntry(
-        domain=const.DOMAIN,
-        unique_id=SERIAL,
-        version=3,
-        data={const.CONF_HOST: HOST, const.CONF_PORT: 502},
-    )
-    entry.add_to_hass(hass)
-
-    assert not await hass.config_entries.async_setup(entry.entry_id)
-    assert entry.state is ConfigEntryState.MIGRATION_ERROR

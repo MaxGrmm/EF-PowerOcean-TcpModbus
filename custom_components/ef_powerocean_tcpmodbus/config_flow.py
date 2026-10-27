@@ -164,8 +164,10 @@ def _is_keyed_by_address(entry: ConfigEntry) -> bool:
 class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the config flow for EF-PowerOcean-TcpModbus."""
 
-    # 2: the settings moved from the entry's data to its options.
-    VERSION = 2
+    VERSION = 1
+    # 2: the settings are read from the entry's options. They are also kept in its
+    # data, as they were at setup, for an earlier release after a downgrade.
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -224,7 +226,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             return self.async_create_entry(
                 title=_default_title(self._user_input[CONF_HOST]),
-                data=self._user_input,
+                data={**self._user_input, **user_input},
                 options=user_input,
             )
 

@@ -117,23 +117,22 @@ def _async_make_device_physical(hass: HomeAssistant, entry: EcoflowConfigEntry) 
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Move the settings of an older entry from its data to its options."""
-    if entry.version > 2:
-        # Made by a newer version of the integration, after a downgrade.
-        return False
-    if entry.version == 1:
+    """Copy the settings of an older entry from its data to its options.
+
+    Copied, not moved: an earlier release still finds them in the data, and as
+    the version only goes up by a minor one, it still loads the entry.
+    """
+    if entry.version == 1 and entry.minor_version < 2:
         connection = {CONF_HOST, CONF_PORT}
         hass.config_entries.async_update_entry(
             entry,
-            data={k: v for k, v in entry.data.items() if k in connection},
             options={
                 **{k: v for k, v in entry.data.items() if k not in connection},
                 **entry.options,
             },
-            version=2,
-            minor_version=1,
+            minor_version=2,
         )
-        _LOGGER.debug("Migrated %s to version 2", entry.title)
+        _LOGGER.debug("Copied the settings of %s to its options", entry.title)
     return True
 
 
