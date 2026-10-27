@@ -32,20 +32,10 @@
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
         }
-      }
-    },
-    "error": {
-      "cannot_connect": "Connection failed - please check IP address and port"
-    },
-    "abort": {
-      "already_configured": "This device is already configured"
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "EcoFlow PowerOcean - Settings",
-        "description": "Adjust the connection details for your inverter.",
+      },
+      "reconfigure": {
+        "title": "EcoFlow PowerOcean - Connection",
+        "description": "Change the address of {title}. The inverter must answer on it, and it must be the same inverter.",
         "data": {
           "host": "IP Address",
           "port": "Modbus TCP Port"
@@ -54,10 +44,22 @@
           "host": "Local IP address of the inverter.",
           "port": "Default is 502"
         }
-      },
-      "parameters": {
+      }
+    },
+    "error": {
+      "cannot_connect": "Connection failed - please check IP address and port"
+    },
+    "abort": {
+      "already_configured": "This device is already configured",
+      "reconfigure_successful": "The connection details have been updated.",
+      "wrong_device": "Another inverter answers on this address. To add it, set it up as a new device instead."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
         "title": "EcoFlow PowerOcean - Settings",
-        "description": "Settings",
+        "description": "To change the IP address or port, choose Reconfigure from the integration entry's menu.",
         "data": {
           "inverter_model": "Inverter model",
           "battery_count": "Battery module count",
@@ -89,11 +91,11 @@
               "remove_corrections": "Reset all totals to the inverter's values"
             },
             "data_description": {
-              "grid_import_total": "Shown as “From grid” in [EcoFlow's portal]({portal_url}).",
-              "grid_export_total": "Shown as “To grid” in [EcoFlow's portal]({portal_url}).",
-              "bat_charged_total": "Shown as “To battery” in [EcoFlow's portal]({portal_url}).",
-              "bat_discharged_total": "Shown as “From battery” in [EcoFlow's portal]({portal_url}).",
-              "solar_total": "Shown as “From solar” in [EcoFlow's portal]({portal_url}).",
+              "grid_import_total": "Shown as \u201cFrom grid\u201d in [EcoFlow's portal]({portal_url}).",
+              "grid_export_total": "Shown as \u201cTo grid\u201d in [EcoFlow's portal]({portal_url}).",
+              "bat_charged_total": "Shown as \u201cTo battery\u201d in [EcoFlow's portal]({portal_url}).",
+              "bat_discharged_total": "Shown as \u201cFrom battery\u201d in [EcoFlow's portal]({portal_url}).",
+              "solar_total": "Shown as \u201cFrom solar\u201d in [EcoFlow's portal]({portal_url}).",
               "remove_corrections": "Removes every correction, so each total shows what the inverter reports. The values above are ignored."
             }
           }
@@ -101,9 +103,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Connection failed - please check IP address and port",
       "invalid_energy_total": "Enter each energy total as a number, with a comma or a point for decimals and without thousands separators.",
-      "energy_total_lowered": "This would lower a total. Home Assistant records a drop as negative energy, or, if it is more than 10%, as a new meter that adds the whole value to the Energy dashboard. Check the values, then submit again to save them anyway. You can correct the history afterwards under Developer tools → Statistics → Adjust sum."
+      "energy_total_lowered": "This would lower a total. Home Assistant records a drop as negative energy, or, if it is more than 10%, as a new meter that adds the whole value to the Energy dashboard. Check the values, then submit again to save them anyway. You can correct the history afterwards under Developer tools \u2192 Statistics \u2192 Adjust sum."
     }
   },
   "issues": {
@@ -121,7 +122,7 @@
         "step": {
           "init": {
             "title": "Energy totals held for over a day",
-            "description": "These lifetime energy totals have been held for more than 24 hours, because the inverter reports a value the integration does not consider plausible:\n\n{totals}\n\nThis usually means the inverter reset its counter, or a wrong value was accepted earlier.\n\n**Keep Home Assistant's totals** if the inverter reset its counter. Each total stays at its value in Home Assistant and counts on from there: the difference to the inverter is added to every reading from now on, and the Energy dashboard continues without a jump. You can match the totals to EcoFlow's portal later under the integration's [settings]({settings_page}): choose Configure, and on the second page open Correct energy totals.\n\n**Switch to the inverter's totals** sets each total to the inverter's value and counts on from there. The Energy dashboard records the difference in one step. If the inverter's value is lower, Home Assistant records the drop as negative energy, or, if it is more than 10% lower, as a new meter that adds the whole value. You can correct the history afterwards under Developer tools → Statistics → Adjust sum.\n\nIf you believe these values are wrong, choose neither. Instead, open the inverter's [device page]({device_page}), choose **Download diagnostics** from its ⋮ menu, and attach the file to this [bug report]({report_url}), which is already filled in.",
+            "description": "These lifetime energy totals have been held for more than 24 hours, because the inverter reports a value the integration does not consider plausible:\n\n{totals}\n\nThis usually means the inverter reset its counter, or a wrong value was accepted earlier.\n\n**Keep Home Assistant's totals** if the inverter reset its counter. Each total stays at its value in Home Assistant and counts on from there: the difference to the inverter is added to every reading from now on, and the Energy dashboard continues without a jump. You can match the totals to EcoFlow's portal later under the integration's [settings]({settings_page}): choose Configure, and on the second page open Correct energy totals.\n\n**Switch to the inverter's totals** sets each total to the inverter's value and counts on from there. The Energy dashboard records the difference in one step. If the inverter's value is lower, Home Assistant records the drop as negative energy, or, if it is more than 10% lower, as a new meter that adds the whole value. You can correct the history afterwards under Developer tools \u2192 Statistics \u2192 Adjust sum.\n\nIf you believe these values are wrong, choose neither. Instead, open the inverter's [device page]({device_page}), choose **Download diagnostics** from its \u22ee menu, and attach the file to this [bug report]({report_url}), which is already filled in.",
             "menu_options": {
               "keep_shown": "Keep Home Assistant's totals",
               "take_device": "Switch to the inverter's totals"
