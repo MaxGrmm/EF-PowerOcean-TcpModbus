@@ -473,6 +473,29 @@ async def test_a_total_that_is_not_a_number_is_asked_for_again(
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_lower_total_is_saved_only_once_confirmed(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    entry = await set_up()
+    form = await _parameters_form(hass, entry, inverter)
+
+    async def submit(total: str) -> Any:
+        return await hass.config_entries.options.async_configure(
+            form["flow_id"], {"energy_totals": {"solar_total": total}}
+        )
+
+    assert (await submit("4200"))["errors"] == {"base": "energy_total_lowered"}
+    # A different lower value is a new warning, not a confirmation.
+    assert (await submit("4100"))["errors"] == {"base": "energy_total_lowered"}
+    assert const.CONF_ENERGY_OFFSETS not in entry.data
+
+    assert (await submit("4100"))["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["solar_total"] == pytest.approx(4100.0)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
 async def test_removing_the_corrections_returns_every_total_to_the_inverter(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
@@ -483,10 +506,11 @@ async def test_removing_the_corrections_returns_every_total_to_the_inverter(
 
     form = await _parameters_form(hass, entry, inverter)
     assert "remove_corrections" in _section_fields(form)
-    await hass.config_entries.options.async_configure(
-        form["flow_id"],
-        {"energy_totals": {"solar_total": "4500", "remove_corrections": True}},
-    )
+    remove = {"energy_totals": {"solar_total": "4500", "remove_corrections": True}}
+    warned = await hass.config_entries.options.async_configure(form["flow_id"], remove)
+    # The inverter's value is lower than the total shown.
+    assert warned["errors"] == {"base": "energy_total_lowered"}
+    await hass.config_entries.options.async_configure(form["flow_id"], remove)
     await hass.async_block_till_done()
 
     data = entry.runtime_data.data

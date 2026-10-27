@@ -263,6 +263,8 @@ class EcoflowOptionsFlow(OptionsFlow):
         # The totals as the form showed them, so a field left alone, while the
         # total kept counting, is not taken for a correction.
         self._shown_totals: dict[str, float] = {}
+        # The lowered totals last warned about; submitting them again confirms.
+        self._warned_lower: dict[str, float] = {}
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -312,10 +314,14 @@ class EcoflowOptionsFlow(OptionsFlow):
         if user_input is not None:
             entered = user_input.pop(ENERGY_TOTALS, {})
             try:
-                corrected = self._energy_offsets(entered)
+                corrected, lowered = self._energy_offsets(entered)
             except ValueError:
                 errors["base"] = "invalid_energy_total"
             else:
+                if lowered and lowered != self._warned_lower:
+                    self._warned_lower = lowered
+                    errors["base"] = "energy_total_lowered"
+            if not errors:
                 self._user_input.update(user_input)
                 self.hass.config_entries.async_update_entry(
                     self._config_entry,
@@ -438,17 +444,28 @@ class EcoflowOptionsFlow(OptionsFlow):
             fields[vol.Required(REMOVE_CORRECTIONS, default=False)] = BooleanSelector()
         return section(vol.Schema(fields), {"collapsed": collapsed})
 
-    def _energy_offsets(self, entered: dict[str, Any]) -> dict[str, Any]:
-        """Return the entry data for the totals the user changed in the section.
+    def _energy_offsets(
+        self, entered: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, float]]:
+        """Return the entry data for the section, and the totals it would lower.
 
         A changed total becomes an offset to what the inverter reports, and the
         entry's reload continues it from the value entered. A field left as shown,
         while the total kept counting, changes nothing. The remove toggle drops
-        every correction, whatever was entered. Raises ValueError for a value
-        that is not a total.
+        every correction, whatever was entered, returning each total to the
+        inverter's value. Raises ValueError for a value that is not a total.
         """
+        coordinator = self._coordinator()
+        if coordinator is None:
+            return {}, {}
         if entered.get(REMOVE_CORRECTIONS):
-            return {CONF_ENERGY_OFFSETS: {}}
+            data = coordinator.data or {}
+            device = {
+                key: data[f"{key}_raw"]
+                for key in self._shown_totals
+                if isinstance(data.get(f"{key}_raw"), (int, float))
+            }
+            return {CONF_ENERGY_OFFSETS: {}}, self._lowered(device)
         values = {
             key: parse_kwh(text)
             for key, text in entered.items()
@@ -459,7 +476,22 @@ class EcoflowOptionsFlow(OptionsFlow):
             for key, value in values.items()
             if abs(value - self._shown_totals[key]) >= ENERGY_RESOLUTION_KWH / 2
         }
-        coordinator = self._coordinator()
-        if not changed or coordinator is None:
-            return {}
-        return {CONF_ENERGY_OFFSETS: coordinator.energy_offsets_for(changed)}
+        if not changed:
+            return {}, {}
+        return (
+            {CONF_ENERGY_OFFSETS: coordinator.energy_offsets_for(changed)},
+            self._lowered(changed),
+        )
+
+    def _lowered(self, totals: dict[str, float]) -> dict[str, float]:
+        """Return the totals that would end up below the value the form showed.
+
+        Home Assistant's statistics record a drop as negative energy, or as a new
+        meter cycle adding the whole value when it is over 10%, so it is confirmed
+        first.
+        """
+        return {
+            key: round(value, 2)
+            for key, value in totals.items()
+            if value < self._shown_totals[key] - ENERGY_RESOLUTION_KWH / 2
+        }

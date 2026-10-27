@@ -79,7 +79,7 @@
         "sections": {
           "energy_totals": {
             "name": "Energiezähler korrigieren",
-            "description": "Nur nötig, wenn der Wechselrichter einen seiner Gesamtzähler zurückgesetzt hat. Trage für jeden falschen Zähler den Wert aus dem EcoFlow-Portal ein und lass die anderen unverändert. Trenne Dezimalstellen mit Komma oder Punkt und lass Tausendertrennzeichen weg. Die Differenz wird ab jetzt zu dem addiert, was der Wechselrichter meldet, die heutigen Werte bleiben unverändert. Um eine Korrektur zu entfernen, trage den Wert des zugehörigen (Gerät)-Sensors ein. Ein niedrigerer Wert als zuvor zählt im Energie-Dashboard als Zählerwechsel.",
+            "description": "Nur nötig, wenn der Wechselrichter einen seiner Gesamtzähler zurückgesetzt hat. Trage für jeden falschen Zähler den Wert aus dem EcoFlow-Portal ein und lass die anderen unverändert. Trenne Dezimalstellen mit Komma oder Punkt und lass Tausendertrennzeichen weg. Die Differenz wird ab jetzt zu dem addiert, was der Wechselrichter meldet, die heutigen Werte bleiben unverändert. Um eine Korrektur zu entfernen, trage den Wert des zugehörigen (Gerät)-Sensors ein.",
             "data": {
               "grid_import_total": "Netzbezugsenergie Gesamt",
               "grid_export_total": "Netzeinspeiseenergie Gesamt",
@@ -106,7 +106,8 @@
     },
     "error": {
       "cannot_connect": "Verbindung fehlgeschlagen - IP-Adresse und Port prüfen",
-      "invalid_energy_total": "Gib jeden Energiezähler als Zahl ein, mit Komma oder Punkt für Dezimalstellen und ohne Tausendertrennzeichen."
+      "invalid_energy_total": "Gib jeden Energiezähler als Zahl ein, mit Komma oder Punkt für Dezimalstellen und ohne Tausendertrennzeichen.",
+      "energy_total_lowered": "Damit würde ein Zähler sinken. Home Assistant erfasst einen Rückgang als negative Energie oder, bei mehr als 10 %, als neuen Zähler, der den gesamten Wert im Energie-Dashboard hinzuzählt. Prüfe die Werte und sende sie erneut, um sie trotzdem zu speichern. Den Verlauf kannst du danach unter Entwicklerwerkzeuge → Statistiken → Summe anpassen korrigieren."
     }
   },
   "issues": {
@@ -124,7 +125,7 @@
         "step": {
           "init": {
             "title": "Energiezähler festgehalten",
-            "description": "Diese Gesamtzähler werden seit mehr als 24 Stunden festgehalten, weil der Wechselrichter einen Wert meldet, den die Integration nicht für plausibel hält:\n\n{totals}\n\nMeist hat der Wechselrichter seinen Zähler zurückgesetzt, oder es wurde früher ein falscher Wert übernommen.\n\n**Gesamtwerte von Home Assistant behalten**, wenn der Wechselrichter seinen Zähler zurückgesetzt hat. Jeder Zähler bleibt auf seinem Wert in Home Assistant und zählt von dort weiter: Die Differenz zum Wechselrichter wird ab jetzt zu jedem Messwert addiert, und das Energie-Dashboard läuft ohne Sprung weiter. Die Zähler kannst du später in den [Einstellungen]({settings_page}) der Integration an das EcoFlow-Portal angleichen: Wähle Konfigurieren und öffne auf der zweiten Seite Energiezähler korrigieren.\n\n**Auf die Gesamtwerte des Wechselrichters wechseln** setzt jeden Zähler auf den Wert des Wechselrichters und zählt von dort weiter. Das Energie-Dashboard erfasst den Unterschied in einem Schritt, ein niedrigerer Wert zählt als Zählerwechsel. Den Verlauf kannst du danach unter Entwicklerwerkzeuge → Statistiken → Summe anpassen korrigieren.\n\nWenn du diese Werte für falsch hältst, wähle keins von beiden. Öffne stattdessen die [Geräteseite]({device_page}) des Wechselrichters, wähle im ⋮-Menü **Diagnosedaten herunterladen** und hänge die Datei an diesen bereits ausgefüllten [Fehlerbericht]({report_url}) an.",
+            "description": "Diese Gesamtzähler werden seit mehr als 24 Stunden festgehalten, weil der Wechselrichter einen Wert meldet, den die Integration nicht für plausibel hält:\n\n{totals}\n\nMeist hat der Wechselrichter seinen Zähler zurückgesetzt, oder es wurde früher ein falscher Wert übernommen.\n\n**Gesamtwerte von Home Assistant behalten**, wenn der Wechselrichter seinen Zähler zurückgesetzt hat. Jeder Zähler bleibt auf seinem Wert in Home Assistant und zählt von dort weiter: Die Differenz zum Wechselrichter wird ab jetzt zu jedem Messwert addiert, und das Energie-Dashboard läuft ohne Sprung weiter. Die Zähler kannst du später in den [Einstellungen]({settings_page}) der Integration an das EcoFlow-Portal angleichen: Wähle Konfigurieren und öffne auf der zweiten Seite Energiezähler korrigieren.\n\n**Auf die Gesamtwerte des Wechselrichters wechseln** setzt jeden Zähler auf den Wert des Wechselrichters und zählt von dort weiter. Das Energie-Dashboard erfasst den Unterschied in einem Schritt. Ist der Wert des Wechselrichters niedriger, erfasst Home Assistant den Rückgang als negative Energie oder, bei mehr als 10 %, als neuen Zähler, der den gesamten Wert hinzuzählt. Den Verlauf kannst du danach unter Entwicklerwerkzeuge → Statistiken → Summe anpassen korrigieren.\n\nWenn du diese Werte für falsch hältst, wähle keins von beiden. Öffne stattdessen die [Geräteseite]({device_page}) des Wechselrichters, wähle im ⋮-Menü **Diagnosedaten herunterladen** und hänge die Datei an diesen bereits ausgefüllten [Fehlerbericht]({report_url}) an.",
             "menu_options": {
               "keep_shown": "Gesamtwerte von Home Assistant behalten",
               "take_device": "Auf die Gesamtwerte des Wechselrichters wechseln"

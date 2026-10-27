@@ -79,7 +79,7 @@
         "sections": {
           "energy_totals": {
             "name": "Correct energy totals",
-            "description": "Only needed if the inverter reset one of its lifetime energy counters. Enter the value from EcoFlow's portal for each total that is wrong and leave the others as they are. Use a comma or a point for decimals, without thousands separators. The difference is added to what the inverter reports from now on, and today's values stay as they are. To remove a correction, enter the value of the total's (Device) sensor. A total set lower than before counts as a meter reset in the Energy dashboard.",
+            "description": "Only needed if the inverter reset one of its lifetime energy counters. Enter the value from EcoFlow's portal for each total that is wrong and leave the others as they are. Use a comma or a point for decimals, without thousands separators. The difference is added to what the inverter reports from now on, and today's values stay as they are. To remove a correction, enter the value of the total's (Device) sensor.",
             "data": {
               "grid_import_total": "Grid Import Total",
               "grid_export_total": "Grid Export Total",
@@ -106,7 +106,8 @@
     },
     "error": {
       "cannot_connect": "Connection failed - please check IP address and port",
-      "invalid_energy_total": "Enter each energy total as a number, with a comma or a point for decimals and without thousands separators."
+      "invalid_energy_total": "Enter each energy total as a number, with a comma or a point for decimals and without thousands separators.",
+      "energy_total_lowered": "This would lower a total. Home Assistant records a drop as negative energy, or, if it is more than 10%, as a new meter that adds the whole value to the Energy dashboard. Check the values, then submit again to save them anyway. You can correct the history afterwards under Developer tools → Statistics → Adjust sum."
     }
   },
   "issues": {
@@ -124,7 +125,7 @@
         "step": {
           "init": {
             "title": "Energy totals held for over a day",
-            "description": "These lifetime energy totals have been held for more than 24 hours, because the inverter reports a value the integration does not consider plausible:\n\n{totals}\n\nThis usually means the inverter reset its counter, or a wrong value was accepted earlier.\n\n**Keep Home Assistant's totals** if the inverter reset its counter. Each total stays at its value in Home Assistant and counts on from there: the difference to the inverter is added to every reading from now on, and the Energy dashboard continues without a jump. You can match the totals to EcoFlow's portal later under the integration's [settings]({settings_page}): choose Configure, and on the second page open Correct energy totals.\n\n**Switch to the inverter's totals** sets each total to the inverter's value and counts on from there. The Energy dashboard records the difference in one step, and a lower value counts as a meter reset. You can correct the history afterwards under Developer tools → Statistics → Adjust sum.\n\nIf you believe these values are wrong, choose neither. Instead, open the inverter's [device page]({device_page}), choose **Download diagnostics** from its ⋮ menu, and attach the file to this [bug report]({report_url}), which is already filled in.",
+            "description": "These lifetime energy totals have been held for more than 24 hours, because the inverter reports a value the integration does not consider plausible:\n\n{totals}\n\nThis usually means the inverter reset its counter, or a wrong value was accepted earlier.\n\n**Keep Home Assistant's totals** if the inverter reset its counter. Each total stays at its value in Home Assistant and counts on from there: the difference to the inverter is added to every reading from now on, and the Energy dashboard continues without a jump. You can match the totals to EcoFlow's portal later under the integration's [settings]({settings_page}): choose Configure, and on the second page open Correct energy totals.\n\n**Switch to the inverter's totals** sets each total to the inverter's value and counts on from there. The Energy dashboard records the difference in one step. If the inverter's value is lower, Home Assistant records the drop as negative energy, or, if it is more than 10% lower, as a new meter that adds the whole value. You can correct the history afterwards under Developer tools → Statistics → Adjust sum.\n\nIf you believe these values are wrong, choose neither. Instead, open the inverter's [device page]({device_page}), choose **Download diagnostics** from its ⋮ menu, and attach the file to this [bug report]({report_url}), which is already filled in.",
             "menu_options": {
               "keep_shown": "Keep Home Assistant's totals",
               "take_device": "Switch to the inverter's totals"
