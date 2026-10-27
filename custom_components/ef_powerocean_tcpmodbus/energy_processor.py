@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final, TypeIs
@@ -77,10 +77,12 @@ class HeldTotal:
     since: datetime | None
 
 
-def offsets_from(stored: Any) -> dict[str, float]:
+def offsets_from(
+    stored: Any, keys: Collection[str] = DEVICE_TOTAL_KEYS
+) -> dict[str, float]:
     """Return the usable offsets of a stored mapping, by the total they correct.
 
-    Keys that are not a device total and values that are not a finite, non-zero
+    Keys not among the given totals and values that are not a finite, non-zero
     number are left out, so a damaged entry corrects nothing.
     """
     if not isinstance(stored, Mapping):
@@ -88,7 +90,7 @@ def offsets_from(stored: Any) -> dict[str, float]:
     return {
         key: float(value)
         for key, value in stored.items()
-        if key in DEVICE_TOTAL_KEYS
+        if key in keys
         and isinstance(value, (int, float))
         and not isinstance(value, bool)
         and math.isfinite(value)

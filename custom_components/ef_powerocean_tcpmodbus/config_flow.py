@@ -43,7 +43,6 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_S,
     DEVICE_INFO_BLOCK,
     DOMAIN,
-    ECOFLOW_PORTAL_TOTALS,
     ENERGY_RESOLUTION_KWH,
     MAX_BATTERY_COUNT,
     PRODUCT_CATEGORY,
@@ -434,7 +433,6 @@ class EcoflowOptionsFlow(OptionsFlow):
             self._shown_totals = {
                 key: round(value, 2)
                 for key, value in coordinator.correctable_totals.items()
-                if key in ECOFLOW_PORTAL_TOTALS
             }
         if not self._shown_totals:
             return None
@@ -457,8 +455,8 @@ class EcoflowOptionsFlow(OptionsFlow):
         A changed total becomes an offset to what the inverter reports, and the
         entry's reload continues it from the value entered. A field left as shown,
         while the total kept counting, changes nothing. The remove toggle drops
-        every correction, also of totals not in the section, whatever was entered,
-        returning each total to the inverter's value. Raises ValueError for a
+        every correction, whatever was entered, returning each total to the
+        inverter's value. Raises ValueError for a
         value that is not a total.
         """
         coordinator = self._coordinator()

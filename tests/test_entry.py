@@ -464,21 +464,43 @@ async def test_only_the_totals_in_ecoflows_portal_can_be_corrected(
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_removing_a_correction_outside_the_section_is_confirmed_too(
-    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+async def test_a_total_not_in_the_portal_is_never_corrected(
+    set_up: SetUp, inverter: FakeInverter
 ) -> None:
-    for key in ("solar_total", "inverter_ac_in_total"):
-        _serve_float(inverter, const.REGISTERS_BY_KEY[key].address, 1234.5)
-    entry = await set_up(**{const.CONF_ENERGY_OFFSETS: {"inverter_ac_in_total": 50.0}})
-    form = await _parameters_form(hass, entry, inverter)
-    remove = {"energy_totals": {"remove_corrections": True}}
+    _serve_float(
+        inverter, const.REGISTERS_BY_KEY["inverter_ac_in_total"].address, 1234.5
+    )
 
-    warned = await hass.config_entries.options.async_configure(form["flow_id"], remove)
-    assert warned["errors"] == {"base": "energy_total_lowered"}
-    await hass.config_entries.options.async_configure(form["flow_id"], remove)
-    await hass.async_block_till_done()
+    entry = await set_up(**{const.CONF_ENERGY_OFFSETS: {"inverter_ac_in_total": 50.0}})
 
     assert entry.runtime_data.data["inverter_ac_in_total"] == pytest.approx(1234.5)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_total_not_in_the_portal_takes_the_inverters_value_after_a_day(
+    hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
+) -> None:
+    """The user has nothing to check it against, so repairs does not ask."""
+    assert await async_setup_component(hass, "repairs", {})
+    _serve_float(
+        inverter, const.REGISTERS_BY_KEY["inverter_ac_in_total"].address, 1234.5
+    )
+    entry = await set_up()
+    coordinator = entry.runtime_data
+    coordinator._last_checked_data["inverter_ac_in_total"] = 2000.0
+    coordinator._energy_processor.accepted_at["inverter_ac_in_total"] = (
+        dt_util.now() - timedelta(days=30)
+    )
+
+    # Held since it was last accepted, a month ago, so taken on the first poll
+    # and published from the next.
+    await _poll_a_minute_later(entry)
+    await _poll_a_minute_later(entry)
+    await hass.async_block_till_done()
+
+    assert coordinator.data["inverter_ac_in_total"] == pytest.approx(1234.5)
+    issue_id = f"energy_totals_held_{entry.entry_id}"
+    assert ir.async_get(hass).async_get_issue(const.DOMAIN, issue_id) is None
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

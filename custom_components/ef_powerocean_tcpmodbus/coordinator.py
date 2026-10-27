@@ -50,6 +50,7 @@ from .const import (
     DEVICE_INFO_BLOCK,
     DEVICE_INFO_EXTRA,
     DOMAIN,
+    ECOFLOW_PORTAL_TOTALS,
     ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
     FIRMWARE_VERSION,
@@ -223,7 +224,11 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # change to automatic shows the expiry as the cause.
         self._command_expired_context: Context | None = None
         self._energy_processor = EnergyProcessor(self.limits)
-        self._energy_offsets = offsets_from(config_entry.data.get(CONF_ENERGY_OFFSETS))
+        # Only totals EcoFlow's portal shows are corrected; the others are the
+        # inverter's value as it is.
+        self._energy_offsets = offsets_from(
+            config_entry.data.get(CONF_ENERGY_OFFSETS), ECOFLOW_PORTAL_TOTALS
+        )
         self._status: CoordinatorStatus | None = None
         self._store: Store[dict[str, Any]] | None = Store(
             hass, STORAGE_VERSION, f"{DOMAIN}.{config_entry.entry_id}.state"
@@ -602,14 +607,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # A shared link can reconnect without us seeing it drop.
         self._mark_identity_unverified()
 
-    @property
-    def long_held_totals(self) -> dict[str, HeldTotal]:
-        """Return the totals held for over a day while the device reports more than 0.
-
-        A healthy system never holds a total that long. What is left is a counter
-        the device reset, or a wrong value accepted earlier, which only the user
-        can tell apart: they are offered the device's value in a repairs issue.
-        """
+    def _held_over_a_day(self) -> dict[str, HeldTotal]:
         now = dt.now()
         return {
             key: held
@@ -618,6 +616,37 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and held.since is not None
             and (now - held.since).total_seconds() >= HELD_TOTAL_ISSUE_AFTER_S
         }
+
+    @property
+    def long_held_totals(self) -> dict[str, HeldTotal]:
+        """Return the totals in EcoFlow's portal held for over a day.
+
+        A healthy system never holds a total that long. What is left is a counter
+        the device reset, or a wrong value accepted earlier, which only the user
+        can tell apart, against the portal: they are asked in a repairs issue.
+        """
+        return {
+            key: held
+            for key, held in self._held_over_a_day().items()
+            if key in ECOFLOW_PORTAL_TOTALS
+        }
+
+    def _take_long_held_inverter_only_totals(self) -> None:
+        """Take the inverter's value for a total not in the portal, held for a day.
+
+        The user has nothing to check such a total against, so it is not raised
+        in repairs: it continues from what the inverter reports.
+        """
+        held = [
+            key for key in self._held_over_a_day() if key not in ECOFLOW_PORTAL_TOTALS
+        ]
+        for key, value in self._energy_processor.take_device_totals(held).items():
+            self._last_checked_data[key] = value
+            _LOGGER.warning(
+                "Took the inverter's %s of %s kWh after holding it for a day",
+                key,
+                value,
+            )
 
     def describe_held_totals(self) -> str:
         """Return one line per long-held total, for the repairs issue."""
@@ -713,12 +742,13 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def correctable_totals(self) -> dict[str, float]:
-        """Return the value shown for each total the device reports above 0."""
+        """Return the value shown for each total in EcoFlow's portal, above 0."""
         data = self.data or {}
         return {
             key: value
             for key in DEVICE_TOTAL_KEYS
-            if isinstance(value := data.get(key), (int, float))
+            if key in ECOFLOW_PORTAL_TOTALS
+            and isinstance(value := data.get(key), (int, float))
             and isinstance(device := data.get(f"{key}_raw"), (int, float))
             and device > 0
         }
@@ -734,14 +764,17 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             device = data.get(f"{key}_raw")
             if isinstance(device, (int, float)) and device > 0:
                 offsets[key] = round(value - device, 3)
-        return offsets_from(offsets)
+        return offsets_from(offsets, ECOFLOW_PORTAL_TOTALS)
 
     @callback
     def async_set_energy_offsets(self, offsets: Mapping[str, float]) -> None:
         """Save new offsets to the entry, whose reload then applies them."""
         self.hass.config_entries.async_update_entry(
             self.config_entry,
-            data={**self.config_entry.data, CONF_ENERGY_OFFSETS: offsets_from(offsets)},
+            data={
+                **self.config_entry.data,
+                CONF_ENERGY_OFFSETS: offsets_from(offsets, ECOFLOW_PORTAL_TOTALS),
+            },
         )
 
     @property
@@ -1020,6 +1053,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
+            self._take_long_held_inverter_only_totals()
             self._status = CoordinatorStatus.SUCCESS
             if self._store is not None:
                 self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
