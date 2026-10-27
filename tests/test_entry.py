@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from homeassistant.components.repairs import repairs_flow_manager
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE, EntityCategory
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -50,12 +51,14 @@ async def set_up(hass: HomeAssistant, inverter: FakeInverter) -> AsyncIterator[S
     """
     entries: list[MockConfigEntry] = []
 
-    async def set_up_entry(**data: Any) -> MockConfigEntry:
+    async def set_up_entry(**options: Any) -> MockConfigEntry:
         inverter.serve_serial(SERIAL, const.SERIAL_NUMBER.address)
         entry = MockConfigEntry(
             domain=const.DOMAIN,
             unique_id=SERIAL,
-            data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port, **data},
+            version=2,
+            data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+            options=options,
         )
         entry.add_to_hass(hass)
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -400,7 +403,7 @@ async def test_a_held_total_keeps_its_value_in_home_assistant_after_the_repair(
     await hass.async_block_till_done()
 
     data = entry.runtime_data.data
-    assert entry.data[const.CONF_ENERGY_OFFSETS] == {
+    assert entry.options[const.CONF_ENERGY_OFFSETS] == {
         "grid_export_total": pytest.approx(1041.23)
     }
     assert data["grid_export_total"] == pytest.approx(1548.74, abs=0.001)
@@ -517,8 +520,8 @@ async def test_a_total_that_is_not_a_number_is_asked_for_again(
     assert schema is not None
     fields = {str(key): value for key, value in schema.schema.items()}
     assert fields["energy_totals"].options["collapsed"] is False
-    assert const.CONF_ENERGY_OFFSETS not in entry.data
-    assert const.CONF_SCAN_INTERVAL not in entry.data
+    assert const.CONF_ENERGY_OFFSETS not in entry.options
+    assert const.CONF_SCAN_INTERVAL not in entry.options
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -537,7 +540,7 @@ async def test_a_lower_total_is_saved_only_once_confirmed(
     assert (await submit("4200"))["errors"] == {"base": "energy_total_lowered"}
     # A different lower value is a new warning, not a confirmation.
     assert (await submit("4100"))["errors"] == {"base": "energy_total_lowered"}
-    assert const.CONF_ENERGY_OFFSETS not in entry.data
+    assert const.CONF_ENERGY_OFFSETS not in entry.options
 
     assert (await submit("4100"))["type"] == "create_entry"
     await hass.async_block_till_done()
@@ -563,7 +566,7 @@ async def test_removing_the_corrections_returns_every_total_to_the_inverter(
     await hass.async_block_till_done()
 
     data = entry.runtime_data.data
-    assert entry.data[const.CONF_ENERGY_OFFSETS] == {}
+    assert entry.options[const.CONF_ENERGY_OFFSETS] == {}
     assert data["solar_total"] == pytest.approx(4296.8)
     assert data["solar_today"] == pytest.approx(today)
 
@@ -584,5 +587,53 @@ async def test_a_total_left_as_shown_is_not_corrected(
     )
     await hass.async_block_till_done()
 
-    assert const.CONF_ENERGY_OFFSETS not in entry.data
+    assert const.CONF_ENERGY_OFFSETS not in entry.options
     assert entry.runtime_data.data["solar_total"] == pytest.approx(4296.81, abs=0.001)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_version_1_entry_moves_its_settings_to_the_options(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    """An entry from an earlier release keeps every setting, now in its options."""
+    inverter.serve_serial(SERIAL, const.SERIAL_NUMBER.address)
+    settings = {
+        const.CONF_INVERTER_MODEL: "powerocean_plus",
+        const.CONF_BATTERY_COUNT: 3,
+        const.CONF_SCAN_INTERVAL: 10,
+        const.CONF_ENERGY_OFFSETS: {"solar_total": 12.5},
+    }
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        unique_id=SERIAL,
+        version=1,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port, **settings},
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.version == 2
+    assert entry.data == {const.CONF_HOST: HOST, const.CONF_PORT: inverter.port}
+    assert entry.options == settings
+    assert entry.runtime_data.inverter_model == "powerocean_plus"
+    assert entry.runtime_data.scan_interval == 10
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_an_entry_from_a_newer_version_is_not_loaded(
+    hass: HomeAssistant,
+) -> None:
+    """After a downgrade, the entry fails loudly rather than run on defaults."""
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        unique_id=SERIAL,
+        version=3,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: 502},
+    )
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.state is ConfigEntryState.MIGRATION_ERROR

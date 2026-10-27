@@ -120,13 +120,13 @@ def run_update(
 
 
 @pytest.mark.parametrize(
-    ("entry_data", "expected"),
+    ("entry_options", "expected"),
     (({}, False), ({const.CONF_MODBUS_CONTROL: True}, True)),
 )
 async def test_modbus_control_enablement_comes_from_config_entry(
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
-    entry_data: dict,
+    entry_options: dict,
     expected: bool,
 ) -> None:
     monkeypatch.setattr(
@@ -135,7 +135,10 @@ async def test_modbus_control_enablement_comes_from_config_entry(
         lambda *_args, **_kwargs: Mock(connected=False),
     )
     config_entry = MockConfigEntry(
-        domain=const.DOMAIN, data={const.CONF_HOST: "192.0.2.10", **entry_data}
+        domain=const.DOMAIN,
+        version=2,
+        data={const.CONF_HOST: "192.0.2.10"},
+        options=entry_options,
     )
 
     instance = coordinator_module.EcoflowCoordinator(hass, config_entry)

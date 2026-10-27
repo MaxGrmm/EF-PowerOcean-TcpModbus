@@ -13,7 +13,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
+from .const import CONF_HOST, CONF_PORT, DOMAIN
 from .control import ControlInputs
 from .coordinator import (
     EcoflowConfigEntry,
@@ -114,6 +114,27 @@ def _async_make_device_physical(hass: HomeAssistant, entry: EcoflowConfigEntry) 
     for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
         if device.entry_type is dr.DeviceEntryType.SERVICE:
             registry.async_update_device(device.id, entry_type=None)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Move the settings of an older entry from its data to its options."""
+    if entry.version > 2:
+        # Made by a newer version of the integration, after a downgrade.
+        return False
+    if entry.version == 1:
+        connection = {CONF_HOST, CONF_PORT}
+        hass.config_entries.async_update_entry(
+            entry,
+            data={k: v for k, v in entry.data.items() if k in connection},
+            options={
+                **{k: v for k, v in entry.data.items() if k not in connection},
+                **entry.options,
+            },
+            version=2,
+            minor_version=1,
+        )
+        _LOGGER.debug("Migrated %s to version 2", entry.title)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> bool:

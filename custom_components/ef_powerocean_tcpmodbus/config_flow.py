@@ -164,7 +164,8 @@ def _is_keyed_by_address(entry: ConfigEntry) -> bool:
 class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the config flow for EF-PowerOcean-TcpModbus."""
 
-    VERSION = 1
+    # 2: the settings moved from the entry's data to its options.
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -221,10 +222,10 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            self._user_input.update(user_input)
             return self.async_create_entry(
                 title=_default_title(self._user_input[CONF_HOST]),
                 data=self._user_input,
+                options=user_input,
             )
 
         return self.async_show_form(
@@ -371,16 +372,14 @@ class EcoflowOptionsFlow(OptionsFlow):
                     self._warned_lower = lowered
                     errors["base"] = "energy_total_lowered"
             if not errors:
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry,
-                    data={**self.config_entry.data, **user_input, **corrected},
+                return self.async_create_entry(
+                    data={**self.config_entry.options, **user_input, **corrected}
                 )
-                return self.async_create_entry(title="", data={})
 
         fields: dict[Any, Any] = {
             vol.Required(
                 CONF_INVERTER_MODEL,
-                default=self.config_entry.data.get(
+                default=self.config_entry.options.get(
                     CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL
                 ),
             ): SelectSelector(
@@ -392,41 +391,41 @@ class EcoflowOptionsFlow(OptionsFlow):
             ),
             vol.Required(
                 CONF_BATTERY_COUNT,
-                default=self.config_entry.data.get(
+                default=self.config_entry.options.get(
                     CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT
                 ),
             ): vol.All(int, vol.Range(min=0, max=MAX_BATTERY_COUNT)),
             vol.Required(
                 CONF_MAX_SOLAR_POWER,
-                default=self.config_entry.data.get(
+                default=self.config_entry.options.get(
                     CONF_MAX_SOLAR_POWER, DEFAULT_MAX_SOLAR_POWER
                 ),
             ): vol.All(int, vol.Range(min=MIN_CONFIG_POWER, max=MAX_CONFIG_POWER)),
             vol.Required(
                 CONF_MAX_GRID_POWER,
-                default=self.config_entry.data.get(
+                default=self.config_entry.options.get(
                     CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER
                 ),
             ): vol.All(int, vol.Range(min=MIN_CONFIG_POWER, max=MAX_CONFIG_POWER)),
             vol.Required(
                 CONF_SCAN_INTERVAL,
-                default=self.config_entry.data.get(
+                default=self.config_entry.options.get(
                     CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_S
                 ),
             ): vol.All(int, vol.Range(min=2, max=30)),
             vol.Required(
                 CONF_CALC_SOLAR_POWER,
-                default=self.config_entry.data.get(CONF_CALC_SOLAR_POWER, False),
+                default=self.config_entry.options.get(CONF_CALC_SOLAR_POWER, False),
             ): BooleanSelector({}),
             vol.Required(
                 CONF_BATTERY_RESERVE,
                 default=battery_reserve_for(
                     InverterModel(
-                        self.config_entry.data.get(
+                        self.config_entry.options.get(
                             CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL
                         )
                     ),
-                    self.config_entry.data.get(CONF_BATTERY_RESERVE),
+                    self.config_entry.options.get(CONF_BATTERY_RESERVE),
                 ).value,
             ): SelectSelector(
                 SelectSelectorConfig(
@@ -487,7 +486,7 @@ class EcoflowOptionsFlow(OptionsFlow):
             vol.Required(key, default=str(value)): field
             for key, value in self._shown_totals.items()
         }
-        if self.config_entry.data.get(CONF_ENERGY_OFFSETS):
+        if self.config_entry.options.get(CONF_ENERGY_OFFSETS):
             fields[vol.Required(REMOVE_CORRECTIONS, default=False)] = BooleanSelector()
         return section(vol.Schema(fields), {"collapsed": collapsed})
 

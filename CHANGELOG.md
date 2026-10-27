@@ -5,8 +5,12 @@
 ### Added
 
 - **Reconfigure** in the entry's menu changes the IP address or port. It tests the new address and refuses it if a different inverter answers there, or if another entry already uses it.
-
 - Lifetime energy totals can be corrected for a counter the inverter reset. The held-totals repairs issue offers to keep Home Assistant's totals and count on from them, and a collapsed **Correct energy totals** section in **Configure** sets a total to the value in EcoFlow's portal. The correction is added to what the inverter reports from then on, without changing today's values.
+
+### Changed
+
+- **Configure** opens on the settings; the IP address and port moved to **Reconfigure**.
+- The settings are stored in the entry's options instead of its data. Existing entries are migrated on first start. After that, going back to an earlier release needs the integration set up again.
 
 ## [2.9.3] - 2026-10-23
 

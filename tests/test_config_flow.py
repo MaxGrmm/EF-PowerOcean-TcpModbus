@@ -55,6 +55,14 @@ async def test_the_serial_number_is_the_unique_id(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].unique_id == SERIAL
+    # The connection in the data, everything else in the options.
+    assert result["result"].data == {
+        const.CONF_HOST: "192.168.1.10",
+        const.CONF_PORT: 502,
+    }
+    assert result["result"].options[const.CONF_SCAN_INTERVAL] == (
+        const.DEFAULT_SCAN_INTERVAL_S
+    )
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -98,13 +106,18 @@ def _fields(result: Any) -> dict[Any, Any]:
 
 
 def _configured_entry(
-    hass: HomeAssistant, data: dict[str, Any] | None = None, unique_id: str = SERIAL
+    hass: HomeAssistant,
+    options: dict[str, Any] | None = None,
+    unique_id: str = SERIAL,
+    port: int = 502,
 ) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=const.DOMAIN,
         unique_id=unique_id,
+        version=2,
         title="EcoFlow PowerOcean (192.168.1.10)",
-        data={const.CONF_HOST: "192.168.1.10", const.CONF_PORT: 502, **(data or {})},
+        data={const.CONF_HOST: "192.168.1.10", const.CONF_PORT: port},
+        options=options or {},
     )
     entry.add_to_hass(hass)
     return entry
@@ -128,7 +141,7 @@ async def test_options_leave_the_connection_alone(
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     device_settings.assert_not_awaited()
-    assert entry.data[const.CONF_SCAN_INTERVAL] == 10
+    assert entry.options[const.CONF_SCAN_INTERVAL] == 10
     assert entry.data[const.CONF_HOST] == "192.168.1.10"
 
 
@@ -144,7 +157,7 @@ async def test_changing_the_settings_keeps_the_energy_corrections(
         form["flow_id"], {const.CONF_SCAN_INTERVAL: 10}
     )
 
-    assert entry.data[const.CONF_ENERGY_OFFSETS] == offsets
+    assert entry.options[const.CONF_ENERGY_OFFSETS] == offsets
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -178,7 +191,7 @@ async def _reconfigure(
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_reconfigure_shows_the_current_address(hass: HomeAssistant) -> None:
-    entry = _configured_entry(hass, {const.CONF_PORT: 5020})
+    entry = _configured_entry(hass, port=5020)
 
     result = await entry.start_reconfigure_flow(hass)
 
@@ -201,7 +214,7 @@ async def test_reconfigure_moves_the_entry_to_an_address_that_answers(
     assert entry.data[const.CONF_HOST] == "192.168.1.99"
     assert entry.data[const.CONF_PORT] == 5020
     # Only the connection changes.
-    assert entry.data[const.CONF_BATTERY_COUNT] == 3
+    assert entry.options[const.CONF_BATTERY_COUNT] == 3
     assert entry.title == "EcoFlow PowerOcean (192.168.1.99)"
 
 
@@ -295,7 +308,7 @@ async def test_the_inverter_fills_in_its_model_and_serial(
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].unique_id == SERIAL
-    assert result["data"][const.CONF_INVERTER_MODEL] == "powerocean_plus"
+    assert result["options"][const.CONF_INVERTER_MODEL] == "powerocean_plus"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
