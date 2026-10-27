@@ -13,7 +13,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
+from .const import CONF_HOST, CONF_PORT, DOMAIN
 from .control import ControlInputs
 from .coordinator import (
     EcoflowConfigEntry,
@@ -114,6 +114,26 @@ def _async_make_device_physical(hass: HomeAssistant, entry: EcoflowConfigEntry) 
     for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
         if device.entry_type is dr.DeviceEntryType.SERVICE:
             registry.async_update_device(device.id, entry_type=None)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Copy the settings of an older entry from its data to its options.
+
+    Copied, not moved: an earlier release still finds them in the data, and as
+    the version only goes up by a minor one, it still loads the entry.
+    """
+    if entry.version == 1 and entry.minor_version < 2:
+        connection = {CONF_HOST, CONF_PORT}
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                **{k: v for k, v in entry.data.items() if k not in connection},
+                **entry.options,
+            },
+            minor_version=2,
+        )
+        _LOGGER.debug("Copied the settings of %s to its options", entry.title)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> bool:

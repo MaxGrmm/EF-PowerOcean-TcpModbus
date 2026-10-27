@@ -55,6 +55,10 @@ async def test_the_serial_number_is_the_unique_id(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].unique_id == SERIAL
+    # The connection in the data, everything else in the options.
+    entry = result["result"]
+    assert entry.data == {const.CONF_HOST: "192.168.1.10", const.CONF_PORT: 502}
+    assert entry.options[const.CONF_SCAN_INTERVAL] == const.DEFAULT_SCAN_INTERVAL_S
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -91,39 +95,50 @@ async def test_an_inverter_that_moved_gets_its_new_address(hass: HomeAssistant) 
     assert entry.data[const.CONF_HOST] == "192.168.1.20"
 
 
-async def _change_options(
-    hass: HomeAssistant, entry: MockConfigEntry, host: str, port: int = 502
-):
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    return await hass.config_entries.options.async_configure(
-        result["flow_id"], {const.CONF_HOST: host, const.CONF_PORT: port}
-    )
+def _fields(result: Any) -> dict[Any, Any]:
+    schema = result["data_schema"]
+    assert schema is not None
+    return dict(schema.schema)
 
 
-def _configured_entry(hass: HomeAssistant, **data: Any) -> MockConfigEntry:
+def _configured_entry(
+    hass: HomeAssistant,
+    options: dict[str, Any] | None = None,
+    unique_id: str = SERIAL,
+    port: int = 502,
+) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=const.DOMAIN,
-        unique_id=SERIAL,
-        data={const.CONF_HOST: "192.168.1.10", const.CONF_PORT: 502, **data},
+        unique_id=unique_id,
+        minor_version=2,
+        title="EcoFlow PowerOcean (192.168.1.10)",
+        data={const.CONF_HOST: "192.168.1.10", const.CONF_PORT: port},
+        options=options or {},
     )
     entry.add_to_hass(hass)
     return entry
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_options_keep_the_address_without_testing_it_again(
+async def test_options_leave_the_connection_alone(
     hass: HomeAssistant, device_settings
 ) -> None:
+    """The options are the settings only; the address is for reconfigure."""
     entry = _configured_entry(hass)
 
-    result = await _change_options(hass, entry, "192.168.1.10")
+    form = await hass.config_entries.options.async_init(entry.entry_id)
+    assert form["step_id"] == "init"
+    assert const.CONF_HOST not in _fields(form)
+    assert const.CONF_PORT not in _fields(form)
+
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {const.CONF_SCAN_INTERVAL: 10}
+        form["flow_id"], {const.CONF_SCAN_INTERVAL: 10}
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     device_settings.assert_not_awaited()
-    assert entry.data[const.CONF_SCAN_INTERVAL] == 10
+    assert entry.options[const.CONF_SCAN_INTERVAL] == 10
+    assert entry.data[const.CONF_HOST] == "192.168.1.10"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
@@ -131,14 +146,14 @@ async def test_changing_the_settings_keeps_the_energy_corrections(
     hass: HomeAssistant,
 ) -> None:
     offsets = {"grid_export_total": 1041.23}
-    entry = _configured_entry(hass, **{const.CONF_ENERGY_OFFSETS: offsets})
+    entry = _configured_entry(hass, {const.CONF_ENERGY_OFFSETS: offsets})
 
-    result = await _change_options(hass, entry, "192.168.1.10")
+    form = await hass.config_entries.options.async_init(entry.entry_id)
     await hass.config_entries.options.async_configure(
-        result["flow_id"], {const.CONF_SCAN_INTERVAL: 10}
+        form["flow_id"], {const.CONF_SCAN_INTERVAL: 10}
     )
 
-    assert entry.data[const.CONF_ENERGY_OFFSETS] == offsets
+    assert entry.options[const.CONF_ENERGY_OFFSETS] == offsets
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -147,38 +162,127 @@ async def test_energy_totals_wait_for_the_inverter_to_report_them(
 ) -> None:
     entry = _configured_entry(hass)
 
-    result = await _change_options(hass, entry, "192.168.1.10")
+    result = await hass.config_entries.options.async_init(entry.entry_id)
 
-    assert result["step_id"] == "parameters"
-    assert config_flow.ENERGY_TOTALS not in result["data_schema"].schema
+    assert result["step_id"] == "init"
+    assert config_flow.ENERGY_TOTALS not in _fields(result)
+
+
+async def _reconfigure(
+    hass: HomeAssistant, entry: MockConfigEntry, host: str, port: int = 502
+):
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    with patch(
+        "custom_components.ef_powerocean_tcpmodbus.async_setup_entry",
+        return_value=True,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {const.CONF_HOST: host, const.CONF_PORT: port}
+        )
+        await hass.async_block_till_done()
+    return result
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_options_refuse_an_address_that_does_not_answer(
+async def test_reconfigure_shows_the_current_address(hass: HomeAssistant) -> None:
+    entry = _configured_entry(hass, port=5020)
+
+    result = await entry.start_reconfigure_flow(hass)
+
+    suggested = {
+        str(key): key.description["suggested_value"] for key in _fields(result)
+    }
+    assert suggested == {const.CONF_HOST: "192.168.1.10", const.CONF_PORT: 5020}
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
+async def test_reconfigure_moves_the_entry_to_an_address_that_answers(
+    hass: HomeAssistant,
+) -> None:
+    entry = _configured_entry(hass, {const.CONF_BATTERY_COUNT: 3})
+
+    result = await _reconfigure(hass, entry, "192.168.1.99", 5020)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[const.CONF_HOST] == "192.168.1.99"
+    assert entry.data[const.CONF_PORT] == 5020
+    # Only the connection changes.
+    assert entry.options[const.CONF_BATTERY_COUNT] == 3
+    assert entry.title == "EcoFlow PowerOcean (192.168.1.99)"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
+async def test_reconfigure_keeps_a_title_the_user_chose(hass: HomeAssistant) -> None:
+    entry = _configured_entry(hass)
+    hass.config_entries.async_update_entry(entry, title="Garage")
+
+    await _reconfigure(hass, entry, "192.168.1.99")
+
+    assert entry.title == "Garage"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_reconfigure_refuses_an_address_that_does_not_answer(
     hass: HomeAssistant, device_settings
 ) -> None:
     entry = _configured_entry(hass)
     device_settings.return_value = None
 
-    result = await _change_options(hass, entry, "192.168.1.99")
+    result = await _reconfigure(hass, entry, "192.168.1.99")
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "cannot_connect"}
     assert entry.data[const.CONF_HOST] == "192.168.1.10"
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_reconfigure_refuses_another_inverter(
+    hass: HomeAssistant, device_settings
+) -> None:
+    entry = _configured_entry(hass)
+    device_settings.return_value = {
+        config_flow.DEVICE_SERIAL_NUMBER: "HJ31ZAS2OTHER002"
+    }
+
+    result = await _reconfigure(hass, entry, "192.168.1.99")
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "wrong_device"
+    assert entry.data[const.CONF_HOST] == "192.168.1.10"
+
+
 @pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
-async def test_options_move_the_entry_to_an_address_that_answers(
+async def test_reconfigure_moves_an_entry_still_keyed_by_its_address(
+    hass: HomeAssistant,
+) -> None:
+    """Without a serial to compare, the entry follows the address it is given."""
+    entry = _configured_entry(hass, unique_id="192.168.1.10:502")
+
+    result = await _reconfigure(hass, entry, "192.168.1.99")
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[const.CONF_HOST] == "192.168.1.99"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
+async def test_reconfigure_refuses_the_address_of_another_entry(
     hass: HomeAssistant,
 ) -> None:
     entry = _configured_entry(hass)
+    MockConfigEntry(
+        domain=const.DOMAIN,
+        unique_id="HJ31ZAS2OTHER002",
+        data={const.CONF_HOST: "192.168.1.99", const.CONF_PORT: 502},
+    ).add_to_hass(hass)
 
-    result = await _change_options(hass, entry, "192.168.1.99", 5020)
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    result = await _reconfigure(hass, entry, "192.168.1.99")
 
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.data[const.CONF_HOST] == "192.168.1.99"
-    assert entry.data[const.CONF_PORT] == 5020
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert entry.data[const.CONF_HOST] == "192.168.1.10"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -200,7 +304,7 @@ async def test_the_inverter_fills_in_its_model_and_serial(
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].unique_id == SERIAL
-    assert result["data"][const.CONF_INVERTER_MODEL] == "powerocean_plus"
+    assert result["options"][const.CONF_INVERTER_MODEL] == "powerocean_plus"
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
@@ -239,7 +343,7 @@ def test_every_portal_total_names_its_portal_term_in_every_language() -> None:
 
     for path in files:
         steps = json.loads(path.read_text(encoding="utf-8"))["options"]["step"]
-        section = steps["parameters"]["sections"][config_flow.ENERGY_TOTALS]
+        section = steps["init"]["sections"][config_flow.ENERGY_TOTALS]
         totals = set(section["data"]) - {config_flow.REMOVE_CORRECTIONS}
         assert totals == const.ECOFLOW_PORTAL_TOTALS, path.name
         assert set(section["data_description"]) >= totals, path.name

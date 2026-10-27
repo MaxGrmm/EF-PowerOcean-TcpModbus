@@ -154,27 +154,31 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Polls in a row each optional block failed, by its start address.
         self._optional_stalls: dict[int, int] = {}
         self.port: int = config_entry.data.get(CONF_PORT, DEFAULT_PORT)
-        self.scan_interval: int = config_entry.data.get(
+        self.scan_interval: int = config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_S
         )
-        battery_count = config_entry.data.get(CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT)
+        battery_count = config_entry.options.get(
+            CONF_BATTERY_COUNT, DEFAULT_BATTERY_COUNT
+        )
         # Until the capacity is read, count every module as the largest kind.
         largest_module_wh = max(module.reported_wh for module in BATTERY_MODULES)
         charge_w, discharge_w = battery_power_limits(battery_count * largest_module_wh)
         self.limits = {
             CONF_BATTERY_COUNT: battery_count,
-            CONF_MAX_GRID_POWER: config_entry.data.get(
+            CONF_MAX_GRID_POWER: config_entry.options.get(
                 CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER
             ),
-            CONF_MAX_SOLAR_POWER: config_entry.data.get(
+            CONF_MAX_SOLAR_POWER: config_entry.options.get(
                 CONF_MAX_SOLAR_POWER, DEFAULT_MAX_SOLAR_POWER
             ),
             CONF_MAX_BATTERY_CHARGED_POWER: charge_w,
             CONF_MAX_BATTERY_DISCHARGED_POWER: discharge_w,
         }
-        self._ena_calc_solar_power = config_entry.data.get(CONF_CALC_SOLAR_POWER, False)
+        self._ena_calc_solar_power = config_entry.options.get(
+            CONF_CALC_SOLAR_POWER, False
+        )
         self.inverter_model = InverterModel(
-            config_entry.data.get(CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL)
+            config_entry.options.get(CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL)
         )
         self._register_blocks = register_blocks_for(self.inverter_model)
         # The words the last poll read, by the address each read started at.
@@ -205,7 +209,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             registers_by_key=self._registers_by_key,
             limits=self.limits,
             inverter_model=self.inverter_model,
-            enabled=config_entry.data.get(CONF_MODBUS_CONTROL, False),
+            enabled=config_entry.options.get(CONF_MODBUS_CONTROL, False),
             scan_interval_s=self.scan_interval,
             on_update=self.async_update_listeners,
             on_refresh=self.async_refresh,
@@ -216,7 +220,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             start_task=hass.async_create_background_task,
             battery_reserve=battery_reserve_for(
                 self.inverter_model,
-                config_entry.data.get(CONF_BATTERY_RESERVE),
+                config_entry.options.get(CONF_BATTERY_RESERVE),
             ),
         )
         self.control_test = ControlTest(self)
@@ -227,7 +231,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Only totals EcoFlow's portal shows are corrected; the others are the
         # inverter's value as it is.
         self._energy_offsets = offsets_from(
-            config_entry.data.get(CONF_ENERGY_OFFSETS), ECOFLOW_PORTAL_TOTALS
+            config_entry.options.get(CONF_ENERGY_OFFSETS), ECOFLOW_PORTAL_TOTALS
         )
         self._status: CoordinatorStatus | None = None
         self._store: Store[dict[str, Any]] | None = Store(
@@ -771,8 +775,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Save new offsets to the entry, whose reload then applies them."""
         self.hass.config_entries.async_update_entry(
             self.config_entry,
-            data={
-                **self.config_entry.data,
+            options={
+                **self.config_entry.options,
                 CONF_ENERGY_OFFSETS: offsets_from(offsets, ECOFLOW_PORTAL_TOTALS),
             },
         )
