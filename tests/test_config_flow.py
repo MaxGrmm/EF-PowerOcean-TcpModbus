@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import socket
+from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -97,11 +100,11 @@ async def _change_options(
     )
 
 
-def _configured_entry(hass: HomeAssistant) -> MockConfigEntry:
+def _configured_entry(hass: HomeAssistant, **data: Any) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=const.DOMAIN,
         unique_id=SERIAL,
-        data={const.CONF_HOST: "192.168.1.10", const.CONF_PORT: 502},
+        data={const.CONF_HOST: "192.168.1.10", const.CONF_PORT: 502, **data},
     )
     entry.add_to_hass(hass)
     return entry
@@ -121,6 +124,33 @@ async def test_options_keep_the_address_without_testing_it_again(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     device_settings.assert_not_awaited()
     assert entry.data[const.CONF_SCAN_INTERVAL] == 10
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
+async def test_changing_the_settings_keeps_the_energy_corrections(
+    hass: HomeAssistant,
+) -> None:
+    offsets = {"grid_export_total": 1041.23}
+    entry = _configured_entry(hass, **{const.CONF_ENERGY_OFFSETS: offsets})
+
+    result = await _change_options(hass, entry, "192.168.1.10")
+    await hass.config_entries.options.async_configure(
+        result["flow_id"], {const.CONF_SCAN_INTERVAL: 10}
+    )
+
+    assert entry.data[const.CONF_ENERGY_OFFSETS] == offsets
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_energy_totals_wait_for_the_inverter_to_report_them(
+    hass: HomeAssistant,
+) -> None:
+    entry = _configured_entry(hass)
+
+    result = await _change_options(hass, entry, "192.168.1.10")
+
+    assert result["step_id"] == "parameters"
+    assert config_flow.ENERGY_TOTALS not in result["data_schema"].schema
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -183,3 +213,33 @@ async def test_an_address_nothing_answers_on_is_reported(hass: HomeAssistant) ->
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "cannot_connect"}
+
+
+def test_section_descriptions_are_plain_text_in_every_language() -> None:
+    """The frontend shows a section's description as plain text, unlike a field's.
+
+    A link or placeholder there shows up raw, so those belong in data_description.
+    """
+    component = Path(const.__file__).parent
+    files = sorted(component.glob("translations/*.json"))
+    assert files
+
+    for path in files:
+        steps = json.loads(path.read_text(encoding="utf-8"))["options"]["step"]
+        for step in steps.values():
+            for name, section in step.get("sections", {}).items():
+                assert "](" not in section["description"], (path.name, name)
+                assert "{" not in section["description"], (path.name, name)
+
+
+def test_every_portal_total_names_its_portal_term_in_every_language() -> None:
+    component = Path(const.__file__).parent
+    files = sorted(component.glob("translations/*.json"))
+    assert files
+
+    for path in files:
+        steps = json.loads(path.read_text(encoding="utf-8"))["options"]["step"]
+        section = steps["parameters"]["sections"][config_flow.ENERGY_TOTALS]
+        totals = set(section["data"]) - {config_flow.REMOVE_CORRECTIONS}
+        assert totals == const.ECOFLOW_PORTAL_TOTALS, path.name
+        assert set(section["data_description"]) >= totals, path.name

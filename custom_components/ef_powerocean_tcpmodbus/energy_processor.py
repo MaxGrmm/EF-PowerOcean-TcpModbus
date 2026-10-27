@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Final
+from typing import Any, Final, TypeIs
 
 from homeassistant.util import dt
 
@@ -28,6 +28,14 @@ ENERGY_KEYS: Final = frozenset(
     for energy_sensor in ENERGY_SENSOR_MAP
     for key in (energy_sensor.key, energy_sensor.total_source)
     if key is not None
+)
+
+
+# The lifetime counters the device reports, as opposed to the calculated ones.
+DEVICE_TOTAL_KEYS: Final = tuple(
+    energy_sensor.key
+    for energy_sensor in ENERGY_SENSOR_MAP
+    if not energy_sensor.is_calculated and not energy_sensor.resets_daily
 )
 
 
@@ -69,6 +77,32 @@ class HeldTotal:
     since: datetime | None
 
 
+def offsets_from(
+    stored: Any, keys: Collection[str] = DEVICE_TOTAL_KEYS
+) -> dict[str, float]:
+    """Return the usable offsets of a stored mapping, by the total they correct.
+
+    Keys not among the given totals and values that are not a finite, non-zero
+    number are left out, so a damaged entry corrects nothing.
+    """
+    if not isinstance(stored, Mapping):
+        return {}
+    return {
+        key: float(value)
+        for key, value in stored.items()
+        if key in keys
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value != 0
+    }
+
+
+def _is_reading(value: Any) -> TypeIs[float]:
+    """Whether a device total is a real reading: a number above 0."""
+    return isinstance(value, (int, float)) and math.isfinite(value) and value > 0
+
+
 def _rises_agree(total_rise: float, daily_rise: float) -> bool:
     """Whether a lifetime counter rose as much as its daily counter, never lower."""
     return daily_rise >= 0 and abs(total_rise - daily_rise) <= (
@@ -92,10 +126,15 @@ class EnergyProcessor:
       counter would, so a one-off spike cannot take its place.
     - A 0 baseline that an earlier version accepted gives way to the device's total
       once that total rises in step with the device's daily counter (#169).
+    - A user's offset is added to a device total before anything else, so a total
+      the inverter reset continues where it was. A changed offset moves its total
+      once, without the move being held as implausible.
     """
 
     def __init__(self, limits: dict[str, Any]) -> None:
         self.limits = limits
+        # The offsets the saved totals include, by total.
+        self.offsets: dict[str, float] = {}
         self.accepted_at: dict[str, datetime] = {}
         self.daily_snapshots: dict[str, float] = {}
         self.last_rollover: datetime | None = None
@@ -118,6 +157,7 @@ class EnergyProcessor:
             "last_daily_rollover": self.last_rollover.isoformat()
             if self.last_rollover is not None
             else None,
+            "energy_offsets": self.offsets,
         }
 
     def load_state(self, stored: dict[str, Any]) -> None:
@@ -129,6 +169,60 @@ class EnergyProcessor:
         }
         self.daily_snapshots = stored.get("daily_energy_snapshots") or {}
         self.last_rollover = parse_datetime(stored.get("last_daily_rollover"))
+        self.offsets = offsets_from(stored.get("energy_offsets"))
+
+    def apply_offsets(self, raw_data: Mapping[str, Any]) -> dict[str, Any]:
+        """Add each total's offset to what the device reports for it.
+
+        A read of 0 is left as it is: it is the glitch the validation holds back,
+        and with the offset added it would pass for a real value (#169).
+        """
+        result = dict(raw_data)
+        for key, offset in self.offsets.items():
+            if _is_reading(value := result.get(key)):
+                result[key] = round(value + offset, 3)
+        return result
+
+    def change_offsets(
+        self, offsets: Mapping[str, float], last_data: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Switch to new offsets; return the last data with their totals moved.
+
+        A total whose offset changed moves to its last device read plus the new
+        offset and is accepted there, so the correction is not held as a jump.
+        That also keeps a held total at its published value when its offset was
+        worked out from it. Today's value stays as it was.
+        """
+        result = dict(last_data)
+        now = dt.now()
+        for key in DEVICE_TOTAL_KEYS:
+            old, new = self.offsets.get(key, 0.0), offsets.get(key, 0.0)
+            baseline = result.get(key)
+            if new == old or not isinstance(baseline, (int, float)):
+                continue
+            device = result.get(f"{key}_raw")
+            moved = round(
+                device + new if _is_reading(device) else baseline + new - old, 3
+            )
+            result[key] = moved
+            daily_key = DAILY_OF_TOTAL.get(key)
+            if daily_key in self.daily_snapshots:
+                self.daily_snapshots[daily_key] = round(
+                    self.daily_snapshots[daily_key] + moved - baseline, 3
+                )
+            self.accepted_at[key] = now
+            self.held.pop(key, None)
+            self.first_reads.pop(key, None)
+            self.witness_runs.pop(key, None)
+            _LOGGER.info(
+                "Offset of %s changed from %s to %s kWh; it continues from %s kWh",
+                key,
+                old,
+                new,
+                moved,
+            )
+        self.offsets = dict(offsets)
+        return result
 
     def validate_totals(
         self,
@@ -441,11 +535,7 @@ class EnergyProcessor:
         Shows what the device reports next to the validated total, so a held
         total can be told apart from a device that reports the same.
         """
-        return {
-            f"{energy_sensor.key}_raw": raw_data.get(energy_sensor.key)
-            for energy_sensor in ENERGY_SENSOR_MAP
-            if not energy_sensor.is_calculated and not energy_sensor.resets_daily
-        }
+        return {f"{key}_raw": raw_data.get(key) for key in DEVICE_TOTAL_KEYS}
 
     @staticmethod
     def raw_daily_values(raw_data: dict[str, Any]) -> dict[str, Any]:

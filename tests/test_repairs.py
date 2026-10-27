@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 from string import Formatter
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import AsyncMock
+from typing import Any, cast
+from unittest.mock import AsyncMock, Mock
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -22,7 +22,10 @@ from custom_components.ef_powerocean_tcpmodbus.repairs import (
 )
 
 BUG_FORM = Path(__file__).parents[1] / ".github" / "ISSUE_TEMPLATE" / "bug_report.yml"
-HELD = "- sensor.grid_export_total: 1548.73 kWh shown, 507.50 kWh on the inverter"
+HELD = (
+    "- sensor.grid_export_total: 1548.73 kWh in Home Assistant, "
+    "507.50 kWh on the inverter"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -58,19 +61,21 @@ def _held_coordinator() -> SimpleNamespace:
         long_held_totals={"grid_export_total": object()},
         describe_held_totals=lambda: HELD,
         async_take_device_totals=AsyncMock(return_value={"grid_export_total": 507.5}),
+        async_keep_shown_totals=Mock(),
         inverter_model=models.InverterModel.POWEROCEAN_PLUS,
         identity=models.DeviceIdentity(firmware_version="V3.0.20.54"),
     )
 
 
-def test_the_flow_shows_what_it_will_take_before_taking_it() -> None:
+def test_the_flow_shows_the_held_totals_before_changing_anything() -> None:
     coordinator = _held_coordinator()
     result = asyncio.run(_flow(coordinator).async_step_init())
 
-    assert result["type"] == "form"
-    assert result["step_id"] == "confirm"
+    assert result["type"] == "menu"
+    assert result.get("menu_options") == ["keep_shown", "take_device"]
     assert (result.get("description_placeholders") or {})["totals"] == HELD
     coordinator.async_take_device_totals.assert_not_called()
+    coordinator.async_keep_shown_totals.assert_not_called()
 
 
 def test_the_flow_links_to_the_diagnostics_and_a_filled_in_bug_report() -> None:
@@ -102,12 +107,37 @@ def test_every_model_name_is_an_option_of_the_bug_form() -> None:
         assert key in fields
 
 
-def test_confirming_takes_the_device_totals() -> None:
+def test_taking_the_inverters_value_takes_the_device_totals() -> None:
     coordinator = _held_coordinator()
-    result = asyncio.run(_flow(coordinator).async_step_confirm({}))
+    result = asyncio.run(_flow(coordinator).async_step_take_device())
 
     assert result["type"] == "create_entry"
     coordinator.async_take_device_totals.assert_awaited_once()
+    coordinator.async_keep_shown_totals.assert_not_called()
+
+
+def test_continuing_from_the_value_shown_keeps_the_totals() -> None:
+    coordinator = _held_coordinator()
+    result = asyncio.run(_flow(coordinator).async_step_keep_shown())
+
+    assert result["type"] == "create_entry"
+    coordinator.async_keep_shown_totals.assert_called_once()
+    coordinator.async_take_device_totals.assert_not_called()
+
+
+@pytest.mark.parametrize("step", ("keep_shown", "take_device"))
+def test_a_choice_made_after_the_totals_were_released_changes_nothing(
+    step: str,
+) -> None:
+    coordinator = _held_coordinator()
+    flow = _flow(coordinator)
+    coordinator.long_held_totals = {}
+
+    result = asyncio.run(getattr(flow, f"async_step_{step}")())
+
+    assert result["type"] == "abort"
+    coordinator.async_keep_shown_totals.assert_not_called()
+    coordinator.async_take_device_totals.assert_not_called()
 
 
 def test_the_flow_aborts_when_nothing_is_held_anymore() -> None:
@@ -123,8 +153,9 @@ def test_the_issue_id_home_assistant_passes_in_is_not_a_confirmation() -> None:
     coordinator = _held_coordinator()
     result = asyncio.run(_flow(coordinator).async_step_init({"issue_id": "issue"}))
 
-    assert result["type"] == "form"
+    assert result["type"] == "menu"
     coordinator.async_take_device_totals.assert_not_called()
+    coordinator.async_keep_shown_totals.assert_not_called()
 
 
 def test_every_language_uses_exactly_the_placeholders_the_flow_provides() -> None:
@@ -133,14 +164,18 @@ def test_every_language_uses_exactly_the_placeholders_the_flow_provides() -> Non
     assert files
     result = asyncio.run(_flow(_held_coordinator()).async_step_init())
     provided = set(result.get("description_placeholders") or {})
+    choices = set(cast(list[str], result.get("menu_options")))
 
     for path in files:
         issue = json.loads(path.read_text(encoding="utf-8"))["issues"][
             "energy_totals_held"
         ]
-        description = issue["fix_flow"]["step"]["confirm"]["description"]
-        used = {name for _, name, _, _ in Formatter().parse(description) if name}
+        step = issue["fix_flow"]["step"]["init"]
+        used = {
+            name for _, name, _, _ in Formatter().parse(step["description"]) if name
+        }
         assert used == provided, path.name
+        assert set(step["menu_options"]) == choices, path.name
         assert {
             name for _, name, _, _ in Formatter().parse(issue["title"]) if name
         } == {"host"}, path.name

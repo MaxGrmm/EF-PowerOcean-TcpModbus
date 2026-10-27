@@ -98,7 +98,7 @@ Or install it from within HACS:
 | Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
 | Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
 
-To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**
+To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**. The collapsed **Correct energy totals** section on the second page is for a lifetime counter the inverter reset; see [Correcting a lifetime total](#correcting-a-lifetime-total).
 
 ---
 
@@ -456,7 +456,16 @@ The lifetime totals above are checked before they are published: a value that dr
 | Inverter AC Input Total (Device)  | `inverter_ac_in_total_raw`  | kWh  |
 | Inverter AC Output Total (Device) | `inverter_ac_out_total_raw` | kWh  |
 
-If a total has been held for more than 24 hours while the device reports a value above 0, a repairs issue lists it with both values and offers to take the device's value. If the values look wrong instead, it links to a filled-in bug report and to the device page for the diagnostics download. This happens when the inverter resets a counter or a wrong value was accepted earlier. A total held at 0 while the device's total rises in step with its own daily counter is corrected automatically.
+If a total has been held for more than 24 hours while the device reports a value above 0, a repairs issue lists it with both values. It offers to keep Home Assistant's total, or to switch to the inverter's. If the values look wrong instead, it links to a filled-in bug report and to the device page for the diagnostics download. This happens when the inverter resets a counter or a wrong value was accepted earlier. A total held at 0 while the device's total rises in step with its own daily counter is corrected automatically.
+
+#### Correcting a lifetime total
+
+Some inverters reset a lifetime counter, while EcoFlow's portal keeps counting. A total can be corrected so it continues as before, by adding an offset to what the device reports:
+
+- **Keep Home Assistant's totals** in the repairs issue keeps each held total at its value in Home Assistant and works the offset out from it, so the Energy dashboard continues without a jump.
+- **Correct energy totals**, a collapsed section on the second page of **Configure**, sets a total to a value you enter, such as the one under historical data in [EcoFlow's portal](https://user-portal.ecoflow.com/user/eu/en/main/home/dashboard/historicalData). Leave the totals that are right as they are. Decimals can be typed with a comma or a point. Each field names the matching total in the portal, such as "From solar" for Solar Yield Total. The inverter's AC input and output totals are not in the portal, so they are never corrected: a held AC total takes the inverter's value after 24 hours instead of raising the repairs issue. To remove a correction, enter the value of the total's (Device) sensor. While any correction is set, the section also has a **Reset all totals to the inverter's values** toggle that removes them all.
+
+Today's values are not changed by a correction, and the (Device) sensors keep showing what the inverter reports. A value lower than the total shown asks for confirmation first: Home Assistant records a drop as negative energy, or, if it is more than 10%, as a new meter that adds the whole value to the Energy dashboard. Developer tools → Statistics → Adjust sum corrects that history. House Consumption Total is calculated from the corrected totals, so it moves with a correction: up in one step, or held until it has caught up if the correction lowers it. The offsets are in the diagnostics download under `energy_offsets`.
 
 The diagnostics download has an `energy` section with every counter as published, as the device reports it (totals and today), the time each total was last accepted, which totals are held, the daily snapshots and the maximum powers the totals are checked against.
 Its `raw_registers` section holds every word the last poll read, undecoded, by the

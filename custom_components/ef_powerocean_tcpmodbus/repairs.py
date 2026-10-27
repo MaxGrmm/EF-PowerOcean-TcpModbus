@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
-import voluptuous as vol
 from homeassistant.components.repairs import RepairsFlow
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
@@ -22,7 +21,7 @@ if TYPE_CHECKING:
 
 
 class HeldTotalsRepairFlow(RepairsFlow):
-    """Take the inverter's value for energy totals held for over a day."""
+    """Continue energy totals held for over a day, or take the inverter's value."""
 
     def __init__(self, entry_id: str) -> None:
         self._entry_id = entry_id
@@ -34,35 +33,53 @@ class HeldTotalsRepairFlow(RepairsFlow):
         coordinator: EcoflowCoordinator | None = getattr(entry, "runtime_data", None)
         return coordinator
 
-    async def async_step_init(
-        self,
-        user_input: dict[str, str] | None = None,  # noqa: ARG002 - not a submission
-    ) -> RepairsFlowResult:
-        """Always show the confirmation first.
-
-        Home Assistant passes the issue id as this step's input, which must never
-        count as the user confirming.
-        """
-        return await self.async_step_confirm()
-
-    async def async_step_confirm(
-        self, user_input: dict[str, str] | None = None
-    ) -> RepairsFlowResult:
+    def _held_coordinator(self) -> EcoflowCoordinator | None:
         coordinator = self._coordinator()
         if coordinator is None or not coordinator.long_held_totals:
+            return None
+        return coordinator
+
+    async def async_step_init(
+        self,
+        user_input: dict[str, str] | None = None,  # noqa: ARG002 - not a choice
+    ) -> RepairsFlowResult:
+        """Show the held totals and the choices.
+
+        Home Assistant passes the issue id as this step's input, which must never
+        count as the user choosing.
+        """
+        if (coordinator := self._held_coordinator()) is None:
             return self.async_abort(reason="not_held")
-        if user_input is not None:
-            await coordinator.async_take_device_totals()
-            return self.async_create_entry(data={})
-        return self.async_show_form(
-            step_id="confirm",
-            data_schema=vol.Schema({}),
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["keep_shown", "take_device"],
             description_placeholders={
                 "totals": coordinator.describe_held_totals(),
                 "device_page": self._device_page(),
                 "report_url": await self._report_url(coordinator),
+                "settings_page": f"/config/integrations/integration/{DOMAIN}",
             },
         )
+
+    async def async_step_keep_shown(
+        self,
+        user_input: dict[str, str] | None = None,  # noqa: ARG002 - a menu choice
+    ) -> RepairsFlowResult:
+        """Keep each held total at its value in Home Assistant, with an offset."""
+        if (coordinator := self._held_coordinator()) is None:
+            return self.async_abort(reason="not_held")
+        coordinator.async_keep_shown_totals()
+        return self.async_create_entry(data={})
+
+    async def async_step_take_device(
+        self,
+        user_input: dict[str, str] | None = None,  # noqa: ARG002 - a menu choice
+    ) -> RepairsFlowResult:
+        """Switch each held total to the inverter's value."""
+        if (coordinator := self._held_coordinator()) is None:
+            return self.async_abort(reason="not_held")
+        await coordinator.async_take_device_totals()
+        return self.async_create_entry(data={})
 
     def _device_page(self) -> str:
         """Return the inverter's device page, whose menu offers the diagnostics.

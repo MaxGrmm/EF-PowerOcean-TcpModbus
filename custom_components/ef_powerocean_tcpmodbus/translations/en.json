@@ -75,11 +75,35 @@
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
           "battery_reserve": "Native: the inverter enforces the reserve itself, like the one set in the EcoFlow app, but not every model accepts a change to it over Modbus. Emulated: the integration imitates the app's reserve with its own logic, while Modbus Control is on. Set for your model; change it only to test a model."
+        },
+        "sections": {
+          "energy_totals": {
+            "name": "Correct energy totals",
+            "description": "Only needed if the inverter reset one of its lifetime energy counters. Enter the value from EcoFlow's portal for each total that is wrong and leave the others as they are.",
+            "data": {
+              "grid_import_total": "Grid Import Total",
+              "grid_export_total": "Grid Export Total",
+              "bat_charged_total": "Battery Charged Total",
+              "bat_discharged_total": "Battery Discharged Total",
+              "solar_total": "Solar Yield Total",
+              "remove_corrections": "Reset all totals to the inverter's values"
+            },
+            "data_description": {
+              "grid_import_total": "Shown as “From grid” in [EcoFlow's portal]({portal_url}).",
+              "grid_export_total": "Shown as “To grid” in [EcoFlow's portal]({portal_url}).",
+              "bat_charged_total": "Shown as “To battery” in [EcoFlow's portal]({portal_url}).",
+              "bat_discharged_total": "Shown as “From battery” in [EcoFlow's portal]({portal_url}).",
+              "solar_total": "Shown as “From solar” in [EcoFlow's portal]({portal_url}).",
+              "remove_corrections": "Removes every correction, so each total shows what the inverter reports. The values above are ignored."
+            }
+          }
         }
       }
     },
     "error": {
-      "cannot_connect": "Connection failed - please check IP address and port"
+      "cannot_connect": "Connection failed - please check IP address and port",
+      "invalid_energy_total": "Enter each energy total as a number, with a comma or a point for decimals and without thousands separators.",
+      "energy_total_lowered": "This would lower a total. Home Assistant records a drop as negative energy, or, if it is more than 10%, as a new meter that adds the whole value to the Energy dashboard. Check the values, then submit again to save them anyway. You can correct the history afterwards under Developer tools → Statistics → Adjust sum."
     }
   },
   "issues": {
@@ -95,9 +119,13 @@
       "title": "Energy totals of the inverter at {host} have been held for over a day",
       "fix_flow": {
         "step": {
-          "confirm": {
-            "title": "Take the inverter's energy totals",
-            "description": "These lifetime energy totals have been held for more than 24 hours, because the inverter reports a value the integration does not consider plausible:\n\n{totals}\n\nThis usually means the inverter reset its counter, or a wrong value was accepted earlier. Submit to take the inverter's values; each total then continues from there.\n\nThe Energy dashboard records the difference in one step, and a lower value counts as a meter reset. You can correct the history afterwards under Developer tools → Statistics → Adjust sum.\n\nIf you believe these values are wrong, don't submit. Instead, open the inverter's [device page]({device_page}), choose **Download diagnostics** from its ⋮ menu, and attach the file to this [bug report]({report_url}), which is already filled in."
+          "init": {
+            "title": "Energy totals held for over a day",
+            "description": "These lifetime energy totals have been held for more than 24 hours, because the inverter reports a value the integration does not consider plausible:\n\n{totals}\n\nThis usually means the inverter reset its counter, or a wrong value was accepted earlier.\n\n**Keep Home Assistant's totals** if the inverter reset its counter. Each total stays at its value in Home Assistant and counts on from there: the difference to the inverter is added to every reading from now on, and the Energy dashboard continues without a jump. You can match the totals to EcoFlow's portal later under the integration's [settings]({settings_page}): choose Configure, and on the second page open Correct energy totals.\n\n**Switch to the inverter's totals** sets each total to the inverter's value and counts on from there. The Energy dashboard records the difference in one step. If the inverter's value is lower, Home Assistant records the drop as negative energy, or, if it is more than 10% lower, as a new meter that adds the whole value. You can correct the history afterwards under Developer tools → Statistics → Adjust sum.\n\nIf you believe these values are wrong, choose neither. Instead, open the inverter's [device page]({device_page}), choose **Download diagnostics** from its ⋮ menu, and attach the file to this [bug report]({report_url}), which is already filled in.",
+            "menu_options": {
+              "keep_shown": "Keep Home Assistant's totals",
+              "take_device": "Switch to the inverter's totals"
+            }
           }
         },
         "abort": {

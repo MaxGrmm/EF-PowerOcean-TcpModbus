@@ -65,6 +65,9 @@ CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_CALC_SOLAR_POWER: Final = "calc_solar_power"
 CONF_MODBUS_CONTROL: Final = "modbus_control"
 CONF_INVERTER_MODEL: Final = "inverter_model"
+# kWh added to what the device reports for a lifetime total, by its key. Set by the
+# user for a counter the inverter reset, so the total continues as in EcoFlow's portal.
+CONF_ENERGY_OFFSETS: Final = "energy_offsets"
 
 MAX_BATTERY_COUNT: Final = 12
 # At most 12 of the 8 kWh modules, with some margin.
@@ -153,6 +156,21 @@ HELD_TOTAL_ISSUE_AFTER_S: Final = 24 * 3600
 # Where a user reports a held total they believe is wrong, with the bug form's
 # fields filled in from the device.
 BUG_REPORT_URL: Final = "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues/new"
+# EcoFlow's portal page with the lifetime energy totals, in one of the languages
+# below. The first is used for any other language.
+ECOFLOW_PORTAL_LANGUAGES: Final = ("en", "de")
+ECOFLOW_PORTAL_HISTORY_URL: Final = "https://user-portal.ecoflow.com/user/eu/{language}/main/home/dashboard/historicalData"
+# The lifetime totals EcoFlow's portal shows, so the ones a user can correct to it.
+# The inverter's AC input and output totals are not among them.
+ECOFLOW_PORTAL_TOTALS: Final = frozenset(
+    {
+        "solar_total",
+        "bat_discharged_total",
+        "bat_charged_total",
+        "grid_import_total",
+        "grid_export_total",
+    }
+)
 MODBUS_DISABLED_READ_THRESHOLD: Final = 3
 
 
