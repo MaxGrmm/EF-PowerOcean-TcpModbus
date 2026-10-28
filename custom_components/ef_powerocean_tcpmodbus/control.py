@@ -67,11 +67,18 @@ from .models import (
     encode_register,
 )
 from .plans import CHARGE, DISCHARGE, Mode, ModeState, Step, Way, battery_power
+from .reading_checks import ReadingChecks
 
 _LOGGER = logging.getLogger(__name__)
 
 # Device states in which control steps aside and leaves the inverter to itself.
-_STEPPED_ASIDE = frozenset({ControlStatus.OFF_GRID, ControlStatus.BATTERY_DISCONNECTED})
+_STEPPED_ASIDE = frozenset(
+    {
+        ControlStatus.OFF_GRID,
+        ControlStatus.BATTERY_DISCONNECTED,
+        ControlStatus.INCONSISTENT_READINGS,
+    }
+)
 
 # Latches the next frame alone could bring back wrong, kept across a restart under
 # these names: each is its attribute without the leading underscore.
@@ -330,20 +337,17 @@ class ControlManager:
         # What the inverter reports about itself, judged only once it has proven to
         # report it: a model that never sets a bit must behave as before this check.
         self._report: DeviceReport | None = None
-        # A battery is only missing once one has been seen.
-        self._bms_seen = False
         # The report is only trusted to say a command is not followed once it has
         # shown one being followed.
         self._follow_proven = False
         self._not_followed_polls = 0
         self._resends = 0
         self._not_accepted = False
-        # Device states take effect after this many polls in a row, so one odd read
-        # neither interrupts the mode nor flickers the status.
-        self._aside_candidate: ControlStatus | None = None
-        self._aside_polls = 0
-        self._aside: ControlStatus | None = None
         self._fault_polls = 0
+        # What each poll's readings say about the inverter. Control steps aside
+        # while a check has failed, and a frame whose readings contradict each other
+        # never moves the guards, so a single bad read cannot latch one.
+        self._checks = ReadingChecks()
         # When the inverter was last told to do something new, so a battery still
         # turning around is not mistaken for one the inverter is overruling.
         self._retargeted_at: datetime | None = None
@@ -594,6 +598,11 @@ class ControlManager:
         if not CONTROL_FEATURES[self._commanded_feature].commands_power:
             return ControlStatus.AUTOMATIC
         return self._deviation
+
+    @property
+    def reading_checks(self) -> ReadingChecks:
+        """Return the checks run on every poll, whether or not control is on."""
+        return self._checks
 
     def dump_state(self) -> dict[str, Any]:
         """Return what must survive a restart, in a JSON-serializable form."""
@@ -1239,35 +1248,17 @@ class ControlManager:
         report = self._report = DeviceReport.from_words(
             inputs.system_modes, inputs.system_state_2
         )
-        if report is None:
-            # Nothing reported, so nothing changes: no state is assumed or kept.
-            self._aside_candidate, self._aside_polls, self._aside = None, 0, None
-            self._fault_polls = 0
-            return
-        if report.bms_connected:
-            self._bms_seen = True
-        self._fault_polls = self._fault_polls + 1 if report.fault else 0
-
-        # Off-grid the inverter powers the house during an outage, and without its
-        # battery no battery command can work; either way it knows best.
-        reason = None
-        if report.off_grid:
-            reason = ControlStatus.OFF_GRID
-        elif self._bms_seen and not report.bms_connected:
-            reason = ControlStatus.BATTERY_DISCONNECTED
-        if reason is None:
-            self._aside_candidate, self._aside_polls, self._aside = None, 0, None
-            return
-        if reason is self._aside_candidate:
-            self._aside_polls += 1
-        else:
-            self._aside_candidate, self._aside_polls = reason, 1
-        if self._aside_polls >= CONTROL_STATUS_DAMPING_POLLS:
-            self._aside = reason
+        self._fault_polls = self._fault_polls + 1 if report and report.fault else 0
 
     def _stepped_aside(self) -> ControlStatus | None:
-        """Return why control leaves the inverter to itself now, if it does."""
-        return self._aside
+        """Return why control leaves the inverter to itself now, if it does.
+
+        Off-grid the inverter powers the house during an outage, without its battery
+        no battery command can work, and with readings that contradict each other
+        nothing can be decided from them; either way it knows best.
+        """
+        active = self._checks.active
+        return active.status if active else None
 
     def _check_followed(self) -> None:
         """Send the command again if the inverter does not report following it.
@@ -1653,6 +1644,8 @@ class ControlManager:
 
     async def async_poll(self, data: Mapping[str, Any]) -> None:
         """Run from a poll, where a write failure must not stop the read."""
+        # Before anything that may return early, so they run whoever is in control.
+        self._checks.run(data, dt.now())
         self._track_grid_feed_restore(ControlInputs.from_mapping(data))
         try:
             await self.async_apply(data, notify=False)
@@ -1680,7 +1673,8 @@ class ControlManager:
         if polled:
             self._observe_device(inputs)
         self._follow_native_reserve(inputs)
-        self._update_guards(inputs)
+        if not self._checks.suspect:
+            self._update_guards(inputs)
 
         # A lapsed window hands the inverter back to its app settings, so the command
         # is sent again rather than assumed to have survived.

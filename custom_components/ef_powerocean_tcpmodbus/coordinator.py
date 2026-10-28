@@ -22,11 +22,14 @@ from pymodbus import __version__ as pyModbusVersion
 from pymodbus.exceptions import ModbusException
 
 from .const import (
+    ATTR_CHECK,
     ATTR_MODE,
+    ATTR_STATUS,
     BATTERY_CHARGE_W_PER_WH,
     BATTERY_DISCHARGE_W_PER_WH,
     BATTERY_MODE_SELECT,
     BATTERY_MODULES,
+    BUG_REPORT_URL,
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
     CONF_CALC_SOLAR_POWER,
@@ -53,6 +56,8 @@ from .const import (
     ECOFLOW_PORTAL_TOTALS,
     ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
+    EVENT_READING_CHECK_CLEARED,
+    EVENT_READING_CHECK_FAILED,
     FIRMWARE_VERSION,
     HELD_TOTAL_ISSUE_AFTER_S,
     MAX_BATTERY_CAPACITY_WH,
@@ -61,6 +66,7 @@ from .const import (
     OPTIONAL_STALLS_TO_DROP,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
+    READING_CHECK_ISSUE_AFTER_S,
     REGISTERS_BY_KEY,
     SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
@@ -88,6 +94,7 @@ from .models import (
     battery_reserve_for,
     encode_register,
 )
+from .reading_checks import Finding
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
@@ -109,6 +116,10 @@ def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
 
 def held_totals_issue_id(entry: ConfigEntry) -> str:
     return f"energy_totals_held_{entry.entry_id}"
+
+
+def reading_check_issue_id(entry: ConfigEntry) -> str:
+    return f"reading_check_{entry.entry_id}"
 
 
 def battery_power_limits(capacity_wh: float) -> tuple[int, int]:
@@ -144,6 +155,9 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _pinned_serial: str | None = None
     # The totals the held-totals issue was last raised for.
     _held_issue_keys: frozenset[str] = frozenset()
+    # The failed reading check last announced, and the one in repairs.
+    _announced_finding: Finding | None = None
+    _issue_finding: Finding | None = None
 
     def __init__(
         self,
@@ -683,6 +697,74 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception:
             _LOGGER.exception("Could not update the held energy totals issue")
 
+    # ── Control stepping aside ────────────────────────────────────────────────
+
+    def _async_track_reading_checks_safely(self) -> None:
+        """Announce a failed reading check without ever failing the poll it follows."""
+        try:
+            self._async_track_reading_checks()
+        except Exception:
+            _LOGGER.exception("Could not announce a failed reading check")
+
+    @callback
+    def _async_track_reading_checks(self) -> None:
+        """Announce a failed check and its end, and raise a long one in repairs."""
+        finding = self.control.reading_checks.active
+        previous, self._announced_finding = self._announced_finding, finding
+        if finding != previous:
+            if previous is not None:
+                self._fire_check_event(EVENT_READING_CHECK_CLEARED, previous)
+            if finding is not None:
+                self._fire_check_event(EVENT_READING_CHECK_FAILED, finding)
+
+        issue_for = (
+            finding
+            if finding is not None
+            and (dt.now() - finding.since).total_seconds()
+            >= READING_CHECK_ISSUE_AFTER_S
+            else None
+        )
+        if issue_for == self._issue_finding:
+            return
+        self._issue_finding = issue_for
+        issue_id = reading_check_issue_id(self.config_entry)
+        if issue_for is None:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        _LOGGER.warning(
+            "The inverter's readings have failed the %s check since %s",
+            issue_for.check,
+            issue_for.since,
+        )
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            learn_more_url=BUG_REPORT_URL,
+            translation_key=f"reading_check_{issue_for.check}",
+            translation_placeholders={
+                "host": str(self.host),
+                "since": dt.as_local(issue_for.since).strftime("%H:%M"),
+            },
+        )
+
+    @callback
+    def _fire_check_event(self, event_type: str, finding: Finding) -> None:
+        devices = device_registry.async_entries_for_config_entry(
+            device_registry.async_get(self.hass), self.config_entry.entry_id
+        )
+        self.hass.bus.async_fire(
+            event_type,
+            {
+                ATTR_DEVICE_ID: devices[0].id if devices else None,
+                ATTR_STATUS: str(finding.status),
+                ATTR_CHECK: finding.check,
+            },
+        )
+
     @callback
     def _async_update_held_totals_issue(self) -> None:
         """Raise the held-totals issue when the set of long-held totals changes."""
@@ -1054,6 +1136,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the control sees the correct solar power, in case the user has configured
             # them to be calculated.
             await self.control.async_poll(result)
+            self._async_track_reading_checks_safely()
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()

@@ -405,6 +405,9 @@ class ControlStatus(StrEnum):
     OFF_GRID = "off_grid"
     # The battery dropped off; control steps aside until it is back.
     BATTERY_DISCONNECTED = "battery_disconnected"
+    # The readings contradict each other or stopped updating; control steps aside
+    # until they make sense again (see reading_checks.py).
+    INCONSISTENT_READINGS = "inconsistent_readings"
     # The inverter reports a fault or a stop, so it may not act on anything.
     INVERTER_FAULT = "inverter_fault"
     # The control test has the inverter; the selected mode resumes after it.
