@@ -236,13 +236,13 @@ before.
 Every poll is also checked for conditions in which the inverter is best left to
 itself:
 
-| Check          | Fails when                                                              | Control Status        |
-| -------------- | ----------------------------------------------------------------------- | --------------------- |
-| `off_grid`     | The inverter reports running off-grid                                   | Off-grid              |
-| `grid_voltage` | The grid-side voltage is gone while the inverter still reports on-grid  | Off-grid              |
-| `bms`          | The inverter reports its battery disconnected, after it reported one    | Battery disconnected  |
-| `battery_soc`  | The system Battery SOC reads 0 % while a battery in use reports more    | Readings inconsistent |
-| `frozen`       | The voltages and frequency haven't changed at all for two minutes       | Readings inconsistent |
+| Check          | Fails when                                                             | Control Status        |
+| -------------- | ---------------------------------------------------------------------- | --------------------- |
+| `off_grid`     | The inverter reports running off-grid                                  | Off-grid              |
+| `grid_voltage` | The grid-side voltage is gone while the inverter still reports on-grid | Off-grid              |
+| `bms`          | The inverter reports its battery disconnected, after it reported one   | Battery disconnected  |
+| `battery_soc`  | The system Battery SOC reads 0 % while a battery in use reports more   | Readings inconsistent |
+| `frozen`       | The voltages and frequency haven't changed at all for two minutes      | Readings inconsistent |
 
 A check counts once it fails three polls in a row. While one does, control hands the
 inverter its own self-consumption and resumes the selected mode once it passes again.
