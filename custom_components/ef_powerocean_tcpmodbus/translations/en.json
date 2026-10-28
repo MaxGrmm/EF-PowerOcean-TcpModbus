@@ -133,6 +133,26 @@
           "not_held": "These energy totals are no longer held."
         }
       }
+    },
+    "reading_check_off_grid": {
+      "title": "The inverter at {host} has been running off-grid since {since}",
+      "description": "For more than 10 minutes the inverter has reported that it runs off-grid, as during a power outage. While this lasts, Modbus Control, when on, leaves the inverter to itself as if it were off, and takes over again by itself once it is over. This issue then clears by itself.\n\nIf this is unexpected, open the inverter's device page while it lasts, choose **Download diagnostics** from its \u22ee menu, and attach the file to a bug report (Learn more). The diagnostics show the readings exactly as the inverter sent them."
+    },
+    "reading_check_grid_voltage": {
+      "title": "The inverter at {host} has had no grid voltage since {since}",
+      "description": "For more than 10 minutes the grid-side voltage has read 0 V while the inverter still reports being on the grid, which usually means a power outage the inverter does not report. While this lasts, Modbus Control, when on, leaves the inverter to itself as if it were off, and takes over again by itself once it is over. This issue then clears by itself.\n\nIf this is unexpected, open the inverter's device page while it lasts, choose **Download diagnostics** from its \u22ee menu, and attach the file to a bug report (Learn more). The diagnostics show the readings exactly as the inverter sent them."
+    },
+    "reading_check_bms": {
+      "title": "The battery of the inverter at {host} has been disconnected since {since}",
+      "description": "For more than 10 minutes the inverter has reported its battery as disconnected (BMS Connected is off). While this lasts, Modbus Control, when on, leaves the inverter to itself as if it were off, and takes over again by itself once it is over. This issue then clears by itself.\n\nIf this is unexpected, open the inverter's device page while it lasts, choose **Download diagnostics** from its \u22ee menu, and attach the file to a bug report (Learn more). The diagnostics show the readings exactly as the inverter sent them."
+    },
+    "reading_check_battery_soc": {
+      "title": "The inverter at {host} reports a battery level of 0 % that its batteries contradict",
+      "description": "Since {since} the inverter has reported the system Battery SOC as 0 %, while the individual batteries report a higher level. While this lasts, Modbus Control, when on, leaves the inverter to itself as if it were off, and takes over again by itself once it is over. This issue then clears by itself.\n\nIf this is unexpected, open the inverter's device page while it lasts, choose **Download diagnostics** from its \u22ee menu, and attach the file to a bug report (Learn more). The diagnostics show the readings exactly as the inverter sent them."
+    },
+    "reading_check_frozen": {
+      "title": "The readings of the inverter at {host} have stopped updating",
+      "description": "Since {since} the inverter has answered every poll with exactly the same voltages and frequency, which on a live grid change all the time. Its readings have most likely stopped updating. While this lasts, Modbus Control, when on, leaves the inverter to itself as if it were off, and takes over again by itself once it is over. This issue then clears by itself.\n\nIf this is unexpected, open the inverter's device page while it lasts, choose **Download diagnostics** from its \u22ee menu, and attach the file to a bug report (Learn more). The diagnostics show the readings exactly as the inverter sent them."
     }
   },
   "selector": {
@@ -538,7 +558,8 @@
           "off_grid": "Off-grid",
           "battery_disconnected": "Battery disconnected",
           "inverter_fault": "Inverter fault",
-          "control_test": "Control test"
+          "control_test": "Control test",
+          "inconsistent_readings": "Readings inconsistent"
         }
       },
       "control_test": {

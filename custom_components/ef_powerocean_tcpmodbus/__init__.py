@@ -20,8 +20,10 @@ from .coordinator import (
     EcoflowCoordinator,
     held_totals_issue_id,
     identity_mismatch_issue_id,
+    reading_check_issue_id,
 )
 from .modbus import async_prepare
+from .reading_checks import KEYS as READING_CHECK_KEYS
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -161,9 +163,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
     _async_make_device_physical(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # The control loop reads its inputs whatever entities are enabled. With it and
+    # The control loop reads its inputs, and what its reading checks compare,
+    # whatever entities are enabled. With it and
     # the entities all asking, the poll reads only what they ask for from here on.
-    entry.async_on_unload(coordinator.async_require(ControlInputs.keys()))
+    entry.async_on_unload(
+        coordinator.async_require(ControlInputs.keys() | READING_CHECK_KEYS)
+    )
     coordinator.async_poll_on_demand()
 
     # Reload integration when config entry data changes
@@ -187,6 +192,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
     ir.async_delete_issue(hass, DOMAIN, _modbus_disabled_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, identity_mismatch_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, held_totals_issue_id(entry))
+    ir.async_delete_issue(hass, DOMAIN, reading_check_issue_id(entry))
     # close connection and shutdown
     await entry.runtime_data.async_client_shutdown()
 

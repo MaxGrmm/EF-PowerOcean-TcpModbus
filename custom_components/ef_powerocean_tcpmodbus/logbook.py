@@ -14,14 +14,19 @@ from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import Event, HomeAssistant, callback
 
 from .const import (
+    ATTR_CHECK,
     ATTR_MODE,
+    ATTR_STATUS,
     DOMAIN,
     EVENT_COMMAND_EXPIRED,
     EVENT_CONTROL_TEST_FINISHED,
     EVENT_CONTROL_TEST_STARTED,
+    EVENT_READING_CHECK_CLEARED,
+    EVENT_READING_CHECK_FAILED,
 )
 
 CONTROL_TEST_NAME = "Control test"
+INVERTER_NAME = "Inverter"
 
 
 @callback
@@ -75,4 +80,28 @@ def async_describe_events(
     )
     async_describe_event(
         DOMAIN, EVENT_CONTROL_TEST_FINISHED, async_describe_control_test_finished
+    )
+
+    @callback
+    def async_describe_check_failed(event: Event) -> dict[str, Any]:
+        status = str(event.data.get(ATTR_STATUS, "")).replace("_", " ")
+        check = str(event.data.get(ATTR_CHECK, "")).replace("_", " ")
+        return {
+            LOGBOOK_ENTRY_NAME: INVERTER_NAME,
+            LOGBOOK_ENTRY_MESSAGE: f"{status} (failed the {check} check)",
+        }
+
+    @callback
+    def async_describe_check_cleared(event: Event) -> dict[str, Any]:
+        status = str(event.data.get(ATTR_STATUS, "")).replace("_", " ")
+        return {
+            LOGBOOK_ENTRY_NAME: INVERTER_NAME,
+            LOGBOOK_ENTRY_MESSAGE: f"no longer {status}",
+        }
+
+    async_describe_event(
+        DOMAIN, EVENT_READING_CHECK_FAILED, async_describe_check_failed
+    )
+    async_describe_event(
+        DOMAIN, EVENT_READING_CHECK_CLEARED, async_describe_check_cleared
     )

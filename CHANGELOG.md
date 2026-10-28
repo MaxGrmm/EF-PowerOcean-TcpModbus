@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- Every poll is checked for conditions in which the inverter is best left to itself: off-grid and a disconnected battery, as the inverter reports them; a grid-side voltage gone while it still reports on-grid; a system Battery SOC of 0 % while a battery reports more (#32, #200); and voltages and frequency that stop changing for two minutes. Control steps aside while one fails, and Control Status shows Off-grid, Battery disconnected or the new Readings inconsistent.
+- A repairs issue when a check fails for 10 minutes. It clears by itself once the check passes again.
+- `ef_powerocean_tcpmodbus_reading_check_failed` and `ef_powerocean_tcpmodbus_reading_check_cleared` events, also in the logbook. The checks run, and the events and issues fire, whether or not Modbus Control is on.
+
+### Fixed
+
+- A Battery SOC reading 0 % for one poll, or for half an hour, no longer sets off the Battery Reserve and has the house draw from the grid while the batteries are nearly full (#200). A frame whose readings contradict each other never moves the Charge Limit or Battery Reserve.
+
 ## [2.9.4] - 2026-10-28
 
 ### Added

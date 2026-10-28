@@ -45,6 +45,12 @@ DOMAIN: Final = "ef_powerocean_tcpmodbus"
 EVENT_COMMAND_EXPIRED: Final = f"{DOMAIN}_command_expired"
 EVENT_CONTROL_TEST_STARTED: Final = f"{DOMAIN}_control_test_started"
 EVENT_CONTROL_TEST_FINISHED: Final = f"{DOMAIN}_control_test_finished"
+# A reading check failed for long enough to act on, and passes again; see
+# reading_checks.py. Control steps aside in between while it is on.
+EVENT_READING_CHECK_FAILED: Final = f"{DOMAIN}_reading_check_failed"
+EVENT_READING_CHECK_CLEARED: Final = f"{DOMAIN}_reading_check_cleared"
+ATTR_STATUS: Final = "status"
+ATTR_CHECK: Final = "check"
 ATTR_MODE: Final = "mode"
 DEFAULT_PORT: Final = 502
 DEFAULT_SLAVE: Final = 1
@@ -988,6 +994,9 @@ GUARD_HANDBACK_S: Final = 60.0
 GUARD_HANDBACK_MAX_S: Final = 900.0
 MIN_CONTROL_DWELL_S: Final = 60.0
 CONTROL_STATUS_DAMPING_POLLS: Final = 3
+# A failed reading check raises a repairs issue once it lasts this long, which
+# clears by itself once the check passes again.
+READING_CHECK_ISSUE_AFTER_S: Final = 600
 # How long the inverter gets to report a command it was sent, and how often it is
 # sent again when it does not, before the status says it is not accepted.
 FOLLOW_GRACE_S: Final = 15.0
