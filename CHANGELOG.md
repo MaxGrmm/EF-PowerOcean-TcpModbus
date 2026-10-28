@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.9.4] - 2026-10-28
+
 ### Added
 
 - **Reconfigure** in the entry's menu changes the IP address or port. It tests the new address and refuses it if a different inverter answers there, or if another entry already uses it.
