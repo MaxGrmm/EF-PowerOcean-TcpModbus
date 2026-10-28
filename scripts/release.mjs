@@ -158,6 +158,33 @@ function publishPrerelease(version) {
   setOutput("tag", tag);
 }
 
+function nextBetaVersion(bump) {
+  const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
+  const [major, minor, patch] = manifest.version
+    .split("-")[0]
+    .split(".")
+    .map(Number);
+  const base = {
+    major: `${major + 1}.0.0`,
+    minor: `${major}.${minor + 1}.0`,
+    patch: `${major}.${minor}.${patch + 1}`,
+  }[bump];
+  if (!base) {
+    throw new Error("Bump must be major, minor or patch.");
+  }
+
+  // Beta tags may point at deleted PR branches, so ask the remote.
+  const pattern = new RegExp(`refs/tags/v${escapeRegExp(base)}-beta\\.(\\d+)$`);
+  const betas = execFileSync("git", ["ls-remote", "--tags", "origin"], {
+    encoding: "utf8",
+  })
+    .split("\n")
+    .map((line) => pattern.exec(line)?.[1])
+    .filter(Boolean)
+    .map(Number);
+  return `${base}-beta.${Math.max(0, ...betas) + 1}`;
+}
+
 const [command, version] = process.argv.slice(2);
 if (command === "prepare") {
   prepareRelease(version);
@@ -165,8 +192,12 @@ if (command === "prepare") {
   publishRelease();
 } else if (command === "prerelease") {
   publishPrerelease(version);
+} else if (command === "beta") {
+  const next = nextBetaVersion(version);
+  setOutput("version", next);
+  publishPrerelease(next);
 } else {
   throw new Error(
-    "Usage: node scripts/release.mjs <prepare VERSION|publish|prerelease VERSION>",
+    "Usage: node scripts/release.mjs <prepare VERSION|publish|prerelease VERSION|beta BUMP>",
   );
 }

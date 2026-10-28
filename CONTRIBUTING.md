@@ -46,6 +46,8 @@ Keep unreleased user-facing changes under the `Unreleased` heading in [CHANGELOG
 
 After that pull request is merged, the `Publish Release` workflow creates the matching `v<version>` tag and GitHub release. The release description starts with that version's changelog section, followed by GitHub's generated release notes. Versions containing a hyphen, such as `2.6.0-beta.7`, are published as prereleases.
 
+To test a pull request before release, add a `beta: patch`, `beta: minor` or `beta: major` label to it. The `Publish Release` workflow bumps the manifest version accordingly, picks the next free `-beta.N` and publishes the PR head as a prerelease. The label is removed afterwards; add it again for another beta.
+
 ## Architecture
 
 The integration separates

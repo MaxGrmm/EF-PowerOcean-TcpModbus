@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - custom_components/ef_powerocean_tcpmodbus/manifest.json
+  pull_request:
+    types: [labeled]
   workflow_dispatch:
     inputs:
       version:
@@ -15,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   publish:
@@ -76,3 +79,57 @@ jobs:
           files: ${{ runner.temp }}/ef_powerocean_tcpmodbus.zip
           generate_release_notes: true
           prerelease: true
+
+  beta:
+    name: Create beta from pull request
+    # Adding a "beta: patch|minor|major" label publishes the PR head as the next beta.
+    # The label is removed afterwards, so adding it again makes another beta.
+    if: >-
+      github.event_name == 'pull_request' &&
+      startsWith(github.event.label.name, 'beta: ') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    concurrency:
+      group: beta-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Prepare beta
+        id: notes
+        env:
+          BUMP: ${{ github.event.label.name }}
+        run: |
+          node scripts/release.mjs beta "${BUMP#beta: }"
+
+      - name: Package integration
+        working-directory: custom_components/ef_powerocean_tcpmodbus
+        run: zip -r "$RUNNER_TEMP/ef_powerocean_tcpmodbus.zip" . -x "__pycache__/*" "*/__pycache__/*"
+
+      - name: Create GitHub pre-release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ steps.notes.outputs.tag }}
+          target_commitish: ${{ github.event.pull_request.head.sha }}
+          name: ${{ steps.notes.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          files: ${{ runner.temp }}/ef_powerocean_tcpmodbus.zip
+          generate_release_notes: true
+          prerelease: true
+
+      - name: Remove label and comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          LABEL: ${{ github.event.label.name }}
+          TAG: ${{ steps.notes.outputs.tag }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          gh pr edit "$PR" --remove-label "$LABEL"
+          if [ "$OUTCOME" = success ]; then
+            gh pr comment "$PR" --body "Published [\`$TAG\`](https://github.com/${{ github.repository }}/releases/tag/$TAG) from ${{ github.event.pull_request.head.sha }}."
+          fi
