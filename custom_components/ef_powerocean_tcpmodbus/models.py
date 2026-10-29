@@ -15,6 +15,7 @@ from collections.abc import (
 )
 from dataclasses import dataclass, field, replace
 from enum import IntEnum, IntFlag, StrEnum
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
@@ -405,6 +406,9 @@ class ControlStatus(StrEnum):
     OFF_GRID = "off_grid"
     # The battery dropped off; control steps aside until it is back.
     BATTERY_DISCONNECTED = "battery_disconnected"
+    # The readings contradict each other or stopped updating; control steps aside
+    # until they make sense again (see reading_checks.py).
+    INCONSISTENT_READINGS = "inconsistent_readings"
     # The inverter reports a fault or a stop, so it may not act on anything.
     INVERTER_FAULT = "inverter_fault"
     # The control test has the inverter; the selected mode resumes after it.
@@ -474,10 +478,14 @@ class DeviceReport:
         return cls.from_words(data.get("system_modes"), data.get("system_state_2"))
 
     @classmethod
+    @lru_cache(maxsize=8)
     def from_words(
         cls, system_modes: float | None, system_state_2: float | None
     ) -> DeviceReport | None:
-        """Decode System Status (40530) and System State 2 (40532)."""
+        """Decode System Status (40530) and System State 2 (40532).
+
+        Cached, as the reading checks and control decode the same words each poll.
+        """
         if system_modes is None:
             return None
         modes = int(system_modes)

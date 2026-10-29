@@ -133,6 +133,26 @@
           "not_held": "Diese Energiezähler werden nicht mehr festgehalten."
         }
       }
+    },
+    "reading_check_off_grid": {
+      "title": "Der Wechselrichter unter {host} läuft seit {since} im Inselbetrieb",
+      "description": "Seit über 10 Minuten meldet der Wechselrichter Inselbetrieb, wie bei einem Stromausfall. Solange das anhält, überlässt die Modbus-Steuerung, wenn sie an ist, den Wechselrichter sich selbst, als wäre sie aus, und übernimmt danach von selbst wieder. Diese Meldung verschwindet dann von selbst.\n\nFalls das unerwartet ist: Öffnen Sie, solange es anhält, die Geräteseite des Wechselrichters, wählen Sie im ⋮-Menü **Diagnosedaten herunterladen** und hängen Sie die Datei an einen Fehlerbericht an (Mehr erfahren). Die Diagnosedaten zeigen die Werte genau so, wie der Wechselrichter sie gesendet hat."
+    },
+    "reading_check_grid_voltage": {
+      "title": "Der Wechselrichter unter {host} hat seit {since} keine Netzspannung",
+      "description": "Seit über 10 Minuten ist die netzseitige Spannung auf nahezu 0 V gefallen, während der Wechselrichter noch Netzbetrieb meldet. Meist ist das ein Stromausfall, den der Wechselrichter nicht meldet. Solange das anhält, überlässt die Modbus-Steuerung, wenn sie an ist, den Wechselrichter sich selbst, als wäre sie aus, und übernimmt danach von selbst wieder. Diese Meldung verschwindet dann von selbst.\n\nFalls das unerwartet ist: Öffnen Sie, solange es anhält, die Geräteseite des Wechselrichters, wählen Sie im ⋮-Menü **Diagnosedaten herunterladen** und hängen Sie die Datei an einen Fehlerbericht an (Mehr erfahren). Die Diagnosedaten zeigen die Werte genau so, wie der Wechselrichter sie gesendet hat."
+    },
+    "reading_check_bms": {
+      "title": "Der Akku des Wechselrichters unter {host} ist seit {since} getrennt",
+      "description": "Seit über 10 Minuten meldet der Wechselrichter seinen Akku als getrennt (BMS verbunden ist aus). Solange das anhält, überlässt die Modbus-Steuerung, wenn sie an ist, den Wechselrichter sich selbst, als wäre sie aus, und übernimmt danach von selbst wieder. Diese Meldung verschwindet dann von selbst.\n\nFalls das unerwartet ist: Öffnen Sie, solange es anhält, die Geräteseite des Wechselrichters, wählen Sie im ⋮-Menü **Diagnosedaten herunterladen** und hängen Sie die Datei an einen Fehlerbericht an (Mehr erfahren). Die Diagnosedaten zeigen die Werte genau so, wie der Wechselrichter sie gesendet hat."
+    },
+    "reading_check_battery_soc": {
+      "title": "Der Wechselrichter unter {host} meldet einen Akkustand von 0 %, dem seine Akkus widersprechen",
+      "description": "Seit {since} meldet der Wechselrichter den System-Akkustand (Battery SOC) als 0 %, während die einzelnen Akkus einen höheren Stand melden. Solange das anhält, überlässt die Modbus-Steuerung, wenn sie an ist, den Wechselrichter sich selbst, als wäre sie aus, und übernimmt danach von selbst wieder. Diese Meldung verschwindet dann von selbst.\n\nFalls das unerwartet ist: Öffnen Sie, solange es anhält, die Geräteseite des Wechselrichters, wählen Sie im ⋮-Menü **Diagnosedaten herunterladen** und hängen Sie die Datei an einen Fehlerbericht an (Mehr erfahren). Die Diagnosedaten zeigen die Werte genau so, wie der Wechselrichter sie gesendet hat."
+    },
+    "reading_check_frozen": {
+      "title": "Die Werte des Wechselrichters unter {host} werden nicht mehr aktualisiert",
+      "description": "Seit {since} beantwortet der Wechselrichter jede Abfrage mit genau denselben Spannungen und derselben Frequenz, die sich bei anliegendem Netz ständig ändern. Seine Werte werden sehr wahrscheinlich nicht mehr aktualisiert. Solange das anhält, überlässt die Modbus-Steuerung, wenn sie an ist, den Wechselrichter sich selbst, als wäre sie aus, und übernimmt danach von selbst wieder. Diese Meldung verschwindet dann von selbst.\n\nFalls das unerwartet ist: Öffnen Sie, solange es anhält, die Geräteseite des Wechselrichters, wählen Sie im ⋮-Menü **Diagnosedaten herunterladen** und hängen Sie die Datei an einen Fehlerbericht an (Mehr erfahren). Die Diagnosedaten zeigen die Werte genau so, wie der Wechselrichter sie gesendet hat."
     }
   },
   "selector": {
@@ -541,7 +561,8 @@
           "off_grid": "Inselbetrieb",
           "battery_disconnected": "Akku getrennt",
           "inverter_fault": "Wechselrichterfehler",
-          "control_test": "Steuerungstest"
+          "control_test": "Steuerungstest",
+          "inconsistent_readings": "Werte widersprüchlich"
         }
       },
       "control_test": {

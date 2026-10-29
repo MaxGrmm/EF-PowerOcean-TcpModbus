@@ -215,6 +215,7 @@ doesn't expose a hard power limit over Modbus. See
 | Not accepted by inverter    | The inverter doesn't report the command, even after resending it |
 | Off-grid                    | Grid outage; control steps aside until the grid is back          |
 | Battery disconnected        | The battery dropped off; control steps aside until it's back     |
+| Readings inconsistent       | The readings contradict each other; control steps aside          |
 | Inverter fault              | The inverter reports a fault or a stop                           |
 | Control test                | The control test has the inverter; the mode resumes after it     |
 
@@ -229,9 +230,30 @@ before it counts.
 The inverter reports which control method it follows. Once it has shown that it does,
 a mismatch for three polls sends the command again, which recovers from an inverter
 restart or Modbus mode being toggled in the installer app. After two resends the status
-shows **Not accepted by inverter**. Off-grid and with the battery disconnected for three
-polls, control hands the inverter its own self-consumption and resumes the selected mode
-once it's back. A model that doesn't report these is controlled as before.
+shows **Not accepted by inverter**. A model that doesn't report these is controlled as
+before.
+
+Every poll is also checked for conditions in which the inverter is best left to
+itself:
+
+| Check          | Fails when                                                             | Control Status        |
+| -------------- | ---------------------------------------------------------------------- | --------------------- |
+| `off_grid`     | The inverter reports running off-grid                                  | Off-grid              |
+| `grid_voltage` | The grid-side voltage is gone while the inverter still reports on-grid | Off-grid              |
+| `bms`          | The inverter reports its battery disconnected, after it reported one   | Battery disconnected  |
+| `battery_soc`  | The system Battery SOC reads 0 % while a battery in use reports more   | Readings inconsistent |
+| `frozen`       | The voltages and frequency haven't changed at all for two minutes      | Readings inconsistent |
+
+A check counts once it fails three polls in a row. While one does, control hands the
+inverter its own self-consumption and resumes the selected mode once it passes again.
+A frame whose readings contradict each other never moves the Charge Limit or Battery
+Reserve, so one bad read can't set them off.
+
+The checks run whether or not Modbus Control is on, since a bad reading also misleads
+the sensors. The `ef_powerocean_tcpmodbus_reading_check_failed` and
+`ef_powerocean_tcpmodbus_reading_check_cleared` events, also shown in the logbook,
+carry the `check` and the `status` it stands for. A check that fails for 10 minutes
+raises a repairs issue, which clears by itself once the check passes again.
 
 ### Commanding the battery from automations
 

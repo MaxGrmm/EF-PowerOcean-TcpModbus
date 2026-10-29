@@ -192,7 +192,7 @@ async def test_a_disabled_sensor_is_not_read(
     er.async_get(hass).async_get_or_create(
         "sensor",
         const.DOMAIN,
-        f"{entry.entry_id}_frequency",
+        f"{entry.entry_id}_inverter_temperature",
         config_entry=entry,
         disabled_by=er.RegistryEntryDisabler.USER,
     )
@@ -204,8 +204,14 @@ async def test_a_disabled_sensor_is_not_read(
     await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert "frequency" not in polled
-    assert {"voltage_l1", "battery_soc", "solar_total", "grid_feed_mode"} <= polled
+    assert "inverter_temperature" not in polled
+    assert {
+        "voltage_l1",
+        "frequency",
+        "battery_soc",
+        "solar_total",
+        "grid_feed_mode",
+    } <= polled
 
 
 # ── Every entity gets what it shows from the demand-driven poll ───────────────

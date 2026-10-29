@@ -20,6 +20,7 @@ from custom_components.ef_powerocean_tcpmodbus.modbus import (
     ModbusClient,
     ModbusRejected,
 )
+from custom_components.ef_powerocean_tcpmodbus.reading_checks import ReadingChecks
 from custom_components.ef_powerocean_tcpmodbus.switch import (
     GRID_FEED_SWITCH,
     EcoFlowSwitch,
@@ -2132,16 +2133,16 @@ def test_control_steps_aside_off_grid_and_comes_back_with_the_grid(
     asyncio.run(control.async_set_command(Feature.CHARGE_BATTERY, power=1500.0))
 
     outage = {"battery_soc": 50.0, "system_modes": status_word(3, off_grid=True)}
-    asyncio.run(control.async_apply(outage))
+    asyncio.run(control.async_poll(outage))
     assert control._commanded_feature is Feature.CHARGE_BATTERY, "one read is enough"
     for _ in range(const.CONTROL_STATUS_DAMPING_POLLS - 1):
-        asyncio.run(control.async_apply(outage))
+        asyncio.run(control.async_poll(outage))
     assert control.status is Status.OFF_GRID
     assert control._commanded_feature is Feature.AUTOMATIC
 
     back = {"battery_soc": 50.0, "system_modes": status_word(0)}
     advance(control, monkeypatch, const.MIN_CONTROL_DWELL_S + 1)
-    asyncio.run(control.async_apply(back))
+    asyncio.run(control.async_poll(back))
     assert control._commanded_feature is Feature.CHARGE_BATTERY
     assert control.selected_feature is Feature.CHARGE_BATTERY
 
@@ -2154,16 +2155,34 @@ def test_a_battery_is_only_missing_once_one_has_been_seen(
     asyncio.run(control.async_set_command(Feature.CHARGE_BATTERY, power=1500.0))
     no_bit = {"battery_soc": 50.0, "system_modes": status_word(3, bms=False)}
 
-    asyncio.run(control.async_apply(no_bit))
+    asyncio.run(control.async_poll(no_bit))
     assert control._commanded_feature is Feature.CHARGE_BATTERY
 
     asyncio.run(
-        control.async_apply({"battery_soc": 50.0, "system_modes": status_word(3)})
+        control.async_poll({"battery_soc": 50.0, "system_modes": status_word(3)})
     )
     for _ in range(const.CONTROL_STATUS_DAMPING_POLLS):
-        asyncio.run(control.async_apply(no_bit))
+        asyncio.run(control.async_poll(no_bit))
     assert control.status is Status.BATTERY_DISCONNECTED
     assert control._commanded_feature is Feature.AUTOMATIC
+
+
+def test_a_battery_seen_before_a_restart_is_missed_after_it(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allow_writes(control, monkeypatch)
+    asyncio.run(
+        control.async_poll({"battery_soc": 50.0, "system_modes": status_word(3)})
+    )
+    stored = control.dump_state()
+
+    control._checks = ReadingChecks()
+    control.load_state(stored)
+    no_bit = {"battery_soc": 50.0, "system_modes": status_word(3, bms=False)}
+    for _ in range(const.CONTROL_STATUS_DAMPING_POLLS):
+        asyncio.run(control.async_poll(no_bit))
+
+    assert control.status is Status.BATTERY_DISCONNECTED
 
 
 def test_an_inverter_fault_is_named_without_changing_the_command(
