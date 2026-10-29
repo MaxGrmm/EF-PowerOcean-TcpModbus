@@ -124,7 +124,8 @@ def test_a_failure_counts_after_three_polls_and_keeps_its_start() -> None:
     assert checks.active is None
     checks.run(_modes(off_grid=True), at[2])
     checks.run(_modes(off_grid=True), at[3])
-    assert checks.active == Finding(Status.OFF_GRID, "off_grid", at[2])
+    # Since the first poll that failed, not the one that confirmed it.
+    assert checks.active == Finding(Status.OFF_GRID, "off_grid", at[0])
 
     checks.run(_modes(), at[4])
     assert checks.active is None
@@ -143,6 +144,116 @@ def test_every_key_a_check_reads_is_kept_polled() -> None:
         reading_checks.KEYS
     )
     assert const.REGISTERS_BY_KEY.keys() >= reading_checks.KEYS
+
+
+def test_a_check_that_keeps_failing_holds_while_one_above_it_flickers() -> None:
+    """An outage the off-grid bit only reports now and then is still an outage."""
+    checks = reading_checks.ReadingChecks()
+    checks.run({"grid_voltage_l1": 231.0, **_modes()}, T0)
+    for poll in range(1, const.CONTROL_STATUS_DAMPING_POLLS + 3):
+        checks.run(
+            {"grid_voltage_l1": 0.0, **_modes(off_grid=poll % 2 == 1)},
+            T0 + timedelta(seconds=5 * poll),
+        )
+
+    assert checks.active is not None
+    assert checks.active.status is Status.OFF_GRID
+
+
+def test_a_failure_ends_as_soon_as_its_check_passes() -> None:
+    checks = reading_checks.ReadingChecks()
+    frame = _live()
+    for poll in range(30):
+        checks.run(frame, T0 + timedelta(seconds=5 * poll))
+    assert checks.active is not None
+    assert checks.active.check == "frozen"
+
+    # Moving again, with one odd SOC read that has not held.
+    checks.run({**_live(), **_socs(0, 99, 99)}, T0 + timedelta(seconds=150))
+
+    assert checks.active is None
+    assert checks.suspect
+
+
+def test_frozen_readings_count_from_when_they_stopped_moving() -> None:
+    checks = reading_checks.ReadingChecks()
+    frame = _live()
+    at = [T0 + timedelta(seconds=5 * poll) for poll in range(30)]
+    for now in at:
+        checks.run(frame, now)
+
+    assert checks.active == Finding(Status.INCONSISTENT_READINGS, "frozen", at[0])
+
+
+def test_another_cause_for_the_same_state_keeps_its_start() -> None:
+    checks = reading_checks.ReadingChecks()
+    at = [T0 + timedelta(seconds=5 * poll) for poll in range(8)]
+    checks.run({"grid_voltage_l1": 231.0, **_modes()}, at[0])
+    for now in at[1:4]:
+        checks.run({"grid_voltage_l1": 0.0, **_modes()}, now)
+    assert checks.active == Finding(Status.OFF_GRID, "grid_voltage", at[1])
+
+    for now in at[4:]:
+        checks.run({"grid_voltage_l1": 0.0, **_modes(off_grid=True)}, now)
+
+    assert checks.active == Finding(Status.OFF_GRID, "off_grid", at[1])
+
+
+def test_a_battery_running_empty_is_not_contradicted() -> None:
+    """Packs may stay a few percent above a system level that reaches 0."""
+    check = reading_checks.SystemSocMismatch()
+    levels = (30, 12, 6, 3, 1, 0, 0, 0)
+    assert not any(check.check(_socs(soc, 9, 7), T0) for soc in levels)
+
+
+def test_a_zero_soc_stays_contradicted_for_as_long_as_it_lasts() -> None:
+    check = reading_checks.SystemSocMismatch()
+    assert not check.check(_socs(60, 61, 59), T0)
+    assert all(check.check(_socs(0, 61, 59), T0) for _ in range(360))
+    assert not check.check(_socs(60, 61, 59), T0)
+
+
+def test_no_battery_is_never_contradicted() -> None:
+    assert not reading_checks.SystemSocMismatch().check(_socs(0, 80, count=0), T0)
+
+
+def test_a_check_that_breaks_passes_and_leaves_the_others_running(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def broken(*_: Any) -> bool:
+        raise ValueError("odd reading")
+
+    monkeypatch.setattr(reading_checks.SystemSocMismatch, "check", broken)
+    checks = reading_checks.ReadingChecks()
+    for poll in range(const.CONTROL_STATUS_DAMPING_POLLS):
+        checks.run(
+            {**_socs(0, 99, 99), **_modes(off_grid=True)},
+            T0 + timedelta(seconds=5 * poll),
+        )
+
+    assert checks.active is not None
+    assert checks.active.check == "off_grid"
+    assert not checks.suspect
+    # Logged once, not on every poll.
+    assert caplog.text.count("battery_soc reading check could not run") == 1
+
+
+def test_what_the_model_reports_survives_a_restart() -> None:
+    checks = reading_checks.ReadingChecks()
+    checks.run({"grid_voltage_l1": 231.0, **_modes()}, T0)
+    stored = checks.dump_state()
+    assert stored == {"grid_seen": True, "bms_seen": True}
+
+    restarted = reading_checks.ReadingChecks()
+    restarted.load_state(stored)
+    for poll in range(const.CONTROL_STATUS_DAMPING_POLLS):
+        restarted.run(
+            {"grid_voltage_l1": 0.0, **_modes(bms=False)},
+            T0 + timedelta(seconds=5 * poll),
+        )
+
+    assert restarted.active is not None
+    assert restarted.active.check == "grid_voltage"
 
 
 # ── What control does ─────────────────────────────────────────────────────────
@@ -331,12 +442,27 @@ def test_every_failed_check_raises_an_issue_after_ten_minutes_that_clears_itself
     assert tracked.issues.deleted.call_args.args[2] == "reading_check_entry"
 
 
-def test_another_check_failing_starts_over(tracked) -> None:
+def test_another_cause_for_the_same_state_is_not_announced_again(tracked) -> None:
+    tracked.poll(Finding(Status.INCONSISTENT_READINGS, "battery_soc", T0), 12)
+    tracked.poll(Finding(Status.INCONSISTENT_READINGS, "frozen", T0), 13)
+
+    # The issue stays up, now naming the new cause.
+    assert tracked.issues.created.call_count == 2
+    assert tracked.issues.created.call_args.kwargs["translation_key"] == (
+        "reading_check_frozen"
+    )
+    tracked.issues.deleted.assert_not_called()
+    assert _fired(tracked) == [
+        (const.EVENT_READING_CHECK_FAILED, "inconsistent_readings", "battery_soc")
+    ]
+
+
+def test_another_state_starts_over(tracked) -> None:
     tracked.poll(Finding(Status.INCONSISTENT_READINGS, "battery_soc", T0), 12)
     later = T0 + timedelta(minutes=12)
-    tracked.poll(Finding(Status.INCONSISTENT_READINGS, "frozen", later), 13)
+    tracked.poll(Finding(Status.OFF_GRID, "off_grid", later), 13)
 
-    # The first issue goes; the new check gets its own after its 10 minutes.
+    # The first issue goes; the new state gets its own after its 10 minutes.
     tracked.issues.created.assert_called_once()
     tracked.issues.deleted.assert_called_once()
     assert [event for event, _, _ in _fired(tracked)] == [

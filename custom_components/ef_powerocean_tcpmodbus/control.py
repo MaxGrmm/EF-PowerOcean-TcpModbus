@@ -618,6 +618,7 @@ class ControlManager:
             "grid_feed_restore": self._grid_feed_restore,
             "grid_feed_stopped": self._grid_feed_stopped,
             "latches": {name: getattr(self, f"_{name}") for name in _LATCHES},
+            "reading_checks": self._checks.dump_state(),
         }
 
     def load_state(self, stored: dict[str, Any]) -> None:
@@ -646,6 +647,9 @@ class ControlManager:
         for name, latched in (stored.get("latches") or {}).items():
             if name in _LATCHES:
                 setattr(self, f"_{name}", bool(latched))
+        # Which readings the model reports at all, so an outage or a dropped battery
+        # that outlasts a restart is still caught.
+        self._checks.load_state(stored.get("reading_checks") or {})
 
     def start(self) -> None:
         """Begin holding control authority, if the user switched control on."""

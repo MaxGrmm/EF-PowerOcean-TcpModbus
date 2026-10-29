@@ -20,6 +20,7 @@ from custom_components.ef_powerocean_tcpmodbus.modbus import (
     ModbusClient,
     ModbusRejected,
 )
+from custom_components.ef_powerocean_tcpmodbus.reading_checks import ReadingChecks
 from custom_components.ef_powerocean_tcpmodbus.switch import (
     GRID_FEED_SWITCH,
     EcoFlowSwitch,
@@ -2164,6 +2165,24 @@ def test_a_battery_is_only_missing_once_one_has_been_seen(
         asyncio.run(control.async_poll(no_bit))
     assert control.status is Status.BATTERY_DISCONNECTED
     assert control._commanded_feature is Feature.AUTOMATIC
+
+
+def test_a_battery_seen_before_a_restart_is_missed_after_it(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allow_writes(control, monkeypatch)
+    asyncio.run(
+        control.async_poll({"battery_soc": 50.0, "system_modes": status_word(3)})
+    )
+    stored = control.dump_state()
+
+    control._checks = ReadingChecks()
+    control.load_state(stored)
+    no_bit = {"battery_soc": 50.0, "system_modes": status_word(3, bms=False)}
+    for _ in range(const.CONTROL_STATUS_DAMPING_POLLS):
+        asyncio.run(control.async_poll(no_bit))
+
+    assert control.status is Status.BATTERY_DISCONNECTED
 
 
 def test_an_inverter_fault_is_named_without_changing_the_command(

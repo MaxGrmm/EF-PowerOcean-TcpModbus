@@ -17,15 +17,20 @@ normal operation rather than catching every case.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, Final
 
 from .const import BATTERY_SOC_KEYS, CONTROL_STATUS_DAMPING_POLLS
 from .models import ControlStatus, DeviceReport
 
-# A system level of 0 is only believed while no pack in use reports more than this.
+_LOGGER = logging.getLogger(__name__)
+
+# A system level of 0 is only believed while no pack in use reports more than this,
+# or when the last level believed was at most twice it: a battery running empty
+# passes through the low levels, a bad read drops to 0 from anywhere.
 SOC_PACK_MARGIN: Final = 5.0
 # Readings that have not moved at all for this long have stopped updating.
 FROZEN_AFTER: Final = timedelta(minutes=2)
@@ -56,6 +61,10 @@ class Check:
 
     def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:
         raise NotImplementedError
+
+    def onset(self, now: datetime, /) -> datetime:
+        """Return when what this check fails on began, once it fails at *now*."""
+        return now
 
 
 class OffGridReported(Check):
@@ -127,13 +136,30 @@ class SystemSocMismatch(Check):
     status = ControlStatus.INCONSISTENT_READINGS
     keys = frozenset({"battery_soc", "battery_count", *BATTERY_SOC_KEYS})
 
+    def __init__(self) -> None:
+        # The last system level that passed; unknown after a start.
+        self._last_believed: float | None = None
+
     def check(self, data: Mapping[str, Any], _now: datetime, /) -> bool:
         soc = data.get("battery_soc")
-        if soc is None or float(soc) > 0:
+        if soc is None:
             return False
-        count = int(data.get("battery_count") or len(BATTERY_SOC_KEYS))
-        packs = (data.get(key) for key in BATTERY_SOC_KEYS[:count])
-        return any(pack is not None and float(pack) > SOC_PACK_MARGIN for pack in packs)
+        count = int(data.get("battery_count") or 0)
+        packs = [
+            float(pack)
+            for key in BATTERY_SOC_KEYS[:count]
+            if (pack := data.get(key)) is not None
+        ]
+        fails = (
+            float(soc) <= 0
+            and any(pack > SOC_PACK_MARGIN for pack in packs)
+            and (
+                self._last_believed is None or self._last_believed > 2 * SOC_PACK_MARGIN
+            )
+        )
+        if not fails:
+            self._last_believed = float(soc)
+        return fails
 
 
 class FrozenReadings(Check):
@@ -157,6 +183,10 @@ class FrozenReadings(Check):
             self._last, self._since = readings, now
             return False
         return now - self._since >= FROZEN_AFTER
+
+    def onset(self, now: datetime, /) -> datetime:
+        # The readings stopped moving before the check could tell.
+        return self._since or now
 
 
 # In order of precedence: where several fail, the first one is reported.
@@ -184,34 +214,79 @@ class Finding:
 class ReadingChecks:
     """Runs every check on each poll and keeps the failure that holds.
 
-    A failure counts once the same check fails this many polls in a row, so one
-    odd read neither interrupts control nor raises anything.
+    A check counts once it fails this many polls in a row, each counted on its own,
+    so one odd read neither interrupts control nor raises anything, and a check
+    that keeps failing holds even while one above it comes and goes.
     """
 
     def __init__(self) -> None:
         self._checks: tuple[Check, ...] = tuple(check() for check in CHECKS)
-        self._candidate: str | None = None
-        self._polls = 0
-        # The failure that holds, if any.
+        # Polls in a row each check has failed, and since when.
+        self._polls: dict[str, int] = {}
+        self._since: dict[str, datetime] = {}
+        # Checks whose error has been logged, so a broken one does not flood the log.
+        self._broken: set[str] = set()
+        # The failure that holds, if any: the first in CHECKS that has held.
         self.active: Finding | None = None
         # Whether this poll's readings contradict each other, whether or not that
-        # has held long enough to count: such a frame never moves a guard.
+        # has held long enough to count: such a frame never moves a guard. Kept
+        # until the next poll, so a user action re-applying that poll's inputs
+        # inherits its verdict.
         self.suspect = False
 
     def run(self, data: Mapping[str, Any], now: datetime) -> None:
         # Every check sees every poll, since some keep a history.
-        failed = [check for check in self._checks if check.check(data, now)]
+        failed = [check for check in self._checks if self._failed(check, data, now)]
         self.suspect = any(
             check.status is ControlStatus.INCONSISTENT_READINGS for check in failed
         )
-        if not failed:
-            self._candidate, self._polls, self.active = None, 0, None
-            return
-        first = failed[0]
-        if first.name == self._candidate:
-            self._polls += 1
+        held = next(
+            (
+                check
+                for check in failed
+                if self._polls[check.name] >= CONTROL_STATUS_DAMPING_POLLS
+            ),
+            None,
+        )
+        if held is None:
+            self.active = None
+        elif self.active is None or self.active.status is not held.status:
+            self.active = Finding(held.status, held.name, self._since[held.name])
+        elif self.active.check != held.name:
+            # Another cause for the same state: it has lasted since the first.
+            self.active = replace(self.active, check=held.name)
+
+    def _failed(self, check: Check, data: Mapping[str, Any], now: datetime) -> bool:
+        """Run one check, counting its failures; an error in it passes the poll."""
+        try:
+            failed = check.check(data, now)
+        except Exception:
+            if check.name not in self._broken:
+                self._broken.add(check.name)
+                _LOGGER.exception("The %s reading check could not run", check.name)
+            failed = False
+        if failed:
+            self._polls[check.name] = self._polls.get(check.name, 0) + 1
+            self._since.setdefault(check.name, check.onset(now))
         else:
-            self._candidate, self._polls = first.name, 1
-        held = self._polls >= CONTROL_STATUS_DAMPING_POLLS
-        if held and (self.active is None or self.active.check != first.name):
-            self.active = Finding(first.status, first.name, now)
+            self._polls.pop(check.name, None)
+            self._since.pop(check.name, None)
+        return failed
+
+    def dump_state(self) -> dict[str, bool]:
+        """Return what the checks learned about the model, to survive a restart."""
+        state = {"grid_seen": False, "bms_seen": False}
+        for check in self._checks:
+            if isinstance(check, GridVoltageLost):
+                state["grid_seen"] = check._grid_seen
+            if isinstance(check, BatteryDisconnected):
+                state["bms_seen"] = check._bms_seen
+        return state
+
+    def load_state(self, stored: Mapping[str, Any]) -> None:
+        """Restore what the checks learned about the model before a restart."""
+        for check in self._checks:
+            if isinstance(check, GridVoltageLost) and stored.get("grid_seen"):
+                check._grid_seen = True
+            if isinstance(check, BatteryDisconnected) and stored.get("bms_seen"):
+                check._bms_seen = True

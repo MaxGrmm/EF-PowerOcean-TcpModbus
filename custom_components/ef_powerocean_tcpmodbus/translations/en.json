@@ -140,7 +140,7 @@
     },
     "reading_check_grid_voltage": {
       "title": "The inverter at {host} has had no grid voltage since {since}",
-      "description": "For more than 10 minutes the grid-side voltage has read 0 V while the inverter still reports being on the grid, which usually means a power outage the inverter does not report. While this lasts, Modbus Control, when on, leaves the inverter to itself as if it were off, and takes over again by itself once it is over. This issue then clears by itself.\n\nIf this is unexpected, open the inverter's device page while it lasts, choose **Download diagnostics** from its \u22ee menu, and attach the file to a bug report (Learn more). The diagnostics show the readings exactly as the inverter sent them."
+      "description": "For more than 10 minutes the grid-side voltage has dropped to near 0 V while the inverter still reports being on the grid, which usually means a power outage the inverter does not report. While this lasts, Modbus Control, when on, leaves the inverter to itself as if it were off, and takes over again by itself once it is over. This issue then clears by itself.\n\nIf this is unexpected, open the inverter's device page while it lasts, choose **Download diagnostics** from its \u22ee menu, and attach the file to a bug report (Learn more). The diagnostics show the readings exactly as the inverter sent them."
     },
     "reading_check_bms": {
       "title": "The battery of the inverter at {host} has been disconnected since {since}",

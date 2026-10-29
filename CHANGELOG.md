@@ -8,6 +8,10 @@
 - A repairs issue when a check fails for 10 minutes. It clears by itself once the check passes again.
 - `ef_powerocean_tcpmodbus_reading_check_failed` and `ef_powerocean_tcpmodbus_reading_check_cleared` events, also in the logbook. The checks run, and the events and issues fire, whether or not Modbus Control is on.
 
+### Changed
+
+- Frequency, the voltages and every battery's SOC are now read on each poll for the reading checks, even when their sensors are disabled.
+
 ### Fixed
 
 - A Battery SOC reading 0 % for one poll, or for half an hour, no longer sets off the Battery Reserve and has the house draw from the grid while the batteries are nearly full (#200). A frame whose readings contradict each other never moves the Charge Limit or Battery Reserve.

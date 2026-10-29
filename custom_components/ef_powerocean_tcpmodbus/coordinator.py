@@ -711,7 +711,9 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Announce a failed check and its end, and raise a long one in repairs."""
         finding = self.control.reading_checks.active
         previous, self._announced_finding = self._announced_finding, finding
-        if finding != previous:
+        # Another check standing for the same state is not news; the issue below
+        # still names it.
+        if (finding and finding.status) != (previous and previous.status):
             if previous is not None:
                 self._fire_check_event(EVENT_READING_CHECK_CLEARED, previous)
             if finding is not None:
