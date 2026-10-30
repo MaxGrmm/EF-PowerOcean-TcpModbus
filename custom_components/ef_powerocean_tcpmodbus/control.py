@@ -62,6 +62,7 @@ from .models import (
     InverterModel,
     RegisterDef,
     RegisterType,
+    ReserveSource,
     ReserveSupport,
     deviation_state,
     encode_register,
@@ -481,6 +482,39 @@ class ControlManager:
     def reserve_native(self) -> bool:
         """Return whether the inverter keeps the Battery Reserve itself."""
         return self._reserve_native
+
+    @property
+    def reserve_in_force(self) -> tuple[float | None, ReserveSource | None]:
+        """Return the state of charge the battery is held at, and what holds it.
+
+        Follows who keeps the reserve in the control loop (see _reserve_guards):
+
+        - Without Modbus control, the inverter runs itself and keeps its own
+          reserve, which is the app's and, where native, the Battery Reserve.
+        - In control and running Automatic, it still does, and an emulated Battery
+          Reserve above it is kept by the guard on top.
+        - Under any other command, the command outranks the inverter's reserve and
+          only the guard keeps the Battery Reserve, even below the app's.
+
+        Unknown while the control test drives the inverter, as its commands outrank
+        both. Handing back counts as without control: nothing is sent any more and
+        the inverter returns to the app's settings within its window.
+        """
+        if self._test_running:
+            return None, None
+        app = self._inputs.min_soc_limit
+        app_reserve = None if app is None else float(app)
+        inverter = (app_reserve, None if app_reserve is None else ReserveSource.APP)
+        if not self.in_control:
+            return inverter
+        ours = self._battery_reserve_soc
+        if self._commanded_feature is not ControlFeature.AUTOMATIC:
+            return ours, ReserveSource.BATTERY_RESERVE
+        if self._reserve_native or ours <= 0.0:
+            return inverter
+        if app_reserve is None or ours > app_reserve:
+            return ours, ReserveSource.BATTERY_RESERVE
+        return inverter
 
     @property
     def reserve_charge(self) -> bool:

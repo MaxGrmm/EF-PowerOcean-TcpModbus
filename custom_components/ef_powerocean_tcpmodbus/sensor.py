@@ -32,6 +32,7 @@ from .const import (
     CONTROL_STATUS_SENSOR,
     CONTROL_TEST_SENSOR,
     DAILY_ENERGY_SENSORS_DEVICE_RAW,
+    EFFECTIVE_RESERVE_SENSOR,
     ENERGY_SENSOR_MAP,
     FAULT_KEYS,
     SENSOR_MAP,
@@ -113,6 +114,7 @@ async def async_setup_entry(
         [
             *entities,
             EcoFlowControlStatusSensor(coordinator, entry),
+            EcoFlowEffectiveReserveSensor(coordinator, entry),
             EcoFlowControlTestSensor(coordinator, entry),
         ]
     )
@@ -155,6 +157,27 @@ class EcoFlowControlStatusSensor(EcoFlowBaseEntity[SensorDef], SensorEntity):
             "in_control": control.in_control,
             "expires_at": control.expires_at,
         }
+
+
+class EcoFlowEffectiveReserveSensor(EcoFlowBaseEntity[SensorDef], SensorEntity):
+    """The state of charge the battery is held at, as the control loop keeps it."""
+
+    def __init__(self, coordinator: EcoflowCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, EFFECTIVE_RESERVE_SENSOR)
+        self._attr_native_unit_of_measurement = EFFECTIVE_RESERVE_SENSOR.unit
+        self._attr_state_class = EFFECTIVE_RESERVE_SENSOR.state_class
+        self._attr_suggested_display_precision = 0
+        if EFFECTIVE_RESERVE_SENSOR.icon:
+            self._attr_icon = EFFECTIVE_RESERVE_SENSOR.icon
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.control.reserve_in_force[0]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        source = self.coordinator.control.reserve_in_force[1]
+        return {"source": None if source is None else str(source)}
 
 
 class EcoFlowControlTestSensor(EcoFlowBaseEntity[SensorDef], SensorEntity):

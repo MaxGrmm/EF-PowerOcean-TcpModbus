@@ -520,6 +520,18 @@
           "limited_percent": "Begrenzt (Prozent)"
         }
       },
+      "battery_reserve_effective": {
+        "name": "Wirksame Batteriereserve",
+        "state_attributes": {
+          "source": {
+            "name": "Quelle",
+            "state": {
+              "app": "App",
+              "battery_reserve": "Batteriereserve"
+            }
+          }
+        }
+      },
       "control_status": {
         "name": "Steuerungsstatus",
         "state": {

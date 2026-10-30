@@ -1004,6 +1004,15 @@ CONTROL_STATUS_SENSOR: Final = SensorDef(
     icon="mdi:robot",
 )
 
+# Not a device register: the reserve the battery is actually held at, as the control
+# manager keeps it. The app's reserve it reads is a control input, so always polled.
+EFFECTIVE_RESERVE_SENSOR: Final = SensorDef(
+    key="battery_reserve_effective",
+    unit=UNIT_OF_RATIO,
+    state_class=SensorStateClass.MEASUREMENT,
+    icon="mdi:battery-lock",
+)
+
 # The control test the run_control_test action starts; its states are those of
 # control_test.ControlTestState.
 CONTROL_TEST_SENSOR: Final = SensorDef(

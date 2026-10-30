@@ -517,6 +517,18 @@
           "limited_percent": "Limited (percent)"
         }
       },
+      "battery_reserve_effective": {
+        "name": "Effective Battery Reserve",
+        "state_attributes": {
+          "source": {
+            "name": "Source",
+            "state": {
+              "app": "App",
+              "battery_reserve": "Battery Reserve"
+            }
+          }
+        }
+      },
       "control_status": {
         "name": "Control Status",
         "state": {

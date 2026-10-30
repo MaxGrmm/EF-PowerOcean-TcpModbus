@@ -153,6 +153,9 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.host: str = config_entry.data[CONF_HOST]
         # Polls in a row each optional block failed, by its start address.
         self._optional_stalls: dict[int, int] = {}
+        # The last plausible pack capacity, kept across restarts. The inverter reads 0
+        # while the battery sleeps at its reserve, which is not a battery of no size.
+        self._battery_capacity_wh: float | None = None
         self.port: int = config_entry.data.get(CONF_PORT, DEFAULT_PORT)
         self.scan_interval: int = config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_S
@@ -308,6 +311,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "last_checked_time": self._last_checked_time.isoformat()
             if self._last_checked_time is not None
             else None,
+            "battery_capacity_wh": self._battery_capacity_wh,
             **self.control.dump_state(),
             **self._energy_processor.dump_state(),
         }
@@ -324,6 +328,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _load_stored_state(self, stored: dict[str, Any]) -> None:
         self.control.load_state(stored)
+        # So a battery asleep at its reserve across a restart keeps its capacity.
+        self._hold_battery_capacity(stored.get("battery_capacity_wh"))
 
         revision = self.inverter_model.traits.energy_state_revision
         if stored.get("energy_state_revision", 0) != revision:
@@ -1027,6 +1033,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         try:
+            if "battery_capacity" in raw_data:
+                raw_data["battery_capacity"] = self._hold_battery_capacity(
+                    raw_data["battery_capacity"]
+                )
             self._size_battery_limits(raw_data.get("battery_capacity"))
             result = self._energy_processor.validate_totals(
                 self._energy_processor.apply_offsets(raw_data),
@@ -1069,6 +1079,15 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # entities unavailable, rather than publishing an empty frame.
             self._status = CoordinatorStatus.PROCESSING_FAILED
             raise
+
+    def _hold_battery_capacity(self, capacity_wh: float | None) -> float | None:
+        """Return a plausible capacity, else the last one read.
+
+        Until one has been read, an implausible reading is unknown, not zero.
+        """
+        if capacity_wh and capacity_wh <= MAX_BATTERY_CAPACITY_WH:
+            self._battery_capacity_wh = capacity_wh
+        return self._battery_capacity_wh
 
     def _size_battery_limits(self, capacity_wh: float | None) -> None:
         """Scale the battery power limits to the capacity the inverter reports.
