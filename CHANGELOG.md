@@ -4,11 +4,11 @@
 
 ### Added
 
-- Effective Battery Reserve sensor: the reserve the battery is actually held at, the higher of the app's backup reserve and the Battery Reserve where that is in force (native, or emulated with Modbus control on). A `source` attribute says which one.
+- Effective Battery Reserve sensor: the reserve the battery is held at right now, as the control loop keeps it. Without Modbus control or in Automatic that is the app's backup reserve, or a higher emulated Battery Reserve; under a manual command only the Battery Reserve, since the command outranks the app's. A `source` attribute says which one.
 
 ### Fixed
 
-- Battery Nominal Capacity and Battery Remaining Energy no longer drop to 0 while the battery sleeps at its reserve; the last plausible capacity is kept.
+- Battery Nominal Capacity and Battery Remaining Energy no longer drop to 0 while the battery sleeps at its reserve; the last plausible capacity is kept, also across restarts.
 
 ## [2.9.4] - 2026-10-28
 

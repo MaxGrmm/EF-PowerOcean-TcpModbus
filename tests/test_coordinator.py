@@ -210,6 +210,29 @@ def test_an_implausible_first_capacity_is_unknown(
     assert data["battery_capacity"] is None
 
 
+def test_the_kept_capacity_survives_a_restart(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A battery still asleep after a restart is not of unknown size."""
+    now = datetime(2026, 10, 23, 22, tzinfo=UTC)
+    run_update(coordinator, {"battery_capacity": 10_000.0}, now, monkeypatch)
+    stored = coordinator._persisted_state()
+
+    coordinator._battery_capacity_wh = None
+    coordinator._store = SimpleNamespace(
+        async_load=AsyncMock(return_value=stored), async_delay_save=Mock()
+    )
+    asyncio.run(coordinator.async_load_persisted_state())
+    asleep = run_update(
+        coordinator,
+        {"battery_capacity": 0.0},
+        now + timedelta(minutes=1),
+        monkeypatch,
+    )
+
+    assert asleep["battery_capacity"] == 10_000.0
+
+
 # Every real module as its datasheet rates it, unlike the merged const table.
 DATASHEET_MODULES = (
     models.BatteryModule(5000, charge_w=2500, discharge_w=3300),  # EF BD-5.1-S1

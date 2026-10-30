@@ -81,6 +81,18 @@ class ReserveSupport(StrEnum):
     NATIVE = "native"
 
 
+class ReserveSource(StrEnum):
+    """What holds the battery at its reserve right now."""
+
+    # The inverter, from its own reserve register (40536): the backup reserve the
+    # EcoFlow app sets, and a native Battery Reserve. It keeps it while it runs
+    # itself, in Automatic or without Modbus control.
+    APP = "app"
+    # The integration's reserve guard, at the Battery Reserve. Under a manual
+    # command it is the only one, since the command outranks the app's reserve.
+    BATTERY_RESERVE = "battery_reserve"
+
+
 @dataclass(frozen=True, slots=True)
 class ModelTraits:
     """What sets one model apart from the rest of the family.

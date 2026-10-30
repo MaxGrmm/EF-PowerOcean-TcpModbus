@@ -1962,6 +1962,98 @@ def test_an_emulated_reserve_is_left_to_the_inverter_at_the_app_reserve(
     assert control._commanded_feature is not Feature.DISCHARGE_BATTERY
 
 
+RESERVE_FRAME = {
+    "battery_soc": 50.0,
+    "solar_power": 0.0,
+    "house_power": 900.0,
+    "grid_power": 0.0,
+    "battery_power": -900.0,
+}
+App = models.ReserveSource.APP
+Ours = models.ReserveSource.BATTERY_RESERVE
+
+
+@pytest.mark.parametrize(
+    ("app", "ours", "expected"),
+    (
+        (10, 30, (30.0, Ours)),  # the guard keeps ours above the inverter's
+        (40, 30, (40.0, App)),  # the inverter keeps the app's above ours
+        (10, 0, (10.0, App)),  # an unset Battery Reserve keeps nothing
+        (None, 30, (30.0, Ours)),
+    ),
+)
+def test_in_automatic_the_higher_kept_reserve_holds(
+    control, monkeypatch: pytest.MonkeyPatch, app, ours, expected
+) -> None:
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_battery_reserve_soc(ours))
+    asyncio.run(
+        control.async_apply({**RESERVE_FRAME, const.BATTERY_RESERVE_REGISTER_KEY: app})
+    )
+
+    assert control._commanded_feature is Feature.AUTOMATIC
+    assert control.reserve_in_force == expected
+
+
+@pytest.mark.parametrize("ours", (30, 0))
+def test_a_manual_command_outranks_the_app_reserve(
+    control, monkeypatch: pytest.MonkeyPatch, ours
+) -> None:
+    """Only the guard holds under a command, so the app's reserve is not in force."""
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_battery_reserve_soc(ours))
+    asyncio.run(control.async_set_command(Feature.DISCHARGE_BATTERY, power=2000.0))
+    asyncio.run(
+        control.async_apply({**RESERVE_FRAME, const.BATTERY_RESERVE_REGISTER_KEY: 40})
+    )
+
+    assert control._commanded_feature is Feature.DISCHARGE_BATTERY
+    assert control.reserve_in_force == (float(ours), Ours)
+
+
+def test_without_control_the_inverter_keeps_the_app_reserve(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_battery_reserve_soc(30))
+    asyncio.run(
+        control.async_apply({**RESERVE_FRAME, const.BATTERY_RESERVE_REGISTER_KEY: 10})
+    )
+    asyncio.run(control.async_set_enabled(False))
+
+    assert control.reserve_in_force == (10.0, App)
+
+
+def test_a_native_reserve_is_the_inverter_s_until_a_command_outranks_it(
+    native_control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allow_writes(native_control, monkeypatch)
+    frame = {**RESERVE_FRAME, const.BATTERY_RESERVE_REGISTER_KEY: 25}
+    asyncio.run(native_control.async_apply(frame))
+    assert native_control.reserve_in_force == (25.0, App)
+
+    asyncio.run(
+        native_control.async_set_command(Feature.DISCHARGE_BATTERY, power=2000.0)
+    )
+    asyncio.run(native_control.async_apply(frame))
+    assert native_control.reserve_in_force == (25.0, Ours)
+
+
+def test_no_reserve_is_known_before_a_read_or_during_the_control_test(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    control._enabled = False
+    assert control.reserve_in_force == (None, None)
+
+    allow_writes(control, monkeypatch)
+    control._enabled = True
+    asyncio.run(
+        control.async_apply({**RESERVE_FRAME, const.BATTERY_RESERVE_REGISTER_KEY: 10})
+    )
+    asyncio.run(control.async_begin_test())
+    assert control.reserve_in_force == (None, None)
+
+
 def test_the_app_reserve_above_the_soc_turns_charge_to_reserve_on(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:

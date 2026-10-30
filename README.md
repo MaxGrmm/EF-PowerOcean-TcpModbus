@@ -159,6 +159,10 @@ attribute:
   so in Automatic the integration leaves it to the inverter as with a native reserve.
   That is whenever the Battery Reserve is at or below the app's.
 
+_Effective Battery Reserve_ shows which of these holds right now. Its `source` is `app`
+while the inverter keeps its own reserve, and `battery_reserve` while the integration
+keeps the Battery Reserve, which under a manual command can be below the app's.
+
 The integration options are set to the model's; change them only to test a model, and
 `scripts/control_feature_scan.py --reserve-probe` shows whether one acts on a written
 reserve.
@@ -331,7 +335,7 @@ that need the EcoFlow app open, or that change device settings, are left to
 | Available Battery Charge Power    | W    | Charge power limit reported from the EcoFlow app (diagnostic)    |
 | Available Battery Discharge Power | W    | Discharge power limit reported from the EcoFlow app (diagnostic) |
 | App Backup Reserve                | %    | Backup reserve set in the EcoFlow app (emulated reserve only)    |
-| Effective Battery Reserve         | %    | Higher of the app reserve and a Battery Reserve in force         |
+| Effective Battery Reserve         | %    | Reserve the battery is held at now; `source` says by what        |
 
 > ⚠️ _Available Battery Charge/Discharge Power_ reflect limits configured in the
 > EcoFlow app, but **battery control over Modbus ignores those limits**. For example,

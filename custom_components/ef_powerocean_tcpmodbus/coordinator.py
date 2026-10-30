@@ -153,8 +153,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.host: str = config_entry.data[CONF_HOST]
         # Polls in a row each optional block failed, by its start address.
         self._optional_stalls: dict[int, int] = {}
-        # The last plausible pack capacity. The inverter reads 0 while the battery
-        # sleeps at its reserve, which is not a battery of no size.
+        # The last plausible pack capacity, kept across restarts. The inverter reads 0
+        # while the battery sleeps at its reserve, which is not a battery of no size.
         self._battery_capacity_wh: float | None = None
         self.port: int = config_entry.data.get(CONF_PORT, DEFAULT_PORT)
         self.scan_interval: int = config_entry.options.get(
@@ -311,6 +311,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "last_checked_time": self._last_checked_time.isoformat()
             if self._last_checked_time is not None
             else None,
+            "battery_capacity_wh": self._battery_capacity_wh,
             **self.control.dump_state(),
             **self._energy_processor.dump_state(),
         }
@@ -327,6 +328,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _load_stored_state(self, stored: dict[str, Any]) -> None:
         self.control.load_state(stored)
+        # So a battery asleep at its reserve across a restart keeps its capacity.
+        self._hold_battery_capacity(stored.get("battery_capacity_wh"))
 
         revision = self.inverter_model.traits.energy_state_revision
         if stored.get("energy_state_revision", 0) != revision:
