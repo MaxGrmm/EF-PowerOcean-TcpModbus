@@ -327,10 +327,11 @@ that need the EcoFlow app open, or that change device settings, are left to
 | Battery Voltage                   | V    | Pack voltage                                                     |
 | Battery Current                   | A    | Positive = charging, negative = discharging                      |
 | Battery Temperature               | °C   | Mean module temperature                                          |
-| Battery Nominal Capacity          | Wh   | Nominal pack capacity reported by the device                     |
+| Battery Nominal Capacity          | Wh   | Pack capacity; the last one kept while the device reads 0        |
 | Available Battery Charge Power    | W    | Charge power limit reported from the EcoFlow app (diagnostic)    |
 | Available Battery Discharge Power | W    | Discharge power limit reported from the EcoFlow app (diagnostic) |
 | App Backup Reserve                | %    | Backup reserve set in the EcoFlow app (emulated reserve only)    |
+| Effective Battery Reserve         | %    | Higher of the app reserve and a Battery Reserve in force         |
 
 > ⚠️ _Available Battery Charge/Discharge Power_ reflect limits configured in the
 > EcoFlow app, but **battery control over Modbus ignores those limits**. For example,

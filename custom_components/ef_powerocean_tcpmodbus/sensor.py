@@ -32,6 +32,7 @@ from .const import (
     CONTROL_STATUS_SENSOR,
     CONTROL_TEST_SENSOR,
     DAILY_ENERGY_SENSORS_DEVICE_RAW,
+    EFFECTIVE_RESERVE_SENSOR,
     ENERGY_SENSOR_MAP,
     FAULT_KEYS,
     SENSOR_MAP,
@@ -113,6 +114,7 @@ async def async_setup_entry(
         [
             *entities,
             EcoFlowControlStatusSensor(coordinator, entry),
+            EcoFlowEffectiveReserveSensor(coordinator, entry),
             EcoFlowControlTestSensor(coordinator, entry),
         ]
     )
@@ -155,6 +157,52 @@ class EcoFlowControlStatusSensor(EcoFlowBaseEntity[SensorDef], SensorEntity):
             "in_control": control.in_control,
             "expires_at": control.expires_at,
         }
+
+
+class EcoFlowEffectiveReserveSensor(EcoFlowBaseEntity[SensorDef], SensorEntity):
+    """The state of charge the battery is held at, whoever sets it.
+
+    The inverter keeps the app's backup reserve whatever runs it. A native Battery
+    Reserve is that same register; an emulated one is kept by the control manager
+    on top of it, but only while Modbus control is on.
+    """
+
+    def __init__(self, coordinator: EcoflowCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, EFFECTIVE_RESERVE_SENSOR)
+        self._attr_native_unit_of_measurement = EFFECTIVE_RESERVE_SENSOR.unit
+        self._attr_state_class = EFFECTIVE_RESERVE_SENSOR.state_class
+        self._attr_suggested_display_precision = 0
+        if EFFECTIVE_RESERVE_SENSOR.icon:
+            self._attr_icon = EFFECTIVE_RESERVE_SENSOR.icon
+
+    def _reserves(self) -> tuple[float | None, float | None]:
+        """Return the app's backup reserve and the Battery Reserve in force."""
+        control = self.coordinator.control
+        app = (self.coordinator.data or {}).get(BATTERY_RESERVE_REGISTER_KEY)
+        app_reserve = None if app is None else float(app)
+        if control.reserve_native:
+            # The Battery Reserve is the app's register, so both say the same.
+            return app_reserve, app_reserve
+        if control.enabled and control.battery_reserve_soc > 0:
+            return app_reserve, control.battery_reserve_soc
+        return app_reserve, None
+
+    @property
+    def native_value(self) -> float | None:
+        reserves = [value for value in self._reserves() if value is not None]
+        return max(reserves) if reserves else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        app_reserve, battery_reserve = self._reserves()
+        source: str | None
+        if battery_reserve is not None and (
+            app_reserve is None or battery_reserve > app_reserve
+        ):
+            source = "battery_reserve"
+        else:
+            source = "app" if app_reserve is not None else None
+        return {"source": source}
 
 
 class EcoFlowControlTestSensor(EcoFlowBaseEntity[SensorDef], SensorEntity):
