@@ -235,9 +235,11 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             on_refresh=self.async_refresh,
             write_setting=self._async_write_register,
             on_command_expired=self._command_expired,
-            # A background task of Home Assistant's: cancelled on shutdown and not
-            # waited for at startup, unlike a bare asyncio task.
-            start_task=hass.async_create_background_task,
+            # A background task of the entry's: Home Assistant cancels it when the
+            # entry unloads or its setup fails, and does not wait for it at startup.
+            start_task=lambda coro, name: config_entry.async_create_background_task(
+                hass, coro, name
+            ),
             battery_reserve=battery_reserve_for(
                 self.inverter_model,
                 config_entry.options.get(CONF_BATTERY_RESERVE),
@@ -257,6 +259,9 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._store: Store[dict[str, Any]] | None = state_store(
             hass, config_entry.entry_id
         )
+        # Not saved until loaded: a setup that fails before then would otherwise
+        # overwrite the saved totals with empty ones.
+        self._state_loaded = False
 
     # ── Properties ────────────────────────────────────────────────────────────
 
@@ -342,6 +347,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_checked_data = self._energy_processor.change_offsets(
             self._energy_offsets, self._last_checked_data
         )
+        self._state_loaded = True
 
     def _load_stored_state(self, stored: dict[str, Any]) -> None:
         self.control.load_state(stored)
@@ -362,27 +368,21 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     # ── Connection ────────────────────────────────────────────────────────────
 
-    async def async_client_shutdown(self) -> None:
-        """Integration-Shutdown, closing connection"""
-        _LOGGER.info("PowerOcean Shutdown. Closing Connection!")
-        # First, while the connection is still open to hand control back.
-        await self.control_test.async_cancel()
-        if self._store is not None:
-            await self._store.async_save(self._persisted_state())
-        await self.control.async_stop()
-        await self._modbus_client.async_close()
-        await super().async_shutdown()
+    async def _async_setup(self) -> None:
+        """Load the saved state and connect, once, before the first poll.
 
-    async def async_connect_client(self) -> None:
-        """Connect for the first time and read the device's identity."""
-        # Started before the connect can fail: the heartbeat skips beats while the
-        # client is down and is beating again the moment a reconnect succeeds.
-        self.control.start()
-
+        Called by the first refresh. A failure here makes Home Assistant retry
+        the setup with its own backoff, and clean up through async_shutdown, so a
+        single attempt is enough: the reconnect backoff is for an inverter lost
+        while running, not one that is not there at startup.
+        """
+        await self.async_load_persisted_state()
         if not await self._modbus_client.async_connect():
-            _LOGGER.error("Modbus TCP not connected to %s:%s", self.host, self.port)
-            return
-
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="cannot_connect",
+                translation_placeholders={"host": self.host, "port": str(self.port)},
+            )
         await self.async_read_device_info()
         _LOGGER.info(
             "Modbus TCP is connected to %s:%s (SN: %s)",
@@ -390,6 +390,24 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.port,
             self.identity.serial_number,
         )
+        # From here on the heartbeat skips beats while the connection is down and
+        # beats again the moment a reconnect succeeds.
+        self.control.start()
+
+    async def async_shutdown(self) -> None:
+        """Hand control back, save the state and close the connection.
+
+        The base class registers this with the config entry, so Home Assistant
+        calls it both when the entry unloads and when its setup fails.
+        """
+        _LOGGER.debug("Closing the connection to %s:%s", self.host, self.port)
+        # First, while the connection is still open to hand control back.
+        await self.control_test.async_cancel()
+        if self._store is not None and self._state_loaded:
+            await self._store.async_save(self._persisted_state())
+        await self.control.async_stop()
+        await self._modbus_client.async_close()
+        await super().async_shutdown()
 
     async def async_read_device_info(self) -> None:
         """Populate the device identity from the device.

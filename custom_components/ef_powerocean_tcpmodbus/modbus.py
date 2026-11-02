@@ -198,24 +198,43 @@ class PymodbusLink:
         self._pymodbus.close()
 
     async def read_holding_registers(self, address: int, count: int) -> list[int]:
-        response = await self._pymodbus.read_holding_registers(
-            address=address, count=count, device_id=self._device_id
-        )
+        with _cancellation_kept():
+            response = await self._pymodbus.read_holding_registers(
+                address=address, count=count, device_id=self._device_id
+            )
         return list(_answered(response).registers)
 
     async def write_register(self, address: int, value: int) -> None:
-        _answered(
-            await self._pymodbus.write_register(
+        with _cancellation_kept():
+            response = await self._pymodbus.write_register(
                 address=address, value=value, device_id=self._device_id
             )
-        )
+        _answered(response)
 
     async def write_registers(self, address: int, values: list[int]) -> None:
-        _answered(
-            await self._pymodbus.write_registers(
+        with _cancellation_kept():
+            response = await self._pymodbus.write_registers(
                 address=address, values=values, device_id=self._device_id
             )
-        )
+        _answered(response)
+
+
+@contextmanager
+def _cancellation_kept() -> Iterator[None]:
+    """Raise a cancellation that pymodbus turned into an error as one again.
+
+    Older pymodbus releases, such as the 3.11 Home Assistant 2025.12 pins, catch the
+    CancelledError of a request in flight and raise a ModbusIOException instead.
+    Taken for a failed request, it would keep a cancelled task, such as the
+    heartbeat, running, and whatever waits for that task to end would wait forever.
+    """
+    try:
+        yield
+    except ModbusException as err:
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            raise asyncio.CancelledError from err
+        raise
 
 
 def _answered(response: ModbusPDU) -> ModbusPDU:
