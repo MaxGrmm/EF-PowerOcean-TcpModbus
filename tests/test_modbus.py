@@ -417,3 +417,43 @@ def test_a_failed_reconnect_does_not_log_above_debug(
         assert not asyncio.run(client.async_reconnect())
 
     assert [r for r in caplog.records if r.levelno > logging.DEBUG] == []
+
+
+class _SwallowingPymodbus:
+    """Turns the cancellation of a request into an error, as pymodbus 3.11 does."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+
+    async def write_register(self, **_kwargs: Any) -> Any:
+        self.started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError as err:
+            raise ModbusException("Request cancelled outside pymodbus.") from err
+
+
+async def test_a_cancelled_request_stays_cancelled_whatever_pymodbus_raises() -> None:
+    """A heartbeat cancelled mid-write has to end, or unloading waits for it."""
+    pymodbus = _SwallowingPymodbus()
+    link = modbus_module.PymodbusLink.__new__(modbus_module.PymodbusLink)
+    link._device_id = const.DEFAULT_SLAVE
+    link._pymodbus = pymodbus  # type: ignore[assignment]
+
+    task = asyncio.create_task(link.write_register(40608, 1))
+    await pymodbus.started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_a_failed_request_that_was_not_cancelled_still_fails() -> None:
+    link = modbus_module.PymodbusLink.__new__(modbus_module.PymodbusLink)
+    link._device_id = const.DEFAULT_SLAVE
+    link._pymodbus = SimpleNamespace(  # type: ignore[assignment]
+        write_register=AsyncMock(side_effect=ModbusException("no answer"))
+    )
+
+    with pytest.raises(ModbusException, match="no answer"):
+        await link.write_register(40608, 1)
