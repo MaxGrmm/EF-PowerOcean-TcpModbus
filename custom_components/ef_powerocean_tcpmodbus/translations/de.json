@@ -805,6 +805,9 @@
     },
     "identity_mismatch": {
       "message": "{what} wird nicht an Register {register} gesendet: Das Gerät unter {host} meldet die Seriennummer {found} statt {expected}."
+    },
+    "cannot_connect": {
+      "message": "Keine Verbindung zum Wechselrichter unter {host}:{port}."
     }
   }
 }

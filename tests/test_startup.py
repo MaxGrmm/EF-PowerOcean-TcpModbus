@@ -9,6 +9,8 @@ library version would stop the integration from starting at all.
 
 from __future__ import annotations
 
+import asyncio
+import socket
 import struct
 from collections.abc import Iterator
 from datetime import timedelta
@@ -23,6 +25,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const
@@ -527,3 +530,103 @@ async def test_removing_the_entry_deletes_its_saved_state(
     await hass.async_block_till_done()
 
     assert key not in hass_storage
+
+
+# ── A setup that fails leaves nothing behind ──────────────────────────────────
+
+
+def _heartbeats() -> list[asyncio.Task[Any]]:
+    return [
+        task
+        for task in asyncio.all_tasks()
+        if task.get_name() == "powerocean-heartbeat" and not task.done()
+    ]
+
+
+def _closed_port() -> int:
+    """Return a port nothing listens on."""
+    with socket.socket() as sock:
+        sock.bind((HOST, 0))
+        return int(sock.getsockname()[1])
+
+
+def _controlled_entry(port: int) -> MockConfigEntry:
+    return MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: port},
+        options={const.CONF_MODBUS_CONTROL: True},
+    )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
+async def test_an_unreachable_inverter_is_retried_without_leaking(
+    hass: HomeAssistant,
+) -> None:
+    """With control on, a failed setup must not leave a heartbeat or a client
+    behind: every retry would add another writer to the inverter."""
+    entry = _controlled_entry(_closed_port())
+    entry.add_to_hass(hass)
+
+    with patch.object(
+        modbus_module.ModbusClient,
+        "async_close",
+        autospec=True,
+        side_effect=modbus_module.ModbusClient.async_close,
+    ) as close:
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    port = entry.data[const.CONF_PORT]
+    assert entry.reason == f"Could not connect to the inverter at {HOST}:{port}"
+    assert _heartbeats() == []
+    assert close.call_count == 1
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_failed_first_poll_is_retried_without_leaking(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    """The inverter answers, so the heartbeat starts, but the first poll fails."""
+    _serve_serial(inverter, SERIAL)
+    entry = _controlled_entry(inverter.port)
+    entry.add_to_hass(hass)
+
+    with (
+        patch.object(
+            EcoflowCoordinator,
+            "async_get_raw_data",
+            side_effect=UpdateFailed("first poll failed"),
+        ),
+        patch.object(
+            modbus_module.ModbusClient,
+            "async_close",
+            autospec=True,
+            side_effect=modbus_module.ModbusClient.async_close,
+        ) as close,
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert _heartbeats() == []
+    assert close.call_count == 1
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_unloading_stops_the_heartbeat_and_closes_the_client(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    _serve_serial(inverter, SERIAL)
+    entry = _controlled_entry(inverter.port)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert len(_heartbeats()) == 1
+    coordinator: EcoflowCoordinator = entry.runtime_data
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert _heartbeats() == []
+    assert not coordinator.connected

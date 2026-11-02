@@ -147,11 +147,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
         hass,
         config_entry=entry,
     )
-    await coordinator.async_load_persisted_state()
-    await coordinator.async_connect_client()
+    # Connects and reads the device, through the coordinator's _async_setup. If
+    # it fails, Home Assistant retries the setup and shuts the coordinator down.
+    await coordinator.async_config_entry_first_refresh()
     # Before the update listener below, which would reload the entry over it.
     _async_claim_serial_number(hass, entry, coordinator)
-    await coordinator.async_config_entry_first_refresh()
 
     _async_update_modbus_disabled_issue(hass, entry, coordinator)
     entry.async_on_unload(
@@ -194,9 +194,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
     ir.async_delete_issue(hass, DOMAIN, identity_mismatch_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, held_totals_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, reading_check_issue_id(entry))
-    # close connection and shutdown
-    await entry.runtime_data.async_client_shutdown()
-
+    # The coordinator's async_shutdown, registered with the entry, hands control
+    # back and closes the connection after this returns.
     return True
 
 

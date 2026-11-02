@@ -25,6 +25,7 @@
 - Effective Battery Reserve sensor: the reserve the battery is held at right now, as the control loop keeps it. Without Modbus control or in Automatic that is the app's backup reserve, or a higher emulated Battery Reserve; under a manual command only the Battery Reserve, since the command outranks the app's. A `source` attribute says which
 - Battery Nominal Capacity and Battery Remaining Energy no longer drop to 0 while the battery sleeps at its reserve; the last plausible capacity is kept, also across restarts.
 - Deleting the integration now also deletes the energy counters and control state it saved.
+- A setup that fails, such as when the inverter is unreachable at startup, no longer leaves the Modbus connection open and, with Modbus Control on, the heartbeat running; every retry used to add another heartbeat writing to the inverter. Setup also gives up after one connection attempt instead of blocking Home Assistant's startup for over two minutes, and Home Assistant retries it with its own backoff.
 
 ## [2.9.4] - 2026-10-28
 
