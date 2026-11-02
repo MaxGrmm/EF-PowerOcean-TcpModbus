@@ -36,6 +36,9 @@ from .models import (
     requires_modbus_control,
 )
 
+# One write to the inverter at a time.
+PARALLEL_UPDATES = 1
+
 _LOGGER = logging.getLogger(__name__)
 
 # Ranges wider than this get a text box; a slider over tens of kilowatts is unusable.
@@ -106,7 +109,6 @@ class EcoFlowFeaturePowerNumber(EcoFlowBaseEntity[ControlEntityDef], NumberEntit
     _attr_native_step = 100.0
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_device_class = NumberDeviceClass.POWER
-    _attr_icon = "mdi:speedometer"
 
     def __init__(
         self,
@@ -168,8 +170,6 @@ class EcoFlowSocLimitNumber(EcoFlowBaseEntity[ControlEntityDef], NumberEntity):
         self._getter = getter
         self._attributes = attributes
         self._attr_entity_category = definition.entity_category
-        if definition.icon:
-            self._attr_icon = definition.icon
 
     @property
     def native_value(self) -> float:
@@ -210,9 +210,6 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity[NumberWritableDef], NumberEntity):
         )
 
         self._attr_entity_category = EntityCategory.CONFIG
-
-        if definition.icon:
-            self._attr_icon = definition.icon
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

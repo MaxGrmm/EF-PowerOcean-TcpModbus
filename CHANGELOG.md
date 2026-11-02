@@ -7,16 +7,24 @@
 - Every poll is checked for conditions in which the inverter is best left to itself: off-grid and a disconnected battery, as the inverter reports them; a grid-side voltage gone while it still reports on-grid; a system Battery SOC of 0 % while a battery reports more (#32, #200); and voltages and frequency that stop changing for two minutes. Control steps aside while one fails, and Control Status shows Off-grid, Battery disconnected or the new Readings inconsistent.
 - A repairs issue when a check fails for 10 minutes. It clears by itself once the check passes again.
 - `ef_powerocean_tcpmodbus_reading_check_failed` and `ef_powerocean_tcpmodbus_reading_check_cleared` events, also in the logbook. The checks run, and the events and issues fire, whether or not Modbus Control is on.
+- Icons for the Battery Mode options and for the actions.
+- README sections on use cases, troubleshooting, removal, how data is updated and known limitations.
+- `quality_scale.yaml`, recording how the integration meets each rule of Home Assistant's integration quality scale.
 
 ### Changed
 
 - Frequency, the voltages and every battery's SOC are now read on each poll for the reading checks, even when their sensors are disabled.
+- Entity icons come from `icons.json` rather than the entities' state, as Home Assistant recommends. They look the same.
+- Error messages from the controls and settings are translated, so they appear in German in a German Home Assistant.
+- Writes to the inverter from the controls are sent one at a time.
+- A connection that stays down is logged once, and its recovery once, instead of an error on every poll.
 
 ### Fixed
 
 - A Battery SOC reading 0 % for one poll, or for half an hour, no longer sets off the Battery Reserve and has the house draw from the grid while the batteries are nearly full (#200). A frame whose readings contradict each other never moves the Charge Limit or Battery Reserve.
 - Effective Battery Reserve sensor: the reserve the battery is held at right now, as the control loop keeps it. Without Modbus control or in Automatic that is the app's backup reserve, or a higher emulated Battery Reserve; under a manual command only the Battery Reserve, since the command outranks the app's. A `source` attribute says which
 - Battery Nominal Capacity and Battery Remaining Energy no longer drop to 0 while the battery sleeps at its reserve; the last plausible capacity is kept, also across restarts.
+- Deleting the integration now also deletes the energy counters and control state it saved.
 
 ## [2.9.4] - 2026-10-28
 

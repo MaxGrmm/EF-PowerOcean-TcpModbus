@@ -90,7 +90,16 @@ jobs:
             --constraint "$(python .github/scripts/ha_requirements.py --constraints)"
           python -m pip check
       - name: Run unit tests
+        if: matrix.ha != 'tested'
         run: python -m pytest
+      # Measured on the pinned version only: which Modbus code paths run depends
+      # on the Home Assistant version, so the others would count different lines.
+      - name: Run unit tests with coverage
+        if: matrix.ha == 'tested'
+        run: |
+          python -m pytest --cov=custom_components/ef_powerocean_tcpmodbus \
+            --cov-report=term-missing --cov-report=json
+          python .github/scripts/check_coverage.py coverage.json
 
   # Newest Home Assistant beta, forced over the harness, about a week before each
   # release; the same as latest when no beta is out. Scheduled runs only.

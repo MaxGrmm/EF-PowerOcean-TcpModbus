@@ -46,6 +46,9 @@ from .fault_names import async_get_fault_names
 from .models import EnergySensorDef, SensorDef
 from .telemetry import active_fault_codes
 
+# The coordinator polls for every entity, so updates need no limit.
+PARALLEL_UPDATES = 0
+
 type SensorValue = StateType | date | datetime | Decimal
 
 _LOGGER = logging.getLogger(__name__)
@@ -135,8 +138,6 @@ class EcoFlowControlStatusSensor(EcoFlowBaseEntity[SensorDef], SensorEntity):
         super().__init__(coordinator, entry, CONTROL_STATUS_SENSOR)
         self._attr_device_class = CONTROL_STATUS_SENSOR.device_class
         self._attr_options = list(CONTROL_STATUS_SENSOR.options or ())
-        if CONTROL_STATUS_SENSOR.icon:
-            self._attr_icon = CONTROL_STATUS_SENSOR.icon
 
     @property
     def available(self) -> bool:
@@ -167,8 +168,6 @@ class EcoFlowEffectiveReserveSensor(EcoFlowBaseEntity[SensorDef], SensorEntity):
         self._attr_native_unit_of_measurement = EFFECTIVE_RESERVE_SENSOR.unit
         self._attr_state_class = EFFECTIVE_RESERVE_SENSOR.state_class
         self._attr_suggested_display_precision = 0
-        if EFFECTIVE_RESERVE_SENSOR.icon:
-            self._attr_icon = EFFECTIVE_RESERVE_SENSOR.icon
 
     @property
     def native_value(self) -> float | None:
@@ -188,8 +187,6 @@ class EcoFlowControlTestSensor(EcoFlowBaseEntity[SensorDef], SensorEntity):
         self._attr_device_class = CONTROL_TEST_SENSOR.device_class
         self._attr_entity_category = CONTROL_TEST_SENSOR.entity_category
         self._attr_options = list(CONTROL_TEST_SENSOR.options or ())
-        if CONTROL_TEST_SENSOR.icon:
-            self._attr_icon = CONTROL_TEST_SENSOR.icon
 
     @property
     def available(self) -> bool:
@@ -226,9 +223,6 @@ class EcoflowSensor(EcoFlowBaseEntity[SensorDef | EnergySensorDef], RestoreSenso
             )
 
         self._attr_entity_category = self._definition.entity_category
-
-        if self._definition.icon:
-            self._attr_icon = self._definition.icon
 
     @callback
     def _handle_coordinator_update(self) -> None:

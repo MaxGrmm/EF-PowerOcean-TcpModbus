@@ -12,6 +12,9 @@ from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .models import BinarySensorDef
 
+# The coordinator polls for every entity, so updates need no limit.
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,  # noqa: ARG001 - required by the platform API

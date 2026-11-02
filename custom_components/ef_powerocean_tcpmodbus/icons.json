@@ -1,0 +1,116 @@
+{
+  "entity": {
+    "number": {
+      "battery_reserve_soc": {
+        "default": "mdi:battery-lock"
+      },
+      "charge_battery_power": {
+        "default": "mdi:speedometer"
+      },
+      "charge_limit_soc": {
+        "default": "mdi:battery-charging-100"
+      },
+      "device_led_brightness_control": {
+        "default": "mdi:led-on"
+      },
+      "discharge_battery_power": {
+        "default": "mdi:speedometer"
+      },
+      "export_solar_first_power": {
+        "default": "mdi:speedometer"
+      },
+      "export_to_grid_power": {
+        "default": "mdi:speedometer"
+      },
+      "import_from_grid_power": {
+        "default": "mdi:speedometer"
+      }
+    },
+    "select": {
+      "battery_mode": {
+        "default": "mdi:home-battery",
+        "state": {
+          "automatic": "mdi:home-battery",
+          "hold_battery": "mdi:pause-circle-outline",
+          "charge_battery": "mdi:battery-charging",
+          "discharge_battery": "mdi:battery-arrow-down",
+          "export_to_grid": "mdi:transmission-tower-export",
+          "import_from_grid": "mdi:transmission-tower-import",
+          "export_solar_first": "mdi:solar-power"
+        }
+      }
+    },
+    "sensor": {
+      "active_control_mode": {
+        "default": "mdi:remote"
+      },
+      "active_faults": {
+        "default": "mdi:alert-circle-outline"
+      },
+      "battery_reserve_effective": {
+        "default": "mdi:battery-lock"
+      },
+      "control_status": {
+        "default": "mdi:robot"
+      },
+      "control_test": {
+        "default": "mdi:test-tube"
+      },
+      "device_address": {
+        "default": "mdi:identifier"
+      },
+      "fault_count": {
+        "default": "mdi:alert-circle-outline"
+      },
+      "feed_in_power_max_percent": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "grid_connection_code": {
+        "default": "mdi:transmission-tower"
+      },
+      "grid_feed_mode": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "grid_mode": {
+        "default": "mdi:transmission-tower"
+      },
+      "min_soc_limit": {
+        "default": "mdi:battery-lock"
+      },
+      "operating_mode": {
+        "default": "mdi:home-lightning-bolt"
+      },
+      "protocol_version": {
+        "default": "mdi:information-outline"
+      },
+      "system_alerts": {
+        "default": "mdi:alert-outline"
+      }
+    },
+    "switch": {
+      "battery_reserve_charge": {
+        "default": "mdi:battery-arrow-up"
+      },
+      "battery_saver_mode_control": {
+        "default": "mdi:leaf"
+      },
+      "grid_feed": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "modbus_control": {
+        "default": "mdi:remote"
+      }
+    }
+  },
+  "services": {
+    "set_battery_command": {
+      "service": "mdi:home-battery"
+    },
+    "run_control_test": {
+      "service": "mdi:test-tube"
+    },
+    "cancel_control_test": {
+      "service": "mdi:test-tube-off"
+    }
+  }
+}

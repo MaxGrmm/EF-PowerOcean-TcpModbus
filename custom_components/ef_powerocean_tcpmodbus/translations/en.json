@@ -749,6 +749,51 @@
     },
     "control_test_other_controller": {
       "message": "The inverter reports another Modbus controller. Stop it, wait a minute, and try again. Nothing was written."
+    },
+    "control_test_has_inverter": {
+      "message": "A control test is running and has the inverter. Wait for it to finish, or cancel it; nothing was written."
+    },
+    "heartbeat_failed": {
+      "message": "The heartbeat write to register {register} failed or was rejected, so the inverter would ignore the command. Nothing was written."
+    },
+    "app_reserve_charges": {
+      "message": "The battery is below the backup reserve set in the EcoFlow app, which charges it up to that reserve anyway. Lower that reserve in the app to turn this off; nothing was changed."
+    },
+    "grid_feed_mode_unsupported": {
+      "message": "The grid feed can't be switched while the inverter is in a feed-in mode it can't restore, such as the percentage limit. Nothing was written."
+    },
+    "grid_feed_nothing_to_restore": {
+      "message": "The grid feed can't be switched: the inverter hasn't reported an export it would allow, so there is nothing to restore."
+    },
+    "not_connected": {
+      "message": "The inverter is not connected. Nothing was written."
+    },
+    "unsafe_control_command": {
+      "message": "Refusing control command {value}: it would take the system off-grid or shut it down."
+    },
+    "setpoint_not_mapped": {
+      "message": "No register is mapped for setpoint {setpoint} on {model}."
+    },
+    "value_out_of_range": {
+      "message": "The value {value} does not fit the register of {what}. Nothing was written."
+    },
+    "write_not_verified": {
+      "message": "Could not verify the write to register {register}: {error}"
+    },
+    "write_read_back_differs": {
+      "message": "Register {register} acknowledged {value}, but read back {read_back}."
+    },
+    "write_rejected": {
+      "message": "The inverter refused {what} for register {register}: {error}"
+    },
+    "write_failed": {
+      "message": "Could not send {what} to register {register}: {error}"
+    },
+    "identity_unverified": {
+      "message": "Not sending {what} to register {register}: the inverter hasn't confirmed its serial number yet."
+    },
+    "identity_mismatch": {
+      "message": "Not sending {what} to register {register}: the device at {host} reports serial number {found}, not {expected}."
     }
   }
 }

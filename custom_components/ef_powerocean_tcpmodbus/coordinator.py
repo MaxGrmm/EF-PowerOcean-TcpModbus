@@ -107,8 +107,6 @@ from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
-_IDENTITY_UNVERIFIED = "the device has not confirmed its serial number yet"
-
 
 def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
     return f"identity_mismatch_{entry.entry_id}"
@@ -135,6 +133,11 @@ type EcoflowConfigEntry = ConfigEntry[EcoflowCoordinator]
 
 class IdentityMismatch(UpdateFailed):
     """Another device answers at the configured address."""
+
+
+def state_store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
+    """Return the store that keeps an entry's counters and control state."""
+    return Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}.state")
 
 
 class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -217,7 +220,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_inverter_temperature: float | None = None
         self._consecutive_modbus_disabled_reads = 0
         self._modbus_client = create_client(hass, config_entry, self.host, self.port)
-        self._modbus_client.block_writes(_IDENTITY_UNVERIFIED)
+        self._modbus_client.block_writes("identity_unverified")
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
 
@@ -251,8 +254,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             config_entry.options.get(CONF_ENERGY_OFFSETS), ECOFLOW_PORTAL_TOTALS
         )
         self._status: CoordinatorStatus | None = None
-        self._store: Store[dict[str, Any]] | None = Store(
-            hass, STORAGE_VERSION, f"{DOMAIN}.{config_entry.entry_id}.state"
+        self._store: Store[dict[str, Any]] | None = state_store(
+            hass, config_entry.entry_id
         )
 
     # ── Properties ────────────────────────────────────────────────────────────
@@ -444,7 +447,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _mark_identity_unverified(self) -> None:
         self._identity_verified = False
-        self._modbus_client.block_writes(_IDENTITY_UNVERIFIED)
+        self._modbus_client.block_writes("identity_unverified")
 
     def _accept_unreadable_identity(self) -> None:
         # Nothing to compare against: keep the behaviour from before the check.
@@ -466,7 +469,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             reason = (
                 f"the device at {self.host} reports serial {serial}, not {expected}"
             )
-            self._modbus_client.block_writes(reason)
+            self._modbus_client.block_writes(
+                "identity_mismatch",
+                {"host": self.host, "found": serial, "expected": expected},
+            )
             if not self._identity_mismatch:
                 _LOGGER.warning(
                     "%s. Nothing is read from or written to it. Check the address, "
@@ -1106,7 +1112,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except UpdateFailed as err:
             self._status = CoordinatorStatus.RECONNECT_FAILED
             raise UpdateFailed(
-                "Reconnect attempts failed! Integration stopped. Retry after 120s.",
+                "Could not reconnect to the inverter; retrying in 120 s",
                 retry_after=120,
             ) from err
 
@@ -1208,7 +1214,9 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         its setpoints, so this never takes control away from the EcoFlow app.
         """
         if not self.connected:
-            raise HomeAssistantError("Modbus client is not connected")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="not_connected"
+            )
 
         target_value = int(value)
         register_address = register.write_address or register.address
@@ -1217,7 +1225,11 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             words = encode_register(target_value, register.data_type)
         except ValueError as err:
-            raise HomeAssistantError(str(err)) from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="value_out_of_range",
+                translation_placeholders={"value": str(target_value), "what": key},
+            ) from err
 
         await self._modbus_client.async_write(
             register_address, words, what=f"{key} {value}"
@@ -1229,7 +1241,12 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except ModbusException as err:
             raise HomeAssistantError(
-                f"Could not verify write to register {register_address}: {err}"
+                translation_domain=DOMAIN,
+                translation_key="write_not_verified",
+                translation_placeholders={
+                    "register": str(register_address),
+                    "error": str(err),
+                },
             ) from err
 
         readback_value = decode_register(
@@ -1243,8 +1260,13 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             readback_value is None or int(readback_value) != target_value
         ):
             raise HomeAssistantError(
-                f"Register {register_address} acknowledged value {target_value}, "
-                f"but read back {readback_value}"
+                translation_domain=DOMAIN,
+                translation_key="write_read_back_differs",
+                translation_placeholders={
+                    "register": str(register_address),
+                    "value": str(target_value),
+                    "read_back": str(readback_value),
+                },
             )
 
         _LOGGER.debug(

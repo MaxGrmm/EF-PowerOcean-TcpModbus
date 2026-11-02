@@ -505,3 +505,25 @@ async def test_an_unreadable_firmware_version_is_not_a_change(
 
     assert unsupported == {"breaker_capacity"}
     assert firmware == "1.2.3.4"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_removing_the_entry_deletes_its_saved_state(
+    hass: HomeAssistant, inverter: FakeInverter, hass_storage: dict[str, Any]
+) -> None:
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    key = f"{const.DOMAIN}.{entry.entry_id}.state"
+    assert key in hass_storage
+
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert key not in hass_storage

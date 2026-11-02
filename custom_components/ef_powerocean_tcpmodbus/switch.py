@@ -16,11 +16,14 @@ from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .models import SwitchDef, requires_modbus_control
 
+# One write to the inverter at a time.
+PARALLEL_UPDATES = 1
+
 MODBUS_CONTROL_SWITCH: Final = SwitchDef(
     key="modbus_control",
     # Switching off only takes effect once the inverter's heartbeat window runs out.
     icon=lambda coordinator: (
-        "mdi:timer-sand" if coordinator.control.handing_back else "mdi:remote"
+        "mdi:timer-sand" if coordinator.control.handing_back else None
     ),
     is_on=lambda coordinator: coordinator.control.enabled,
     turn=ControlManager.async_set_enabled,
@@ -31,7 +34,6 @@ MODBUS_CONTROL_SWITCH: Final = SwitchDef(
 
 BATTERY_SAVER_SWITCH: Final = SwitchDef(
     key="battery_saver_mode_control",
-    icon="mdi:leaf",
     # The device's own bit only rises once it has gone idle, so it cannot confirm.
     is_on=lambda coordinator: coordinator.control.battery_saver_commanded,
     turn=ControlManager.async_set_battery_saver,
@@ -45,7 +47,6 @@ BATTERY_SAVER_SWITCH: Final = SwitchDef(
 
 GRID_FEED_SWITCH: Final = SwitchDef(
     key="grid_feed",
-    icon="mdi:transmission-tower-export",
     is_on=lambda coordinator: coordinator.control.grid_feed_allowed(coordinator.data),
     turn=ControlManager.async_set_grid_feed,
     attributes=lambda coordinator: coordinator.control.grid_feed_restore_attributes,
@@ -59,7 +60,6 @@ GRID_FEED_SWITCH: Final = SwitchDef(
 
 RESERVE_CHARGE_SWITCH: Final = SwitchDef(
     key="battery_reserve_charge",
-    icon="mdi:battery-arrow-up",
     # A Battery Reserve above the SOC then charges from the grid up to it, at the
     # Charge Battery power, as the app's backup reserve does. Below the app's own
     # reserve it is on anyway, since the inverter charges up to that by itself.
@@ -119,9 +119,10 @@ class EcoFlowSwitch(EcoFlowBaseEntity[SwitchDef], SwitchEntity):
         self._attr_entity_category = definition.entity_category
 
     @property
-    def icon(self) -> str:
+    def icon(self) -> str | None:
+        """Return an override of the icon in icons.json, if the state needs one."""
         icon = self._definition.icon
-        return icon(self.coordinator) if callable(icon) else icon
+        return icon(self.coordinator) if icon is not None else None
 
     @property
     def available(self) -> bool:

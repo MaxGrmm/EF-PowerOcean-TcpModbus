@@ -1550,8 +1550,9 @@ def test_another_serial_blocks_writes_and_keeps_the_known_identity(
 
     assert not coordinator.identity_verified
     assert coordinator.identity.serial_number == "R371ZD1AZH3X0450"
-    reason = coordinator._modbus_client.block_writes.call_args.args[0]
-    assert "R371ZD1AZH3X9999" in reason
+    key, placeholders = coordinator._modbus_client.block_writes.call_args.args
+    assert key == "identity_mismatch"
+    assert placeholders["found"] == "R371ZD1AZH3X9999"
     coordinator._modbus_client.allow_writes.assert_not_called()
     issues.created.assert_called_once()
     assert issues.created.call_args.kwargs["translation_key"] == "identity_mismatch"
