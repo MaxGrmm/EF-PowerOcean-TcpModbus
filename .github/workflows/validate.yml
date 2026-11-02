@@ -122,7 +122,19 @@ jobs:
             -e "^pytest-homeassistant-custom-component " \
             -e "^No broken requirements found" || true)
           if [ -n "$PROBLEMS" ]; then echo "$PROBLEMS"; exit 1; fi
+      # A harness built for an older release may not even load against the beta;
+      # warn about that rather than fail, since our code is not involved.
+      - name: Check the harness loads against the beta
+        id: harness
+        run: |
+          if python -c "import pytest_homeassistant_custom_component.plugins" 2> "$RUNNER_TEMP/harness.txt"; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Harness incompatible with this beta: $(tail -1 "$RUNNER_TEMP/harness.txt")"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Run unit tests
+        if: steps.harness.outputs.ok == 'true'
         run: python -m pytest
 
   validate-hacs:
