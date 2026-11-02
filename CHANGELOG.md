@@ -15,6 +15,8 @@
 ### Fixed
 
 - A Battery SOC reading 0 % for one poll, or for half an hour, no longer sets off the Battery Reserve and has the house draw from the grid while the batteries are nearly full (#200). A frame whose readings contradict each other never moves the Charge Limit or Battery Reserve.
+- Effective Battery Reserve sensor: the reserve the battery is held at right now, as the control loop keeps it. Without Modbus control or in Automatic that is the app's backup reserve, or a higher emulated Battery Reserve; under a manual command only the Battery Reserve, since the command outranks the app's. A `source` attribute says which 
+- Battery Nominal Capacity and Battery Remaining Energy no longer drop to 0 while the battery sleeps at its reserve; the last plausible capacity is kept, also across restarts.
 
 ## [2.9.4] - 2026-10-28
 

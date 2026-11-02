@@ -64,6 +64,7 @@ def coordinator():
     instance.identity = models.DeviceIdentity()
     instance._consecutive_modbus_disabled_reads = 0
     instance._optional_stalls = {}
+    instance._battery_capacity_wh = None
     instance._ena_calc_solar_power = False
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
     instance._register_blocks = const.register_blocks_for(instance.inverter_model)
@@ -171,6 +172,65 @@ def test_battery_limits_follow_the_reported_capacity(
     assert coordinator.limits[const.CONF_MAX_BATTERY_CHARGED_POWER] == charge_w
     assert coordinator.limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] == discharge_w
     assert coordinator._energy_processor.limits is coordinator.limits
+
+
+def test_a_sleeping_battery_keeps_its_last_capacity(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The inverter reads 0 Wh while the battery sleeps at its reserve."""
+    now = datetime(2026, 10, 23, 22, tzinfo=UTC)
+    awake = run_update(
+        coordinator,
+        {"battery_capacity": 10_000.0, "battery_soc": 50.0},
+        now,
+        monkeypatch,
+    )
+
+    asleep = run_update(
+        coordinator,
+        {"battery_capacity": 0.0, "battery_soc": 50.0},
+        now + timedelta(minutes=1),
+        monkeypatch,
+    )
+
+    assert asleep["battery_capacity"] == awake["battery_capacity"]
+    assert asleep["bat_remaining"] == awake["bat_remaining"]
+
+
+def test_an_implausible_first_capacity_is_unknown(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = run_update(
+        coordinator,
+        {"battery_capacity": 0.0},
+        datetime(2026, 10, 23, 22, tzinfo=UTC),
+        monkeypatch,
+    )
+
+    assert data["battery_capacity"] is None
+
+
+def test_the_kept_capacity_survives_a_restart(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A battery still asleep after a restart is not of unknown size."""
+    now = datetime(2026, 10, 23, 22, tzinfo=UTC)
+    run_update(coordinator, {"battery_capacity": 10_000.0}, now, monkeypatch)
+    stored = coordinator._persisted_state()
+
+    coordinator._battery_capacity_wh = None
+    coordinator._store = SimpleNamespace(
+        async_load=AsyncMock(return_value=stored), async_delay_save=Mock()
+    )
+    asyncio.run(coordinator.async_load_persisted_state())
+    asleep = run_update(
+        coordinator,
+        {"battery_capacity": 0.0},
+        now + timedelta(minutes=1),
+        monkeypatch,
+    )
+
+    assert asleep["battery_capacity"] == 10_000.0
 
 
 # Every real module as its datasheet rates it, unlike the merged const table.
