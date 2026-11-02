@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import sys
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from awesomeversion import AwesomeVersion
 from homeassistant.const import MAJOR_VERSION, MINOR_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -258,10 +261,15 @@ def test_a_closed_client_stops_reconnecting(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_blocked_writes_never_reach_the_link(client, pymodbus) -> None:
     pymodbus.write_register = AsyncMock()
-    client.block_writes("serial mismatch")
+    client.block_writes("identity_unverified")
 
-    with pytest.raises(HomeAssistantError, match="serial mismatch"):
+    with pytest.raises(HomeAssistantError) as raised:
         asyncio.run(client.async_write(40536, [10], what="reserve"))
+    assert raised.value.translation_key == "identity_unverified"
+    assert raised.value.translation_placeholders == {
+        "what": "reserve",
+        "register": "40536",
+    }
     pymodbus.write_register.assert_not_called()
 
     client.allow_writes()
@@ -278,3 +286,134 @@ def test_an_own_link_waits_a_few_seconds_not_twenty() -> None:
 
     assert link._pymodbus.comm_params.timeout_connect == const.MODBUS_REQUEST_TIMEOUT_S
     assert const.MODBUS_POLL_BUDGET_S < const.HEARTBEAT_WINDOW_S / 2
+
+
+def test_reconnecting_an_open_link_is_a_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
+    link = _FlakyLink(up_on_attempt=1)
+    link.connected = True
+    client = modbus_module.ModbusClient(cast(modbus_module.ModbusLink, link))
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+
+    assert asyncio.run(client.async_reconnect())
+    assert link.attempts == 0
+
+
+def test_reconnecting_gives_up_after_every_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    link = _FlakyLink(up_on_attempt=99)
+    client = modbus_module.ModbusClient(cast(modbus_module.ModbusLink, link))
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+
+    assert not asyncio.run(client.async_reconnect())
+    assert link.attempts == len(modbus_module.RECONNECT_DELAYS_S)
+
+
+def test_closing_a_client_closes_its_link() -> None:
+    link = _FlakyLink(up_on_attempt=1)
+    link.connected = True
+    modbus_module.ModbusClient(cast(modbus_module.ModbusLink, link)).close()
+
+    assert not link.connected
+
+
+# ── An own connection, where Home Assistant cannot share one ─────────────────
+
+
+@pytest.mark.usefixtures("socket_enabled")
+async def test_an_own_link_connects_reads_and_closes(inverter: Any) -> None:
+    inverter.registers[40000] = 7
+    link = modbus_module.PymodbusLink("127.0.0.1", inverter.port)
+
+    assert await link.connect()
+    assert link.connected
+    assert await link.read_holding_registers(40000, 1) == [7]
+    link.close()
+    assert not link.connected
+
+
+@pytest.mark.usefixtures("socket_enabled")
+async def test_a_temporary_client_is_an_own_link_without_sharing(
+    hass: HomeAssistant, inverter: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(modbus_module, "_shared", None)
+    monkeypatch.setattr(modbus_module, "SHARED_MIN_VERSION", AwesomeVersion("9999.1"))
+
+    async with modbus_module.async_temporary_client(
+        hass, "127.0.0.1", inverter.port
+    ) as client:
+        assert isinstance(client._link, modbus_module.PymodbusLink)
+        assert await client.async_connect()
+        link = client._link
+
+    assert not link.connected
+
+
+async def _prepare_unshared(hass: HomeAssistant) -> bool:
+    modbus_module._shared = None
+    return await modbus_module.async_prepare(hass)
+
+
+async def test_an_older_home_assistant_is_not_shared(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(modbus_module, "SHARED_MIN_VERSION", AwesomeVersion("9999.1"))
+
+    assert not await _prepare_unshared(hass)
+
+
+async def test_a_modbus_integration_that_fails_is_not_shared(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(modbus_module, "SHARED_MIN_VERSION", AwesomeVersion("0.0"))
+    monkeypatch.setattr(
+        modbus_module, "async_setup_component", AsyncMock(return_value=False)
+    )
+
+    assert not await _prepare_unshared(hass)
+    assert modbus_module._unshared_reason == "the modbus integration did not set up"
+
+
+async def test_missing_modbus_modules_are_not_shared(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(modbus_module, "SHARED_MIN_VERSION", AwesomeVersion("0.0"))
+    monkeypatch.setattr(
+        modbus_module, "async_setup_component", AsyncMock(return_value=True)
+    )
+    monkeypatch.setitem(sys.modules, "modbus_connection", None)
+
+    assert not await _prepare_unshared(hass)
+    assert "modbus_connection" in modbus_module._unshared_reason
+
+
+async def test_a_modbus_integration_without_sharing_is_not_shared(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from homeassistant.components import modbus as ha_modbus
+
+    monkeypatch.setattr(modbus_module, "SHARED_MIN_VERSION", AwesomeVersion("0.0"))
+    monkeypatch.setattr(
+        modbus_module, "async_setup_component", AsyncMock(return_value=True)
+    )
+    monkeypatch.setitem(sys.modules, "modbus_connection", SimpleNamespace())
+    monkeypatch.delattr(ha_modbus, "async_get_unit", raising=False)
+
+    assert not await _prepare_unshared(hass)
+    assert modbus_module._unshared_reason == (
+        "the modbus integration does not share connections"
+    )
+
+
+def test_a_failed_reconnect_does_not_log_above_debug(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The coordinator logs an outage once; the transport stays quiet each poll."""
+    link = _FlakyLink(up_on_attempt=99)
+    client = modbus_module.ModbusClient(cast(modbus_module.ModbusLink, link))
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+
+    for _ in range(3):
+        assert not asyncio.run(client.async_reconnect())
+
+    assert [r for r in caplog.records if r.levelno > logging.DEBUG] == []

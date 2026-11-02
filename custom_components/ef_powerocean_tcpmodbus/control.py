@@ -30,6 +30,7 @@ from .const import (
     CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
+    DOMAIN,
     FEED_IN_POWER_MAX_SETTING_KEY,
     FOLLOW_GRACE_S,
     FOLLOW_RESENDS,
@@ -413,8 +414,7 @@ class ControlManager:
     def _require_no_test(self) -> None:
         if self._test_running:
             raise HomeAssistantError(
-                "A control test is running and has the inverter. Wait for it to "
-                "finish, or cancel it; nothing was written."
+                translation_domain=DOMAIN, translation_key="control_test_has_inverter"
             )
 
     @property
@@ -739,8 +739,7 @@ class ControlManager:
         self._require_no_test()
         if not self._enabled:
             raise HomeAssistantError(
-                "Modbus control is off. Turn on the Modbus Control switch to "
-                "command the inverter; nothing was written."
+                translation_domain=DOMAIN, translation_key="modbus_control_off"
             )
 
     async def _async_require_control_authority(self) -> None:
@@ -753,8 +752,9 @@ class ControlManager:
 
         if not await self._heartbeat.async_ensure_fresh():
             raise HomeAssistantError(
-                f"Heartbeat write to register {HEARTBEAT_REGISTER} failed or was "
-                "rejected, so the inverter would ignore the command. Nothing written."
+                translation_domain=DOMAIN,
+                translation_key="heartbeat_failed",
+                translation_placeholders={"register": str(HEARTBEAT_REGISTER)},
             )
 
     async def async_select_feature(self, feature: ControlFeature) -> None:
@@ -835,9 +835,7 @@ class ControlManager:
         """
         if not enabled and self._app_reserve_charges:
             raise HomeAssistantError(
-                "The battery is below the backup reserve set in the EcoFlow app, "
-                "which charges it up to that reserve anyway. Lower that reserve in "
-                "the app to turn this off; nothing was changed."
+                translation_domain=DOMAIN, translation_key="app_reserve_charges"
             )
         if enabled == self._reserve_charge:
             return
@@ -896,13 +894,12 @@ class ControlManager:
         restore = self._grid_feed_restore
         if not self.grid_feed_supported:
             raise HomeAssistantError(
-                "The grid feed cannot be switched while the inverter is in a feed-in "
-                "mode it cannot restore, such as the percentage limit. Nothing written."
+                translation_domain=DOMAIN, translation_key="grid_feed_mode_unsupported"
             )
         if restore is None or not self.grid_feed_switchable:
             raise HomeAssistantError(
-                "The grid feed cannot be switched: the inverter has not reported an "
-                "export it would allow, so there is nothing to restore."
+                translation_domain=DOMAIN,
+                translation_key="grid_feed_nothing_to_restore",
             )
         # The PowerOcean stores both registers but only acts on them under control.
         await self._async_require_control_authority()
@@ -1803,7 +1800,9 @@ class ControlManager:
         authority lapse is the one case that has to assume it was forgotten.
         """
         if not self._modbus_client.connected:
-            raise HomeAssistantError("Modbus client is not connected")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="not_connected"
+            )
 
         if CONTROL_FEATURES[feature].commands_power:
             await self._async_require_control_authority()
@@ -1820,11 +1819,14 @@ class ControlManager:
         value = self._compose_control_command()
         if value & CONTROL_COMMAND_UNSAFE_BITS:
             raise HomeAssistantError(
-                f"Refusing control command 0x{value:08X}: it would take the system "
-                "off-grid or shut it down."
+                translation_domain=DOMAIN,
+                translation_key="unsafe_control_command",
+                translation_placeholders={"value": f"0x{value:08X}"},
             )
         if not self._modbus_client.connected:
-            raise HomeAssistantError("Modbus client is not connected")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="not_connected"
+            )
 
         # Battery saver applies on its own, like the LED brightness does. Only a
         # control method needs the app locked out, so only it takes control.
@@ -1858,15 +1860,26 @@ class ControlManager:
             register = self._registers_by_key[definition.setpoint_key]
         except KeyError as err:
             raise HomeAssistantError(
-                f"No register mapped for setpoint {definition.setpoint_key} on "
-                f"{self._inverter_model}"
+                translation_domain=DOMAIN,
+                translation_key="setpoint_not_mapped",
+                translation_placeholders={
+                    "setpoint": definition.setpoint_key,
+                    "model": str(self._inverter_model),
+                },
             ) from err
         value = round(watts) * definition.sign
 
         try:
             words = encode_register(value, RegisterType.INT32)
         except ValueError as err:
-            raise HomeAssistantError(str(err)) from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="value_out_of_range",
+                translation_placeholders={
+                    "value": str(value),
+                    "what": definition.setpoint_key,
+                },
+            ) from err
 
         await self._modbus_client.async_write(
             register.address, words, what=f"setpoint {value} W"

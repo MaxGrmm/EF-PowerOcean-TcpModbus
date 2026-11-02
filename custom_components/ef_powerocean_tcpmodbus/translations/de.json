@@ -760,6 +760,51 @@
     },
     "control_test_other_controller": {
       "message": "Der Wechselrichter meldet eine andere Modbus-Steuerung. Diese beenden, eine Minute warten und erneut versuchen. Es wurde nichts geschrieben."
+    },
+    "control_test_has_inverter": {
+      "message": "Ein Steuerungstest läuft und hat den Wechselrichter übernommen. Warten, bis er fertig ist, oder ihn abbrechen; es wurde nichts geschrieben."
+    },
+    "heartbeat_failed": {
+      "message": "Das Schreiben des Heartbeats in Register {register} ist fehlgeschlagen oder wurde abgelehnt, daher würde der Wechselrichter den Befehl ignorieren. Es wurde nichts geschrieben."
+    },
+    "app_reserve_charges": {
+      "message": "Die Batterie liegt unter der in der EcoFlow-App eingestellten Notstromreserve, die sie ohnehin bis dorthin lädt. Diese Reserve in der App senken, um das auszuschalten; es wurde nichts geändert."
+    },
+    "grid_feed_mode_unsupported": {
+      "message": "Die Netzeinspeisung lässt sich nicht schalten, solange der Wechselrichter in einem Einspeisemodus ist, der sich nicht wiederherstellen lässt, etwa der prozentualen Begrenzung. Es wurde nichts geschrieben."
+    },
+    "grid_feed_nothing_to_restore": {
+      "message": "Die Netzeinspeisung lässt sich nicht schalten: Der Wechselrichter hat keine erlaubte Einspeisung gemeldet, daher gibt es nichts wiederherzustellen."
+    },
+    "not_connected": {
+      "message": "Der Wechselrichter ist nicht verbunden. Es wurde nichts geschrieben."
+    },
+    "unsafe_control_command": {
+      "message": "Steuerbefehl {value} abgelehnt: Er würde das System vom Netz trennen oder abschalten."
+    },
+    "setpoint_not_mapped": {
+      "message": "Für den Sollwert {setpoint} ist beim Modell {model} kein Register zugeordnet."
+    },
+    "value_out_of_range": {
+      "message": "Der Wert {value} passt nicht in das Register von {what}. Es wurde nichts geschrieben."
+    },
+    "write_not_verified": {
+      "message": "Das Schreiben in Register {register} konnte nicht überprüft werden: {error}"
+    },
+    "write_read_back_differs": {
+      "message": "Register {register} hat {value} bestätigt, aber {read_back} zurückgelesen."
+    },
+    "write_rejected": {
+      "message": "Der Wechselrichter hat {what} für Register {register} abgelehnt: {error}"
+    },
+    "write_failed": {
+      "message": "{what} konnte nicht an Register {register} gesendet werden: {error}"
+    },
+    "identity_unverified": {
+      "message": "{what} wird nicht an Register {register} gesendet: Der Wechselrichter hat seine Seriennummer noch nicht bestätigt."
+    },
+    "identity_mismatch": {
+      "message": "{what} wird nicht an Register {register} gesendet: Das Gerät unter {host} meldet die Seriennummer {found} statt {expected}."
     }
   }
 }

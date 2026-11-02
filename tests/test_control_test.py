@@ -27,6 +27,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.ef_powerocean_tcpmodbus import const
 from custom_components.ef_powerocean_tcpmodbus import control as control_module
 from custom_components.ef_powerocean_tcpmodbus.control_test import (
+    AbortTest,
     ControlTest,
     ControlTestState,
     Timing,
@@ -42,6 +43,7 @@ from custom_components.ef_powerocean_tcpmodbus.models import (
     ControlMode,
     ControlStatus,
     GridFeedMode,
+    GridMode,
 )
 
 SETPOINTS = {
@@ -526,8 +528,10 @@ async def test_modbus_control_cannot_be_switched_on_during_a_test() -> None:
     manager = control_manager()
     await manager.async_begin_test()
 
-    with pytest.raises(HomeAssistantError, match="control test is running"):
+    with pytest.raises(HomeAssistantError) as raised:
         await manager.async_set_enabled(True)
+
+    assert raised.value.translation_key == "control_test_has_inverter"
 
     assert not manager.enabled
 
@@ -536,10 +540,12 @@ async def test_no_command_or_battery_saver_reaches_the_inverter_during_a_test() 
     manager = control_manager()
     await manager.async_begin_test()
 
-    with pytest.raises(HomeAssistantError, match="control test is running"):
+    with pytest.raises(HomeAssistantError) as command:
         await manager.async_set_command(ControlFeature.CHARGE_BATTERY, power=1000)
-    with pytest.raises(HomeAssistantError, match="control test is running"):
+    with pytest.raises(HomeAssistantError) as saver:
         await manager.async_set_battery_saver(True)
+    assert command.value.translation_key == "control_test_has_inverter"
+    assert saver.value.translation_key == "control_test_has_inverter"
     await manager.async_poll({"battery_soc": 50})
 
     write = cast(AsyncMock, manager._modbus_client.async_write)
@@ -644,3 +650,109 @@ def test_the_logbook_says_why_a_run_stopped(hass: HomeAssistant) -> None:
     )
 
     assert message == "aborted: cancelled"
+
+
+# ── Refusing to start, and stopping when the inverter changes under the run ───
+
+
+@pytest.mark.usefixtures("hass")
+async def test_it_does_not_start_without_a_connection(
+    coordinator: FakeCoordinator,
+) -> None:
+    coordinator.connected = False
+
+    with pytest.raises(ServiceValidationError) as raised:
+        runner(coordinator).async_start(1500)
+
+    assert raised.value.translation_key == "control_test_no_data"
+
+
+@pytest.mark.usefixtures("hass")
+async def test_it_does_not_start_while_modbus_is_disabled(
+    coordinator: FakeCoordinator,
+) -> None:
+    coordinator.is_modbus_disabled = True
+
+    with pytest.raises(ServiceValidationError) as raised:
+        runner(coordinator).async_start(1500)
+
+    assert raised.value.translation_key == "control_test_no_status"
+
+
+@pytest.mark.parametrize(
+    ("reading", "reason"),
+    (
+        ({"system_fault": True}, "the inverter reports a system fault"),
+        ({"grid_mode": GridMode.ISLANDED}, "the inverter went off-grid"),
+    ),
+    ids=("fault", "off-grid"),
+)
+@pytest.mark.usefixtures("hass")
+async def test_a_fault_or_outage_during_the_run_aborts_it(
+    coordinator: FakeCoordinator,
+    inverter: FakeInverter,
+    monkeypatch: pytest.MonkeyPatch,
+    reading: dict[str, Any],
+    reason: str,
+) -> None:
+    frame = inverter.frame
+
+    def frame_with_trouble() -> dict[str, Any]:
+        return {**frame(), **reading} if inverter.beating else frame()
+
+    monkeypatch.setattr(inverter, "frame", frame_with_trouble)
+
+    report = await runner(coordinator).async_run(1500)
+
+    assert report["outcome"] == "aborted"
+    assert report["abort_reason"] == reason
+    assert not inverter.beating
+
+
+@pytest.mark.usefixtures("hass")
+async def test_an_unexpected_error_fails_the_run_and_hands_back(
+    coordinator: FakeCoordinator, inverter: FakeInverter
+) -> None:
+    write = inverter.async_write
+
+    async def broken_write(address: int, words: list[int], *, what: str) -> None:
+        if address == const.CONTROL_COMMAND_REGISTER and inverter.method is (
+            ControlMode.DEFAULT
+        ):
+            raise RuntimeError("bug")
+        await write(address, words, what=what)
+
+    inverter.async_write = broken_write
+
+    test = runner(coordinator)
+    report = await test.async_run(1500)
+
+    assert report["outcome"] == "failed"
+    assert report["abort_reason"] == "RuntimeError('bug')"
+    assert test.state is ControlTestState.FAILED
+    assert not inverter.beating
+
+
+@pytest.mark.usefixtures("hass")
+async def test_an_unsafe_control_word_is_never_written(
+    coordinator: FakeCoordinator, inverter: FakeInverter
+) -> None:
+    with pytest.raises(AbortTest, match="refused to write control word"):
+        await runner(coordinator)._write_control_word(const.CONTROL_COMMAND_UNSAFE_BITS)
+
+    assert inverter.writes == []
+
+
+async def test_a_report_that_cannot_be_saved_is_still_kept(
+    hass: HomeAssistant, coordinator: FakeCoordinator, tmp_path: Path
+) -> None:
+    blocked = tmp_path / "not_a_directory"
+    blocked.write_text("")
+    hass.config.config_dir = str(blocked)
+
+    test = runner(coordinator)
+    report = await test.async_run(1500)
+
+    assert report["outcome"] == "done"
+    assert test.last_report is not None
+    assert test.attributes["report_file"] is None

@@ -32,6 +32,20 @@
 
 ---
 
+## Use Cases
+
+- **Energy dashboard:** the lifetime totals for grid, solar and battery feed Home
+  Assistant's Energy dashboard directly, without the EcoFlow cloud.
+- **Cheap-tariff charging:** an automation charges the battery from the grid while
+  electricity is cheap and returns it to Automatic afterwards, using the
+  [Set battery command](#commanding-the-battery-from-automations) action.
+- **Holding the battery for later:** Hold battery keeps the charge for the evening peak
+  while surplus solar is exported.
+- **Watching the system:** faults, grid outages and a disconnected battery show up as
+  sensors, logbook entries and repairs issues, ready to trigger a notification.
+
+---
+
 ## Supported Devices
 
 | Device                       | Read         | Control      |
@@ -503,11 +517,88 @@ The serial number is never included.
 
 ---
 
-## Debug Logging
+## Troubleshooting
+
+<details>
+<summary><b>Setup fails with “Connection failed - please check IP address and port”</b></summary>
+
+Home Assistant can't open a Modbus TCP connection to the address entered.
+
+1. Check that the IP address is the inverter's, for example in your router's list of
+   devices, and that the port is 502.
+2. Make sure Home Assistant and the inverter are on the same network, or that the
+   networks between them allow port 502.
+3. Ask your installer to confirm that Modbus TCP is enabled; it is off by default.
+
+</details>
+
+<details>
+<summary><b>Repairs shows “Modbus is disabled on the inverter”</b></summary>
+
+The inverter answers, but every value reads 0, which is how it behaves with Modbus
+disabled. Ask your installer to enable Modbus TCP in the EcoFlow Pro app. The issue
+clears by itself once readings arrive.
+
+</details>
+
+<details>
+<summary><b>Repairs shows “A different inverter answers”</b></summary>
+
+The address now belongs to another device, usually because the inverter got a new IP
+address from your router. Nothing is read or written until this is fixed.
+
+1. Find the inverter's current address and use **Reconfigure** on the entry to change
+   it.
+2. Reserve that address for the inverter in your router so it doesn't move again.
+
+</details>
+
+<details>
+<summary><b>All entities are unavailable</b></summary>
+
+The connection to the inverter was lost. It is retried automatically and the entities
+come back with the next successful poll. If they stay unavailable, check that the
+inverter is powered and reachable, and look at the log with debug logging enabled.
+
+</details>
+
+<details>
+<summary><b>A battery mode has no effect</b></summary>
+
+Check **Control Status**: it says when a guard, a full or empty battery, or the export
+limit stops a command, and when Modbus Control is off. After a firmware update, run the
+[control test](#testing-the-controls-after-a-firmware-update) to see which methods the
+inverter still follows.
+
+</details>
+
+### Debug logging and diagnostics
 
 To enable debug logging without editing `configuration.yaml`:
 
 - Settings → Devices & Services → EF-PowerOcean-TcpModbus → Enable debug logging
+
+When reporting a problem, attach the log and the diagnostics download from the device
+page, after checking it for anything you would rather not share.
+
+---
+
+## Removing the Integration
+
+This integration follows the standard removal process:
+
+1. If **Modbus Control** is on, turn it off first and wait about a minute for the
+   EcoFlow app to take over again. Removing the integration with it on also hands
+   control back, once the heartbeat stops.
+2. Go to **Settings → Devices & Services → EF-PowerOcean-TcpModbus**, open the entry's
+   **⋮** menu and choose **Delete**.
+3. To uninstall the integration as well, remove it in HACS, or delete
+   `custom_components/ef_powerocean_tcpmodbus` for a manual installation, then restart
+   Home Assistant.
+
+Deleting the entry also deletes the energy counters and control state the integration
+saved. Reports of control tests stay in the `ef_powerocean_tcpmodbus` folder of your
+configuration directory; delete it if you no longer need them.
 
 ---
 
@@ -517,6 +608,24 @@ To enable debug logging without editing `configuration.yaml`:
 <img width="431" height="443" alt="Configuration" src="https://github.com/user-attachments/assets/320ce431-1d6b-4f3f-965c-912f9e4be31a" />
 <img width="431" height="1539" alt="Sensor_Entities" src="https://github.com/user-attachments/assets/dca4b3c8-a56d-4d8d-ad13-6499f2cfd63c" />
 <img width="431" height="2075" alt="Diagnostics" src="https://github.com/user-attachments/assets/4380c0bb-a5f9-4a7d-8225-af3c5f2d3ab2" />
+
+---
+
+## How Data Is Updated
+
+The integration polls the inverter over your local network every **Poll Interval**
+(5 seconds by default, 2–30 configurable). Each poll reads only the registers that
+enabled entities, the control loop and the reading checks need, so disabling sensors
+you don't use makes polls lighter. The serial number and firmware are read again each
+time the connection opens.
+
+If a poll fails, the entities become unavailable until the next one succeeds. A lost
+connection is retried within the poll after 0, 5, 30 and 120 seconds, then again at
+the next poll. If the inverter can't be reached when Home Assistant starts, the setup
+is retried automatically in the background.
+
+With Modbus Control on, a heartbeat is written to the inverter independently of the
+polls, to keep control from passing back to the EcoFlow app.
 
 ---
 
@@ -536,6 +645,25 @@ To enable debug logging without editing `configuration.yaml`:
 - **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 
 The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. For address numbering, word order, decoding and known gaps, see [EcoFlow_PowerOcean_Modbus.md](EcoFlow_PowerOcean_Modbus.md).
+
+---
+
+## Known Limitations
+
+- **Modbus has to be enabled by your installer.** It is off by default and can't be
+  switched on from Home Assistant or the regular EcoFlow app.
+- **Modbus Control locks out the EcoFlow app** while it is on. Turning it off hands
+  control back within about 60 seconds.
+- **No automatic discovery.** The inverter doesn't announce itself on the network, so it
+  is added by IP address. Give it a reserved address in your router so it can't move.
+- **One inverter per entry.** Add each inverter as its own entry.
+- **Not every model is tested.** See [Supported Devices](#supported-devices); the
+  PowerOcean DC Fit is untested, and controls are untested on several models.
+- **Some registers read a constant 0 on some models.** Sensors for those are left out
+  on the models concerned rather than showing a value that misleads.
+- **The protocol is EcoFlow's trial version.** A firmware update can change which
+  controls the inverter follows; see
+  [Testing the controls after a firmware update](#testing-the-controls-after-a-firmware-update).
 
 ---
 

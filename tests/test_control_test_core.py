@@ -9,9 +9,12 @@ import pytest
 from custom_components.ef_powerocean_tcpmodbus.control_test_core import (
     CORE_TESTS,
     ControlTestReport,
+    Difference,
     FeatureResult,
+    Plan,
     Verdict,
     compare_reports,
+    compose_control_word,
     judge,
     judge_modes,
     plan_test,
@@ -173,3 +176,120 @@ def test_a_hand_back_no_longer_seen_is_significant() -> None:
     differences = compare_reports(old, new)
 
     assert [(d.feature, d.significant) for d in differences] == [("hand back", True)]
+
+
+def test_decisive_verdicts_are_shouted_in_the_script() -> None:
+    assert Verdict.FOLLOWED.label == "FOLLOWED"
+    assert Verdict.NOT_FOLLOWED.label == "NOT FOLLOWED"
+    assert Verdict.NOT_TESTED.label == "not tested"
+
+
+def test_the_control_word_carries_the_battery_saver_bit() -> None:
+    method = TESTS["battery charge"].method
+    plain = compose_control_word(method, battery_saver=False)
+    saving = compose_control_word(method, battery_saver=True)
+
+    assert saving & ~plain
+    assert saving & plain == plain
+
+
+def test_an_unreadable_inverter_output_is_battery_minus_solar() -> None:
+    test = TESTS["inverter feed"]
+    readable = frame(battery_power=-900.0, solar_power=100.0)
+    readable["inverter_output_power"] = None
+
+    plan, _ = plan_test(test, readable, 1500)
+
+    assert plan is not None
+    assert plan.baseline == -1000.0
+    assert any("battery minus solar" in note for note in plan.notes)
+
+
+def test_an_inverter_output_with_nothing_to_derive_it_from_is_unknown() -> None:
+    unknown = frame(battery_power=None)
+    unknown["inverter_output_power"] = None
+
+    plan, _ = plan_test(TESTS["inverter feed"], unknown, 1500)
+
+    assert plan is not None
+    assert plan.baseline is None
+
+
+def test_an_inverter_feed_may_use_the_house_load_on_top_of_the_cap() -> None:
+    capped = frame(
+        grid_feed_mode=GridFeedMode.LIMITED,
+        feed_in_power_max=0,
+        feed_in_power_max_setting=800,
+        house_power=400.0,
+        solar_power=200.0,
+    )
+
+    plan, _ = plan_test(TESTS["inverter feed"], capped, 1500)
+
+    assert plan is not None
+    assert plan.power == 1000  # 400 W of house plus the 800 W cap, less 200 W solar
+
+
+def test_a_cap_too_small_to_tell_skips_the_feed() -> None:
+    capped = frame(grid_feed_mode=GridFeedMode.LIMITED, feed_in_power_max=100)
+
+    plan, reason = plan_test(TESTS["grid feed"], capped, 1500)
+
+    assert plan is None
+    assert reason == "the export cap leaves only 100 W to feed"
+
+
+def test_an_unknown_battery_level_skips_nothing() -> None:
+    plan, reason = plan_test(TESTS["battery charge"], frame(battery_soc=None), 1500)
+
+    assert plan is not None
+    assert reason == ""
+
+
+def test_a_target_already_met_is_inconclusive_and_keeps_the_notes() -> None:
+    test = TESTS["battery charge"]
+    plan = Plan(power=1500, baseline=1500.0, decisive=False, notes=["a note"])
+
+    verdict, detail, _ = judge(test, plan, 5.0, ControlStatus.ACTIVE, [1500.0])
+
+    assert verdict is Verdict.INCONCLUSIVE
+    assert (
+        detail == "battery_power was already near the target before the command; a note"
+    )
+
+
+def test_a_difference_reads_as_a_line_of_the_comparison() -> None:
+    significant = Difference("grid feed", "verdict", "followed", "not_followed", True)
+    noted = Difference("grid feed", "verdict", "followed", "skipped", False)
+
+    assert str(significant) == "! grid feed: verdict followed -> not_followed"
+    assert str(noted) == "~ grid feed: verdict followed -> skipped"
+
+
+def test_a_feature_only_one_report_has_is_noted() -> None:
+    differences = compare_reports(report(grid_feed=Verdict.FOLLOWED), report())
+
+    assert [(d.feature, d.what, d.old, d.new, d.significant) for d in differences] == [
+        ("grid feed", "presence", "tested", "absent", False)
+    ]
+
+
+def test_a_method_no_longer_reported_is_significant() -> None:
+    old = report(grid_feed=Verdict.FOLLOWED)
+    new = report(grid_feed=Verdict.FOLLOWED)
+    new["features"][0]["method_reported"] = False
+
+    differences = compare_reports(old, new)
+
+    assert [(d.what, d.significant) for d in differences] == [("method reported", True)]
+
+
+def test_a_heartbeat_the_inverter_now_refuses_is_significant() -> None:
+    old, new = report(), report()
+    new["heartbeat"] = "refused"
+
+    differences = compare_reports(old, new)
+
+    assert [(d.feature, d.new, d.significant) for d in differences] == [
+        ("heartbeat", "refused", True)
+    ]

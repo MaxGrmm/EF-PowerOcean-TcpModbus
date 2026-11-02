@@ -14,6 +14,9 @@ from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .models import ControlEntityDef, ControlFeature
 
+# One write to the inverter at a time.
+PARALLEL_UPDATES = 1
+
 
 async def async_setup_entry(
     hass: HomeAssistant,  # noqa: ARG001 - required by the platform API
@@ -45,8 +48,6 @@ class EcoFlowBatteryModeSelect(EcoFlowBaseEntity[ControlEntityDef], SelectEntity
         super().__init__(coordinator, entry, definition)
         self._attr_options = [str(feature) for feature in ControlFeature]
         self._attr_entity_category = definition.entity_category
-        if definition.icon:
-            self._attr_icon = definition.icon
 
     @callback
     def _handle_coordinator_update(self) -> None:

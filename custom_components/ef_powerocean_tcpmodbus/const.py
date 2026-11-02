@@ -374,7 +374,6 @@ SENSOR_MAP: list[SensorDef] = [
         key="min_soc_limit",
         unit=UNIT_OF_RATIO,
         state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:battery-lock",
     ),
     SensorDef(
         key="battery_charge_power_limit",
@@ -557,14 +556,12 @@ SENSOR_MAP: list[SensorDef] = [
         unit=UNIT_OF_RATIO,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:transmission-tower-export",
         # Accepts and stores any value but acts on none of them (40573 probe).
         unsupported_models=(InverterModel.POWEROCEAN_PLUS,),
     ),
     SensorDef(
         key="grid_connection_code",
         entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:transmission-tower",
     ),
     SensorDef(
         key="breaker_capacity",
@@ -604,7 +601,6 @@ SENSOR_MAP: list[SensorDef] = [
         device_class=SensorDeviceClass.ENUM,
         options=ACTIVE_CONTROL_MODE_OPTIONS,
         entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:remote",
         attribute_keys=("system_modes_hex",),
     ),
     SensorDef(
@@ -612,7 +608,6 @@ SENSOR_MAP: list[SensorDef] = [
         device_class=SensorDeviceClass.ENUM,
         options=tuple(GridFeedMode),
         entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:transmission-tower-export",
     ),
     SensorDef(
         key="inverter_rated_power",
@@ -675,17 +670,14 @@ SENSOR_MAP: list[SensorDef] = [
         device_class=SensorDeviceClass.ENUM,
         state_class=None,
         options=tuple(GridMode),
-        icon="mdi:transmission-tower",
     ),
     SensorDef(
         key="operating_mode",
         device_class=SensorDeviceClass.ENUM,
         options=tuple(OperatingMode),
-        icon="mdi:home-lightning-bolt",
     ),
     SensorDef(
         key="system_alerts",
-        icon="mdi:alert-outline",
         attribute_keys=("system_state_2_hex",),
     ),
     *[
@@ -706,13 +698,11 @@ SENSOR_MAP: list[SensorDef] = [
         key="fault_count",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:alert-circle-outline",
         attribute_keys=("system_state_2_hex",),
     ),
     SensorDef(
         key="active_faults",
         entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:alert-circle-outline",
     ),
     SensorDef(
         key="coordinator_status",
@@ -723,12 +713,10 @@ SENSOR_MAP: list[SensorDef] = [
     SensorDef(
         key="protocol_version",
         entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:information-outline",
     ),
     SensorDef(
         key="device_address",
         entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:identifier",
     ),
 ]
 
@@ -946,20 +934,17 @@ CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
 # other under Controls rather than mixed in with the settings that always apply.
 BATTERY_MODE_SELECT: Final = ControlEntityDef(
     key="battery_mode",
-    icon="mdi:home-battery",
     availability=requires_modbus_control,
 )
 
 CHARGE_LIMIT_SOC_NUMBER: Final = ControlEntityDef(
     key="charge_limit_soc",
     entity_category=EntityCategory.CONFIG,
-    icon="mdi:battery-charging-100",
     availability=requires_modbus_control,
 )
 BATTERY_RESERVE_SOC_NUMBER: Final = ControlEntityDef(
     key="battery_reserve_soc",
     entity_category=EntityCategory.CONFIG,
-    icon="mdi:battery-lock",
     availability=requires_modbus_control,
 )
 # The inverter's own reserve, the backup reserve the EcoFlow app sets. Written by the
@@ -1010,7 +995,6 @@ CONTROL_STATUS_SENSOR: Final = SensorDef(
     key="control_status",
     device_class=SensorDeviceClass.ENUM,
     options=tuple(str(status) for status in ControlStatus),
-    icon="mdi:robot",
 )
 
 # Not a device register: the reserve the battery is actually held at, as the control
@@ -1019,7 +1003,6 @@ EFFECTIVE_RESERVE_SENSOR: Final = SensorDef(
     key="battery_reserve_effective",
     unit=UNIT_OF_RATIO,
     state_class=SensorStateClass.MEASUREMENT,
-    icon="mdi:battery-lock",
 )
 
 # The control test the run_control_test action starts; its states are those of
@@ -1029,7 +1012,6 @@ CONTROL_TEST_SENSOR: Final = SensorDef(
     device_class=SensorDeviceClass.ENUM,
     entity_category=EntityCategory.DIAGNOSTIC,
     options=("idle", "running", "done", "aborted", "failed"),
-    icon="mdi:test-tube",
 )
 
 # Ceiling for a mode whose limit registers are all missing or read zero.
@@ -1047,6 +1029,5 @@ WRITABLE_NUMBERS_MAP: list[NumberWritableDef] = [
         max_value=100.0,
         step=10.0,
         unit=UNIT_OF_RATIO,
-        icon="mdi:led-on",
     ),
 ]

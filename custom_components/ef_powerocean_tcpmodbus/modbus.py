@@ -29,6 +29,7 @@ from pymodbus.pdu import ModbusPDU
 from .const import (
     DEFAULT_SLAVE,
     DEVICE_INFO_BLOCK,
+    DOMAIN,
     MODBUS_REQUEST_TIMEOUT_S,
     SLEEP_TIME_AFTER_RECONNECT_S,
 )
@@ -99,8 +100,19 @@ class ModbusRejected(HomeAssistantError):
     # moment, and a device that was busy is the same device a second later.
     PERMANENT_CODES: Final = frozenset({0x01, 0x02, 0x03})
 
-    def __init__(self, message: str, *, exception_code: int | None = None) -> None:
-        super().__init__(message)
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        exception_code: int | None = None,
+        translation_placeholders: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            translation_domain=DOMAIN if message is None else None,
+            translation_key="write_rejected" if message is None else None,
+            translation_placeholders=translation_placeholders,
+        )
         self.exception_code = exception_code
 
     @property
@@ -278,7 +290,7 @@ class ModbusClient:
         self._lock = asyncio.Lock()
         # Stops a reconnect in its backoff from reopening the link after unload.
         self._closed = False
-        self._write_block: str | None = None
+        self._write_block: tuple[str, dict[str, str]] | None = None
 
     @property
     def connected(self) -> bool:
@@ -288,8 +300,11 @@ class ModbusClient:
     def writes_allowed(self) -> bool:
         return self._write_block is None
 
-    def block_writes(self, reason: str) -> None:
-        self._write_block = reason
+    def block_writes(
+        self, translation_key: str, placeholders: dict[str, str] | None = None
+    ) -> None:
+        """Refuse writes until allowed, with the error a refused write raises."""
+        self._write_block = (translation_key, placeholders or {})
 
     def allow_writes(self) -> None:
         self._write_block = None
@@ -335,9 +350,8 @@ class ModbusClient:
                 await asyncio.sleep(SLEEP_TIME_AFTER_RECONNECT_S)
                 return True
 
-        _LOGGER.error(
-            "EF-Modbus-TCP: All reconnect attempts failed, will retry next poll"
-        )
+        # Debug only: the coordinator logs the outage once, and the recovery.
+        _LOGGER.debug("All reconnect attempts failed; retrying at the next poll")
         return False
 
     async def async_read(self, address: int, count: int) -> list[int]:
@@ -362,8 +376,15 @@ class ModbusClient:
         arrived.
         """
         if self._write_block is not None:
+            key, placeholders = self._write_block
             raise HomeAssistantError(
-                f"Not sending {what} to register {address}: {self._write_block}"
+                translation_domain=DOMAIN,
+                translation_key=key,
+                translation_placeholders={
+                    "what": what,
+                    "register": str(address),
+                    **placeholders,
+                },
             )
         values = list(words)
         _LOGGER.debug(
@@ -382,12 +403,22 @@ class ModbusClient:
                     await self._link.write_registers(address, values)
         except DeviceRefused as err:
             raise ModbusRejected(
-                f"Modbus rejected {what} to register {address}: {err}",
                 exception_code=err.exception_code,
+                translation_placeholders={
+                    "what": what,
+                    "register": str(address),
+                    "error": str(err),
+                },
             ) from err
         except TRANSPORT_ERRORS as err:
             raise HomeAssistantError(
-                f"Could not send {what} to register {address}: {err!r}"
+                translation_domain=DOMAIN,
+                translation_key="write_failed",
+                translation_placeholders={
+                    "what": what,
+                    "register": str(address),
+                    "error": repr(err),
+                },
             ) from err
 
 

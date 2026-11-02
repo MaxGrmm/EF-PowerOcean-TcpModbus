@@ -560,7 +560,6 @@ class ControlEntityDef:
     """An entity that carries commanded state rather than a device register."""
 
     key: str
-    icon: str | None = None
     entity_category: EntityCategory | None = None
     # When set, the entity is only available while this returns True for the
     # coordinator's current control status. None means always available.
@@ -842,7 +841,6 @@ class SensorDef:
     device_class: SensorDeviceClass | None = None
     state_class: SensorStateClass | None = None
     entity_category: EntityCategory | None = None
-    icon: str | None = None
     options: tuple[str, ...] | None = None
     # Models whose register reads a constant 0, so the sensor would only mislead.
     unsupported_models: tuple[InverterModel, ...] = ()
@@ -865,7 +863,6 @@ class EnergySensorDef:
     device_class: SensorDeviceClass = SensorDeviceClass.ENERGY
     state_class: SensorStateClass = SensorStateClass.TOTAL_INCREASING
     entity_category: EntityCategory | None = None
-    icon: str | None = None
 
 
 @dataclass(frozen=True)
@@ -879,12 +876,14 @@ class BinarySensorDef:
 @dataclass(frozen=True, kw_only=True)
 class SwitchDef:
     key: str
-    icon: str | Callable[[EcoflowCoordinator], str]
     is_on: Callable[[EcoflowCoordinator], bool]
     turn: Callable[[ControlManager, bool], Awaitable[None]]
     attributes: Callable[[EcoflowCoordinator], dict[str, Any]] | None = None
     available: Callable[[EcoflowCoordinator], bool] | None = None
     entity_category: EntityCategory | None = EntityCategory.CONFIG
+    # An icon that overrides the one in icons.json while it returns one, for a
+    # state the switch's on and off cannot show.
+    icon: Callable[[EcoflowCoordinator], str | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -900,7 +899,6 @@ class NumberWritableDef:
     data_type: RegisterType = RegisterType.UINT16
     unit: str | None = None
     device_class: NumberDeviceClass | None = None
-    icon: str | None = None
     # Not implemented on every model: hidden from the entity list unless enabled.
     advanced: bool = False
     # Models whose firmware stores the write but never acts on it. Writing anyway

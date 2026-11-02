@@ -21,6 +21,7 @@ from .coordinator import (
     held_totals_issue_id,
     identity_mismatch_issue_id,
     reading_check_issue_id,
+    state_store,
 )
 from .modbus import async_prepare
 from .reading_checks import KEYS as READING_CHECK_KEYS
@@ -197,3 +198,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
     await entry.runtime_data.async_client_shutdown()
 
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the state saved for the entry, which nothing else would read again."""
+    await state_store(hass, entry.entry_id).async_remove()

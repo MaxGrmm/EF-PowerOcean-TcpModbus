@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import socket
+import struct
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -12,9 +14,11 @@ import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from pymodbus.exceptions import ModbusException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import config_flow, const
+from custom_components.ef_powerocean_tcpmodbus.models import RegisterType
 from tests.fake_inverter import HOST, FakeInverter
 
 SERIAL = "HJ31ZAS2TEST0001"
@@ -347,3 +351,91 @@ def test_every_portal_total_names_its_portal_term_in_every_language() -> None:
         totals = set(section["data"]) - {config_flow.REMOVE_CORRECTIONS}
         assert totals == const.ECOFLOW_PORTAL_TOTALS, path.name
         assert set(section["data_description"]) >= totals, path.name
+
+
+# ── Reading the settings the device suggests ──────────────────────────────────
+
+
+class _Client:
+    """Answers reads from a register map, or raises for addresses it refuses."""
+
+    def __init__(self, words: dict[int, int], refused: set[int]) -> None:
+        self._words = words
+        self._refused = refused
+
+    async def async_read(self, address: int, count: int) -> list[int]:
+        if address in self._refused:
+            raise ModbusException("refused")
+        return [self._words.get(address + i, 0) for i in range(count)]
+
+
+async def test_settings_the_device_cannot_read_are_left_out() -> None:
+    refused = {const.DEVICE_INFO_BLOCK.start} | {
+        register.address
+        for register, _, _ in config_flow.DEVICE_SUGGESTED_SETTINGS.values()
+    }
+
+    settings = await config_flow._async_read_settings(
+        _Client({}, refused)  # type: ignore[arg-type]
+    )
+
+    assert settings == {}
+
+
+async def test_plausible_settings_pre_fill_the_form() -> None:
+    battery_count = const.REGISTERS_BY_KEY["battery_count"]
+    rated_power = const.REGISTERS_BY_KEY["limit_inv_power"]
+    assert battery_count.data_type is RegisterType.UINT16
+    words = {battery_count.address: 3}
+    words.update(
+        zip(
+            range(rated_power.address, rated_power.address + rated_power.size),
+            _words(rated_power.data_type, 10_000),
+            strict=True,
+        )
+    )
+
+    settings = await config_flow._async_read_settings(
+        _Client(words, set())  # type: ignore[arg-type]
+    )
+
+    assert settings[const.CONF_BATTERY_COUNT] == 3
+    assert settings[const.CONF_MAX_SOLAR_POWER] == 10_000
+
+
+async def test_an_error_while_connecting_counts_as_unreachable(
+    hass: HomeAssistant,
+) -> None:
+    with patch.object(
+        config_flow, "async_temporary_client", side_effect=OSError("no route")
+    ):
+        assert (
+            await config_flow.async_read_device_settings(hass, "192.168.1.10", 502)
+            is None
+        )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_energy_totals_are_left_out_while_the_inverter_reports_none(
+    hass: HomeAssistant,
+) -> None:
+    entry = _configured_entry(hass)
+    entry.runtime_data = SimpleNamespace(correctable_totals={})
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert config_flow.ENERGY_TOTALS not in _fields(result)
+
+
+def _words(data_type: RegisterType, value: int) -> list[int]:
+    """Encode *value* the way the device sends it, low word first."""
+    formats = {
+        RegisterType.UINT16: ">H",
+        RegisterType.UINT32: "<I",
+        RegisterType.INT32: "<i",
+        RegisterType.FLOAT32: "<f",
+    }
+    packed = struct.pack(formats[data_type], value)
+    if data_type is RegisterType.UINT16:
+        return [value]
+    return list(struct.unpack("<HH", packed))
