@@ -42,7 +42,7 @@
 - **Holding the battery for later:** Hold battery keeps the charge for the evening peak
   while surplus solar is exported.
 - **Watching the system:** faults, grid outages and a disconnected battery show up as
-  sensors, logbook entries and repairs issues, ready to trigger a notification.
+  sensors, logbook entries and events, ready to trigger a notification.
 
 ---
 
@@ -270,8 +270,9 @@ Reserve, so one bad read can't set them off.
 The checks run whether or not Modbus Control is on, since a bad reading also misleads
 the sensors. The `ef_powerocean_tcpmodbus_reading_check_failed` and
 `ef_powerocean_tcpmodbus_reading_check_cleared` events, also shown in the logbook,
-carry the `check` and the `status` it stands for. A check that fails for 10 minutes
-raises a repairs issue, which clears by itself once the check passes again.
+carry the `check` and the `status` it stands for; use them to be notified. A failed
+check is not raised in repairs, since it reflects the inverter's state, such as an
+outage or the battery saver turning the battery off, not something to fix.
 
 ### Commanding the battery from automations
 

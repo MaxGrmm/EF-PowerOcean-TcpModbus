@@ -7,7 +7,7 @@ frame that no longer changes once its telemetry stops updating.
 
 The checks run on every poll, whoever is in control, since a bad reading also
 misleads the sensors and anything built on them. Control steps aside while one has
-failed; the coordinator announces it and raises it in repairs once it lasts.
+failed; the coordinator announces it, and Control Status shows it.
 
 Each check is one class: the data keys it reads, the Control Status it stands for,
 and check(), which returns whether the frame fails it. A false alarm only hands the

@@ -29,7 +29,6 @@ from .const import (
     BATTERY_DISCHARGE_W_PER_WH,
     BATTERY_MODE_SELECT,
     BATTERY_MODULES,
-    BUG_REPORT_URL,
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
     CONF_CALC_SOLAR_POWER,
@@ -66,7 +65,6 @@ from .const import (
     OPTIONAL_STALLS_TO_DROP,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
-    READING_CHECK_ISSUE_AFTER_S,
     REGISTERS_BY_KEY,
     SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
@@ -116,10 +114,6 @@ def held_totals_issue_id(entry: ConfigEntry) -> str:
     return f"energy_totals_held_{entry.entry_id}"
 
 
-def reading_check_issue_id(entry: ConfigEntry) -> str:
-    return f"reading_check_{entry.entry_id}"
-
-
 def battery_power_limits(capacity_wh: float) -> tuple[int, int]:
     """Return the charge and discharge power of a battery of this capacity."""
     return (
@@ -158,9 +152,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _pinned_serial: str | None = None
     # The totals the held-totals issue was last raised for.
     _held_issue_keys: frozenset[str] = frozenset()
-    # The failed reading check last announced, and the one in repairs.
+    # The failed reading check last announced.
     _announced_finding: Finding | None = None
-    _issue_finding: Finding | None = None
 
     def __init__(
         self,
@@ -738,50 +731,20 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @callback
     def _async_track_reading_checks(self) -> None:
-        """Announce a failed check and its end, and raise a long one in repairs."""
+        """Announce a failed check and its end as events, which the logbook shows.
+
+        Not raised in repairs: what fails one, an outage, a battery the battery
+        saver turned off or an inverter fault, is nothing the user can fix, and
+        Control Status already shows why control stepped aside.
+        """
         finding = self.control.reading_checks.active
         previous, self._announced_finding = self._announced_finding, finding
-        # Another check standing for the same state is not news; the issue below
-        # still names it.
+        # Another check standing for the same state is not news.
         if (finding and finding.status) != (previous and previous.status):
             if previous is not None:
                 self._fire_check_event(EVENT_READING_CHECK_CLEARED, previous)
             if finding is not None:
                 self._fire_check_event(EVENT_READING_CHECK_FAILED, finding)
-
-        issue_for = (
-            finding
-            if finding is not None
-            and (dt.now() - finding.since).total_seconds()
-            >= READING_CHECK_ISSUE_AFTER_S
-            else None
-        )
-        if issue_for == self._issue_finding:
-            return
-        self._issue_finding = issue_for
-        issue_id = reading_check_issue_id(self.config_entry)
-        if issue_for is None:
-            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-            return
-        _LOGGER.warning(
-            "The inverter's readings have failed the %s check since %s",
-            issue_for.check,
-            issue_for.since,
-        )
-        ir.async_create_issue(
-            self.hass,
-            DOMAIN,
-            issue_id,
-            is_fixable=False,
-            is_persistent=False,
-            severity=ir.IssueSeverity.WARNING,
-            learn_more_url=BUG_REPORT_URL,
-            translation_key=f"reading_check_{issue_for.check}",
-            translation_placeholders={
-                "host": str(self.host),
-                "since": dt.as_local(issue_for.since).strftime("%H:%M"),
-            },
-        )
 
     @callback
     def _fire_check_event(self, event_type: str, finding: Finding) -> None:

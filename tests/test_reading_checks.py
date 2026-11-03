@@ -376,7 +376,7 @@ def test_the_checks_run_while_modbus_control_is_off(
     assert Status.INCONSISTENT_READINGS not in run.status
 
 
-# ── Events and the repairs issue ──────────────────────────────────────────────
+# ── Events, and no repairs issue ──────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -420,38 +420,10 @@ def test_a_failed_check_is_announced_when_it_starts_and_when_it_ends(tracked) ->
     ]
 
 
-@pytest.mark.parametrize("check", [check.name for check in reading_checks.CHECKS])
-def test_every_failed_check_raises_an_issue_after_ten_minutes_that_clears_itself(
-    tracked, check: str
-) -> None:
-    finding = Finding(Status.INCONSISTENT_READINGS, check, T0)
-
-    for minute in range(10):
-        tracked.poll(finding, minute)
-    tracked.issues.created.assert_not_called()
-
-    tracked.poll(finding, 10)
-    tracked.poll(finding, 11)
-    tracked.issues.created.assert_called_once()
-    kwargs = tracked.issues.created.call_args.kwargs
-    assert kwargs["translation_key"] == f"reading_check_{check}"
-    assert kwargs["is_fixable"] is False
-
-    tracked.poll(None, 35)
-    tracked.issues.deleted.assert_called_once()
-    assert tracked.issues.deleted.call_args.args[2] == "reading_check_entry"
-
-
 def test_another_cause_for_the_same_state_is_not_announced_again(tracked) -> None:
     tracked.poll(Finding(Status.INCONSISTENT_READINGS, "battery_soc", T0), 12)
     tracked.poll(Finding(Status.INCONSISTENT_READINGS, "frozen", T0), 13)
 
-    # The issue stays up, now naming the new cause.
-    assert tracked.issues.created.call_count == 2
-    assert tracked.issues.created.call_args.kwargs["translation_key"] == (
-        "reading_check_frozen"
-    )
-    tracked.issues.deleted.assert_not_called()
     assert _fired(tracked) == [
         (const.EVENT_READING_CHECK_FAILED, "inconsistent_readings", "battery_soc")
     ]
@@ -462,9 +434,6 @@ def test_another_state_starts_over(tracked) -> None:
     later = T0 + timedelta(minutes=12)
     tracked.poll(Finding(Status.OFF_GRID, "off_grid", later), 13)
 
-    # The first issue goes; the new state gets its own after its 10 minutes.
-    tracked.issues.created.assert_called_once()
-    tracked.issues.deleted.assert_called_once()
     assert [event for event, _, _ in _fired(tracked)] == [
         const.EVENT_READING_CHECK_FAILED,
         const.EVENT_READING_CHECK_CLEARED,
@@ -472,15 +441,24 @@ def test_another_state_starts_over(tracked) -> None:
     ]
 
 
-def test_every_check_that_raises_an_issue_has_its_text() -> None:
+def test_a_failed_check_is_never_raised_in_repairs(tracked) -> None:
+    """Nothing the user can fix: an outage, a battery turned off, a fault."""
+    finding = Finding(Status.BATTERY_DISCONNECTED, "bms", T0)
+
+    for minute in range(0, 60, 5):
+        tracked.poll(finding, minute)
+
+    tracked.issues.created.assert_not_called()
+
+
+def test_every_status_a_check_stands_for_has_its_text() -> None:
     import json
     from pathlib import Path
 
     folder = Path(coordinator_module.__file__).parent / "translations"
     for language in ("en", "de"):
         strings = json.loads((folder / f"{language}.json").read_text())
-        for check in reading_checks.CHECKS:
-            assert f"reading_check_{check.name}" in strings["issues"]
+        assert not [key for key in strings["issues"] if key.startswith("reading_")]
         states = strings["entity"]["sensor"]["control_status"]["state"]
         assert "inconsistent_readings" in states
 
