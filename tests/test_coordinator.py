@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import struct
+from collections import deque
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -65,6 +66,8 @@ def coordinator():
     instance._consecutive_modbus_disabled_reads = 0
     instance._optional_stalls = {}
     instance._battery_capacity_wh = None
+    instance._raw_blocks = {}
+    instance._check_snapshots = deque(maxlen=const.READING_CHECK_SNAPSHOTS)
     instance._ena_calc_solar_power = False
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
     instance._register_blocks = const.register_blocks_for(instance.inverter_model)

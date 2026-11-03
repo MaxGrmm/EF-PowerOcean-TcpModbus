@@ -42,7 +42,7 @@
 - **Holding the battery for later:** Hold battery keeps the charge for the evening peak
   while surplus solar is exported.
 - **Watching the system:** faults, grid outages and a disconnected battery show up as
-  sensors, logbook entries and repairs issues, ready to trigger a notification.
+  sensors, logbook entries and events, ready to trigger a notification.
 
 ---
 
@@ -254,13 +254,13 @@ before.
 Every poll is also checked for conditions in which the inverter is best left to
 itself:
 
-| Check          | Fails when                                                             | Control Status        |
-| -------------- | ---------------------------------------------------------------------- | --------------------- |
-| `off_grid`     | The inverter reports running off-grid                                  | Off-grid              |
-| `grid_voltage` | The grid-side voltage is gone while the inverter still reports on-grid | Off-grid              |
-| `bms`          | The inverter reports its battery disconnected, after it reported one   | Battery disconnected  |
-| `battery_soc`  | The system Battery SOC reads 0 % while a battery in use reports more   | Readings inconsistent |
-| `frozen`       | The voltages and frequency haven't changed at all for two minutes      | Readings inconsistent |
+| Check          | Fails when                                                               | Control Status        |
+| -------------- | ------------------------------------------------------------------------ | --------------------- |
+| `off_grid`     | The inverter reports running off-grid                                    | Off-grid              |
+| `grid_voltage` | The grid-side voltage is gone while the inverter still reports on-grid   | Off-grid              |
+| `bms`          | The inverter reports its battery disconnected, after it reported one     | Battery disconnected  |
+| `battery_soc`  | The system Battery SOC drops to 0 % from a level no battery empties from | Readings inconsistent |
+| `frozen`       | The voltages and frequency haven't changed at all for two minutes        | Readings inconsistent |
 
 A check counts once it fails three polls in a row. While one does, control hands the
 inverter its own self-consumption and resumes the selected mode once it passes again.
@@ -270,8 +270,16 @@ Reserve, so one bad read can't set them off.
 The checks run whether or not Modbus Control is on, since a bad reading also misleads
 the sensors. The `ef_powerocean_tcpmodbus_reading_check_failed` and
 `ef_powerocean_tcpmodbus_reading_check_cleared` events, also shown in the logbook,
-carry the `check` and the `status` it stands for. A check that fails for 10 minutes
-raises a repairs issue, which clears by itself once the check passes again.
+carry the `check` and the `status` it stands for; use them to be notified. A failed
+check is not raised in repairs, since it reflects the inverter's state, such as an
+outage or the battery saver turning the battery off, not something to fix.
+
+While `battery_soc` fails, the **Battery SOC** sensor shows unavailable rather than
+0 %, so history, automations and the Energy dashboard don't take it for an empty
+battery. Each time a check starts failing, the readings of that poll and the one before
+are kept, also across restarts, and included in the diagnostics download. If a check
+fails unexpectedly, download diagnostics from the device page whenever you notice and
+attach them to a bug report.
 
 ### Commanding the battery from automations
 

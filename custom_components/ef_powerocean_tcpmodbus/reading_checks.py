@@ -7,7 +7,7 @@ frame that no longer changes once its telemetry stops updating.
 
 The checks run on every poll, whoever is in control, since a bad reading also
 misleads the sensors and anything built on them. Control steps aside while one has
-failed; the coordinator announces it and raises it in repairs once it lasts.
+failed; the coordinator announces it, and Control Status shows it.
 
 Each check is one class: the data keys it reads, the Control Status it stands for,
 and check(), which returns whether the frame fails it. A false alarm only hands the
@@ -28,9 +28,10 @@ from .models import ControlStatus, DeviceReport
 
 _LOGGER = logging.getLogger(__name__)
 
-# A system level of 0 is only believed while no pack in use reports more than this,
-# or when the last level believed was at most twice it: a battery running empty
-# passes through the low levels, a bad read drops to 0 from anywhere.
+# A system level of 0 is only believed when the last level believed was at most
+# twice this, since a battery running empty passes through the low levels and a bad
+# read drops to 0 from anywhere. With no level believed yet, as after a start, it is
+# believed while no pack in use reports more than this.
 SOC_PACK_MARGIN: Final = 5.0
 # Readings that have not moved at all for this long have stopped updating.
 FROZEN_AFTER: Final = timedelta(minutes=2)
@@ -58,6 +59,8 @@ class Check:
     name: ClassVar[str]
     status: ClassVar[ControlStatus]
     keys: ClassVar[frozenset[str]]
+    # Readings a failure shows to be wrong, which their sensors do not show.
+    distrusts: ClassVar[frozenset[str]] = frozenset()
 
     def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:
         raise NotImplementedError
@@ -130,11 +133,16 @@ class BatteryDisconnected(Check):
 
 
 class SystemSocMismatch(Check):
-    """The system state of charge reads 0 while a pack in use reports more."""
+    """The system state of charge drops to 0 from a level no battery empties from.
+
+    The packs' own levels are no help once the read is bad: in #200 a pack read 0
+    alongside the system level, and the packs may not be read at all.
+    """
 
     name = "battery_soc"
     status = ControlStatus.INCONSISTENT_READINGS
     keys = frozenset({"battery_soc", "battery_count", *BATTERY_SOC_KEYS})
+    distrusts = frozenset({"battery_soc"})
 
     def __init__(self) -> None:
         # The last system level that passed; unknown after a start.
@@ -150,13 +158,13 @@ class SystemSocMismatch(Check):
             for key in BATTERY_SOC_KEYS[:count]
             if (pack := data.get(key)) is not None
         ]
-        fails = (
-            float(soc) <= 0
-            and any(pack > SOC_PACK_MARGIN for pack in packs)
-            and (
-                self._last_believed is None or self._last_believed > 2 * SOC_PACK_MARGIN
-            )
-        )
+        if self._last_believed is None:
+            implausible = any(pack > SOC_PACK_MARGIN for pack in packs)
+        else:
+            implausible = self._last_believed > 2 * SOC_PACK_MARGIN
+        fails = float(soc) <= 0 and implausible
+        # A failing level is never believed, so the drop stays a bad read until a
+        # real level comes back.
         if not fails:
             self._last_believed = float(soc)
         return fails
@@ -200,6 +208,7 @@ CHECKS: Final[tuple[type[Check], ...]] = (
 
 # Kept polled whatever entities are enabled, as the control inputs are.
 KEYS: Final = frozenset[str]().union(*(check.keys for check in CHECKS))
+KEYS_BY_CHECK: Final = {check.name: check.keys for check in CHECKS}
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +237,10 @@ class ReadingChecks:
         self._broken: set[str] = set()
         # The failure that holds, if any: the first in CHECKS that has held.
         self.active: Finding | None = None
+        # The checks this poll failed, whether or not that has held yet.
+        self.failing: frozenset[str] = frozenset()
+        # The readings this poll's failures show to be wrong.
+        self.distrusted: frozenset[str] = frozenset()
         # Whether this poll's readings contradict each other, whether or not that
         # has held long enough to count: such a frame never moves a guard. Kept
         # until the next poll, so a user action re-applying that poll's inputs
@@ -237,6 +250,8 @@ class ReadingChecks:
     def run(self, data: Mapping[str, Any], now: datetime) -> None:
         # Every check sees every poll, since some keep a history.
         failed = [check for check in self._checks if self._failed(check, data, now)]
+        self.failing = frozenset(check.name for check in failed)
+        self.distrusted = frozenset().union(*(check.distrusts for check in failed))
         self.suspect = any(
             check.status is ControlStatus.INCONSISTENT_READINGS for check in failed
         )

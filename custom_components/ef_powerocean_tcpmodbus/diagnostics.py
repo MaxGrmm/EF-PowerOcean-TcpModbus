@@ -98,6 +98,20 @@ async def async_get_config_entry_diagnostics(
                 "state": str(coordinator.control_test.state),
                 "last_report": coordinator.control_test.last_report,
             },
+            # The readings each time a reading check started failing, kept across
+            # restarts, so a report filed later still shows what the inverter sent.
+            "reading_check_snapshots": [
+                {
+                    **snapshot,
+                    "raw_registers": redact_raw_registers(snapshot["raw_registers"]),
+                    "raw_registers_before": (
+                        redact_raw_registers(before)
+                        if (before := snapshot["raw_registers_before"]) is not None
+                        else None
+                    ),
+                }
+                for snapshot in coordinator.reading_check_snapshots
+            ],
             "protocol_report": {
                 key: (coordinator.data or {}).get(key) for key in PROTOCOL_REPORT_KEYS
             },
