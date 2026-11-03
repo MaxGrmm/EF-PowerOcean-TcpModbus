@@ -265,6 +265,10 @@ class EcoflowSensor(EcoFlowBaseEntity[SensorDef | EnergySensorDef], RestoreSenso
         """Keep coordinator diagnostics available when normal entities are not."""
         if self._definition.key == "coordinator_status":
             return self.coordinator.status is not None
+        # A reading the checks show to be wrong, such as a system level of 0 while
+        # the batteries are full (#200), is not shown as if it were real.
+        if self._definition.key in self.coordinator.control.reading_checks.distrusted:
+            return False
         return super().available
 
     @property

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from functools import partial
@@ -65,6 +66,7 @@ from .const import (
     OPTIONAL_STALLS_TO_DROP,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
+    READING_CHECK_SNAPSHOTS,
     REGISTERS_BY_KEY,
     SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
@@ -92,7 +94,7 @@ from .models import (
     battery_reserve_for,
     encode_register,
 )
-from .reading_checks import Finding
+from .reading_checks import KEYS_BY_CHECK, Finding
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
@@ -154,6 +156,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _held_issue_keys: frozenset[str] = frozenset()
     # The failed reading check last announced.
     _announced_finding: Finding | None = None
+    # The checks the last poll failed and the words it read, to tell when one
+    # starts failing and to show what came before.
+    _failing_before: frozenset[str] = frozenset()
+    _raw_before: dict[int, list[int]] | None = None
 
     def __init__(
         self,
@@ -255,6 +261,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Not saved until loaded: a setup that fails before then would otherwise
         # overwrite the saved totals with empty ones.
         self._state_loaded = False
+        # The readings when a check last started failing, newest last.
+        self._check_snapshots: deque[dict[str, Any]] = deque(
+            maxlen=READING_CHECK_SNAPSHOTS
+        )
 
     # ── Properties ────────────────────────────────────────────────────────────
 
@@ -327,6 +337,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._last_checked_time is not None
             else None,
             "battery_capacity_wh": self._battery_capacity_wh,
+            "reading_check_snapshots": list(self._check_snapshots),
             **self.control.dump_state(),
             **self._energy_processor.dump_state(),
         }
@@ -344,6 +355,11 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _load_stored_state(self, stored: dict[str, Any]) -> None:
         self.control.load_state(stored)
+        # Kept across restarts, which several of the episodes in #200 followed.
+        self._check_snapshots.extend(
+            _with_int_addresses(snapshot)
+            for snapshot in stored.get("reading_check_snapshots") or []
+        )
         # So a battery asleep at its reserve across a restart keeps its capacity.
         self._hold_battery_capacity(stored.get("battery_capacity_wh"))
 
@@ -746,6 +762,34 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if finding is not None:
                 self._fire_check_event(EVENT_READING_CHECK_FAILED, finding)
 
+    def _record_check_snapshots(self, data: Mapping[str, Any]) -> None:
+        """Keep the readings of a poll in which a check starts failing.
+
+        So diagnostics downloaded later, once the user notices, still show what the
+        inverter sent then: the words it read, those of the poll before, and the
+        readings the check judged.
+        """
+        raw = self.raw_registers
+        failing = self.control.reading_checks.failing
+        for check in sorted(failing - self._failing_before):
+            self._check_snapshots.append(
+                {
+                    "check": check,
+                    "at": dt.now().isoformat(),
+                    "readings": {
+                        key: data.get(key) for key in sorted(KEYS_BY_CHECK[check])
+                    },
+                    "raw_registers": raw,
+                    "raw_registers_before": self._raw_before,
+                }
+            )
+        self._failing_before, self._raw_before = failing, raw
+
+    @property
+    def reading_check_snapshots(self) -> list[dict[str, Any]]:
+        """Return the readings of the checks that last started failing, oldest first."""
+        return list(self._check_snapshots)
+
     @callback
     def _fire_check_event(self, event_type: str, finding: Finding) -> None:
         devices = device_registry.async_entries_for_config_entry(
@@ -1136,6 +1180,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # them to be calculated.
             await self.control.async_poll(result)
             self._async_track_reading_checks_safely()
+            try:
+                self._record_check_snapshots(result)
+            except Exception:
+                _LOGGER.exception("Could not keep the readings of a failed check")
 
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
@@ -1261,3 +1309,15 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         published = target_value if publish_as is None else publish_as
         updated_data = {**(self.data or {}), key: published}
         self.async_set_updated_data(updated_data)
+
+
+def _with_int_addresses(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Return a snapshot loaded from JSON with its register addresses as numbers."""
+    return {
+        **snapshot,
+        **{
+            key: {int(address): words for address, words in raw.items()}
+            for key in ("raw_registers", "raw_registers_before")
+            if isinstance(raw := snapshot.get(key), dict)
+        },
+    }

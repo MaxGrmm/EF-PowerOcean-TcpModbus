@@ -213,6 +213,31 @@ def test_a_zero_soc_stays_contradicted_for_as_long_as_it_lasts() -> None:
     assert not check.check(_socs(60, 61, 59), T0)
 
 
+def test_a_poll_with_every_pack_at_0_does_not_make_the_drop_believed() -> None:
+    """#200 on 31 Oct: a pack read 0 alongside the system, then came back."""
+    check = reading_checks.SystemSocMismatch()
+    assert not check.check(_socs(100, 100, 99), T0)
+
+    frames = (_socs(0, 0, 0), _socs(0, 100, 99), _socs(0, 100, 99))
+
+    assert all(check.check(frame, T0) for frame in frames)
+    assert not check.check(_socs(100, 100, 99), T0)
+
+
+@pytest.mark.parametrize(
+    "frame",
+    (_socs(0, 0, 0), _socs(0, count=0), {"battery_soc": 0}),
+    ids=("packs at 0", "no battery count", "no packs read"),
+)
+def test_a_drop_to_0_from_a_believed_level_fails_whatever_the_packs_say(
+    frame: dict[str, Any],
+) -> None:
+    check = reading_checks.SystemSocMismatch()
+    assert not check.check(_socs(57, 60, 55), T0)
+
+    assert check.check(frame, T0)
+
+
 def test_no_battery_is_never_contradicted() -> None:
     assert not reading_checks.SystemSocMismatch().check(_socs(0, 80, count=0), T0)
 

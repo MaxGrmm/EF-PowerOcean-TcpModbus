@@ -4,11 +4,12 @@
 
 ### Added
 
-- Every poll is checked for conditions in which the inverter is best left to itself: off-grid and a disconnected battery, as the inverter reports them; a grid-side voltage gone while it still reports on-grid; a system Battery SOC of 0 % while a battery reports more (#32, #200); and voltages and frequency that stop changing for two minutes. Control steps aside while one fails, and Control Status shows Off-grid, Battery disconnected or the new Readings inconsistent.
+- Every poll is checked for conditions in which the inverter is best left to itself: off-grid and a disconnected battery, as the inverter reports them; a grid-side voltage gone while it still reports on-grid; a system Battery SOC that drops to 0 % from above 10 %, or reads 0 % while a battery reports more (#32, #200); and voltages and frequency that stop changing for two minutes. Control steps aside while one fails, and Control Status shows Off-grid, Battery disconnected or the new Readings inconsistent.
 - `ef_powerocean_tcpmodbus_reading_check_failed` and `ef_powerocean_tcpmodbus_reading_check_cleared` events, also in the logbook. The checks run, and the events fire, whether or not Modbus Control is on.
 - Icons for the Battery Mode options and for the actions.
 - README sections on use cases, troubleshooting, removal, how data is updated and known limitations.
 - `quality_scale.yaml`, recording how the integration meets each rule of Home Assistant's integration quality scale.
+- The diagnostics now include the readings from each time a check started failing, kept across restarts, so a report can be downloaded after the fact.
 
 ### Changed
 
@@ -17,6 +18,7 @@
 - Error messages from the controls and settings are translated, so they appear in German in a German Home Assistant.
 - Writes to the inverter from the controls are sent one at a time.
 - A connection that stays down is logged once, and its recovery once, instead of an error on every poll.
+- The Battery SOC sensor shows unavailable instead of 0 % while the `battery_soc` check fails (#200).
 
 ### Fixed
 
