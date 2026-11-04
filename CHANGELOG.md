@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.9.5] - 2026-11-04
+
 ### Added
 
 - Every poll is checked for conditions in which the inverter is best left to itself: off-grid and a disconnected battery, as the inverter reports them; a grid-side voltage gone while it still reports on-grid; a system Battery SOC that drops to 0 % from above 10 %, or reads 0 % while a battery reports more (#32, #200); and voltages and frequency that stop changing for two minutes. Control steps aside while one fails, and Control Status shows Off-grid, Battery disconnected or the new Readings inconsistent.
