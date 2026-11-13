@@ -214,8 +214,8 @@ class EcoflowSensor(EcoFlowBaseEntity[SensorDef | EnergySensorDef], RestoreSenso
         self._attr_state_class = self._definition.state_class
         if isinstance(definition, SensorDef) and definition.options:
             self._attr_options = list(definition.options)
+        # Shown while a poll leaves the value out; restored at a restart.
         self._last_written_value: SensorValue = None
-        self._last_written_attributes: dict[str, Any] | None = None
 
         if definition.unit is not None:
             self._attr_suggested_display_precision = VALUE_PRECISION.get(
@@ -227,15 +227,10 @@ class EcoflowSensor(EcoFlowBaseEntity[SensorDef | EnergySensorDef], RestoreSenso
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        new_value = self.native_value
-        new_attributes = self.extra_state_attributes
-        if (
-            new_value != self._last_written_value
-            or new_attributes != self._last_written_attributes
-        ):
-            self._last_written_value = new_value
-            self._last_written_attributes = new_attributes
-            self.async_write_ha_state()
+        self._last_written_value = self.native_value
+        self._async_write_if_changed(
+            self._last_written_value, self.extra_state_attributes
+        )
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

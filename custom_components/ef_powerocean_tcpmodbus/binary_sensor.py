@@ -79,10 +79,8 @@ class EcoFlowBinarySensor(EcoFlowBaseEntity[BinarySensorDef], BinarySensorEntity
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        new_value = self.is_on
-        if new_value != self._last_written_value:
-            self._last_written_value = new_value
-            self.async_write_ha_state()
+        self._last_written_value = self.is_on
+        self._async_write_if_changed(self._last_written_value)
 
     @property
     def is_on(self) -> bool | None:

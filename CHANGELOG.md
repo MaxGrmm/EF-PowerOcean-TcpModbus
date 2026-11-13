@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Entities whose value has not changed now become unavailable when a read fails and available again on the next good one. Before, they could stay unavailable after a restart until their value changed (#219).
+
 ## [2.9.5] - 2026-11-04
 
 ### Added
