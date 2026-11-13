@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
+- Entities now show unavailable while a poll fails, and available again with the next good one, as the README describes. Before, they kept showing their last value, because a value that had not changed wrote no state (#219).
+
+### Fixed
+
+- Entities whose value had not changed could stay unavailable after a start whose first read failed, until their value next changed (#219).
+
 ## [2.9.5] - 2026-11-04
 
 ### Added
