@@ -15,11 +15,11 @@ import struct
 from collections.abc import Iterator
 from datetime import timedelta
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import MAJOR_VERSION, MINOR_VERSION
+from homeassistant.const import MAJOR_VERSION, MINOR_VERSION, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_platform
@@ -416,6 +416,143 @@ async def test_entities_show_what_reading_everything_shows(
 
     assert at_setup_differences == []
     assert on_demand_differences == []
+
+
+# ── A failed read shows, and a good one clears, steady entities (#219) ────────
+
+
+def _reading_entities(hass: HomeAssistant, entry: MockConfigEntry) -> list[str]:
+    """The entities that show a reading, and so are unavailable while reads fail."""
+    readings = {
+        *(
+            ("sensor", definition.key)
+            for definition in (
+                *const.SENSOR_MAP,
+                *const.ENERGY_SENSOR_MAP,
+                *const.DAILY_ENERGY_SENSORS_DEVICE_RAW,
+                *const.TOTAL_ENERGY_SENSORS_DEVICE_RAW,
+            )
+            if definition.key != "coordinator_status"
+        ),
+        *(("binary_sensor", definition.key) for definition in const.BINARY_SENSOR_MAP),
+        *(("number", definition.key) for definition in const.WRITABLE_NUMBERS_MAP),
+    }
+    prefix = f"{entry.entry_id}_"
+    return sorted(
+        registry_entry.entity_id
+        for registry_entry in er.async_entries_for_config_entry(
+            er.async_get(hass), entry.entry_id
+        )
+        if (registry_entry.domain, registry_entry.unique_id.removeprefix(prefix))
+        in readings
+    )
+
+
+async def _fail_a_poll(hass: HomeAssistant, coordinator: EcoflowCoordinator) -> None:
+    """Run a poll whose read fails, as when the inverter briefly does not answer."""
+    with patch.object(coordinator, "async_get_raw_data", AsyncMock(return_value=None)):
+        await _poll(hass, coordinator)
+    assert not coordinator.last_update_success
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_failed_read_shows_steady_entities_unavailable_until_the_next(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    """The fake inverter's values never change, so each entity's only change is
+    whether it is available. Both ways must reach the state machine.
+    """
+    _fill_registers(inverter)
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+    _enable_every_entity(hass, entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator: EcoflowCoordinator = entry.runtime_data
+    await _poll(hass, coordinator)
+
+    before = _states(hass, entry)
+    shown = [
+        entity_id
+        for entity_id in _reading_entities(hass, entry)
+        if entity_id in before and before[entity_id][0] != STATE_UNAVAILABLE
+    ]
+    await _fail_a_poll(hass, coordinator)
+    during = _states(hass, entry)
+    await _poll(hass, coordinator)
+    after = _states(hass, entry)
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert len(shown) > 50
+    assert [e for e in shown if during[e][0] != STATE_UNAVAILABLE] == []
+    assert [e for e in shown if after[e] != before[e]] == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_steady_entities_recover_after_a_start_whose_first_poll_fails(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    """The report of #219: after a restart whose first poll failed, entities whose
+    value had not changed stayed unavailable once reads succeeded again.
+
+    Unloading keeps the states the entities restore when set up again, as at a
+    restart. The poll that fails lands while the entities are being added.
+    """
+    _fill_registers(inverter)
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+    _enable_every_entity(hass, entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    await _poll(hass, entry.runtime_data)
+    before = _states(hass, entry)
+    shown = [
+        entity_id
+        for entity_id in _reading_entities(hass, entry)
+        if entity_id in before and before[entity_id][0] != STATE_UNAVAILABLE
+    ]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    forward = hass.config_entries.async_forward_entry_setups
+
+    async def fail_then_forward(config_entry, platforms):
+        await _fail_a_poll(hass, config_entry.runtime_data)
+        return await forward(config_entry, platforms)
+
+    with patch.object(
+        hass.config_entries, "async_forward_entry_setups", fail_then_forward
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    coordinator: EcoflowCoordinator = entry.runtime_data
+    added = _states(hass, entry)
+    restored = [
+        entity.entity_id
+        for platform in entity_platform.async_get_platforms(hass, const.DOMAIN)
+        for entity in platform.entities.values()
+        if entity.entity_id in shown
+        and getattr(entity, "_last_written_value", None) is not None
+    ]
+    await _poll(hass, coordinator)
+    after = _states(hass, entry)
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # The entities were added while the read had failed, holding their old values.
+    assert [e for e in shown if added[e][0] != STATE_UNAVAILABLE] == []
+    assert len(restored) > 50
+    # One good read later, none is left unavailable.
+    assert [e for e in shown if after[e][0] == STATE_UNAVAILABLE] == []
 
 
 # ── Refused registers are retried after a firmware update ─────────────────────
