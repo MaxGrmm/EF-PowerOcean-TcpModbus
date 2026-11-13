@@ -32,7 +32,12 @@ from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const
 from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
-from custom_components.ef_powerocean_tcpmodbus.models import InverterModel, RegisterType
+from custom_components.ef_powerocean_tcpmodbus.models import (
+    EnergySensorDef,
+    InverterModel,
+    RegisterType,
+    SensorDef,
+)
 from tests.fake_inverter import HOST, FakeInverter
 
 
@@ -423,15 +428,16 @@ async def test_entities_show_what_reading_everything_shows(
 
 def _reading_entities(hass: HomeAssistant, entry: MockConfigEntry) -> list[str]:
     """The entities that show a reading, and so are unavailable while reads fail."""
+    sensor_definitions: tuple[SensorDef | EnergySensorDef, ...] = (
+        *const.SENSOR_MAP,
+        *const.ENERGY_SENSOR_MAP,
+        *const.DAILY_ENERGY_SENSORS_DEVICE_RAW,
+        *const.TOTAL_ENERGY_SENSORS_DEVICE_RAW,
+    )
     readings = {
         *(
             ("sensor", definition.key)
-            for definition in (
-                *const.SENSOR_MAP,
-                *const.ENERGY_SENSOR_MAP,
-                *const.DAILY_ENERGY_SENSORS_DEVICE_RAW,
-                *const.TOTAL_ENERGY_SENSORS_DEVICE_RAW,
-            )
+            for definition in sensor_definitions
             if definition.key != "coordinator_status"
         ),
         *(("binary_sensor", definition.key) for definition in const.BINARY_SENSOR_MAP),
