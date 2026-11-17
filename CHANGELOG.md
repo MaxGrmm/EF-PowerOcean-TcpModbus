@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- The register scan reads the registers EcoFlow's newer point table lists for the PowerOcean that the integration does not poll yet, such as the battery control mode, the battery's charge and discharge capability and the house consumption counters, so they can be confirmed on a live inverter first.
+
 ### Changed
 
 - Entities now show unavailable while a poll fails, and available again with the next good one, as the README describes. Before, they kept showing their last value, because a value that had not changed wrote no state (#219).

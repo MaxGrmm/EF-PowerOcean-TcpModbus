@@ -234,3 +234,19 @@ def test_the_grid_code_leaves_every_existing_read_unchanged() -> None:
             (40513, 1, True)
         ], model
         assert [block for block in without if block not in with_code] == [], model
+
+
+def test_candidate_registers_stay_out_of_the_poll() -> None:
+    """Only the register scan reads them, until one is confirmed and moved over."""
+    polled = {
+        address
+        for register in const.MODBUS_REGISTERS
+        for address in range(register.address, register.end)
+    }
+    keys = [register.key for register in const.CANDIDATE_REGISTERS]
+
+    assert len(keys) == len(set(keys))
+    assert not set(keys) & set(const.REGISTERS_BY_KEY)
+    for register in const.CANDIDATE_REGISTERS:
+        assert not set(range(register.address, register.end)) & polled, register.key
+        assert register.address != const.HEARTBEAT_REGISTER, register.key

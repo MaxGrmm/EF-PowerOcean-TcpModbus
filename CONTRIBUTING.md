@@ -122,6 +122,7 @@ Reading the result:
 
 - Every register reading zero usually means Modbus TCP is switched off in the EcoFlow app, not that the map differs.
 - A refused register that is readable elsewhere means the address moved on that model. Add an `address_overrides` entry to its `RegisterDef` rather than changing the shared address.
+- The candidate section reads `CANDIDATE_REGISTERS` from const.py: registers in EcoFlow's newer point table that the integration does not poll yet. A plausible value there is the evidence for moving one into `MODBUS_REGISTERS`, and the raw words show whether the assumed type and word order fit.
 - A `maybe ...` in the `looks like` column is only a guess from the value's magnitude. It's an educated guess, but can be wrong. Use it as a reference together with the [protocol notes](EcoFlow_PowerOcean_Modbus.md).
 
 To find where a setting in the EcoFlow app lives on Modbus, run it with `--watch` instead. It reads everything a few times to learn which registers move by themselves, then asks you to make one change in the app at a time, waits for it to reach Modbus (`--settle`, default 20 s) and lists the registers that followed. Mapped measurements are left out of that list, as they drift on their own; the ones that show what the inverter did (battery, grid, inverter and house power, and the status word) are shown decoded after each change instead. It ends with a table of both after every step, and stays read-only.

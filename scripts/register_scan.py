@@ -195,6 +195,27 @@ def report_mapped_registers(
     return missing, suspect, values
 
 
+def report_candidate_registers(reader: RegisterReader) -> None:
+    """Read the registers in EcoFlow's point table that are not mapped yet."""
+    print("== Candidate registers not mapped yet ==")
+    print("  From EcoFlow's newer point table; types and meanings are unconfirmed")
+    print(f"  {'key':<34} {'address':>16} {'type':<8} {'value':>14}  raw")
+    for register in const.CANDIDATE_REGISTERS:
+        row = (
+            f"  {register.key:<34} {render_address(register.address):>16} "
+            f"{register.data_type:<8}"
+        )
+        words, reason = reader.read(register.address, register.size)
+        if words is None:
+            print(f"{row} {'-':>14}  UNREADABLE ({reason})")
+            continue
+        value = reader.decode(words, register)
+        decoded = "None" if value is None else f"{value:.2f}"
+        raw = " ".join(f"0x{word:04X}" for word in words)
+        print(f"{row} {decoded:>14}  {raw}")
+    print()
+
+
 def report_derived_values(
     values: dict[str, float | None], model: models.InverterModel
 ) -> None:
@@ -915,6 +936,7 @@ def main() -> int:
         report_block_reads(reader, blocks)
         missing, suspect, values = report_mapped_registers(reader, registers)
         report_derived_values(values, model)
+        report_candidate_registers(reader)
         words, refused = (
             ({}, {}) if arguments.no_scan else report_readable_addresses(reader, ranges)
         )

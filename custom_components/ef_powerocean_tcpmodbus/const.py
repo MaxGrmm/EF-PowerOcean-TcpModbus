@@ -304,6 +304,41 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
 
 REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTERS}
 
+# Listed for the PowerOcean in EcoFlow's newer point table, but not confirmed on any
+# model yet. Only scripts/register_scan.py reads them, so each one can be checked
+# against a live inverter before it is polled or gets an entity.
+CANDIDATE_REGISTERS: Final[tuple[RegisterDef, ...]] = (
+    RegisterDef("inverter_total_active_power", 40023, RegisterType.INT16),
+    RegisterDef("inverter_total_reactive_power", 40024, RegisterType.INT16),
+    RegisterDef("time_zone", 40518, RegisterType.INT16),
+    RegisterDef("battery_state", 40611, RegisterType.INT16),
+    # 0 remote, 1 local, documented as read-write.
+    RegisterDef("battery_control_mode", 40612, RegisterType.UINT16),
+    RegisterDef("system_reactive_power", 40613),
+    RegisterDef("rated_max_active_power", 40615, RegisterType.UINT16),
+    RegisterDef("max_apparent_power", 40616, RegisterType.UINT16),
+    RegisterDef("max_reactive_output_power", 40617, RegisterType.UINT16),
+    RegisterDef("max_reactive_input_power", 40618, RegisterType.UINT16),
+    RegisterDef("pf_limit_supplying_reactive", 40625, RegisterType.UINT16),
+    RegisterDef("pf_limit_absorbing_reactive", 40626, RegisterType.UINT16),
+    RegisterDef("battery_max_charge_capability", 40627, RegisterType.UINT16),
+    RegisterDef("battery_max_discharge_capability", 40628, RegisterType.UINT16),
+    # In 0.1 %, documented as read-write.
+    RegisterDef("inverter_active_output_percent", 40629, RegisterType.UINT16),
+    # Documented as write-only and for Australia only; a read shows whether the
+    # PowerOcean answers them at all.
+    RegisterDef("vpp_control_mode", 40630, RegisterType.UINT16),
+    RegisterDef("soft_start_switch", 40631, RegisterType.UINT16),
+    RegisterDef("battery_power_switch", 40632, RegisterType.UINT16),
+    RegisterDef("force_off_grid", 40633, RegisterType.UINT16),
+    # Each named only "total energy (today)", with no direction given.
+    RegisterDef("meter_energy_today", 42113),
+    RegisterDef("inverter_energy_today", 42129),
+    RegisterDef("battery_energy_today", 42145),
+    RegisterDef("house_consumption_total", 44609),
+    RegisterDef("house_consumption_today", 44611),
+)
+
 
 def register_blocks_for(
     inverter_model: InverterModel, *, exclude: Collection[str] = ()
