@@ -253,6 +253,7 @@ class RegisterScan:
                 }
             )
             for register in block.registers:
+                own: list[int] | None
                 if words is not None:
                     own, own_reason = block.registers_for(words, register), ""
                 else:
