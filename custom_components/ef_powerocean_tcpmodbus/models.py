@@ -621,6 +621,7 @@ class RegisterType(StrEnum):
     """Word layout of a register. Multi-word values are stored low word first."""
 
     UINT16 = "uint16"
+    INT16 = "int16"
     UINT32 = "uint32"
     INT32 = "int32"
     FLOAT32 = "float32"
@@ -629,6 +630,7 @@ class RegisterType(StrEnum):
 
 REGISTER_SIZES: Final = {
     RegisterType.UINT16: 1,
+    RegisterType.INT16: 1,
     RegisterType.UINT32: 2,
     RegisterType.INT32: 2,
     RegisterType.FLOAT32: 2,
