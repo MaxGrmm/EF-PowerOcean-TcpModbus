@@ -65,3 +65,10 @@ cancel_control_test:
       selector:
         device:
           integration: ef_powerocean_tcpmodbus
+run_register_scan:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: ef_powerocean_tcpmodbus

@@ -20,6 +20,7 @@ from .models import ControlFeature
 SERVICE_SET_BATTERY_COMMAND: Final = "set_battery_command"
 SERVICE_RUN_CONTROL_TEST: Final = "run_control_test"
 SERVICE_CANCEL_CONTROL_TEST: Final = "cancel_control_test"
+SERVICE_RUN_REGISTER_SCAN: Final = "run_register_scan"
 ATTR_CONFIRM: Final = "confirm"
 ATTR_POWER: Final = "power"
 ATTR_CHARGE_LIMIT_SOC: Final = "charge_limit_soc"
@@ -57,6 +58,9 @@ RUN_CONTROL_TEST_SCHEMA: Final = vol.Schema(
 CANCEL_CONTROL_TEST_SCHEMA: Final = vol.Schema(
     {vol.Required(ATTR_DEVICE_ID): cv.string}
 )
+
+# Read-only, so it needs no confirmation.
+RUN_REGISTER_SCAN_SCHEMA: Final = vol.Schema({vol.Required(ATTR_DEVICE_ID): cv.string})
 
 
 def async_setup_services(hass: HomeAssistant) -> None:
@@ -136,6 +140,21 @@ def async_setup_services(hass: HomeAssistant) -> None:
         SERVICE_CANCEL_CONTROL_TEST,
         async_cancel_control_test,
         schema=CANCEL_CONTROL_TEST_SCHEMA,
+    )
+
+    async def async_run_register_scan(call: ServiceCall) -> None:
+        """Start the register scan and return at once, as the control test does.
+
+        It reads a few hundred addresses between the polls, which takes a minute or
+        two, and a notification says when the report is in the diagnostics.
+        """
+        _coordinator_for(hass, call.data[ATTR_DEVICE_ID]).register_scan.async_start()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RUN_REGISTER_SCAN,
+        async_run_register_scan,
+        schema=RUN_REGISTER_SCAN_SCHEMA,
     )
 
 

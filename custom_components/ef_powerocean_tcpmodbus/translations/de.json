@@ -711,6 +711,16 @@
           "description": "Der Wechselrichter, dessen Test abgebrochen wird."
         }
       }
+    },
+    "run_register_scan": {
+      "name": "Registerscan ausführen",
+      "description": "Liest, ohne etwas zu schreiben, jedes Register, das diese Integration abbildet, die Register aus EcoFlows neuerer Punkttabelle, die sie noch nicht abfragt, und die Adressbereiche um sie herum, wie scripts/register_scan.py. Dauert zwischen den Abfragen ein bis zwei Minuten. Die Aktion kehrt sofort zurück; eine Benachrichtigung meldet, wenn der Bericht im Diagnosedownload liegt, bereit zum Anhängen an ein GitHub-Issue.",
+      "fields": {
+        "device_id": {
+          "name": "Wechselrichter",
+          "description": "Der Wechselrichter, der gescannt werden soll."
+        }
+      }
     }
   },
   "exceptions": {
@@ -788,6 +798,15 @@
     },
     "cannot_connect": {
       "message": "Keine Verbindung zum Wechselrichter unter {host}:{port}."
+    },
+    "register_scan_running": {
+      "message": "Auf diesem Wechselrichter läuft bereits ein Registerscan."
+    },
+    "register_scan_no_data": {
+      "message": "Der Wechselrichter ist nicht verbunden oder wurde noch nicht gelesen."
+    },
+    "register_scan_control_test": {
+      "message": "Auf diesem Wechselrichter läuft ein Steuerungstest. Den Registerscan danach starten."
     }
   }
 }

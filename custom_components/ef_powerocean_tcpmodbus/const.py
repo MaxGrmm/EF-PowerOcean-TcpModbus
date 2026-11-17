@@ -339,6 +339,12 @@ CANDIDATE_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("house_consumption_today", 44611),
 )
 
+# The address ranges the register scan reads beyond the map, first and last address.
+REGISTER_SCAN_RANGES: Final[tuple[tuple[int, int], ...]] = (
+    (40000, 40700),
+    (42000, 42300),
+)
+
 
 def register_blocks_for(
     inverter_model: InverterModel, *, exclude: Collection[str] = ()

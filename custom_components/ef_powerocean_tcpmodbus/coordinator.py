@@ -95,6 +95,7 @@ from .models import (
     encode_register,
 )
 from .reading_checks import KEYS_BY_CHECK, Finding
+from .register_scan import RegisterScan
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
@@ -245,6 +246,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
         )
         self.control_test = ControlTest(self)
+        self.register_scan = RegisterScan(self)
         # Context of the last expiry event, taken once by the Battery Mode select so its
         # change to automatic shows the expiry as the cause.
         self._command_expired_context: Context | None = None
@@ -412,6 +414,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("Closing the connection to %s:%s", self.host, self.port)
         # First, while the connection is still open to hand control back.
         await self.control_test.async_cancel()
+        await self.register_scan.async_cancel()
         if self._store is not None and self._state_loaded:
             await self._store.async_save(self._persisted_state())
         await self.control.async_stop()

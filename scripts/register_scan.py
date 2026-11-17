@@ -36,7 +36,7 @@ from utils import (
     telemetry,
 )
 
-DEFAULT_SCAN: Final = ["40000-40700", "42000-42300"]
+DEFAULT_SCAN: Final = [f"{low}-{high}" for low, high in const.REGISTER_SCAN_RANGES]
 
 # Used to attempt to determine what an unknown value could be.
 PLAUSIBLE_RANGE: Final[dict[str, tuple[float, float]]] = {
