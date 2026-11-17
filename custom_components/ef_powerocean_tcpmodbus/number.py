@@ -213,17 +213,15 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity[NumberWritableDef], NumberEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        # Otherwise the first update would write a state change from nothing.
+        # Kept, should a later poll leave the register out.
         initial_value = self.native_value
         if initial_value is not None:
             self._last_written_value = initial_value
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        new_value = self.native_value
-        if new_value != self._last_written_value:
-            self._last_written_value = new_value
-            self.async_write_ha_state()
+        self._last_written_value = self.native_value
+        self._async_write_if_changed(self._last_written_value)
 
     @property
     def native_value(self) -> float | None:
