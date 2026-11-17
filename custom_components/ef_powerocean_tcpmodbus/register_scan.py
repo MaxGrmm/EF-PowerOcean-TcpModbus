@@ -141,9 +141,10 @@ class RegisterScan:
         hass = coordinator.hass
         self._state = RegisterScanState.RUNNING
         self._requests = 0
-        report = self._report = await self._new_report()
+        report = self._report = self._new_report()
         persistent_notification.async_dismiss(hass, self._notification_id())
         try:
+            report["integration_version"] = await self._integration_version()
             report["blocks"], report["mapped"] = await self._read_map()
             report["candidates"] = await self._read_candidates()
             words, refused = await self._read_ranges()
@@ -172,20 +173,21 @@ class RegisterScan:
         self._notify(report)
         return report
 
-    async def _new_report(self) -> dict[str, Any]:
-        coordinator = self._coordinator
+    async def _integration_version(self) -> str | None:
         try:
-            version: str | None = str(
-                (await async_get_integration(coordinator.hass, DOMAIN)).version
-            )
+            integration = await async_get_integration(self._coordinator.hass, DOMAIN)
         except Exception:
-            version = None
+            return None
+        return str(integration.version)
+
+    def _new_report(self) -> dict[str, Any]:
+        coordinator = self._coordinator
         identity = coordinator.identity
         model = coordinator.inverter_model
         return {
             "source": "home_assistant",
             "created_at": dt.now().isoformat(),
-            "integration_version": version,
+            "integration_version": None,
             "home_assistant_version": HA_VERSION,
             "model": str(model),
             "high_word_first": model.traits.high_word_first,
