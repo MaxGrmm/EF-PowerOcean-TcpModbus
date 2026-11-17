@@ -58,7 +58,7 @@
 | EcoFlow Ocean 2 1-phase      | ✅ Confirmed | ❓ Untested  |
 | EcoFlow Ocean 2 Plus 1-phase | ✅ Confirmed | ✅ Confirmed |
 
-Running an untested model? [scripts/register_scan.py](scripts/register_scan.py) produces a read-only report comparing your inverter against the register map this integration expects. Attaching its output to an issue is what makes a device supportable, see [Register Scan](CONTRIBUTING.md#register-scan).
+Running an untested model? The **Run register scan** action reads your inverter against the register map this integration expects, without writing anything, and puts the report in the diagnostics download. Attaching it to an issue is what makes a device supportable, see [Scanning the registers](#scanning-the-registers). [scripts/register_scan.py](scripts/register_scan.py) does the same from a computer, see [Register Scan](CONTRIBUTING.md#register-scan).
 
 ---
 
@@ -350,6 +350,26 @@ A run is most useful with the battery well above its reserve and below 94 %: a t
 the battery cannot take part in is reported as skipped rather than failed. The checks
 that need the EcoFlow app open, or that change device settings, are left to
 [scripts/control_feature_scan.py](CONTRIBUTING.md#control-test).
+
+### Scanning the registers
+
+The **Run register scan** action reads, once and without writing anything, every
+register the integration maps for your model, the registers from EcoFlow's newer point
+table it does not poll yet, and the address ranges around them. It is what makes an
+untested model supportable, and shows whether the candidate registers hold data on
+yours.
+
+```yaml
+action: ef_powerocean_tcpmodbus.run_register_scan
+data:
+  device_id: <your inverter's device id>
+```
+
+It takes a minute or two, with its reads between the polls, and never touches the
+heartbeat register, so Modbus Control can stay on. It refuses to start during a
+control test. A notification says when it is done; then choose **Download
+diagnostics** on the device page and attach the file to an issue. The report is kept
+until Home Assistant restarts.
 
 ---
 

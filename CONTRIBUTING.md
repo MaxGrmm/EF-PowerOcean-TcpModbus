@@ -109,7 +109,7 @@ Use the portal's `errorName` as the name, and leave out serial numbers.
 
 [scripts/register_scan.py](scripts/register_scan.py) compares a live inverter against the register map in [const.py](custom_components/ef_powerocean_tcpmodbus/const.py) and prints a report to attach to an issue. It is read-only: it never writes a register and never takes Modbus control away from the EcoFlow app. The map, the decoding and the block planning are imported from the integration, so the report cannot drift from the code.
 
-When requesting support for a new inverter model, this is the script that should be run to compare the registers.
+When requesting support for a new inverter model, this is the script that should be run to compare the registers. Users without a computer at hand can run the **Run register scan** action instead: it reads the same map, candidates and ranges once from Home Assistant and puts the raw words in the diagnostics download, under `register_scan`. The repeated sampling and `--watch` stay in the script.
 
 To run it:
 
