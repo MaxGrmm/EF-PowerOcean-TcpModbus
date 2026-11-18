@@ -4,7 +4,7 @@
 
 ### Added
 
-- A repairs issue when the inverter has not answered for 10 minutes, as after a firmware update that switched Modbus TCP off (#222). The inverter then stays silent instead of reading 0, which the Modbus disabled issue does not catch. The issue says whether the port still takes connections, which points to Modbus being off, or nothing answers at all. It stays across a reload and clears with the next good read.
+- A repairs issue when the inverter has not answered for 10 minutes or more, as after a firmware update that switched Modbus TCP off (#222). The inverter then stays silent instead of reading 0, which the Modbus disabled issue does not catch. The issue says whether the port still takes connections, which points to Modbus being off, or nothing answers at all. It stays across a reload and clears with the next good read.
 - Setup and Reconfigure say that Modbus TCP is likely off when the inverter takes connections but sends no replies, instead of asking to check the address.
 - Firmware changes appear in the logbook, from an `ef_powerocean_tcpmodbus_firmware_changed` event.
 

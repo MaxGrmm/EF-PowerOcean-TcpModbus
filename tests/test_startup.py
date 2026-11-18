@@ -623,7 +623,7 @@ async def test_a_firmware_update_retries_refused_registers(
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
-async def test_a_firmware_update_goes_to_the_logbook(
+async def test_a_firmware_update_fires_an_event(
     hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
     entry, coordinator = await _set_up_refusing(hass, inverter)
