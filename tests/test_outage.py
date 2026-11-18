@@ -42,9 +42,17 @@ async def test_a_closed_port_is_an_unreachable_inverter() -> None:
     assert await outage.async_classify(HOST, _closed_port()) is Cause.UNREACHABLE
 
 
-@pytest.mark.usefixtures("socket_enabled")
 async def test_a_host_name_that_cannot_be_encoded_is_unreachable() -> None:
-    assert await outage.async_classify("a..b", 502) is Cause.UNREACHABLE
+    """Such as "a..b", whose encoding fails with a ValueError, not an OSError.
+
+    Stubbed, because the test harness refuses the name lookup before that.
+    """
+    with patch.object(
+        outage.asyncio,
+        "open_connection",
+        AsyncMock(side_effect=UnicodeError("label empty or too long")),
+    ):
+        assert await outage.async_classify("a..b", 502) is Cause.UNREACHABLE
 
 
 async def test_a_connection_held_without_answers_needs_no_probe() -> None:
