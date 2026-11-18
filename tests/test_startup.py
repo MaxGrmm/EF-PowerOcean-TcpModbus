@@ -33,6 +33,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const, outage
+from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
@@ -846,6 +847,23 @@ async def test_a_failed_setup_starts_an_outage(hass: HomeAssistant) -> None:
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert entry.entry_id in outage._outages
     assert _not_answering_issue(hass, entry) is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_bug_in_the_setup_is_no_outage(hass: HomeAssistant) -> None:
+    entry = _entry(const.DEFAULT_PORT)
+    entry.add_to_hass(hass)
+
+    with patch.object(
+        coordinator_module.EcoflowCoordinator,
+        "_async_setup",
+        AsyncMock(side_effect=RuntimeError("bug")),
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert entry.entry_id not in outage._outages
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")

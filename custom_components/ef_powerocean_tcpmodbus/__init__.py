@@ -18,6 +18,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from . import outage
 from .const import CONF_HOST, CONF_PORT, DOMAIN
@@ -173,8 +174,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady:
         # A poll that ran has counted itself; a failed connect never got that far.
-        # Either way the outage goes on across the retries.
-        if coordinator.status is None:
+        # Either way the outage goes on across the retries. Any other error in
+        # _async_setup is a bug here, not the inverter being away.
+        if coordinator.status is None and isinstance(
+            coordinator.last_exception, UpdateFailed
+        ):
             await coordinator.async_poll_failed(answers)
         raise
     # Before the update listener below, which would reload the entry over it.
