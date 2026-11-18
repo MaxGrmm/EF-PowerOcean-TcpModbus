@@ -6,7 +6,9 @@ on:
       - main
     paths:
       - custom_components/ef_powerocean_tcpmodbus/manifest.json
-  pull_request:
+  # Runs from main with this repository's token, so a label also makes a beta of a
+  # pull request from a fork. Nothing from the pull request is ever run: see beta.
+  pull_request_target:
     types: [labeled]
   workflow_dispatch:
     inputs:
@@ -83,20 +85,44 @@ jobs:
   beta:
     name: Create beta from pull request
     # Adding a "beta: patch|minor|major" label publishes the PR head as the next beta.
-    # The label is removed afterwards, so adding it again makes another beta.
+    # The label is removed afterwards, so adding it again makes another beta. Only
+    # someone who can label pull requests can start it, forks included.
     if: >-
-      github.event_name == 'pull_request' &&
-      startsWith(github.event.label.name, 'beta: ') &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'pull_request_target' &&
+      startsWith(github.event.label.name, 'beta: ')
     runs-on: ubuntu-latest
     concurrency:
       group: beta-release
       cancel-in-progress: false
     steps:
+      # main: the release script that runs comes from here, never from the PR. No
+      # credentials on disk either, where packaged files could reach them; the
+      # release and the label use the token through the API.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          persist-credentials: false
+
+      # The PR head, only as files to package. Nothing in it is run, and it gets no
+      # credentials.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+
+      - name: Take the integration and changelog from the pull request
+        run: |
+          # zip follows links, which could pack files from outside the integration.
+          if [ -n "$(find pr/custom_components/ef_powerocean_tcpmodbus pr/CHANGELOG.md -type l)" ]; then
+            echo "::error::The pull request contains symbolic links; refusing to package it."
+            exit 1
+          fi
+          rm -rf custom_components/ef_powerocean_tcpmodbus
+          cp -R pr/custom_components/ef_powerocean_tcpmodbus custom_components/
+          cp pr/CHANGELOG.md CHANGELOG.md
+          rm -rf pr
 
       - name: Prepare beta
         id: notes
