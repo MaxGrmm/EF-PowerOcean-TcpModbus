@@ -538,6 +538,23 @@ Home Assistant can't open a Modbus TCP connection to the address entered.
    networks between them allow port 502.
 3. Ask your installer to confirm that Modbus TCP is enabled; it is off by default.
 
+If the form says the inverter takes connections but sends no Modbus replies, the
+address is right and Modbus TCP is off: ask your installer to enable it.
+
+</details>
+
+<details>
+<summary><b>Repairs shows “The inverter stopped answering Modbus” or “is not reachable”</b></summary>
+
+The inverter has not answered for 10 minutes. The entities stay unavailable, and the
+issue clears by itself with the next good read.
+
+- **Stopped answering Modbus:** the inverter takes connections on port 502 but sends no
+  replies. Modbus TCP is most likely switched off, which a firmware update can do. Ask
+  your installer to enable it again in the EcoFlow Pro app.
+- **Not reachable:** nothing answers on the port. Check that the inverter is powered and
+  still has the same IP address, and use **Reconfigure** if it moved.
+
 </details>
 
 <details>
