@@ -682,9 +682,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._modbus_client.answers > answers_before:
             outage.async_answered(self.hass, self.config_entry)
             return
-        await outage.async_failed(
-            self.hass, self.config_entry, self._modbus_client, self.host, self.port
-        )
+        await outage.async_failed(self.hass, self.config_entry, self.host, self.port)
 
     def _read_failed(self) -> None:
         self._modbus_client.close()

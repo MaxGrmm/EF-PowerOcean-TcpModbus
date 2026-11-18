@@ -2,8 +2,9 @@
 
 A firmware update can switch Modbus TCP off. The inverter then stays silent
 rather than answering with zeros, so the modbus_disabled issue never shows and
-a timeout is all a read sees. Whether the port still takes connections tells a
-silent inverter from one that is gone.
+a timeout is all a read sees. Whether the port still takes a new connection
+tells a silent inverter from one that is gone. The connection the client holds
+can't tell: one whose packets a firewall drops stays open without answers too.
 
 Failed polls and failed setups feed one outage per entry. Its issue waits until
 the outage has lasted longer than the reboot of an update, and clears with the
@@ -18,7 +19,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Final
+from typing import Final
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -27,13 +28,11 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, MODBUS_REQUEST_TIMEOUT_S
 
-if TYPE_CHECKING:
-    from .modbus import ModbusClient
-
 _LOGGER = logging.getLogger(__name__)
 
-# Well past the reboot of a firmware update, which takes about two minutes.
-NOT_ANSWERING_AFTER_S: Final = 600
+# Past the reboot of a firmware update, which takes about two minutes, with room
+# for a router restart.
+NOT_ANSWERING_AFTER_S: Final = 300
 # Once the issue is up, how often its cause is looked at again. A poll can fail
 # every few seconds, and each look may open a connection.
 RECHECK_CAUSE_AFTER_S: Final = 300
@@ -69,17 +68,6 @@ async def async_classify(host: str, port: int) -> Cause:
     return Cause.MODBUS_SILENT
 
 
-async def async_cause(client: ModbusClient, host: str, port: int) -> Cause:
-    """Name the cause from the client's link where it can tell, else probe.
-
-    A link that holds a connection its reads get no answer on has already shown
-    the port open. One that holds none leaves the inverter free for the probe.
-    """
-    if client.connected:
-        return Cause.MODBUS_SILENT
-    return await async_classify(host, port)
-
-
 @dataclass(slots=True)
 class Outage:
     """An entry's inverter at *host*:*port* not answering since *since*."""
@@ -104,7 +92,7 @@ def issue_id(entry: ConfigEntry) -> str:
 
 
 async def async_failed(
-    hass: HomeAssistant, entry: ConfigEntry, client: ModbusClient, host: str, port: int
+    hass: HomeAssistant, entry: ConfigEntry, host: str, port: int
 ) -> None:
     """Note that the inverter did not answer; raise the issue once it is overdue."""
     now = dt_util.utcnow()
@@ -122,7 +110,7 @@ async def async_failed(
     ):
         return
 
-    cause = await async_cause(client, host, port)
+    cause = await async_classify(host, port)
     outage.checked_at = now
     if cause is outage.cause:
         return

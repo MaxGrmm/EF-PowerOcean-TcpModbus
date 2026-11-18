@@ -7,7 +7,6 @@ import json
 import socket
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -56,27 +55,6 @@ async def test_a_host_name_that_cannot_be_encoded_is_unreachable() -> None:
         assert await outage.async_classify("a..b", 502) is Cause.UNREACHABLE
 
 
-async def test_a_connection_held_without_answers_needs_no_probe() -> None:
-    client = SimpleNamespace(connected=True)
-
-    with patch.object(outage, "async_classify", side_effect=AssertionError):
-        cause = await outage.async_cause(client, HOST, 502)  # type: ignore[arg-type]
-
-    assert cause is Cause.MODBUS_SILENT
-
-
-async def test_without_a_held_connection_the_probe_decides() -> None:
-    client = SimpleNamespace(connected=False)
-
-    with patch.object(
-        outage, "async_classify", AsyncMock(return_value=Cause.UNREACHABLE)
-    ) as probe:
-        cause = await outage.async_cause(client, HOST, 502)  # type: ignore[arg-type]
-
-    assert cause is Cause.UNREACHABLE
-    probe.assert_awaited_once_with(HOST, 502)
-
-
 # ── The outage and its issue ──────────────────────────────────────────────────
 
 START = datetime(2026, 11, 17, 8, 42, tzinfo=UTC)
@@ -102,21 +80,14 @@ async def _fail(
     host: str = HOST,
 ) -> AsyncMock:
     """Fail a poll *after_s* into the outage; return the stand-in for the probe."""
-    client = SimpleNamespace(connected=False)
     probe = AsyncMock(return_value=cause)
     with (
         patch.object(
             dt_util, "utcnow", return_value=START + timedelta(seconds=after_s)
         ),
-        patch.object(outage, "async_cause", probe),
+        patch.object(outage, "async_classify", probe),
     ):
-        await outage.async_failed(
-            hass,
-            entry,
-            client,  # type: ignore[arg-type]
-            host,
-            502,
-        )
+        await outage.async_failed(hass, entry, host, 502)
     return probe
 
 

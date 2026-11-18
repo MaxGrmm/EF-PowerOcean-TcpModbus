@@ -546,9 +546,8 @@ address is right and Modbus TCP is off: ask your installer to enable it.
 <details>
 <summary><b>Repairs shows “The inverter stopped answering Modbus” or “is not reachable”</b></summary>
 
-The inverter has not answered for at least 10 minutes; while it can't be reached at
-all, retries are minutes apart, so the issue can take a few minutes longer to show.
-The entities stay unavailable, and the issue clears by itself with the next good read.
+The inverter has not answered for at least 5 minutes. The entities stay unavailable,
+and the issue clears by itself with the next good read.
 
 - **Stopped answering Modbus:** the inverter takes connections on its Modbus port but
   sends no replies. Modbus TCP is most likely switched off, which a firmware update can
