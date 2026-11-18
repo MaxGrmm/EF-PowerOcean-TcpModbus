@@ -104,13 +104,15 @@ jobs:
           persist-credentials: false
 
       # The PR head, only as files to package. Nothing in it is run, and it gets no
-      # credentials.
+      # credentials. checkout refuses a fork's code here unless told this is safe:
+      # it is, as long as no later step runs anything from pr/.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
 
       - name: Take the integration and changelog from the pull request
         run: |
