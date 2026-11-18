@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 from datetime import UTC, datetime, timedelta
@@ -48,7 +49,7 @@ async def test_a_host_name_that_cannot_be_encoded_is_unreachable() -> None:
     Stubbed, because the test harness refuses the name lookup before that.
     """
     with patch.object(
-        outage.asyncio,
+        asyncio,
         "open_connection",
         AsyncMock(side_effect=UnicodeError("label empty or too long")),
     ):
