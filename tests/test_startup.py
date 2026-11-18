@@ -27,7 +27,10 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_capture_events,
+)
 
 from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const, outage
 from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
@@ -616,6 +619,30 @@ async def test_a_firmware_update_retries_refused_registers(
     assert unsupported == frozenset()
     assert "breaker_capacity" in polled
     assert sw_version == "1.2.4.0"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_firmware_update_goes_to_the_logbook(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    entry, coordinator = await _set_up_refusing(hass, inverter)
+    events = async_capture_events(hass, const.EVENT_FIRMWARE_CHANGED)
+    try:
+        (device,) = dr.async_entries_for_config_entry(
+            dr.async_get(hass), entry.entry_id
+        )
+        _serve_firmware(inverter, 0x01020400)
+        await coordinator.async_read_device_info()
+        # Read again without a change, which is no event.
+        await coordinator.async_read_device_info()
+        await hass.async_block_till_done()
+    finally:
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert [event.data for event in events] == [
+        {"device_id": device.id, const.ATTR_FROM: "1.2.3.4", const.ATTR_TO: "1.2.4.0"}
+    ]
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

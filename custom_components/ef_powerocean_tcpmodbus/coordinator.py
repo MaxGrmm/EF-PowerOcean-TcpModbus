@@ -25,8 +25,10 @@ from pymodbus.exceptions import ModbusException
 from . import outage
 from .const import (
     ATTR_CHECK,
+    ATTR_FROM,
     ATTR_MODE,
     ATTR_STATUS,
+    ATTR_TO,
     BATTERY_CHARGE_W_PER_WH,
     BATTERY_DISCHARGE_W_PER_WH,
     BATTERY_MODE_SELECT,
@@ -57,6 +59,7 @@ from .const import (
     ECOFLOW_PORTAL_TOTALS,
     ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
+    EVENT_FIRMWARE_CHANGED,
     EVENT_READING_CHECK_CLEARED,
     EVENT_READING_CHECK_FAILED,
     FIRMWARE_VERSION,
@@ -562,10 +565,19 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Only written when the entities are created, so it would show the old
         # version until a reload.
         registry = device_registry.async_get(self.hass)
-        for device in device_registry.async_entries_for_config_entry(
+        devices = device_registry.async_entries_for_config_entry(
             registry, self.config_entry.entry_id
-        ):
+        )
+        for device in devices:
             registry.async_update_device(device.id, sw_version=firmware)
+        self.hass.bus.async_fire(
+            EVENT_FIRMWARE_CHANGED,
+            {
+                ATTR_DEVICE_ID: devices[0].id if devices else None,
+                ATTR_FROM: previous,
+                ATTR_TO: firmware,
+            },
+        )
 
     async def _async_read_device_info_extra(self) -> None:
         """Read the protocol version and device address, where the device has them.

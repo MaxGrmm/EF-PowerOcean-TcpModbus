@@ -43,6 +43,20 @@ def test_a_failed_reading_check_names_the_check(hass: HomeAssistant) -> None:
     }
 
 
+def test_a_firmware_change_names_both_versions(hass: HomeAssistant) -> None:
+    entry = _describe(
+        hass,
+        const.EVENT_FIRMWARE_CHANGED,
+        {const.ATTR_FROM: "6.50.99.166", const.ATTR_TO: "6.50.99.170"},
+    )
+
+    assert entry == {
+        "name": "Inverter",
+        "message": "firmware changed from 6.50.99.166 to 6.50.99.170; run the "
+        "control test to see whether control still works",
+    }
+
+
 def test_a_cleared_reading_check_says_what_ended(hass: HomeAssistant) -> None:
     entry = _describe(
         hass, const.EVENT_READING_CHECK_CLEARED, {const.ATTR_STATUS: "off_grid"}
