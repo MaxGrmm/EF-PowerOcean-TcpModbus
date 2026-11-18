@@ -47,7 +47,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Connection failed - please check IP address and port"
+      "cannot_connect": "Connection failed - please check IP address and port",
+      "modbus_silent": "The inverter takes connections on this port but sends no Modbus replies. Modbus TCP is most likely switched off, which a firmware update can do. Ask your installer to enable it in the EcoFlow Pro app, then try again."
     },
     "abort": {
       "already_configured": "This device is already configured",

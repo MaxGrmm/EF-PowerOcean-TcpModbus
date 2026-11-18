@@ -47,7 +47,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Verbindung fehlgeschlagen - IP-Adresse und Port prüfen"
+      "cannot_connect": "Verbindung fehlgeschlagen - IP-Adresse und Port prüfen",
+      "modbus_silent": "Der Wechselrichter nimmt auf diesem Port Verbindungen an, sendet aber keine Modbus-Antworten. Wahrscheinlich ist Modbus TCP ausgeschaltet, was ein Firmware-Update bewirken kann. Bitten Sie Ihren Installateur, es in der EcoFlow Pro App zu aktivieren, und versuchen Sie es dann erneut."
     },
     "abort": {
       "already_configured": "Dieses Gerät ist bereits eingerichtet",
