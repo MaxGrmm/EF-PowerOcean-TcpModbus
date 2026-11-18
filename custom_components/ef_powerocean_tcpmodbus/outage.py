@@ -57,7 +57,8 @@ async def async_classify(host: str, port: int) -> Cause:
     try:
         async with asyncio.timeout(MODBUS_REQUEST_TIMEOUT_S):
             _, writer = await asyncio.open_connection(host, port)
-    except (OSError, TimeoutError):
+    # ValueError: a host name that cannot be encoded, such as "a..b".
+    except (OSError, TimeoutError, ValueError):
         return Cause.UNREACHABLE
     writer.close()
     with contextlib.suppress(OSError):
