@@ -823,6 +823,8 @@ def _raise_outage_issue(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     """Stand in for an outage that has gone on for an hour, with its issue."""
     outage._outages[entry.entry_id] = outage.Outage(
         since=dt_util.utcnow() - timedelta(hours=1),
+        host=HOST,
+        port=entry.data[const.CONF_PORT],
         cause=outage.Cause.MODBUS_SILENT,
     )
     ir.async_create_issue(
@@ -874,7 +876,9 @@ async def test_a_setup_retry_late_in_an_outage_raises_the_issue(
     entry = _entry(_closed_port())
     entry.add_to_hass(hass)
     outage._outages[entry.entry_id] = outage.Outage(
-        since=dt_util.utcnow() - timedelta(seconds=outage.NOT_ANSWERING_AFTER_S)
+        since=dt_util.utcnow() - timedelta(seconds=outage.NOT_ANSWERING_AFTER_S),
+        host=HOST,
+        port=entry.data[const.CONF_PORT],
     )
 
     assert not await hass.config_entries.async_setup(entry.entry_id)

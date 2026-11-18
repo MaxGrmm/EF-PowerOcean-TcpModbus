@@ -82,9 +82,11 @@ async def async_cause(client: ModbusClient, host: str, port: int) -> Cause:
 
 @dataclass(slots=True)
 class Outage:
-    """An entry's inverter not answering since *since*."""
+    """An entry's inverter at *host*:*port* not answering since *since*."""
 
     since: datetime
+    host: str
+    port: int
     # What the issue names, once it is raised, and when that was looked at.
     cause: Cause | None = None
     checked_at: datetime | None = None
@@ -106,7 +108,12 @@ async def async_failed(
 ) -> None:
     """Note that the inverter did not answer; raise the issue once it is overdue."""
     now = dt_util.utcnow()
-    outage = _outages.setdefault(entry.entry_id, Outage(since=now))
+    outage = _outages.get(entry.entry_id)
+    if outage is None or (outage.host, outage.port) != (host, port):
+        # A new address, after Reconfigure, starts over: the issue names the host.
+        if outage is not None:
+            ir.async_delete_issue(hass, DOMAIN, issue_id(entry))
+        outage = _outages[entry.entry_id] = Outage(since=now, host=host, port=port)
     if (now - outage.since).total_seconds() < NOT_ANSWERING_AFTER_S:
         return
     if (

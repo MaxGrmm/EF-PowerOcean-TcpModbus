@@ -590,7 +590,9 @@ def test_a_failed_poll_the_inverter_answered_in_ends_the_outage(
     coordinator,
 ) -> None:
     """A refusal, or blocks that came back before the poll ran out of time."""
-    outage._outages["entry"] = outage.Outage(since=dt_util.utcnow())
+    outage._outages["entry"] = outage.Outage(
+        since=dt_util.utcnow(), host=coordinator.host, port=coordinator.port
+    )
     client = coordinator._modbus_client
 
     async def answer_then_fail() -> None:
@@ -607,7 +609,9 @@ def test_a_failed_poll_the_inverter_answered_in_ends_the_outage(
 
 
 def test_a_reading_that_fails_to_process_still_ends_the_outage(coordinator) -> None:
-    outage._outages["entry"] = outage.Outage(since=dt_util.utcnow())
+    outage._outages["entry"] = outage.Outage(
+        since=dt_util.utcnow(), host=coordinator.host, port=coordinator.port
+    )
     coordinator.async_get_raw_data = AsyncMock(return_value={})
     coordinator._energy_processor.validate_totals = Mock(
         side_effect=ValueError("Invalid data")

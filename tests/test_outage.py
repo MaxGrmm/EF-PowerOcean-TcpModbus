@@ -90,6 +90,7 @@ async def _fail(
     entry: MockConfigEntry,
     after_s: float,
     cause: Cause = Cause.MODBUS_SILENT,
+    host: str = HOST,
 ) -> AsyncMock:
     """Fail a poll *after_s* into the outage; return the stand-in for the probe."""
     client = SimpleNamespace(connected=False)
@@ -104,7 +105,7 @@ async def _fail(
             hass,
             entry,
             client,  # type: ignore[arg-type]
-            HOST,
+            host,
             502,
         )
     return probe
@@ -188,6 +189,18 @@ async def test_an_answer_ends_the_outage_and_its_issue(hass: HomeAssistant) -> N
     # The next failure starts a new outage, which has to last as long again.
     await _fail(hass, entry, outage.NOT_ANSWERING_AFTER_S + 60)
     assert _issue(hass, entry) is None
+
+
+async def test_a_new_address_starts_a_new_outage(hass: HomeAssistant) -> None:
+    """After Reconfigure, the issue would otherwise name the old host."""
+    entry = _entry(hass)
+    await _fail(hass, entry, 0)
+    await _fail(hass, entry, outage.NOT_ANSWERING_AFTER_S)
+
+    await _fail(hass, entry, outage.NOT_ANSWERING_AFTER_S + 60, host="127.0.0.2")
+
+    assert _issue(hass, entry) is None
+    assert outage._outages[entry.entry_id].host == "127.0.0.2"
 
 
 @pytest.mark.parametrize("cause", tuple(Cause))
