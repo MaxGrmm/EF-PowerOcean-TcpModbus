@@ -142,3 +142,10 @@ def async_answered(hass: HomeAssistant, entry: ConfigEntry) -> None:
         dt_util.as_local(outage.since).strftime("%Y-%m-%d %H:%M"),
     )
     ir.async_delete_issue(hass, DOMAIN, issue_id(entry))
+
+
+@callback
+def async_forget(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop the outage and its issue of an entry that stops polling for good."""
+    _outages.pop(entry.entry_id, None)
+    ir.async_delete_issue(hass, DOMAIN, issue_id(entry))

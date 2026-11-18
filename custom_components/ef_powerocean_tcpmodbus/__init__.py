@@ -8,11 +8,13 @@ from typing import Final
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.typing import ConfigType
 
+from . import outage
 from .const import CONF_HOST, CONF_PORT, DOMAIN
 from .control import ControlInputs
 from .coordinator import (
@@ -148,7 +150,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
     )
     # Connects and reads the device, through the coordinator's _async_setup. If
     # it fails, Home Assistant retries the setup and shuts the coordinator down.
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except ConfigEntryNotReady:
+        # A poll that ran has counted itself; a failed connect never got that far.
+        # Either way the outage goes on across the retries.
+        if coordinator.status is None:
+            await coordinator.async_not_answering()
+        raise
     # Before the update listener below, which would reload the entry over it.
     _async_claim_serial_number(hass, entry, coordinator)
 
@@ -192,6 +201,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
     ir.async_delete_issue(hass, DOMAIN, _modbus_disabled_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, identity_mismatch_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, held_totals_issue_id(entry))
+    # An outage outlives a reload, so its issue stays, unless nothing polls anymore.
+    if entry.disabled_by is not None:
+        outage.async_forget(hass, entry)
     # The coordinator's async_shutdown, registered with the entry, hands control
     # back and closes the connection after this returns.
     return True
@@ -199,4 +211,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Delete the state saved for the entry, which nothing else would read again."""
+    outage.async_forget(hass, entry)
     await state_store(hass, entry.entry_id).async_remove()

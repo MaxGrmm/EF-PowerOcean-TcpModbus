@@ -18,7 +18,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
 from homeassistant.const import MAJOR_VERSION, MINOR_VERSION, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -26,9 +26,10 @@ from homeassistant.helpers import entity_platform
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const
+from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const, outage
 from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
@@ -773,3 +774,137 @@ async def test_unloading_stops_the_heartbeat_and_closes_the_client(
 
     assert _heartbeats() == []
     assert not coordinator.connected
+
+
+# ── An outage outlives a reload ───────────────────────────────────────────────
+
+
+def _entry(port: int) -> MockConfigEntry:
+    return MockConfigEntry(
+        domain=const.DOMAIN, data={const.CONF_HOST: HOST, const.CONF_PORT: port}
+    )
+
+
+def _not_answering_issue(
+    hass: HomeAssistant, entry: MockConfigEntry
+) -> ir.IssueEntry | None:
+    return ir.async_get(hass).async_get_issue(const.DOMAIN, outage.issue_id(entry))
+
+
+def _raise_outage_issue(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    """Stand in for an outage that has gone on for an hour, with its issue."""
+    outage._outages[entry.entry_id] = outage.Outage(
+        since=dt_util.utcnow() - timedelta(hours=1),
+        cause=outage.Cause.MODBUS_SILENT,
+    )
+    ir.async_create_issue(
+        hass,
+        const.DOMAIN,
+        outage.issue_id(entry),
+        is_fixable=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="not_answering_modbus_silent",
+        translation_placeholders={"host": HOST, "since": "2026-11-17 09:42"},
+    )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
+async def test_a_failed_setup_starts_an_outage(hass: HomeAssistant) -> None:
+    entry = _entry(_closed_port())
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert entry.entry_id in outage._outages
+    assert _not_answering_issue(hass, entry) is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
+async def test_a_setup_retry_late_in_an_outage_raises_the_issue(
+    hass: HomeAssistant,
+) -> None:
+    """The setup that fails after a reload carries on the outage from before it."""
+    entry = _entry(_closed_port())
+    entry.add_to_hass(hass)
+    outage._outages[entry.entry_id] = outage.Outage(
+        since=dt_util.utcnow() - timedelta(seconds=outage.NOT_ANSWERING_AFTER_S)
+    )
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    issue = _not_answering_issue(hass, entry)
+    assert issue is not None
+    assert issue.translation_key == "not_answering_unreachable"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_unloading_keeps_the_issue_of_an_outage(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    _serve_serial(inverter, SERIAL)
+    entry = _entry(inverter.port)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    _raise_outage_issue(hass, entry)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert _not_answering_issue(hass, entry) is not None
+    assert entry.entry_id in outage._outages
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_the_first_good_read_after_a_reload_clears_the_issue(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    _serve_serial(inverter, SERIAL)
+    entry = _entry(inverter.port)
+    entry.add_to_hass(hass)
+    _raise_outage_issue(hass, entry)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    issue = _not_answering_issue(hass, entry)
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert issue is None
+    assert entry.entry_id not in outage._outages
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_disabling_the_entry_drops_its_outage(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    _serve_serial(inverter, SERIAL)
+    entry = _entry(inverter.port)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    _raise_outage_issue(hass, entry)
+
+    assert await hass.config_entries.async_set_disabled_by(
+        entry.entry_id, ConfigEntryDisabler.USER
+    )
+    await hass.async_block_till_done()
+
+    assert _not_answering_issue(hass, entry) is None
+    assert entry.entry_id not in outage._outages
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_removing_the_entry_drops_its_outage(hass: HomeAssistant) -> None:
+    entry = _entry(const.DEFAULT_PORT)
+    entry.add_to_hass(hass)
+    _raise_outage_issue(hass, entry)
+
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert _not_answering_issue(hass, entry) is None
+    assert entry.entry_id not in outage._outages
