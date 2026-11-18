@@ -104,6 +104,19 @@ def test_reads_register_block(client, pymodbus, is_error: bool) -> None:
         count=2,
         device_id=const.DEFAULT_SLAVE,
     )
+    # A refusal is an answer as much as registers are.
+    assert client.answers == 1
+
+
+def test_a_read_that_gets_no_reply_is_no_answer(client, pymodbus) -> None:
+    pymodbus.read_holding_registers = AsyncMock(
+        side_effect=ModbusException("No response received")
+    )
+
+    with pytest.raises(ModbusException):
+        asyncio.run(client.async_read(100, 2))
+
+    assert client.answers == 0
 
 
 def test_a_single_word_is_written_as_fc6(client, pymodbus) -> None:

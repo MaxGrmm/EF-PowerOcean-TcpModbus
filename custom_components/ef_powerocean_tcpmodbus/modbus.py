@@ -310,6 +310,9 @@ class ModbusClient:
         # Stops a reconnect in its backoff from reopening the link after unload.
         self._closed = False
         self._write_block: tuple[str, dict[str, str]] | None = None
+        # Reads the device replied to, a refusal included. Compared across a poll,
+        # it tells a slow or refusing inverter from a silent one.
+        self.answers = 0
 
     @property
     def connected(self) -> bool:
@@ -377,13 +380,16 @@ class ModbusClient:
         """Read *count* holding registers starting at *address*."""
         async with self._lock:
             try:
-                return await self._link.read_holding_registers(address, count)
+                registers = await self._link.read_holding_registers(address, count)
             except DeviceRefused as err:
+                self.answers += 1
                 raise ModbusReadRejected(
                     f"Modbus error response at 0x{address:04X} with "
                     f"Exception-Code {err.exception_code}",
                     exception_code=err.exception_code,
                 ) from err
+            self.answers += 1
+            return registers
 
     async def async_write(
         self, address: int, words: Sequence[int], *, what: str

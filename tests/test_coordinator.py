@@ -46,6 +46,7 @@ def coordinator():
         ModbusClient,
         SimpleNamespace(
             connected=True,
+            answers=0,
             async_read=AsyncMock(),
             async_write=AsyncMock(),
             close=Mock(),
@@ -585,11 +586,18 @@ def test_a_failed_reconnect_counts_toward_an_outage(coordinator) -> None:
     assert "entry" in outage._outages
 
 
-def test_a_refused_read_is_an_answer_and_ends_the_outage(coordinator) -> None:
+def test_a_failed_poll_the_inverter_answered_in_ends_the_outage(
+    coordinator,
+) -> None:
+    """A refusal, or blocks that came back before the poll ran out of time."""
     outage._outages["entry"] = outage.Outage(since=dt_util.utcnow())
-    coordinator._modbus_client.async_read = AsyncMock(
-        side_effect=ModbusReadRejected("busy", exception_code=0x06)
-    )
+    client = coordinator._modbus_client
+
+    async def answer_then_fail() -> None:
+        client.answers += 1
+        return
+
+    coordinator.async_get_raw_data = answer_then_fail
 
     with pytest.raises(UpdateFailed):
         asyncio.run(coordinator._async_update_data())

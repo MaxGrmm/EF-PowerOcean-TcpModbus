@@ -168,13 +168,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
     )
     # Connects and reads the device, through the coordinator's _async_setup. If
     # it fails, Home Assistant retries the setup and shuts the coordinator down.
+    answers = coordinator.modbus_client.answers
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady:
         # A poll that ran has counted itself; a failed connect never got that far.
         # Either way the outage goes on across the retries.
         if coordinator.status is None:
-            await coordinator.async_not_answering()
+            await coordinator.async_poll_failed(answers)
         raise
     # Before the update listener below, which would reload the entry over it.
     _async_claim_serial_number(hass, entry, coordinator)

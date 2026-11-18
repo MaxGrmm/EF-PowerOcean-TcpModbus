@@ -164,8 +164,6 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # starts failing and to show what came before.
     _failing_before: frozenset[str] = frozenset()
     _raw_before: dict[int, list[int]] | None = None
-    # Whether the last failed poll failed on a refusal, which is still an answer.
-    _poll_refused: bool = False
 
     def __init__(
         self,
@@ -624,7 +622,6 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_get_raw_data(self) -> dict[str, Any] | None:
         """Read every planned register block, or None if the read failed."""
         data: dict[str, Any] = {}
-        self._poll_refused = False
 
         # ── Check Connection, if not -> start reconnection ──
         if not self._modbus_client.connected and not await self.async_reconnect():
@@ -661,7 +658,6 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (ModbusException, ConnectionError) as err:
             _LOGGER.debug("%s. Connection closing...", err)
             self._read_failed()
-            self._poll_refused = isinstance(err, ModbusReadRejected)
             return None
         # Anything else is a bug: let the coordinator log its traceback.
 
@@ -676,8 +672,16 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._consecutive_modbus_disabled_reads = 0
         return data
 
-    async def async_not_answering(self) -> None:
-        """Count a poll or setup the inverter gave no answer to toward an outage."""
+    async def async_poll_failed(self, answers_before: int) -> None:
+        """Count a failed poll or setup toward an outage, unless it got an answer.
+
+        A refusal, a device-info read that confirmed nothing, or blocks that came
+        back before the poll ran out of time all show the inverter is there.
+        *answers_before* is the client's count of answers when it started.
+        """
+        if self._modbus_client.answers > answers_before:
+            outage.async_answered(self.hass, self.config_entry)
+            return
         await outage.async_failed(
             self.hass, self.config_entry, self._modbus_client, self.host, self.port
         )
@@ -1152,6 +1156,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return value
 
     async def _async_update_data(self) -> dict[str, Any]:
+        answers = self._modbus_client.answers
         try:
             raw_data = await self.async_get_raw_data()
         except IdentityMismatch:
@@ -1161,7 +1166,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise
         except UpdateFailed as err:
             self._status = CoordinatorStatus.RECONNECT_FAILED
-            await self.async_not_answering()
+            await self.async_poll_failed(answers)
             raise UpdateFailed(
                 "Could not reconnect to the inverter; retrying in 120 s",
                 retry_after=120,
@@ -1169,10 +1174,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if raw_data is None:
             self._status = CoordinatorStatus.READ_FAILED
-            if self._poll_refused:
-                outage.async_answered(self.hass, self.config_entry)
-            else:
-                await self.async_not_answering()
+            await self.async_poll_failed(answers)
             raise UpdateFailed(
                 "Read failed; entities stay unavailable until the next successful read."
             )
