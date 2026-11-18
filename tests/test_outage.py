@@ -90,13 +90,15 @@ async def _fail(
     entry: MockConfigEntry,
     after_s: float,
     cause: Cause = Cause.MODBUS_SILENT,
-) -> None:
+) -> AsyncMock:
+    """Fail a poll *after_s* into the outage; return the stand-in for the probe."""
     client = SimpleNamespace(connected=False)
+    probe = AsyncMock(return_value=cause)
     with (
         patch.object(
             dt_util, "utcnow", return_value=START + timedelta(seconds=after_s)
         ),
-        patch.object(outage, "async_cause", AsyncMock(return_value=cause)),
+        patch.object(outage, "async_cause", probe),
     ):
         await outage.async_failed(
             hass,
@@ -105,6 +107,7 @@ async def _fail(
             HOST,
             502,
         )
+    return probe
 
 
 async def test_an_outage_as_long_as_a_firmware_reboot_raises_no_issue(
@@ -142,11 +145,36 @@ async def test_the_issue_follows_a_change_of_cause(hass: HomeAssistant) -> None:
     await _fail(hass, entry, 0)
     await _fail(hass, entry, outage.NOT_ANSWERING_AFTER_S)
 
-    await _fail(hass, entry, outage.NOT_ANSWERING_AFTER_S + 120, Cause.UNREACHABLE)
+    await _fail(
+        hass,
+        entry,
+        outage.NOT_ANSWERING_AFTER_S + outage.RECHECK_CAUSE_AFTER_S,
+        Cause.UNREACHABLE,
+    )
 
     issue = _issue(hass, entry)
     assert issue is not None
     assert issue.translation_key == "not_answering_unreachable"
+
+
+async def test_the_cause_is_looked_at_again_only_after_a_while(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry(hass)
+    await _fail(hass, entry, 0)
+    await _fail(hass, entry, outage.NOT_ANSWERING_AFTER_S)
+
+    probe = await _fail(
+        hass,
+        entry,
+        outage.NOT_ANSWERING_AFTER_S + outage.RECHECK_CAUSE_AFTER_S - 1,
+        Cause.UNREACHABLE,
+    )
+
+    probe.assert_not_awaited()
+    issue = _issue(hass, entry)
+    assert issue is not None
+    assert issue.translation_key == "not_answering_modbus_silent"
 
 
 async def test_an_answer_ends_the_outage_and_its_issue(hass: HomeAssistant) -> None:

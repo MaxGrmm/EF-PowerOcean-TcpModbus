@@ -34,6 +34,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # Well past the reboot of a firmware update, which takes about two minutes.
 NOT_ANSWERING_AFTER_S: Final = 600
+# Once the issue is up, how often its cause is looked at again. A poll can fail
+# every few seconds, and each look may open a connection.
+RECHECK_CAUSE_AFTER_S: Final = 300
 LEARN_MORE_URL: Final = (
     "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus#troubleshooting"
 )
@@ -82,8 +85,9 @@ class Outage:
     """An entry's inverter not answering since *since*."""
 
     since: datetime
-    # What the issue names, once it is raised.
+    # What the issue names, once it is raised, and when that was looked at.
     cause: Cause | None = None
+    checked_at: datetime | None = None
 
 
 # By entry id. Held here rather than by the coordinator, so that an outage outlives
@@ -105,8 +109,14 @@ async def async_failed(
     outage = _outages.setdefault(entry.entry_id, Outage(since=now))
     if (now - outage.since).total_seconds() < NOT_ANSWERING_AFTER_S:
         return
+    if (
+        outage.checked_at is not None
+        and (now - outage.checked_at).total_seconds() < RECHECK_CAUSE_AFTER_S
+    ):
+        return
 
     cause = await async_cause(client, host, port)
+    outage.checked_at = now
     if cause is outage.cause:
         return
     since = dt_util.as_local(outage.since).strftime("%Y-%m-%d %H:%M")
