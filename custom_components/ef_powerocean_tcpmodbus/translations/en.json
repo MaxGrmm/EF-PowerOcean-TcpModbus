@@ -116,6 +116,14 @@
       "title": "Modbus is disabled on the inverter at {host}",
       "description": "The integration requires Modbus TCP to be enabled in the EcoFlow Pro app. Ask your installer to enable it and the integration will automatically start working."
     },
+    "not_answering_unreachable": {
+      "title": "The inverter at {host} is not reachable",
+      "description": "Nothing has answered on the inverter's Modbus port since {since}. Check that the inverter is powered and still has the IP address {host}, for example in your router. The entities stay unavailable until it answers again, and this message then disappears by itself."
+    },
+    "not_answering_modbus_silent": {
+      "title": "The inverter at {host} stopped answering Modbus",
+      "description": "Since {since} the inverter takes connections on its Modbus port but sends no replies. Modbus TCP is most likely switched off, which a firmware update can do. Ask your installer to enable it again in the EcoFlow Pro app. The integration then recovers by itself, and this message disappears."
+    },
     "energy_totals_held": {
       "title": "Energy totals of the inverter at {host} have been held for over a day",
       "fix_flow": {

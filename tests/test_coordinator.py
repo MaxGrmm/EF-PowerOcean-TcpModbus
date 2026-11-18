@@ -22,7 +22,7 @@ from homeassistant.util import dt as dt_util
 from pymodbus.exceptions import ModbusException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const, models
+from custom_components.ef_powerocean_tcpmodbus import const, models, outage
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowConfigEntry
@@ -55,6 +55,7 @@ def coordinator():
     )
     instance.hass = Mock()
     instance.host = "192.0.2.10"
+    instance.port = 502
     instance.config_entry = cast(
         EcoflowConfigEntry,
         SimpleNamespace(entry_id="entry", unique_id="R371ZD1AZH3X0450"),
@@ -560,6 +561,54 @@ def test_a_lost_socket_is_a_read_failure(coordinator) -> None:
 
     assert coordinator.status == models.CoordinatorStatus.READ_FAILED
     coordinator._modbus_client.close.assert_called_once()
+
+
+def test_a_read_without_an_answer_counts_toward_an_outage(coordinator) -> None:
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=ConnectionResetError("reset")
+    )
+
+    with pytest.raises(UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert "entry" in outage._outages
+
+
+def test_a_failed_reconnect_counts_toward_an_outage(coordinator) -> None:
+    coordinator.async_get_raw_data = AsyncMock(
+        side_effect=UpdateFailed("Reconnect failed")
+    )
+
+    with pytest.raises(UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert "entry" in outage._outages
+
+
+def test_a_refused_read_is_an_answer_and_ends_the_outage(coordinator) -> None:
+    outage._outages["entry"] = outage.Outage(since=dt_util.utcnow())
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=ModbusReadRejected("busy", exception_code=0x06)
+    )
+
+    with pytest.raises(UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.status == models.CoordinatorStatus.READ_FAILED
+    assert "entry" not in outage._outages
+
+
+def test_a_reading_that_fails_to_process_still_ends_the_outage(coordinator) -> None:
+    outage._outages["entry"] = outage.Outage(since=dt_util.utcnow())
+    coordinator.async_get_raw_data = AsyncMock(return_value={})
+    coordinator._energy_processor.validate_totals = Mock(
+        side_effect=ValueError("Invalid data")
+    )
+
+    with pytest.raises(ValueError, match="Invalid data"):
+        asyncio.run(coordinator._async_update_data())
+
+    assert "entry" not in outage._outages
 
 
 def test_a_bug_while_reading_is_raised_not_published_as_partial_data(

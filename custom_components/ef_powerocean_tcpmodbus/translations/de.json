@@ -116,6 +116,14 @@
       "title": "Modbus ist am Wechselrichter unter {host} deaktiviert",
       "description": "Für die Integration muss Modbus TCP in der EcoFlow Pro App aktiviert sein. Bitten Sie Ihren Installateur, es zu aktivieren. Die Integration wird anschließend automatisch funktionieren."
     },
+    "not_answering_unreachable": {
+      "title": "Der Wechselrichter unter {host} ist nicht erreichbar",
+      "description": "Seit {since} antwortet nichts auf dem Modbus-Port des Wechselrichters. Prüfen Sie, ob der Wechselrichter eingeschaltet ist und noch die IP-Adresse {host} hat, zum Beispiel in Ihrem Router. Die Entitäten bleiben nicht verfügbar, bis er wieder antwortet; diese Meldung verschwindet dann von selbst."
+    },
+    "not_answering_modbus_silent": {
+      "title": "Der Wechselrichter unter {host} antwortet nicht mehr über Modbus",
+      "description": "Seit {since} nimmt der Wechselrichter Verbindungen auf seinem Modbus-Port an, sendet aber keine Antworten. Wahrscheinlich ist Modbus TCP ausgeschaltet, was ein Firmware-Update bewirken kann. Bitten Sie Ihren Installateur, es in der EcoFlow Pro App wieder zu aktivieren. Die Integration erholt sich danach von selbst, und diese Meldung verschwindet."
+    },
     "energy_totals_held": {
       "title": "Energiezähler des Wechselrichters unter {host} werden seit über einem Tag festgehalten",
       "fix_flow": {
