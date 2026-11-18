@@ -924,6 +924,26 @@ async def test_disabling_the_entry_drops_its_outage(
     assert entry.entry_id not in outage._outages
 
 
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
+async def test_disabling_an_entry_that_retries_its_setup_drops_its_outage(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry(_closed_port())
+    entry.add_to_hass(hass)
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    _raise_outage_issue(hass, entry)
+
+    assert await hass.config_entries.async_set_disabled_by(
+        entry.entry_id, ConfigEntryDisabler.USER
+    )
+    await hass.async_block_till_done()
+
+    assert _not_answering_issue(hass, entry) is None
+    assert entry.entry_id not in outage._outages
+
+
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_removing_the_entry_drops_its_outage(hass: HomeAssistant) -> None:
     entry = _entry(const.DEFAULT_PORT)

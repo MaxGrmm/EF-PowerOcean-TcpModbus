@@ -5,13 +5,18 @@ from __future__ import annotations
 import logging
 from typing import Final
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import (
+    SIGNAL_CONFIG_ENTRY_CHANGED,
+    ConfigEntry,
+    ConfigEntryChange,
+)
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.typing import ConfigType
 
 from . import outage
@@ -52,6 +57,19 @@ async def async_setup(
 ) -> bool:
     """Register the actions, which serve every configured inverter."""
     async_setup_services(hass)
+
+    @callback
+    def _async_entry_changed(change: ConfigEntryChange, entry: ConfigEntry) -> None:
+        # Disabling an entry that retries its setup never unloads it, and an
+        # outage outlives an unload, so drop it here for an entry that stops.
+        if (
+            change is ConfigEntryChange.UPDATED
+            and entry.domain == DOMAIN
+            and entry.disabled_by is not None
+        ):
+            outage.async_forget(hass, entry)
+
+    async_dispatcher_connect(hass, SIGNAL_CONFIG_ENTRY_CHANGED, _async_entry_changed)
     return True
 
 
@@ -201,9 +219,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
     ir.async_delete_issue(hass, DOMAIN, _modbus_disabled_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, identity_mismatch_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, held_totals_issue_id(entry))
-    # An outage outlives a reload, so its issue stays, unless nothing polls anymore.
-    if entry.disabled_by is not None:
-        outage.async_forget(hass, entry)
+    # An outage outlives a reload, so its issue stays; async_setup drops it when
+    # the entry is disabled.
     # The coordinator's async_shutdown, registered with the entry, hands control
     # back and closes the connection after this returns.
     return True
