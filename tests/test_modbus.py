@@ -27,6 +27,7 @@ if SHARED:
     from modbus_connection import (
         IllegalDataAddressError,
         ModbusConnectionError,
+        ModbusTimeoutError,
         ServerDeviceBusyError,
     )
     from modbus_connection.mock import MockModbusConnection
@@ -224,6 +225,48 @@ async def test_any_answer_counts_as_a_shared_link_being_up(shared_client, unit) 
 
     unit.fail_requests(ModbusConnectionError("link down"))
     assert not await shared_client.async_connect()
+
+
+@shared_only
+async def test_a_shared_link_asks_for_our_timeout(unit) -> None:
+    import modbus_connection
+
+    modbus_module.SharedLink(unit, modbus_connection)
+
+    assert unit.required_timeout == const.MODBUS_REQUEST_TIMEOUT_S
+
+
+@shared_only
+async def test_a_shared_link_drops_a_connection_that_stops_answering(
+    shared_client, unit
+) -> None:
+    """A firewall that swallows packets leaves the old connection open but useless."""
+    unit.disconnect = AsyncMock()
+    unit.fail_requests(ModbusTimeoutError("Response timeout after 3.0 seconds"))
+
+    with pytest.raises(ModbusException):
+        await shared_client.async_read(100, 2)
+    with pytest.raises(HomeAssistantError):
+        await shared_client.async_write(40608, [1], what="heartbeat")
+    assert not await shared_client.async_connect()
+
+    assert unit.disconnect.await_count == 3
+
+
+@shared_only
+async def test_a_shared_link_keeps_a_connection_that_fails_otherwise(
+    shared_client, unit
+) -> None:
+    unit.disconnect = AsyncMock()
+    unit.fail_read(100, IllegalDataAddressError())
+
+    with pytest.raises(modbus_module.ModbusReadRejected):
+        await shared_client.async_read(100, 2)
+    unit.fail_requests(ModbusConnectionError("link down"))
+    with pytest.raises(ModbusException):
+        await shared_client.async_read(100, 2)
+
+    unit.disconnect.assert_not_awaited()
 
 
 class _FlakyLink:

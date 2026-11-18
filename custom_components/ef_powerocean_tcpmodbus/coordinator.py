@@ -1168,8 +1168,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._status = CoordinatorStatus.RECONNECT_FAILED
             await self.async_poll_failed(answers)
             raise UpdateFailed(
-                "Could not reconnect to the inverter; retrying in 120 s",
-                retry_after=120,
+                "Could not reconnect to the inverter; retrying in 30 s",
+                retry_after=30,
             ) from err
 
         if raw_data is None:

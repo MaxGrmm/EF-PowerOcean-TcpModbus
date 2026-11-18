@@ -646,8 +646,8 @@ you don't use makes polls lighter. The serial number and firmware are read again
 time the connection opens.
 
 If a poll fails, the entities become unavailable until the next one succeeds. A lost
-connection is retried within the poll after 0, 5, 30 and 120 seconds, then again at
-the next poll. If the inverter can't be reached when Home Assistant starts, the setup
+connection is retried within the poll after 0, 5, 10 and 20 seconds, then again 30
+seconds later. If the inverter can't be reached when Home Assistant starts, the setup
 is retried automatically in the background.
 
 With Modbus Control on, a heartbeat is written to the inverter independently of the

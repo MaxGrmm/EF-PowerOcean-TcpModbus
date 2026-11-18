@@ -10,10 +10,12 @@
 
 ### Changed
 
+- A lost connection is retried after 0, 5, 10 and 20 seconds, then every 30 seconds instead of every 2 minutes, so the inverter is read again soon after it is back. On the connection Home Assistant shares, requests time out after 3 seconds, as on an own connection, instead of 10.
 - Entities now show unavailable while a poll fails, and available again with the next good one, as the README describes. Before, they kept showing their last value, because a value that had not changed wrote no state (#219).
 
 ### Fixed
 
+- On the connection Home Assistant shares, a request that times out now drops the connection, and the next poll opens a new one. A connection whose packets a firewall dropped stayed open without answers, and kept the inverter unreadable for minutes after it was reachable again.
 - Entities whose value had not changed could stay unavailable after a start whose first read failed, until their value next changed (#219).
 
 ## [2.9.5] - 2026-11-04
