@@ -336,7 +336,10 @@ class TelemetryStalled(Check):
     name = "telemetry_stalled"
     status = ControlStatus.INCONSISTENT_READINGS
     needs = (FrozenReadings, CounterStalled)
-    keys = frozenset(_STALL_KEYS)
+    # Judges whichever of _STALL_KEYS an enabled entity has polled, and keeps none
+    # of them polled itself: the checks it weighs keep their own evidence polled,
+    # and a reading nobody shows needs no verdict.
+    keys = frozenset()
 
     def __init__(self, *evidence: Check) -> None:
         self._evidence = evidence

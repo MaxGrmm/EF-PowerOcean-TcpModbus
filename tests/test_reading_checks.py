@@ -282,6 +282,9 @@ def test_every_key_a_check_reads_is_kept_polled() -> None:
         reading_checks.KEYS
     )
     assert const.REGISTERS_BY_KEY.keys() >= reading_checks.KEYS
+    # Stalled telemetry judges what is polled anyway, so a disabled sensor such
+    # as the inverter temperature is not read for it.
+    assert "inverter_temperature" not in reading_checks.KEYS
 
 
 def test_a_check_that_keeps_failing_holds_while_one_above_it_flickers() -> None:
