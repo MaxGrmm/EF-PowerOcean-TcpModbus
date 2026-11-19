@@ -277,9 +277,13 @@ that stopped changing for `telemetry_stalled`. Energy counters stay shown as the
 inverter counts them. `counter_stalled` only counts as evidence for
 `telemetry_stalled`, since some models may update a counter in coarse steps. The `ef_powerocean_tcpmodbus_reading_check_failed` and
 `ef_powerocean_tcpmodbus_reading_check_cleared` events, also shown in the logbook,
-carry the `check` and the `status` it stands for; use them to be notified. A failed
-check is not raised in repairs, since it reflects the inverter's state, such as an
-outage or the battery saver turning the battery off, not something to fix.
+carry the `check` and the `status` it stands for; use them to be notified. The Reading
+Check diagnostic sensor is on while a check fails, with the `check`, its `status`,
+`since` when, and the `distrusted` readings as attributes, also while Modbus Control is
+off. Only `telemetry_stalled` is raised in repairs, once it has lasted 30 minutes,
+since restarting the inverter is the fix. The other checks reflect the inverter's
+state, such as an outage or the battery saver turning the battery off, not something
+to fix.
 
 While `battery_soc` fails, the **Battery SOC** sensor shows unavailable rather than
 0 %, so history, automations and the Energy dashboard don't take it for an empty
@@ -431,6 +435,7 @@ installer if you need to know.
 | Modbus Control    |                                 | The device is accepting our commands          |
 | Control Status    |                                 | What the selected battery mode is achieving   |
 | Control Test      | Idle / Running / Done / Aborted | The last run of the control test (diagnostic) |
+| Reading Check     | Problem / OK                    | A reading check fails (diagnostic)            |
 
 ### Faults (Diagnostic)
 

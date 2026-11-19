@@ -6,13 +6,18 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from itertools import count
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
 
-from custom_components.ef_powerocean_tcpmodbus import const, models, reading_checks
+from custom_components.ef_powerocean_tcpmodbus import (
+    binary_sensor,
+    const,
+    models,
+    reading_checks,
+)
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus.reading_checks import Finding
 from tests.simulation import Simulation
@@ -628,6 +633,56 @@ def test_a_failed_check_is_never_raised_in_repairs(tracked) -> None:
     tracked.issues.created.assert_not_called()
 
 
+def test_stalled_telemetry_is_raised_in_repairs_after_half_an_hour(tracked) -> None:
+    """A restart is the user's to do, unlike what fails the other checks."""
+    finding = Finding(Status.INCONSISTENT_READINGS, "telemetry_stalled", T0)
+
+    tracked.poll(finding, 29)
+    tracked.issues.created.assert_not_called()
+
+    tracked.poll(finding, 30)
+    tracked.poll(finding, 45)
+    tracked.issues.created.assert_called_once()
+    assert tracked.issues.created.call_args.kwargs["translation_key"] == (
+        "telemetry_stalled"
+    )
+
+    tracked.poll(None, 46)
+    tracked.issues.deleted.assert_called_once()
+
+
+def test_frozen_readings_alone_are_not_raised_in_repairs(tracked) -> None:
+    for minute in range(0, 120, 5):
+        tracked.poll(Finding(Status.INCONSISTENT_READINGS, "frozen", T0), minute)
+
+    tracked.issues.created.assert_not_called()
+
+
+def test_the_reading_check_sensor_shows_a_failure_whether_or_not_control_is_on() -> (
+    None
+):
+    checks = SimpleNamespace(active=None, distrusted=frozenset())
+    fake = SimpleNamespace(control=SimpleNamespace(reading_checks=checks))
+    entity = binary_sensor.EcoFlowReadingCheckBinarySensor(
+        cast(Any, fake),
+        cast(Any, SimpleNamespace(entry_id="entry")),
+        const.READING_CHECK_BINARY_SENSOR,
+    )
+    assert entity.available
+    assert not entity.is_on
+
+    checks.active = Finding(Status.INCONSISTENT_READINGS, "telemetry_stalled", T0)
+    checks.distrusted = frozenset({"voltage_l1", "battery_soc"})
+
+    assert entity.is_on
+    assert entity.extra_state_attributes == {
+        "check": "telemetry_stalled",
+        "status": "inconsistent_readings",
+        "since": T0.isoformat(),
+        "distrusted": ["battery_soc", "voltage_l1"],
+    }
+
+
 def test_every_status_a_check_stands_for_has_its_text() -> None:
     import json
     from pathlib import Path
@@ -636,6 +691,7 @@ def test_every_status_a_check_stands_for_has_its_text() -> None:
     for language in ("en", "de"):
         strings = json.loads((folder / f"{language}.json").read_text())
         assert not [key for key in strings["issues"] if key.startswith("reading_")]
+        assert "telemetry_stalled" in strings["issues"]
         states = strings["entity"]["sensor"]["control_status"]["state"]
         assert "inconsistent_readings" in states
 
