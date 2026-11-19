@@ -164,6 +164,10 @@ STATE_SAVE_DELAY_S: Final = 30
 # a repairs issue offering to take the inverter's value. Longer than any glitch on
 # record, a bogus 0 that lasted hours.
 HELD_TOTAL_ISSUE_AFTER_S: Final = 24 * 3600
+# Readings an inverter stopped updating for this long raise a repairs issue asking
+# for a restart. Long enough that a stall the inverter recovers from by itself
+# passes unannounced.
+TELEMETRY_STALLED_ISSUE_AFTER_S: Final = 30 * 60
 # Where a user reports a held total they believe is wrong, with the bug form's
 # fields filled in from the device.
 BUG_REPORT_URL: Final = "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues/new"
@@ -899,6 +903,13 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
 MODBUS_CONTROL_BINARY_SENSOR: Final = BinarySensorDef(
     key="modbus_control",
     device_class=BinarySensorDeviceClass.RUNNING,
+)
+
+# On while a reading check fails, whether or not Modbus Control is on.
+READING_CHECK_BINARY_SENSOR: Final = BinarySensorDef(
+    key="reading_check",
+    device_class=BinarySensorDeviceClass.PROBLEM,
+    entity_category=EntityCategory.DIAGNOSTIC,
 )
 
 CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {

@@ -142,6 +142,10 @@
           "not_held": "These energy totals are no longer held."
         }
       }
+    },
+    "telemetry_stalled": {
+      "title": "The inverter at {host} stopped updating its readings",
+      "description": "The inverter still answers, but most of its readings and its energy counters haven't changed since {since}. Readings that stand still show as unavailable, and Modbus Control, if on, leaves the inverter to its own logic. Restart the inverter, for example by switching it off and on in the EcoFlow app or at the device. This issue goes away once the readings move again. If it keeps coming back, report it with the integration's diagnostics and the inverter's firmware version."
     }
   },
   "selector": {
@@ -580,6 +584,9 @@
     "binary_sensor": {
       "modbus_control": {
         "name": "Modbus Control"
+      },
+      "reading_check": {
+        "name": "Reading Check"
       },
       "self_use_mode_ena": {
         "name": "Self-powered Mode"

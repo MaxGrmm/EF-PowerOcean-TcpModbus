@@ -75,6 +75,7 @@ from .const import (
     SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
+    TELEMETRY_STALLED_ISSUE_AFTER_S,
     register_blocks_for,
 )
 from .control import ControlManager
@@ -98,7 +99,7 @@ from .models import (
     battery_reserve_for,
     encode_register,
 )
-from .reading_checks import KEYS_BY_CHECK, Finding
+from .reading_checks import KEYS_BY_CHECK, Finding, TelemetryStalled
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
@@ -118,6 +119,10 @@ def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
 
 def held_totals_issue_id(entry: ConfigEntry) -> str:
     return f"energy_totals_held_{entry.entry_id}"
+
+
+def telemetry_stalled_issue_id(entry: ConfigEntry) -> str:
+    return f"telemetry_stalled_{entry.entry_id}"
 
 
 def battery_power_limits(capacity_wh: float) -> tuple[int, int]:
@@ -160,6 +165,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _held_issue_keys: frozenset[str] = frozenset()
     # The failed reading check last announced.
     _announced_finding: Finding | None = None
+    _stalled_issue_raised = False
     # The checks the last poll failed and the words it read, to tell when one
     # starts failing and to show what came before.
     _failing_before: frozenset[str] = frozenset()
@@ -774,18 +780,61 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _async_track_reading_checks(self) -> None:
         """Announce a failed check and its end as events, which the logbook shows.
 
-        Not raised in repairs: what fails one, an outage, a battery the battery
-        saver turned off or an inverter fault, is nothing the user can fix, and
-        Control Status already shows why control stepped aside.
+        Each is logged once, and its end once. Only stalled telemetry is raised in
+        repairs: what fails the others, an outage, a battery the battery saver
+        turned off or an inverter fault, is nothing the user can fix, and Control
+        Status already shows why control stepped aside.
         """
         finding = self.control.reading_checks.active
         previous, self._announced_finding = self._announced_finding, finding
         # Another check standing for the same state is not news.
         if (finding and finding.status) != (previous and previous.status):
             if previous is not None:
+                _LOGGER.info("The %s reading check passes again", previous.check)
                 self._fire_check_event(EVENT_READING_CHECK_CLEARED, previous)
             if finding is not None:
+                _LOGGER.info(
+                    "The %s reading check failed (%s since %s)",
+                    finding.check,
+                    finding.status,
+                    finding.since,
+                )
                 self._fire_check_event(EVENT_READING_CHECK_FAILED, finding)
+        self._async_update_stalled_issue(finding)
+
+    @callback
+    def _async_update_stalled_issue(self, finding: Finding | None) -> None:
+        """Raise an issue once the inverter has stopped updating for a while.
+
+        Unlike the other checks, this is the user's to fix: a restart of the
+        inverter. It goes as soon as the readings move again.
+        """
+        stalled = (
+            finding is not None
+            and finding.check == TelemetryStalled.name
+            and (dt.now() - finding.since).total_seconds()
+            >= TELEMETRY_STALLED_ISSUE_AFTER_S
+        )
+        if stalled == self._stalled_issue_raised:
+            return
+        self._stalled_issue_raised = stalled
+        issue_id = telemetry_stalled_issue_id(self.config_entry)
+        if finding is None or not stalled:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="telemetry_stalled",
+            translation_placeholders={
+                "host": str(self.host),
+                "since": dt.as_local(finding.since).strftime("%Y-%m-%d %H:%M"),
+            },
+        )
 
     def _record_check_snapshots(self, data: Mapping[str, Any]) -> None:
         """Keep the readings of a poll in which a check starts failing.
