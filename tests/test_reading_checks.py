@@ -111,6 +111,118 @@ def test_a_model_without_these_readings_is_never_frozen() -> None:
     )
 
 
+# 1 kWh at 3.6 kW takes 1000 s, 200 polls 5 s apart.
+STALLED_POLLS = 201
+
+
+def test_a_counter_fails_once_its_power_adds_up_to_a_kwh_without_it() -> None:
+    check = reading_checks.CounterStalled()
+    frame = {"solar_total": 20719.85, "solar_power": 3600.0}
+
+    results = [check.check(frame, now) for now in _polls(STALLED_POLLS + 5)]
+
+    assert not any(results[: STALLED_POLLS - 1])
+    assert all(results[STALLED_POLLS - 1 :])
+    # Moving again clears it at once.
+    assert not check.check({**frame, "solar_total": 20719.86}, T0 + timedelta(hours=1))
+
+
+@pytest.mark.parametrize(
+    ("frame", "fails"),
+    (
+        # Importing does not move the export counter.
+        ({"grid_export_total": 1674.18, "grid_power": 3600.0}, False),
+        ({"grid_export_total": 1674.18, "grid_power": -3600.0}, True),
+        # The device's own count is judged, not a total held back from it.
+        ({"solar_total": 5.0, "solar_total_raw": 5.0, "solar_power": 3600.0}, True),
+        # No power, nothing to count.
+        ({"solar_total": 5.0, "solar_power": 0.0}, False),
+        ({"solar_total": None, "solar_power": 3600.0}, False),
+    ),
+)
+def test_a_counter_is_judged_by_the_power_it_counts(
+    frame: dict[str, Any], fails: bool
+) -> None:
+    check = reading_checks.CounterStalled()
+    results = [check.check(frame, now) for now in _polls(STALLED_POLLS)]
+    assert results[-1] is fails
+
+
+def test_an_outage_counts_as_a_minute_of_power_at_most() -> None:
+    check = reading_checks.CounterStalled()
+    frame = {"solar_total": 5.0, "solar_power": 10_000.0}
+
+    check.check(frame, T0)
+    # Ten hours apart at 10 kW, but only one minute is believed: 167 Wh.
+    assert not check.check(frame, T0 + timedelta(hours=10))
+
+
+def test_a_still_counter_alone_never_steps_aside() -> None:
+    """A model that counts in coarse steps must not hand control back for it."""
+    checks = reading_checks.ReadingChecks()
+    frame = {**_live(), "solar_total": 5.0, "solar_power": 3600.0}
+    for now in _polls(STALLED_POLLS + 5):
+        checks.run({**frame, **_live()}, now)
+
+    assert "counter_stalled" in checks.failing
+    assert checks.active is None
+    assert not checks.suspect
+
+
+def _stalled(solar: float) -> dict[str, Any]:
+    """An inverter as in #227: only grid and solar power still move."""
+    return {
+        "frequency": 50.01,
+        "voltage_l1": 232.03,
+        "voltage_l2": 231.55,
+        "battery_voltage": 53.57,
+        "house_power": 538.4,
+        "battery_power": 490.9,
+        "pv1_voltage": 458.15,
+        "pv1_current": 1.02,
+        "battery_soc": 78.0,
+        "solar_total": 20719.85,
+        "grid_import_total": 11579.97,
+        "solar_power": solar,
+        "grid_power": -15.0 - solar / 100,
+    }
+
+
+def test_an_inverter_that_stopped_updating_distrusts_what_stands_still() -> None:
+    checks = reading_checks.ReadingChecks()
+    at = _polls(STALLED_POLLS + 5)
+    for poll, now in enumerate(at):
+        checks.run(_stalled(3600.0 + poll % 7), now)
+
+    assert checks.active == Finding(
+        Status.INCONSISTENT_READINGS, "telemetry_stalled", at[0]
+    )
+    assert checks.distrusted >= {
+        "frequency",
+        "voltage_l1",
+        "house_power",
+        "battery_power",
+        "battery_soc",
+        "pv1_voltage",
+        # Calculated from what stands still.
+        "pv1_power",
+        "bat_remaining",
+    }
+    # Still moving, so still shown; the counters are shown as the device counts.
+    assert not checks.distrusted & {"solar_power", "grid_power", "solar_total"}
+
+
+def test_a_stalled_inverter_needs_both_kinds_of_evidence() -> None:
+    checks = reading_checks.ReadingChecks()
+    for now in _polls(STALLED_POLLS + 5):
+        # The voltages stand still, but the counter keeps counting.
+        checks.run({**_stalled(3600.0), "solar_total": now.timestamp()}, now)
+
+    assert checks.active is not None
+    assert checks.active.check == "frozen"
+    assert "house_power" not in checks.distrusted
+
+
 def test_a_lost_grid_voltage_fails_only_after_a_grid_was_seen() -> None:
     check = reading_checks.GridVoltageLost()
     gone = {"grid_voltage_l1": 0.0, "grid_voltage_l2": 0.0, "grid_voltage_l3": 0.0}
@@ -170,6 +282,9 @@ def test_every_key_a_check_reads_is_kept_polled() -> None:
         reading_checks.KEYS
     )
     assert const.REGISTERS_BY_KEY.keys() >= reading_checks.KEYS
+    # Stalled telemetry judges what is polled anyway, so a disabled sensor such
+    # as the inverter temperature is not read for it.
+    assert "inverter_temperature" not in reading_checks.KEYS
 
 
 def test_a_check_that_keeps_failing_holds_while_one_above_it_flickers() -> None:

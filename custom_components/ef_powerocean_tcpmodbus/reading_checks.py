@@ -40,6 +40,12 @@ _LOGGER = logging.getLogger(__name__)
 SOC_PACK_MARGIN: Final = 5.0
 # Readings that have not moved at all for this long have stopped updating.
 FROZEN_AFTER: Final = timedelta(minutes=5)
+# A counter that has not moved while its power readings add up to this much
+# energy has stopped counting.
+COUNTER_STALLED_AFTER_WH: Final = 1000.0
+# A gap between polls longer than this, as across an outage, counts as this much.
+MAX_STEP: Final = timedelta(minutes=1)
+_HOUR: Final = timedelta(hours=1)
 # Grid-side voltage above this shows a grid is there; at or below the lower one,
 # on every phase that reports, it is gone.
 GRID_PRESENT_V: Final = 100.0
@@ -58,6 +64,8 @@ def keys_of(*signals: Signal) -> tuple[str, ...]:
 
 # On a live grid these jitter from poll to poll, whatever the power flows do.
 _JITTER_KEYS: Final = keys_of(Signal.JITTER)
+# What an inverter that stopped updating stops moving, settings and counters aside.
+_STALL_KEYS: Final = keys_of(Signal.JITTER, Signal.MEASURE, Signal.LEVEL)
 
 
 class Movement:
@@ -108,6 +116,16 @@ class Check:
     keys: ClassVar[frozenset[str]]
     # Readings a failure shows to be wrong, which their sensors do not show.
     distrusts: ClassVar[frozenset[str]] = frozenset()
+    # Whether a failure on its own steps control aside. One that is only evidence
+    # for another check counts towards that check and is never reported itself.
+    steps_aside: ClassVar[bool] = True
+    # Checks whose verdict this one weighs, run before it on every poll.
+    needs: ClassVar[tuple[type[Check], ...]] = ()
+    # Whether the last poll failed this check, as the runner counted it.
+    failed = False
+
+    def __init__(self, *_needed: Check) -> None:
+        """Take the checks named in needs, already built."""
 
     def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:
         raise NotImplementedError
@@ -252,6 +270,100 @@ class FrozenReadings(Check):
         return self._movement.still_since(self._frozen) or now
 
 
+class CounterStalled(Check):
+    """An energy counter stands still while the power it counts keeps flowing.
+
+    Counted from the power readings themselves, so a counter only fails once they
+    say COUNTER_STALLED_AFTER_WH went by without it moving at all. Evidence for
+    TelemetryStalled only: a model that updates a counter in coarse steps should
+    not step control aside on its own.
+    """
+
+    name = "counter_stalled"
+    status = ControlStatus.INCONSISTENT_READINGS
+    steps_aside = False
+    # Each counter, the power it counts, and the sign that power has while it does.
+    _PAIRS: ClassVar[tuple[tuple[str, str, int], ...]] = (
+        ("solar_total", "solar_power", 1),
+        ("grid_import_total", "grid_power", 1),
+        ("grid_export_total", "grid_power", -1),
+    )
+    keys = frozenset(key for pair in _PAIRS for key in pair[:2])
+
+    def __init__(self) -> None:
+        self._at: datetime | None = None
+        # Per counter: the value last seen, since when, and the energy since.
+        self._last: dict[str, tuple[float, datetime, float]] = {}
+        self._stalled: frozenset[str] = frozenset()
+
+    def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:
+        step = timedelta() if self._at is None else min(now - self._at, MAX_STEP)
+        self._at = now
+        stalled: set[str] = set()
+        for counter, power_key, sign in self._PAIRS:
+            # The device's own count, not the total held back from it.
+            raw = data.get(f"{counter}_raw")
+            total = raw if raw is not None else data.get(counter)
+            power = data.get(power_key)
+            last = self._last.get(counter)
+            if total is None or power is None:
+                self._last.pop(counter, None)
+                continue
+            if last is None or last[0] != total:
+                self._last[counter] = (float(total), now, 0.0)
+                continue
+            energy_wh = last[2] + max(sign * float(power), 0.0) * (step / _HOUR)
+            self._last[counter] = (last[0], last[1], energy_wh)
+            if energy_wh >= COUNTER_STALLED_AFTER_WH:
+                stalled.add(counter)
+        self._stalled = frozenset(stalled)
+        return bool(stalled)
+
+    def onset(self, now: datetime, /) -> datetime:
+        return min((self._last[counter][1] for counter in self._stalled), default=now)
+
+
+class TelemetryStalled(Check):
+    """The inverter answers, but its readings stopped updating (#227).
+
+    Frozen voltages alone can be a meter the inverter lost, and a still counter can
+    be a model that counts coarsely. Both at once is the inverter serving readings
+    it no longer updates. Every measured reading that has not moved is then
+    distrusted, while those that still move, such as the grid power from the
+    meter, stay shown.
+    """
+
+    name = "telemetry_stalled"
+    status = ControlStatus.INCONSISTENT_READINGS
+    needs = (FrozenReadings, CounterStalled)
+    # Judges whichever of _STALL_KEYS an enabled entity has polled, and keeps none
+    # of them polled itself: the checks it weighs keep their own evidence polled,
+    # and a reading nobody shows needs no verdict.
+    keys = frozenset()
+
+    def __init__(self, *evidence: Check) -> None:
+        self._evidence = evidence
+        self._movement = Movement(_STALL_KEYS)
+        self._stalled: frozenset[str] = frozenset()
+
+    def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:
+        self._movement.observe(data, now)
+        if not all(check.failed for check in self._evidence):
+            self._stalled = frozenset()
+            return False
+        self._stalled = self._movement.still(now)
+        return True
+
+    def distrusted(self) -> frozenset[str]:
+        return self._stalled
+
+    def onset(self, now: datetime, /) -> datetime:
+        return min(
+            (check.onset(now) for check in self._evidence if check.failed),
+            default=now,
+        )
+
+
 def with_derived(keys: frozenset[str]) -> frozenset[str]:
     """Add the values calculated from any of *keys*, as wrong as their sources."""
     return keys | {key for key, sources in DERIVED_FROM.items() if keys & sources}
@@ -262,8 +374,10 @@ CHECKS: Final[tuple[type[Check], ...]] = (
     OffGridReported,
     GridVoltageLost,
     BatteryDisconnected,
+    TelemetryStalled,
     SystemSocMismatch,
     FrozenReadings,
+    CounterStalled,
 )
 
 # Kept polled whatever entities are enabled, as the control inputs are.
@@ -289,7 +403,12 @@ class ReadingChecks:
     """
 
     def __init__(self) -> None:
-        self._checks: tuple[Check, ...] = tuple(check() for check in CHECKS)
+        built: dict[type[Check], Check] = {}
+        # A check that weighs others is built after them, and runs after them.
+        for check in sorted(CHECKS, key=lambda check: bool(check.needs)):
+            built[check] = check(*(built[need] for need in check.needs))
+        self._run_order: tuple[Check, ...] = tuple(built.values())
+        self._checks: tuple[Check, ...] = tuple(built[check] for check in CHECKS)
         # Polls in a row each check has failed, and since when.
         self._polls: dict[str, int] = {}
         self._since: dict[str, datetime] = {}
@@ -309,19 +428,23 @@ class ReadingChecks:
 
     def run(self, data: Mapping[str, Any], now: datetime) -> None:
         # Every check sees every poll, since some keep a history.
-        failed = [check for check in self._checks if self._failed(check, data, now)]
+        for check in self._run_order:
+            check.failed = self._failed(check, data, now)
+        failed = [check for check in self._checks if check.failed]
         self.failing = frozenset(check.name for check in failed)
         self.distrusted = with_derived(
             frozenset().union(*(check.distrusted() for check in failed))
         )
         self.suspect = any(
-            check.status is ControlStatus.INCONSISTENT_READINGS for check in failed
+            check.steps_aside and check.status is ControlStatus.INCONSISTENT_READINGS
+            for check in failed
         )
         held = next(
             (
                 check
                 for check in failed
-                if self._polls[check.name] >= CONTROL_STATUS_DAMPING_POLLS
+                if check.steps_aside
+                and self._polls[check.name] >= CONTROL_STATUS_DAMPING_POLLS
             ),
             None,
         )
