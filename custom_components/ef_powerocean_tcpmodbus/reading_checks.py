@@ -43,6 +43,9 @@ FROZEN_AFTER: Final = timedelta(minutes=5)
 # A counter that has not moved while its power readings add up to this much
 # energy has stopped counting.
 COUNTER_STALLED_AFTER_WH: Final = 1000.0
+# Readings that stood still for this long while the voltages are frozen show a
+# stalled inverter even with no counter to prove it, as at night.
+STALLED_WITHOUT_COUNTERS: Final = timedelta(minutes=30)
 # A gap between polls longer than this, as across an outage, counts as this much.
 MAX_STEP: Final = timedelta(minutes=1)
 _HOUR: Final = timedelta(hours=1)
@@ -96,10 +99,10 @@ class Movement:
         """Return the keys this model reports a value for."""
         return frozenset(self._seen)
 
-    def still(self, now: datetime) -> frozenset[str]:
-        """Return the reported keys that have not changed for FROZEN_AFTER."""
+    def still(self, now: datetime, after: timedelta = FROZEN_AFTER) -> frozenset[str]:
+        """Return the reported keys that have not changed for *after*."""
         return frozenset(
-            key for key, (_, since) in self._seen.items() if now - since >= FROZEN_AFTER
+            key for key, (_, since) in self._seen.items() if now - since >= after
         )
 
     def still_since(self, keys: frozenset[str]) -> datetime | None:
@@ -314,6 +317,10 @@ class CounterStalled(Check):
         ("solar_total", "solar_power", 1),
         ("grid_import_total", "grid_power", 1),
         ("grid_export_total", "grid_power", -1),
+        # Battery power is positive while charging. In #227 the battery read a
+        # steady 490 W, which proves a stall within hours at any time of day.
+        ("bat_charged_total", "battery_power", 1),
+        ("bat_discharged_total", "battery_power", -1),
     )
     keys = frozenset(key for pair in _PAIRS for key in pair[:2])
 
@@ -353,11 +360,13 @@ class CounterStalled(Check):
 class TelemetryStalled(Check):
     """The inverter answers, but its readings stopped updating (#227).
 
-    Frozen voltages alone can be a meter the inverter lost, and a still counter can
-    be a model that counts coarsely. Both at once is the inverter serving readings
-    it no longer updates. Every measured reading that has not moved is then
-    distrusted, while those that still move, such as the grid power from the
-    meter, stay shown.
+    Frozen voltages alone may be a coarse model or a short glitch, and a still
+    counter can be a model that counts coarsely. Frozen voltages with a counter
+    that missed the energy it should have counted, or with most readings still
+    for STALLED_WITHOUT_COUNTERS, as at night when little flows, is the inverter
+    serving readings it no longer updates. Every measured reading that has not
+    moved is then distrusted, while those that still move, such as the grid power
+    from the meter, stay shown.
     """
 
     name = "telemetry_stalled"
@@ -371,14 +380,17 @@ class TelemetryStalled(Check):
     remedy = "telemetry_stalled"
     issue_after = timedelta(minutes=30)
 
-    def __init__(self, *evidence: Check) -> None:
-        self._evidence = evidence
+    def __init__(self, frozen: Check, counters: Check) -> None:
+        self._evidence = (frozen, counters)
         self._movement = Movement(_STALL_KEYS, zero_is_missing=False)
         self._stalled: frozenset[str] = frozenset()
 
     def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:
         self._movement.observe(data, now)
-        if not all(check.failed for check in self._evidence):
+        frozen, counters = self._evidence
+        quiet = self._movement.still(now, STALLED_WITHOUT_COUNTERS)
+        mostly_quiet = 2 * len(quiet) > len(self._movement.reported)
+        if not frozen.failed or not (counters.failed or mostly_quiet):
             self._stalled = frozenset()
             return False
         self._stalled = self._movement.still(now)

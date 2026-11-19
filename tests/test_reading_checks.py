@@ -222,7 +222,7 @@ def test_a_stalled_reading_at_0_is_distrusted_too() -> None:
     assert "battery_current" in checks.distrusted
 
 
-def test_a_stalled_inverter_needs_both_kinds_of_evidence() -> None:
+def test_frozen_voltages_alone_are_not_a_stall_at_first() -> None:
     checks = reading_checks.ReadingChecks()
     for now in _polls(STALLED_POLLS + 5):
         # The voltages stand still, but the counter keeps counting.
@@ -231,6 +231,56 @@ def test_a_stalled_inverter_needs_both_kinds_of_evidence() -> None:
     assert checks.active is not None
     assert checks.active.check == "frozen"
     assert "house_power" not in checks.distrusted
+
+
+def test_a_stalled_battery_proves_a_stall_without_the_sun() -> None:
+    """At night in #227 the export was 20 W, but the battery read 490 W."""
+    checks = reading_checks.ReadingChecks()
+    frame = {**_stalled(0.0), "bat_charged_total": 11451.31}
+    # 490.9 W adds up to 1 kWh in a little over 2 hours.
+    at = _polls(int(2.1 * 3600 / 5))
+    for poll, now in enumerate(at):
+        checks.run({**frame, "grid_power": -15.0 - poll % 7}, now)
+
+    assert checks.active is not None
+    assert checks.active.check == "telemetry_stalled"
+
+
+def test_readings_still_for_half_an_hour_prove_a_stall_without_counters() -> None:
+    checks = reading_checks.ReadingChecks()
+    # No counters at all; only the grid power from the meter still moves.
+    frame = {k: v for k, v in _stalled(0.0).items() if not k.endswith("_total")}
+    at = _polls(int(31 * 60 / 5))
+    for poll, now in enumerate(at):
+        checks.run({**frame, "grid_power": -15.0 - poll % 7}, now)
+        if now - at[0] < timedelta(minutes=29):
+            assert checks.active is None or checks.active.check == "frozen"
+
+    assert checks.active is not None
+    assert checks.active.check == "telemetry_stalled"
+    assert "grid_power" not in checks.distrusted
+
+
+def test_a_live_house_load_keeps_frozen_voltages_from_being_a_stall() -> None:
+    checks = reading_checks.ReadingChecks()
+    frame = {k: v for k, v in _stalled(0.0).items() if not k.endswith("_total")}
+    for poll, now in enumerate(_polls(int(40 * 60 / 5))):
+        # Most measured readings move: the house, the battery and the grid.
+        checks.run(
+            {
+                **frame,
+                "house_power": 500.0 + poll % 9,
+                "battery_power": 400.0 + poll % 5,
+                "pv1_current": 1.0 + poll % 3 / 100,
+                "pv1_voltage": 450.0 + poll % 4,
+                "battery_soc": 78.0 + poll % 2,
+                "grid_power": -15.0 - poll % 7,
+            },
+            now,
+        )
+
+    assert checks.active is not None
+    assert checks.active.check == "frozen"
 
 
 def test_a_lost_grid_voltage_fails_only_after_a_grid_was_seen() -> None:
