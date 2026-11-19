@@ -538,6 +538,28 @@ Home Assistant can't open a Modbus TCP connection to the address entered.
    networks between them allow port 502.
 3. Ask your installer to confirm that Modbus TCP is enabled; it is off by default.
 
+If the form says the inverter takes connections but sends no Modbus replies, the
+address is right. In a few cases a firmware update has switched Modbus TCP off: ask your
+installer to enable it again.
+
+</details>
+
+<details>
+<summary><b>Repairs shows “The inverter stopped answering Modbus” or “is not reachable”</b></summary>
+
+The inverter has not answered for at least 5 minutes. The entities stay unavailable,
+and the issue clears by itself with the next good read.
+
+- **Stopped answering Modbus:** the inverter takes connections on its Modbus port but
+  sends no replies.
+- **Not reachable:** nothing answers on the port. Check that the inverter is powered and
+  still has the same IP address, and use **Reconfigure** if it moved.
+
+In a few cases a firmware update has switched Modbus TCP off. If the inverter updated
+recently, ask your installer to enable it again in the EcoFlow Pro app. That is
+different from Modbus never having been enabled: the inverter then still answers, and
+Repairs shows "Modbus is disabled on the inverter" instead.
+
 </details>
 
 <details>
@@ -628,8 +650,8 @@ you don't use makes polls lighter. The serial number and firmware are read again
 time the connection opens.
 
 If a poll fails, the entities become unavailable until the next one succeeds. A lost
-connection is retried within the poll after 0, 5, 30 and 120 seconds, then again at
-the next poll. If the inverter can't be reached when Home Assistant starts, the setup
+connection is retried within the poll after 0, 5, 10 and 20 seconds, then again 30
+seconds later. If the inverter can't be reached when Home Assistant starts, the setup
 is retried automatically in the background.
 
 With Modbus Control on, a heartbeat is written to the inverter independently of the

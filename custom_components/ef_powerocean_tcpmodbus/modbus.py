@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Iterator, Sequence
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass
 from types import ModuleType
 from typing import Any, Final, Protocol
@@ -51,7 +51,9 @@ class _SharedModbus:
 _shared: _SharedModbus | None = None
 _unshared_reason = "Home Assistant older than 2026.9"
 
-RECONNECT_DELAYS_S: Final = (0, 5, 30, 120)
+# Short, so the inverter is read again soon after it is back: each attempt is one
+# connect to a device on the local network.
+RECONNECT_DELAYS_S: Final = (0, 5, 10, 20)
 TRANSPORT_ERRORS: Final = (ModbusException, ConnectionError, asyncio.TimeoutError)
 
 
@@ -260,12 +262,40 @@ class SharedLink:
 
     The connection opens on the first request and again on the next one after it
     drops. It belongs to the modbus integration, which closes it once the last
-    config entry holding a unit on it unloads, so this link never closes it.
+    config entry holding a unit on it unloads, so this link never closes it. It
+    only drops it after a timeout, for the next request to open a new one.
     """
 
     def __init__(self, unit: Any, mc: ModuleType) -> None:
         self._unit = unit
         self._mc = mc
+        # Older modbus-connection releases lack these; the link then works as
+        # before, on the library's 10 s timeout and without dropping a dead link.
+        self._timeout_error: type[Exception] = getattr(
+            mc, "ModbusTimeoutError", TimeoutError
+        )
+        if hasattr(unit, "require_timeout"):
+            # The connection uses the longest timeout any unit on it asks for, and
+            # its own 10 s only when none asks.
+            unit.require_timeout(MODBUS_REQUEST_TIMEOUT_S)
+
+    @asynccontextmanager
+    async def _dropped_on_timeout(self) -> AsyncIterator[None]:
+        """Drop the connection when a request times out.
+
+        A connection whose packets a firewall or a dead route swallows stays open
+        without answers, and TCP sends nothing new on it until its unanswered
+        requests get through, minutes apart. It is the same device for every unit
+        on it, so a new connection serves them all better.
+        """
+        try:
+            yield
+        except self._timeout_error:
+            disconnect = getattr(self._unit, "disconnect", None)
+            if disconnect is not None:
+                with suppress(self._mc.ModbusError):
+                    await disconnect()
+            raise
 
     @property
     def connected(self) -> bool:
@@ -277,7 +307,8 @@ class SharedLink:
         Any answer counts, even a refusal: it proves the inverter is reachable.
         """
         try:
-            await self._unit.read_holding_registers(DEVICE_INFO_BLOCK.start, 1)
+            async with self._dropped_on_timeout():
+                await self._unit.read_holding_registers(DEVICE_INFO_BLOCK.start, 1)
         except self._mc.ModbusExceptionError:
             return True
         except self._mc.ModbusError as err:
@@ -290,15 +321,18 @@ class SharedLink:
 
     async def read_holding_registers(self, address: int, count: int) -> list[int]:
         with _translated_errors(self._mc):
-            return list(await self._unit.read_holding_registers(address, count))
+            async with self._dropped_on_timeout():
+                return list(await self._unit.read_holding_registers(address, count))
 
     async def write_register(self, address: int, value: int) -> None:
         with _translated_errors(self._mc):
-            await self._unit.write_register(address, value)
+            async with self._dropped_on_timeout():
+                await self._unit.write_register(address, value)
 
     async def write_registers(self, address: int, values: list[int]) -> None:
         with _translated_errors(self._mc):
-            await self._unit.write_registers(address, values)
+            async with self._dropped_on_timeout():
+                await self._unit.write_registers(address, values)
 
 
 class ModbusClient:
@@ -310,6 +344,9 @@ class ModbusClient:
         # Stops a reconnect in its backoff from reopening the link after unload.
         self._closed = False
         self._write_block: tuple[str, dict[str, str]] | None = None
+        # Reads the device replied to, a refusal included. Compared across a poll,
+        # it tells a slow or refusing inverter from a silent one.
+        self.answers = 0
 
     @property
     def connected(self) -> bool:
@@ -377,13 +414,16 @@ class ModbusClient:
         """Read *count* holding registers starting at *address*."""
         async with self._lock:
             try:
-                return await self._link.read_holding_registers(address, count)
+                registers = await self._link.read_holding_registers(address, count)
             except DeviceRefused as err:
+                self.answers += 1
                 raise ModbusReadRejected(
                     f"Modbus error response at 0x{address:04X} with "
                     f"Exception-Code {err.exception_code}",
                     exception_code=err.exception_code,
                 ) from err
+            self.answers += 1
+            return registers
 
     async def async_write(
         self, address: int, words: Sequence[int], *, what: str

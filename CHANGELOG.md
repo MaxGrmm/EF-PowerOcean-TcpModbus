@@ -2,12 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- A repairs issue when the inverter has not answered for 5 minutes or more, as after a firmware update that switched Modbus TCP off (#222). The inverter then stays silent instead of reading 0, which the Modbus disabled issue does not catch. The issue says whether the port still takes connections or nothing answers at all, and that in a few cases a firmware update has switched Modbus TCP off. It stays across a reload and clears with the next good read.
+- Setup and Reconfigure say when the inverter takes connections but sends no replies, instead of asking to check the address, and that a firmware update has in a few cases switched Modbus TCP off.
+- Firmware changes appear in the logbook, from an `ef_powerocean_tcpmodbus_firmware_changed` event.
+
 ### Changed
 
+- A lost connection is retried after 0, 5, 10 and 20 seconds, then every 30 seconds instead of every 2 minutes, so the inverter is read again soon after it is back. On the connection Home Assistant shares, requests time out after 3 seconds, as on an own connection, instead of 10.
 - Entities now show unavailable while a poll fails, and available again with the next good one, as the README describes. Before, they kept showing their last value, because a value that had not changed wrote no state (#219).
 
 ### Fixed
 
+- On the connection Home Assistant shares, a request that times out now drops the connection, and the next poll opens a new one. A connection whose packets a firewall dropped stayed open without answers, and kept the inverter unreadable for minutes after it was reachable again.
 - Entities whose value had not changed could stay unavailable after a start whose first read failed, until their value next changed (#219).
 
 ## [2.9.5] - 2026-11-04

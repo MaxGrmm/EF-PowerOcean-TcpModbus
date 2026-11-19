@@ -52,6 +52,7 @@ from .const import (
 )
 from .modbus import TRANSPORT_ERRORS, ModbusClient, async_temporary_client
 from .models import InverterModel, ReserveSupport, battery_reserve_for
+from .outage import Cause, async_classify
 from .telemetry import decode_register, decode_serial_number
 from .util import parse_kwh, portal_history_url
 
@@ -101,6 +102,16 @@ async def async_read_device_settings(
     except Exception as e:
         _LOGGER.warning("EF-PowerOcean connection test failed: %s", e)
         return None
+
+
+async def async_connect_error(host: str, port: int) -> str:
+    """Return the error for an address that gave no answer, named by its cause.
+
+    The flow's own client is closed by now, so the probe has the port to itself.
+    """
+    if await async_classify(host, port) is Cause.MODBUS_SILENT:
+        return "modbus_silent"
+    return "cannot_connect"
 
 
 async def _async_read_settings(client: ModbusClient) -> dict[str, Any]:
@@ -208,7 +219,9 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
                     }
                 )
                 return await self.async_step_parameters()
-            errors["base"] = "cannot_connect"
+            errors["base"] = await async_connect_error(
+                user_input[CONF_HOST], user_input[CONF_PORT]
+            )
 
         return self.async_show_form(
             step_id="user",
@@ -298,7 +311,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
                 return self.async_abort(reason="already_configured")
             device_settings = await async_read_device_settings(self.hass, host, port)
             if device_settings is None:
-                errors["base"] = "cannot_connect"
+                errors["base"] = await async_connect_error(host, port)
             else:
                 serial = device_settings.get(DEVICE_SERIAL_NUMBER)
                 if serial and not _is_keyed_by_address(entry):

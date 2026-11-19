@@ -49,6 +49,10 @@ EVENT_CONTROL_TEST_FINISHED: Final = f"{DOMAIN}_control_test_finished"
 # reading_checks.py. Control steps aside in between while it is on.
 EVENT_READING_CHECK_FAILED: Final = f"{DOMAIN}_reading_check_failed"
 EVENT_READING_CHECK_CLEARED: Final = f"{DOMAIN}_reading_check_cleared"
+# Read on a reconnect, so it often marks the end of an outage an update caused.
+EVENT_FIRMWARE_CHANGED: Final = f"{DOMAIN}_firmware_changed"
+ATTR_FROM: Final = "from"
+ATTR_TO: Final = "to"
 ATTR_STATUS: Final = "status"
 ATTR_CHECK: Final = "check"
 ATTR_MODE: Final = "mode"

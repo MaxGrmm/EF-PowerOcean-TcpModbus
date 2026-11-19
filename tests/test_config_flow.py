@@ -19,6 +19,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import config_flow, const
 from custom_components.ef_powerocean_tcpmodbus.models import RegisterType
+from custom_components.ef_powerocean_tcpmodbus.outage import Cause
 from tests.fake_inverter import HOST, FakeInverter
 
 SERIAL = "HJ31ZAS2TEST0001"
@@ -26,12 +27,22 @@ SERIAL = "HJ31ZAS2TEST0001"
 
 @pytest.fixture
 def device_settings():
-    """What the device reports during the flow, without a connection."""
-    with patch.object(
-        config_flow,
-        "async_read_device_settings",
-        new=AsyncMock(return_value={config_flow.DEVICE_SERIAL_NUMBER: SERIAL}),
-    ) as read:
+    """What the device reports during the flow, without a connection.
+
+    An address that gives no answer is taken for unreachable, without a probe.
+    """
+    with (
+        patch.object(
+            config_flow,
+            "async_read_device_settings",
+            new=AsyncMock(return_value={config_flow.DEVICE_SERIAL_NUMBER: SERIAL}),
+        ) as read,
+        patch.object(
+            config_flow,
+            "async_classify",
+            new=AsyncMock(return_value=Cause.UNREACHABLE),
+        ),
+    ):
         yield read
 
 
@@ -321,6 +332,48 @@ async def test_an_address_nothing_answers_on_is_reported(hass: HomeAssistant) ->
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "cannot_connect"}
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_port_that_never_answers_modbus_points_to_the_setting(
+    hass: HomeAssistant, device_settings
+) -> None:
+    device_settings.return_value = None
+
+    with patch.object(
+        config_flow, "async_classify", AsyncMock(return_value=Cause.MODBUS_SILENT)
+    ) as probe:
+        result = await _start(hass, "192.168.1.10")
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "modbus_silent"}
+    probe.assert_awaited_once_with("192.168.1.10", 502)
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_reconfigure_points_to_the_setting_when_modbus_is_silent(
+    hass: HomeAssistant, device_settings
+) -> None:
+    entry = _configured_entry(hass)
+    device_settings.return_value = None
+
+    with patch.object(
+        config_flow, "async_classify", AsyncMock(return_value=Cause.MODBUS_SILENT)
+    ):
+        result = await _reconfigure(hass, entry, "192.168.1.99")
+
+    assert result["errors"] == {"base": "modbus_silent"}
+    assert entry.data[const.CONF_HOST] == "192.168.1.10"
+
+
+def test_every_connect_error_has_a_message_in_every_language() -> None:
+    component = Path(const.__file__).parent
+    files = sorted(component.glob("translations/*.json"))
+    assert files
+
+    for path in files:
+        errors = json.loads(path.read_text(encoding="utf-8"))["config"]["error"]
+        assert {"cannot_connect", "modbus_silent"} <= errors.keys(), path.name
 
 
 def test_section_descriptions_are_plain_text_in_every_language() -> None:

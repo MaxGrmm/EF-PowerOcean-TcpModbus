@@ -22,10 +22,13 @@ from homeassistant.util import dt
 from pymodbus import __version__ as pyModbusVersion
 from pymodbus.exceptions import ModbusException
 
+from . import outage
 from .const import (
     ATTR_CHECK,
+    ATTR_FROM,
     ATTR_MODE,
     ATTR_STATUS,
+    ATTR_TO,
     BATTERY_CHARGE_W_PER_WH,
     BATTERY_DISCHARGE_W_PER_WH,
     BATTERY_MODE_SELECT,
@@ -56,6 +59,7 @@ from .const import (
     ECOFLOW_PORTAL_TOTALS,
     ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
+    EVENT_FIRMWARE_CHANGED,
     EVENT_READING_CHECK_CLEARED,
     EVENT_READING_CHECK_FAILED,
     FIRMWARE_VERSION,
@@ -559,10 +563,19 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Only written when the entities are created, so it would show the old
         # version until a reload.
         registry = device_registry.async_get(self.hass)
-        for device in device_registry.async_entries_for_config_entry(
+        devices = device_registry.async_entries_for_config_entry(
             registry, self.config_entry.entry_id
-        ):
+        )
+        for device in devices:
             registry.async_update_device(device.id, sw_version=firmware)
+        self.hass.bus.async_fire(
+            EVENT_FIRMWARE_CHANGED,
+            {
+                ATTR_DEVICE_ID: devices[0].id if devices else None,
+                ATTR_FROM: previous,
+                ATTR_TO: firmware,
+            },
+        )
 
     async def _async_read_device_info_extra(self) -> None:
         """Read the protocol version and device address, where the device has them.
@@ -658,6 +671,18 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._consecutive_modbus_disabled_reads = 0
         return data
+
+    async def async_poll_failed(self, answers_before: int) -> None:
+        """Count a failed poll or setup toward an outage, unless it got an answer.
+
+        A refusal, a device-info read that confirmed nothing, or blocks that came
+        back before the poll ran out of time all show the inverter is there.
+        *answers_before* is the client's count of answers when it started.
+        """
+        if self._modbus_client.answers > answers_before:
+            outage.async_answered(self.hass, self.config_entry)
+            return
+        await outage.async_failed(self.hass, self.config_entry, self.host, self.port)
 
     def _read_failed(self) -> None:
         self._modbus_client.close()
@@ -1129,23 +1154,29 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return value
 
     async def _async_update_data(self) -> dict[str, Any]:
+        answers = self._modbus_client.answers
         try:
             raw_data = await self.async_get_raw_data()
         except IdentityMismatch:
             self._status = CoordinatorStatus.IDENTITY_MISMATCH
+            # Another device, but it answered; its own issue says what is wrong.
+            outage.async_answered(self.hass, self.config_entry)
             raise
         except UpdateFailed as err:
             self._status = CoordinatorStatus.RECONNECT_FAILED
+            await self.async_poll_failed(answers)
             raise UpdateFailed(
-                "Could not reconnect to the inverter; retrying in 120 s",
-                retry_after=120,
+                "Could not reconnect to the inverter; retrying in 30 s",
+                retry_after=30,
             ) from err
 
         if raw_data is None:
             self._status = CoordinatorStatus.READ_FAILED
+            await self.async_poll_failed(answers)
             raise UpdateFailed(
                 "Read failed; entities stay unavailable until the next successful read."
             )
+        outage.async_answered(self.hass, self.config_entry)
 
         try:
             if "battery_capacity" in raw_data:
