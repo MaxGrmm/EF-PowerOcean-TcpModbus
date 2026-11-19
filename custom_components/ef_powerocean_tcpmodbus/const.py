@@ -325,6 +325,16 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
 
 REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTERS}
 
+# Values calculated from polled readings, by the readings they come from. A value
+# from a reading the checks distrust is not shown either.
+DERIVED_FROM: Final[dict[str, frozenset[str]]] = {
+    "bat_remaining": frozenset({"battery_soc"}),
+    **{
+        f"pv{number}_power": frozenset({f"pv{number}_voltage", f"pv{number}_current"})
+        for number in (1, 2, 3)
+    },
+}
+
 
 def register_blocks_for(
     inverter_model: InverterModel, *, exclude: Collection[str] = ()

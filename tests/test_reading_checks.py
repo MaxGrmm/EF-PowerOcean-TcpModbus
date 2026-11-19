@@ -64,17 +64,43 @@ def test_a_zero_system_soc_fails_only_where_a_pack_contradicts_it(
     assert reading_checks.SystemSocMismatch().check(data, T0) is fails
 
 
-def test_readings_fail_once_they_have_not_moved_for_two_minutes() -> None:
+# Polls 5 s apart, from the first to the one five minutes later.
+FROZEN_POLLS = 61
+
+
+def _polls(n: int = FROZEN_POLLS + 5) -> list[datetime]:
+    return [T0 + timedelta(seconds=5 * poll) for poll in range(n)]
+
+
+def test_readings_fail_once_they_have_not_moved_for_five_minutes() -> None:
     check = reading_checks.FrozenReadings()
     frame = _live()
 
-    at = [T0 + timedelta(seconds=5 * poll) for poll in range(30)]
-    results = [check.check(frame, now) for now in at]
+    results = [check.check(frame, now) for now in _polls()]
 
-    assert not any(results[:24])
-    assert all(results[24:])
-    # One reading moving again clears it at once.
-    assert not check.check({**frame, "frequency": 49.98}, at[-1])
+    assert not any(results[: FROZEN_POLLS - 1])
+    assert all(results[FROZEN_POLLS - 1 :])
+    assert check.distrusted() == frozenset(frame)
+
+
+def test_one_reading_that_still_moves_does_not_hide_the_frozen_ones() -> None:
+    """In #227 most readings stood still for days; one moving must not clear it."""
+    check = reading_checks.FrozenReadings()
+    frame = _live()
+    at = _polls()
+    for now in at:
+        check.check(frame, now)
+
+    assert check.check({**frame, "frequency": 49.98}, at[-1])
+    assert check.distrusted() == frozenset(frame) - {"frequency"}
+
+
+def test_one_reading_a_model_rounds_coarsely_never_fails_it_alone() -> None:
+    check = reading_checks.FrozenReadings()
+    results = [check.check(_live(), now) for now in _polls()]
+
+    # _live() keeps the battery voltage at 410.0 throughout.
+    assert not any(results)
 
 
 def test_a_model_without_these_readings_is_never_frozen() -> None:
@@ -163,13 +189,14 @@ def test_a_check_that_keeps_failing_holds_while_one_above_it_flickers() -> None:
 def test_a_failure_ends_as_soon_as_its_check_passes() -> None:
     checks = reading_checks.ReadingChecks()
     frame = _live()
-    for poll in range(30):
-        checks.run(frame, T0 + timedelta(seconds=5 * poll))
+    at = _polls()
+    for now in at:
+        checks.run(frame, now)
     assert checks.active is not None
     assert checks.active.check == "frozen"
 
     # Moving again, with one odd SOC read that has not held.
-    checks.run({**_live(), **_socs(0, 99, 99)}, T0 + timedelta(seconds=150))
+    checks.run({**_live(), **_socs(0, 99, 99)}, at[-1] + timedelta(seconds=5))
 
     assert checks.active is None
     assert checks.suspect
@@ -178,11 +205,24 @@ def test_a_failure_ends_as_soon_as_its_check_passes() -> None:
 def test_frozen_readings_count_from_when_they_stopped_moving() -> None:
     checks = reading_checks.ReadingChecks()
     frame = _live()
-    at = [T0 + timedelta(seconds=5 * poll) for poll in range(30)]
+    at = _polls()
     for now in at:
         checks.run(frame, now)
 
     assert checks.active == Finding(Status.INCONSISTENT_READINGS, "frozen", at[0])
+
+
+def test_frozen_readings_and_what_is_calculated_from_them_are_distrusted() -> None:
+    checks = reading_checks.ReadingChecks()
+    frame = {**_live(), "pv1_voltage": 458.15, "pv1_current": 1.02}
+    for now in _polls():
+        checks.run(frame, now)
+
+    # The PV readings are not jitter readings, but the calculated power follows
+    # whichever of its sources is distrusted.
+    assert {"frequency", "voltage_l1"} <= checks.distrusted
+    assert "pv1_power" not in checks.distrusted
+    assert reading_checks.with_derived(frozenset({"pv1_current"})) >= {"pv1_power"}
 
 
 def test_another_cause_for_the_same_state_keeps_its_start() -> None:
@@ -362,7 +402,7 @@ def test_frozen_readings_step_aside(monkeypatch: pytest.MonkeyPatch) -> None:
     sim.run(polls=24, solar=0, house=1500)
 
     alter(lambda data: data.update(frozen))
-    run = sim.run(polls=36, solar=0, house=1500)
+    run = sim.run(polls=FROZEN_POLLS + 12, solar=0, house=1500)
 
     assert run.status[-1] is Status.INCONSISTENT_READINGS
     aside = sim.control.reading_checks.active

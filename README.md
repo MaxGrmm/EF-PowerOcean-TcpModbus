@@ -260,7 +260,7 @@ itself:
 | `grid_voltage` | The grid-side voltage is gone while the inverter still reports on-grid   | Off-grid              |
 | `bms`          | The inverter reports its battery disconnected, after it reported one     | Battery disconnected  |
 | `battery_soc`  | The system Battery SOC drops to 0 % from a level no battery empties from | Readings inconsistent |
-| `frozen`       | The voltages and frequency haven't changed at all for two minutes        | Readings inconsistent |
+| `frozen`       | Most voltages and the frequency haven't changed at all for five minutes  | Readings inconsistent |
 
 A check counts once it fails three polls in a row. While one does, control hands the
 inverter its own self-consumption and resumes the selected mode once it passes again.
@@ -268,7 +268,9 @@ A frame whose readings contradict each other never moves the Charge Limit or Bat
 Reserve, so one bad read can't set them off.
 
 The checks run whether or not Modbus Control is on, since a bad reading also misleads
-the sensors. The `ef_powerocean_tcpmodbus_reading_check_failed` and
+the sensors. A reading a check shows to be wrong, and anything calculated from it,
+shows unavailable until it makes sense again: the system Battery SOC for `battery_soc`,
+and each voltage or frequency that stopped changing for `frozen`. The `ef_powerocean_tcpmodbus_reading_check_failed` and
 `ef_powerocean_tcpmodbus_reading_check_cleared` events, also shown in the logbook,
 carry the `check` and the `status` it stands for; use them to be notified. A failed
 check is not raised in repairs, since it reflects the inverter's state, such as an

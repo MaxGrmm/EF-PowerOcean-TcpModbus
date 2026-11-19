@@ -23,8 +23,13 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, Final
 
-from .const import BATTERY_SOC_KEYS, CONTROL_STATUS_DAMPING_POLLS
-from .models import ControlStatus, DeviceReport
+from .const import (
+    BATTERY_SOC_KEYS,
+    CONTROL_STATUS_DAMPING_POLLS,
+    DERIVED_FROM,
+    MODBUS_REGISTERS,
+)
+from .models import ControlStatus, DeviceReport, Signal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,7 +39,7 @@ _LOGGER = logging.getLogger(__name__)
 # believed while no pack in use reports more than this.
 SOC_PACK_MARGIN: Final = 5.0
 # Readings that have not moved at all for this long have stopped updating.
-FROZEN_AFTER: Final = timedelta(minutes=2)
+FROZEN_AFTER: Final = timedelta(minutes=5)
 # Grid-side voltage above this shows a grid is there; at or below the lower one,
 # on every phase that reports, it is gone.
 GRID_PRESENT_V: Final = 100.0
@@ -42,15 +47,57 @@ GRID_ABSENT_V: Final = 50.0
 
 _STATUS_KEYS: Final = frozenset({"system_modes", "system_state_2"})
 _GRID_VOLTAGE_KEYS: Final = ("grid_voltage_l1", "grid_voltage_l2", "grid_voltage_l3")
+
+
+def keys_of(*signals: Signal) -> tuple[str, ...]:
+    """Return the polled keys that carry one of *signals*, in register order."""
+    return tuple(
+        register.key for register in MODBUS_REGISTERS if register.signal in signals
+    )
+
+
 # On a live grid these jitter from poll to poll, whatever the power flows do.
-_JITTER_KEYS: Final = (
-    "frequency",
-    "voltage_l1",
-    "voltage_l2",
-    "voltage_l3",
-    *_GRID_VOLTAGE_KEYS,
-    "battery_voltage",
-)
+_JITTER_KEYS: Final = keys_of(Signal.JITTER)
+
+
+class Movement:
+    """When each reading last changed, for the checks that look for stillness.
+
+    A reading that is missing or 0 is not reported by this model, or not now, and
+    is forgotten, so it never counts as still.
+    """
+
+    def __init__(self, keys: tuple[str, ...]) -> None:
+        self._keys = keys
+        self._seen: dict[str, tuple[Any, datetime]] = {}
+
+    def observe(self, data: Mapping[str, Any], now: datetime) -> None:
+        for key in self._keys:
+            value = data.get(key)
+            if not value:
+                self._seen.pop(key, None)
+                continue
+            last = self._seen.get(key)
+            if last is None or last[0] != value:
+                self._seen[key] = (value, now)
+
+    @property
+    def reported(self) -> frozenset[str]:
+        """Return the keys this model reports a value for."""
+        return frozenset(self._seen)
+
+    def still(self, now: datetime) -> frozenset[str]:
+        """Return the reported keys that have not changed for FROZEN_AFTER."""
+        return frozenset(
+            key for key, (_, since) in self._seen.items() if now - since >= FROZEN_AFTER
+        )
+
+    def still_since(self, keys: frozenset[str]) -> datetime | None:
+        """Return since when the stillest of *keys* has not changed."""
+        return min(
+            (since for key, (_, since) in self._seen.items() if key in keys),
+            default=None,
+        )
 
 
 class Check:
@@ -64,6 +111,10 @@ class Check:
 
     def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:
         raise NotImplementedError
+
+    def distrusted(self) -> frozenset[str]:
+        """Return the readings the last failure showed to be wrong."""
+        return self.distrusts
 
     def onset(self, now: datetime, /) -> datetime:
         """Return when what this check fails on began, once it fails at *now*."""
@@ -171,30 +222,39 @@ class SystemSocMismatch(Check):
 
 
 class FrozenReadings(Check):
-    """Voltages and frequency that have not changed at all for a while."""
+    """Most voltages and the frequency have not changed at all for a while.
+
+    Judged per reading, so one that still jitters does not hide the others (#227),
+    and only the ones that stopped are distrusted. It takes most of them, so one
+    reading a model rounds coarsely never fails it on its own.
+    """
 
     name = "frozen"
     status = ControlStatus.INCONSISTENT_READINGS
     keys = frozenset(_JITTER_KEYS)
 
     def __init__(self) -> None:
-        self._last: tuple[Any, ...] | None = None
-        self._since: datetime | None = None
+        self._movement = Movement(_JITTER_KEYS)
+        self._frozen: frozenset[str] = frozenset()
 
     def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:
-        readings = tuple(data.get(key) for key in _JITTER_KEYS)
+        self._movement.observe(data, now)
+        reported = self._movement.reported
+        self._frozen = self._movement.still(now)
         # Nothing to judge by: a model that reports none of these never fails.
-        if not any(readings):
-            self._last = self._since = None
-            return False
-        if readings != self._last or self._since is None:
-            self._last, self._since = readings, now
-            return False
-        return now - self._since >= FROZEN_AFTER
+        return bool(reported) and 2 * len(self._frozen) > len(reported)
+
+    def distrusted(self) -> frozenset[str]:
+        return self._frozen
 
     def onset(self, now: datetime, /) -> datetime:
         # The readings stopped moving before the check could tell.
-        return self._since or now
+        return self._movement.still_since(self._frozen) or now
+
+
+def with_derived(keys: frozenset[str]) -> frozenset[str]:
+    """Add the values calculated from any of *keys*, as wrong as their sources."""
+    return keys | {key for key, sources in DERIVED_FROM.items() if keys & sources}
 
 
 # In order of precedence: where several fail, the first one is reported.
@@ -251,7 +311,9 @@ class ReadingChecks:
         # Every check sees every poll, since some keep a history.
         failed = [check for check in self._checks if self._failed(check, data, now)]
         self.failing = frozenset(check.name for check in failed)
-        self.distrusted = frozenset().union(*(check.distrusts for check in failed))
+        self.distrusted = with_derived(
+            frozenset().union(*(check.distrusted() for check in failed))
+        )
         self.suspect = any(
             check.status is ControlStatus.INCONSISTENT_READINGS for check in failed
         )
