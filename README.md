@@ -254,13 +254,15 @@ before.
 Every poll is also checked for conditions in which the inverter is best left to
 itself:
 
-| Check          | Fails when                                                               | Control Status        |
-| -------------- | ------------------------------------------------------------------------ | --------------------- |
-| `off_grid`     | The inverter reports running off-grid                                    | Off-grid              |
-| `grid_voltage` | The grid-side voltage is gone while the inverter still reports on-grid   | Off-grid              |
-| `bms`          | The inverter reports its battery disconnected, after it reported one     | Battery disconnected  |
-| `battery_soc`  | The system Battery SOC drops to 0 % from a level no battery empties from | Readings inconsistent |
-| `frozen`       | Most voltages and the frequency haven't changed at all for five minutes  | Readings inconsistent |
+| Check               | Fails when                                                                          | Control Status        |
+| ------------------- | ----------------------------------------------------------------------------------- | --------------------- |
+| `off_grid`          | The inverter reports running off-grid                                               | Off-grid              |
+| `grid_voltage`      | The grid-side voltage is gone while the inverter still reports on-grid              | Off-grid              |
+| `bms`               | The inverter reports its battery disconnected, after it reported one                | Battery disconnected  |
+| `telemetry_stalled` | Both `frozen` and `counter_stalled` fail: the inverter answers but stopped updating | Readings inconsistent |
+| `battery_soc`       | The system Battery SOC drops to 0 % from a level no battery empties from            | Readings inconsistent |
+| `frozen`            | Most voltages and the frequency haven't changed at all for five minutes             | Readings inconsistent |
+| `counter_stalled`   | An energy counter stood still while its own power added up to 1 kWh                 | None on its own       |
 
 A check counts once it fails three polls in a row. While one does, control hands the
 inverter its own self-consumption and resumes the selected mode once it passes again.
@@ -270,7 +272,10 @@ Reserve, so one bad read can't set them off.
 The checks run whether or not Modbus Control is on, since a bad reading also misleads
 the sensors. A reading a check shows to be wrong, and anything calculated from it,
 shows unavailable until it makes sense again: the system Battery SOC for `battery_soc`,
-and each voltage or frequency that stopped changing for `frozen`. The `ef_powerocean_tcpmodbus_reading_check_failed` and
+each voltage or frequency that stopped changing for `frozen`, and every measured reading
+that stopped changing for `telemetry_stalled`. Energy counters stay shown as the
+inverter counts them. `counter_stalled` only counts as evidence for
+`telemetry_stalled`, since some models may update a counter in coarse steps. The `ef_powerocean_tcpmodbus_reading_check_failed` and
 `ef_powerocean_tcpmodbus_reading_check_cleared` events, also shown in the logbook,
 carry the `check` and the `status` it stands for; use them to be notified. A failed
 check is not raised in repairs, since it reflects the inverter's state, such as an
