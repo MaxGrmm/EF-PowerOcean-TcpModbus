@@ -901,6 +901,13 @@ MODBUS_CONTROL_BINARY_SENSOR: Final = BinarySensorDef(
     device_class=BinarySensorDeviceClass.RUNNING,
 )
 
+# On while a check shows readings to be wrong, whether or not Modbus Control is on.
+READING_CHECK_BINARY_SENSOR: Final = BinarySensorDef(
+    key="reading_check",
+    device_class=BinarySensorDeviceClass.PROBLEM,
+    entity_category=EntityCategory.DIAGNOSTIC,
+)
+
 CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
     ControlFeature.AUTOMATIC: ControlFeatureDef(method=ControlMode.DEFAULT),
     ControlFeature.HOLD_BATTERY: ControlFeatureDef(

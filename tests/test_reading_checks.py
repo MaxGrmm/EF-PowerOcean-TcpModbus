@@ -12,7 +12,12 @@ import pytest
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
 
-from custom_components.ef_powerocean_tcpmodbus import const, models, reading_checks
+from custom_components.ef_powerocean_tcpmodbus import (
+    binary_sensor,
+    const,
+    models,
+    reading_checks,
+)
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus.reading_checks import Finding
 from tests.simulation import Simulation
@@ -851,6 +856,46 @@ def test_every_issue_a_finding_raises_goes_with_the_entry() -> None:
 
     entry = SimpleNamespace(entry_id="entry")
     assert announcer.issue_ids(cast(Any, entry)) == ["telemetry_stalled_entry"]
+
+
+def test_the_reading_check_sensor_shows_wrong_readings_with_control_off() -> None:
+    checks = SimpleNamespace(findings=(), distrusted=frozenset())
+    fake = SimpleNamespace(
+        control=SimpleNamespace(reading_checks=checks),
+        connected=True,
+        last_update_success=True,
+    )
+    entity = binary_sensor.EcoFlowReadingCheckBinarySensor(
+        cast(Any, fake),
+        cast(Any, SimpleNamespace(entry_id="entry")),
+        const.READING_CHECK_BINARY_SENSOR,
+    )
+    assert not entity.is_on
+
+    # The inverter's own state is not a problem with its readings.
+    checks.findings = (Finding(Status.OFF_GRID, "off_grid", T0),)
+    assert not entity.is_on
+
+    checks.findings = (
+        Finding(Status.OFF_GRID, "off_grid", T0),
+        _stall(),
+        Finding(
+            Status.INCONSISTENT_READINGS,
+            "frozen",
+            T0,
+            keys=frozenset({"voltage_l1"}),
+        ),
+    )
+    assert entity.is_on
+    assert entity.extra_state_attributes == {
+        "check": "telemetry_stalled",
+        "since": T0.isoformat(),
+        "distrusted": ["voltage_l1"],
+    }
+
+    # Without a connection it shows nothing at all, as the readings do.
+    fake.connected = False
+    assert not entity.available
 
 
 def test_every_status_a_check_stands_for_has_its_text() -> None:

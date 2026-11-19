@@ -585,6 +585,9 @@
       "modbus_control": {
         "name": "Modbus Control"
       },
+      "reading_check": {
+        "name": "Reading Check"
+      },
       "self_use_mode_ena": {
         "name": "Self-powered Mode"
       },

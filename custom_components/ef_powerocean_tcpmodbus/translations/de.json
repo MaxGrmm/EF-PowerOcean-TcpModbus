@@ -588,6 +588,9 @@
       "modbus_control": {
         "name": "Modbus-Steuerung"
       },
+      "reading_check": {
+        "name": "Messwertprüfung"
+      },
       "self_use_mode_ena": {
         "name": "Eigenstromversorgung"
       },
