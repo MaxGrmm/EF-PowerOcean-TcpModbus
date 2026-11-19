@@ -282,9 +282,18 @@ steps. How long each reading has stood still survives a restart.
 
 The `ef_powerocean_tcpmodbus_reading_check_failed` and
 `ef_powerocean_tcpmodbus_reading_check_cleared` events, also shown in the logbook,
-carry the `check` and the `status` it stands for; use them to be notified. A failed
-check is not raised in repairs, since it reflects the inverter's state, such as an
-outage or the battery saver turning the battery off, not something to fix.
+carry the `check` and the `status` it stands for; use them to be notified. Each check
+is announced on its own, so a stall that follows frozen voltages is announced too, and
+each is logged once when it fails and once when it passes again.
+
+The Reading Check diagnostic sensor is on while a check shows readings to be wrong,
+also while Modbus Control is off, with the `check`, `since` when and the `distrusted`
+readings as attributes. Off-grid and a disconnected battery are the inverter's state,
+so they don't turn it on.
+
+Only `telemetry_stalled` is raised in repairs, once it has lasted 30 minutes, since
+restarting the inverter is the fix. The other checks reflect the inverter's state, such
+as an outage or the battery saver turning the battery off, not something to fix.
 
 While `battery_soc` fails, the **Battery SOC** sensor shows unavailable rather than
 0 %, so history, automations and the Energy dashboard don't take it for an empty
@@ -436,6 +445,7 @@ installer if you need to know.
 | Modbus Control    |                                 | The device is accepting our commands          |
 | Control Status    |                                 | What the selected battery mode is achieving   |
 | Control Test      | Idle / Running / Done / Aborted | The last run of the control test (diagnostic) |
+| Reading Check     | Problem / OK                    | A check shows readings wrong (diagnostic)     |
 
 ### Faults (Diagnostic)
 
