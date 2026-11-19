@@ -27,6 +27,7 @@ from .control import ControlInputs
 from .coordinator import (
     EcoflowConfigEntry,
     EcoflowCoordinator,
+    grid_energy_issue_id,
     held_totals_issue_id,
     identity_mismatch_issue_id,
     state_store,
@@ -235,6 +236,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
     ir.async_delete_issue(hass, DOMAIN, held_totals_issue_id(entry))
     for issue_id in announcer_issue_ids(entry):
         ir.async_delete_issue(hass, DOMAIN, issue_id)
+    ir.async_delete_issue(hass, DOMAIN, grid_energy_issue_id(entry))
     # An outage outlives a reload, so its issue stays; async_setup drops it when
     # the entry is disabled.
     # The coordinator's async_shutdown, registered with the entry, hands control

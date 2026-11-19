@@ -101,16 +101,17 @@ Or install it from within HACS:
 2. Search for **EF-PowerOcean-TcpModbus**
 3. Fill in the setup form:
 
-| Field                      | Default                | Description                                                                                                                                                      |
-| -------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| IP Address                 | –                      | Local IP of your PowerOcean inverter                                                                                                                             |
-| Port                       | 502                    | Modbus TCP port                                                                                                                                                  |
-| Inverter model             | PowerOcean Three Phase |                                                                                                                                                                  |
-| Number of Batteries        | 0                      | Number of installed battery modules (0–12), of any size. Sets the battery power limits until the inverter reports its total capacity                             |
-| Maximum solar power        | 12 kW                  | Installed solar power (1–60 kW)                                                                                                                                  |
-| Maximum grid power         | 15 kW                  | Your grid connection (main fuse), not the inverter rating. Rejects implausible readings and caps Import from Grid (1–60 kW)                                      |
-| Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
-| Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
+| Field                      | Default                | Description                                                                                                                                                                                                                                 |
+| -------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| IP Address                 | –                      | Local IP of your PowerOcean inverter                                                                                                                                                                                                        |
+| Port                       | 502                    | Modbus TCP port                                                                                                                                                                                                                             |
+| Inverter model             | PowerOcean Three Phase |                                                                                                                                                                                                                                             |
+| Number of Batteries        | 0                      | Number of installed battery modules (0–12), of any size. Sets the battery power limits until the inverter reports its total capacity                                                                                                        |
+| Maximum solar power        | 12 kW                  | Installed solar power (1–60 kW)                                                                                                                                                                                                             |
+| Maximum grid power         | 15 kW                  | Your grid connection (main fuse), not the inverter rating. Rejects implausible readings and caps Import from Grid (1–60 kW)                                                                                                                 |
+| Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.                                                                            |
+| Calculation of grid energy | false                  | In some inverters, the grid import and export registers stay at 0 while Grid Power reads right. This switch integrates them from Grid Power instead, see [Grid energy calculated from Grid Power](#grid-energy-calculated-from-grid-power). |
+| Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                                                                                                |
 
 To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**. The collapsed **Correct energy totals** section there is for a lifetime counter the inverter reset; see [Correcting a lifetime total](#correcting-a-lifetime-total).
 
@@ -530,6 +531,12 @@ The lifetime totals above are checked before they are published: a value that dr
 | Inverter AC Output Total (Device) | `inverter_ac_out_total_raw` | kWh  |
 
 If a total has been held for more than 24 hours while the device reports a value above 0, a repairs issue lists it with both values. It offers to keep Home Assistant's total, or to switch to the inverter's. If the values look wrong instead, it links to a filled-in bug report and to the device page for the diagnostics download. This happens when the inverter resets a counter or a wrong value was accepted earlier. A total held at 0 while the device's total rises in step with its own daily counter is corrected automatically.
+
+#### Grid energy calculated from Grid Power
+
+Some inverters report 0 for grid import and export while Grid Power reads right (#218), which also makes House Consumption wrong. If all four grid energy registers have read 0 for more than 24 hours while at least 1 kWh went through the grid by Grid Power, a repairs issue offers to turn on **Calculation of grid energy**. It is never turned on by itself, since a counter has been seen reading a bogus 0 for hours.
+
+With it on, Grid Import Total and Grid Export Total are integrated from Grid Power on every poll (positive is import, negative export), and the today values follow from them as for any total. The totals continue from the values last shown, so the Energy dashboard records no jump. It is an estimate: power changes between polls are not seen, and nothing is counted across a gap of more than 2 minutes between readings, such as an outage or a restart. The (Device) sensors keep showing what the inverter reports, and the diagnostics download has the integration's state under `energy.grid_energy`. Turning it off again holds the totals at their last value while the inverter reports 0.
 
 #### Correcting a lifetime total
 

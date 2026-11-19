@@ -13,7 +13,7 @@ from homeassistant.loader import async_get_integration
 
 from . import watchdog
 from .const import BUG_REPORT_URL, DOMAIN
-from .coordinator import EcoflowCoordinator
+from .coordinator import GRID_ENERGY_ISSUE_PREFIX, EcoflowCoordinator
 
 if TYPE_CHECKING:
     # Only for annotations: Home Assistant 2025.12, the oldest supported, does not
@@ -189,13 +189,59 @@ class AlertRepairFlow(RepairsFlow):
         return self.async_create_entry(data={})
 
 
+class GridEnergyRepairFlow(RepairsFlow):
+    """Turn on calculating grid energy from Grid Power, once the user confirms."""
+
+    def __init__(self, entry_id: str) -> None:
+        self._entry_id = entry_id
+
+    def _coordinator(self) -> EcoflowCoordinator | None:
+        entry = self.hass.config_entries.async_get_entry(self._entry_id)
+        if entry is None or entry.domain != DOMAIN:
+            return None
+        coordinator: EcoflowCoordinator | None = getattr(entry, "runtime_data", None)
+        if coordinator is None or not coordinator.grid_energy_not_counted:
+            return None
+        return coordinator
+
+    async def async_step_init(
+        self,
+        user_input: dict[str, str] | None = None,  # noqa: ARG002 - not a choice
+    ) -> RepairsFlowResult:
+        """Explain the choice before anything changes.
+
+        Home Assistant passes the issue id as this step's input, which must never
+        count as the user confirming.
+        """
+        return await self.async_step_confirm()
+
+    async def async_step_confirm(
+        self, user_input: dict[str, str] | None = None
+    ) -> RepairsFlowResult:
+        """Turn the calculation on once the user submits the form."""
+        if (coordinator := self._coordinator()) is None:
+            return self.async_abort(reason="not_needed")
+        if user_input is None:
+            return self.async_show_form(
+                step_id="confirm",
+                description_placeholders={
+                    "settings_page": f"/config/integrations/integration/{DOMAIN}"
+                },
+            )
+        coordinator.async_enable_grid_energy_calculation()
+        return self.async_create_entry(data={})
+
+
 async def async_create_fix_flow(
     hass: HomeAssistant,  # noqa: ARG001 - required by the repairs platform
-    issue_id: str,  # noqa: ARG001 - required by the repairs platform
+    issue_id: str,
     data: dict[str, Any] | None,
 ) -> RepairsFlow:
     """Create the fix flow for a repairs issue raised by this integration."""
     data = data or {}
     if data.get("flow") == "alert":
         return AlertRepairFlow(data)
-    return HeldTotalsRepairFlow(str(data.get("entry_id", "")))
+    entry_id = str(data.get("entry_id", ""))
+    if issue_id.startswith(GRID_ENERGY_ISSUE_PREFIX):
+        return GridEnergyRepairFlow(entry_id)
+    return HeldTotalsRepairFlow(entry_id)

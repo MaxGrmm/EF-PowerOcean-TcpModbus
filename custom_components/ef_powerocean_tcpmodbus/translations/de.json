@@ -22,7 +22,8 @@
           "solar_power_max": "Maximale Solar-Leistung [W]",
           "grid_power_max": "Maximale Netz-Leistung [W]",
           "scan_interval": "Abfrageintervall [s]",
-          "calc_solar_power": "Berechnung der Solarleistung"
+          "calc_solar_power": "Berechnung der Solarleistung",
+          "calc_grid_energy": "Berechnung der Netzenergie"
         },
         "data_description": {
           "inverter_model": "Wählen Sie das Wechselrichtermodell.",
@@ -30,7 +31,8 @@
           "solar_power_max": "Die max. Solar-Leistung wird für die Überprüfung der empfangenen Werte verwendet.",
           "grid_power_max": "Die max. Leistung Ihres Netzanschlusses, begrenzt durch die Hauptsicherung. Nicht die Wechselrichterleistung: das Haus allein kann mehr beziehen.",
           "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
-          "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden."
+          "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden.",
+          "calc_grid_energy": "Bei einigen Wechselrichtern bleiben die Register für Netzbezug und Einspeisung auf 0, obwohl die Netzleistung stimmt. Mit diesem Schalter werden Netzbezug und Einspeisung stattdessen aus der Netzleistung berechnet. Eine Schätzung: Sie kann um einige Prozent von Ihrem Zähler abweichen."
         }
       },
       "reconfigure": {
@@ -68,6 +70,7 @@
           "grid_power_max": "Maximale Netz-Leistung [W]",
           "scan_interval": "Abfrageintervall [s]",
           "calc_solar_power": "Berechnung der Solarleistung",
+          "calc_grid_energy": "Berechnung der Netzenergie",
           "alert_verbosity": "Verbositätsgrad",
           "battery_reserve": "Batteriereserve"
         },
@@ -78,6 +81,7 @@
           "grid_power_max": "Die max. Leistung Ihres Netzanschlusses, begrenzt durch die Hauptsicherung. Nicht die Wechselrichterleistung: das Haus allein kann mehr beziehen.",
           "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
           "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden.",
+          "calc_grid_energy": "Bei einigen Wechselrichtern bleiben die Register für Netzbezug und Einspeisung auf 0, obwohl die Netzleistung stimmt. Mit diesem Schalter werden Netzbezug und Einspeisung stattdessen aus der Netzleistung berechnet. Eine Schätzung: Sie kann um einige Prozent von Ihrem Zähler abweichen.",
           "alert_verbosity": "Wie viel die Integration unter Einstellungen → Reparaturen meldet. Wesentlich: nur, was Sie tun müssen, etwa wenn der Wechselrichter seine Messwerte nicht mehr aktualisiert. Messwerte: auch Messwerte, denen nicht zu trauen ist. Ausführlich: auch der Zustand der Verbindung, etwa häufige Neuverbindungen oder verspätete Abfragen. Fehlersuche: auch jede Warnung und jeder Fehler im Log der Integration. Jeder Hinweis lässt sich ignorieren. Zurück auf Wesentlich werden die ignorierten Hinweise vergessen.",
           "battery_reserve": "Nativ: Der Wechselrichter hält die Reserve selbst, wie die in der EcoFlow-App eingestellte, aber nicht jedes Modell übernimmt eine Änderung über Modbus. Emuliert: Die Integration bildet die Reserve der App mit eigener Logik nach, solange die Modbus-Steuerung an ist. Für dein Modell voreingestellt; nur ändern, um ein Modell zu testen."
         },
@@ -142,6 +146,20 @@
         },
         "abort": {
           "not_held": "Diese Energiezähler werden nicht mehr festgehalten."
+        }
+      }
+    },
+    "grid_energy_not_counted": {
+      "title": "Die Netzenergie des Wechselrichters unter {host} wird nicht gezählt",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Netzenergie aus der Netzleistung berechnen",
+            "description": "Seit mehr als einem Tag meldet der Wechselrichter 0 für Netzbezug und Einspeisung, während die Netzleistung Energie über das Netz zeigte. Netzbezug, Einspeisung und Hausverbrauch bleiben deshalb falsch.\n\nBestätigen Sie, um Netzbezug und Einspeisung stattdessen aus der Netzleistung zu berechnen. Die Gesamtwerte zählen von ihrem aktuellen Stand weiter, das Energie-Dashboard verzeichnet also keinen Sprung. Die Berechnung ist eine Schätzung: Sie kann um einige Prozent von Ihrem Zähler abweichen, und solange der Wechselrichter nicht gelesen werden kann, wird keine Energie gezählt. Die (Gerät)-Sensoren zeigen weiterhin, was der Wechselrichter meldet.\n\nSie können dies in den [Einstellungen]({settings_page}) der Integration wieder ausschalten: Wählen Sie Konfigurieren und schalten Sie Berechnung der Netzenergie aus."
+          }
+        },
+        "abort": {
+          "not_needed": "Die Register der Netzenergie zählen wieder, oder die Netzenergie wird bereits berechnet."
         }
       }
     },

@@ -18,6 +18,7 @@ from homeassistant.util.yaml import parse_yaml
 from custom_components.ef_powerocean_tcpmodbus import const, models, repairs, watchdog
 from custom_components.ef_powerocean_tcpmodbus.repairs import (
     AlertRepairFlow,
+    GridEnergyRepairFlow,
     HeldTotalsRepairFlow,
     async_create_fix_flow,
 )
@@ -44,17 +45,20 @@ def device_and_version(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _flow(coordinator: Any) -> HeldTotalsRepairFlow:
+def _flow(coordinator: Any, issue_id: str = "issue") -> Any:
     flow = asyncio.run(
-        async_create_fix_flow(None, "issue", {"entry_id": "entry"})  # type: ignore[arg-type]
+        async_create_fix_flow(None, issue_id, {"entry_id": "entry"})  # type: ignore[arg-type]
     )
-    assert isinstance(flow, HeldTotalsRepairFlow)
     entry = SimpleNamespace(domain=const.DOMAIN, runtime_data=coordinator)
     flow.hass = SimpleNamespace(  # type: ignore[assignment]
         config_entries=SimpleNamespace(async_get_entry=lambda _: entry)
     )
     flow.flow_id, flow.handler = "flow", const.DOMAIN
     return flow
+
+
+def test_the_held_totals_issue_gets_the_held_totals_flow() -> None:
+    assert isinstance(_flow(_held_coordinator()), HeldTotalsRepairFlow)
 
 
 def _held_coordinator() -> SimpleNamespace:
@@ -276,3 +280,75 @@ def test_every_language_explains_an_alert_with_what_the_flow_provides(
         }
         assert used <= provided, path.name
         assert set(step["menu_options"]) == choices, path.name
+
+
+# ── Grid energy not counted ───────────────────────────────────────────────────
+
+GRID_ISSUE = "grid_energy_not_counted_entry"
+
+
+def _not_counting_coordinator() -> SimpleNamespace:
+    return SimpleNamespace(
+        grid_energy_not_counted=True,
+        async_enable_grid_energy_calculation=Mock(),
+    )
+
+
+def test_the_grid_energy_issue_gets_its_own_flow() -> None:
+    assert isinstance(
+        _flow(_not_counting_coordinator(), GRID_ISSUE), GridEnergyRepairFlow
+    )
+
+
+def test_the_grid_energy_flow_explains_before_turning_anything_on() -> None:
+    coordinator = _not_counting_coordinator()
+    flow = _flow(coordinator, GRID_ISSUE)
+
+    result = asyncio.run(flow.async_step_init({"issue_id": GRID_ISSUE}))
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "confirm"
+    coordinator.async_enable_grid_energy_calculation.assert_not_called()
+
+
+def test_confirming_turns_the_grid_energy_calculation_on() -> None:
+    coordinator = _not_counting_coordinator()
+
+    result = asyncio.run(_flow(coordinator, GRID_ISSUE).async_step_confirm({}))
+
+    assert result["type"] == "create_entry"
+    coordinator.async_enable_grid_energy_calculation.assert_called_once()
+
+
+def test_confirming_after_the_registers_count_again_changes_nothing() -> None:
+    coordinator = _not_counting_coordinator()
+    flow = _flow(coordinator, GRID_ISSUE)
+    coordinator.grid_energy_not_counted = False
+
+    result = asyncio.run(flow.async_step_confirm({}))
+
+    assert result["type"] == "abort"
+    assert result["reason"] == "not_needed"
+    coordinator.async_enable_grid_energy_calculation.assert_not_called()
+
+
+def test_every_language_explains_the_grid_energy_issue_with_its_placeholders() -> None:
+    component = Path(const.__file__).parent
+    result = asyncio.run(
+        _flow(_not_counting_coordinator(), GRID_ISSUE).async_step_init()
+    )
+    provided = set(result.get("description_placeholders") or {})
+
+    for path in sorted(component.glob("translations/*.json")):
+        issue = json.loads(path.read_text(encoding="utf-8"))["issues"][
+            "grid_energy_not_counted"
+        ]
+        step = issue["fix_flow"]["step"]["confirm"]
+        used = {
+            name for _, name, _, _ in Formatter().parse(step["description"]) if name
+        }
+        assert used == provided, path.name
+        assert "not_needed" in issue["fix_flow"]["abort"], path.name
+        assert {
+            name for _, name, _, _ in Formatter().parse(issue["title"]) if name
+        } == {"host"}, path.name
