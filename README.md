@@ -474,7 +474,7 @@ history in the EcoFlow portal. To add one, see
 | Maximum feed-in Power (Percent)    | %    | Export cap as a share of the rated power, not on the PO Plus    |
 | Grid Feed-in Mode                  | –    | Whether the export is limited in watts, in percent or unlimited |
 | System Modes                       | –    | Raw system status                                               |
-| Coordinator Status                 | –    | Integration polling state                                       |
+| Coordinator Status                 | –    | Integration polling state; Readings stalled during a stall      |
 
 The inverter keeps its own copy of settings such as the export cap for Modbus
 mode. It takes the app's values the first time Modbus mode is turned on, and

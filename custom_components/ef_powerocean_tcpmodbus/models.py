@@ -276,6 +276,8 @@ class CoordinatorStatus(StrEnum):
     RECONNECT_FAILED = "reconnect_failed"
     PROCESSING_FAILED = "processing_failed"
     IDENTITY_MISMATCH = "identity_mismatch"
+    # The poll succeeded, but the inverter stopped updating what it serves.
+    READINGS_STALLED = "readings_stalled"
 
 
 class OperatingMode(StrEnum):

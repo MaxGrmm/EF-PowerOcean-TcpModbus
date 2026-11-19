@@ -233,6 +233,8 @@ def test_an_inverter_that_stopped_updating_distrusts_what_stands_still() -> None
     }
     # Still moving, so still shown; the counters are shown as the device counts.
     assert not checks.distrusted & {"solar_power", "grid_power", "solar_total"}
+    # The whole poll is stale, not just a few readings in it.
+    assert checks.stale
 
 
 def test_a_stalled_reading_at_0_is_distrusted_too() -> None:
@@ -255,6 +257,7 @@ def test_frozen_voltages_alone_are_not_a_stall() -> None:
     assert checks.active is not None
     assert checks.active.check == "frozen"
     assert "house_power" not in checks.distrusted
+    assert not checks.stale
 
 
 def test_a_quiet_night_on_a_healthy_system_is_not_a_stall() -> None:

@@ -389,7 +389,8 @@
           "read_failed": "Read failed",
           "reconnect_failed": "Reconnect failed",
           "processing_failed": "Processing failed",
-          "identity_mismatch": "Different device"
+          "identity_mismatch": "Different device",
+          "readings_stalled": "Readings stalled"
         }
       },
       "protocol_version": {

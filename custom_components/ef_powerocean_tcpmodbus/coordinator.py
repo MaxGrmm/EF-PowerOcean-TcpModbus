@@ -1200,7 +1200,13 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
             self._take_long_held_inverter_only_totals()
-            self._status = CoordinatorStatus.SUCCESS
+            # A poll that ran fine can still bring readings the inverter no
+            # longer updates (#227), which "success" would hide.
+            self._status = (
+                CoordinatorStatus.READINGS_STALLED
+                if self.control.reading_checks.stale
+                else CoordinatorStatus.SUCCESS
+            )
             if self._store is not None:
                 self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
             self._async_update_held_totals_issue_safely()

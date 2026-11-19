@@ -155,6 +155,8 @@ class Check:
     # once a failure has lasted issue_after. None where there is nothing to do.
     remedy: ClassVar[str | None] = None
     issue_after: ClassVar[timedelta | None] = None
+    # Whether a failure means the whole poll is stale, not a few readings in it.
+    stale_poll: ClassVar[bool] = False
     # Whether the last poll failed this check, as the runner counted it.
     failed = False
 
@@ -406,6 +408,7 @@ class TelemetryStalled(Check):
     shows = frozenset(_STALL_KEYS)
     remedy = "telemetry_stalled"
     issue_after = timedelta(minutes=30)
+    stale_poll = True
 
     def __init__(self, frozen: Check, counters: Check) -> None:
         self._evidence = (frozen, counters)
@@ -483,6 +486,7 @@ class Finding:
     keys: frozenset[str] = field(default=frozenset(), compare=False)
     remedy: str | None = field(default=None, compare=False)
     issue_after: timedelta | None = field(default=None, compare=False)
+    stale_poll: bool = field(default=False, compare=False)
 
 
 class ReadingChecks:
@@ -541,6 +545,7 @@ class ReadingChecks:
                 keys=with_derived(check.distrusted()),
                 remedy=check.remedy,
                 issue_after=check.issue_after,
+                stale_poll=check.stale_poll,
             )
             for check in failed
             if check.steps_aside
@@ -555,6 +560,11 @@ class ReadingChecks:
             # Another cause for the same state, or the same one with other
             # readings: it has lasted since the first.
             self.active = replace(held, since=self.active.since)
+
+    @property
+    def stale(self) -> bool:
+        """Return whether a finding shows the whole poll stale."""
+        return any(finding.stale_poll for finding in self.findings)
 
     def _failed(self, check: Check, data: Mapping[str, Any], now: datetime) -> bool:
         """Run one check, counting its failures; an error in it passes the poll."""

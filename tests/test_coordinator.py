@@ -435,9 +435,8 @@ def test_a_failed_cap_write_still_leaves_the_feed_mode_as_an_enum(
     assert coordinator.data["grid_feed_mode"] is models.GridFeedMode.LIMITED
 
 
-def test_accepted_update_publishes_successful_coordinator_status(
-    coordinator, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _accept_updates(coordinator, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let every update through, with the energy processing out of the way."""
     now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
     coordinator.async_get_raw_data = AsyncMock(return_value={"grid_import_total": 10.0})
     coordinator._energy_processor.validate_totals = Mock(
@@ -461,10 +460,30 @@ def test_accepted_update_publishes_successful_coordinator_status(
         coordinator_module, "calculate_derived_values", Mock(return_value={})
     )
 
+
+def test_accepted_update_publishes_successful_coordinator_status(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _accept_updates(coordinator, monkeypatch)
+
     asyncio.run(coordinator._async_update_data())
 
     assert coordinator.status == models.CoordinatorStatus.SUCCESS
     assert "coordinator_status" not in coordinator._last_checked_data
+
+
+def test_a_poll_of_readings_the_inverter_stopped_updating_is_not_a_success(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In #227 every poll ran fine for a week while the readings stood still."""
+    _accept_updates(coordinator, monkeypatch)
+    monkeypatch.setattr(
+        type(coordinator.control.reading_checks), "stale", property(lambda _: True)
+    )
+
+    asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.status == models.CoordinatorStatus.READINGS_STALLED
 
 
 def test_control_sees_the_derived_solar_power_not_the_raw_register(
