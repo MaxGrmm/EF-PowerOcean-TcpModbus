@@ -105,6 +105,24 @@ class Movement:
             key for key, (_, since) in self._seen.items() if now - since >= after
         )
 
+    def dump(self) -> dict[str, list[Any]]:
+        return {
+            key: [value, since.isoformat()]
+            for key, (value, since) in self._seen.items()
+        }
+
+    def load(self, stored: Mapping[str, Any]) -> None:
+        """Restore when each reading last changed.
+
+        A reading that still has the stored value on the first poll keeps its
+        time, so a restart does not hide how long it has stood still.
+        """
+        self._seen = {
+            key: (value, datetime.fromisoformat(since))
+            for key, (value, since) in stored.items()
+            if key in self._keys
+        }
+
     def still_since(self, keys: frozenset[str]) -> datetime | None:
         """Return since when the stillest of *keys* has not changed."""
         return min(
@@ -299,6 +317,12 @@ class FrozenReadings(Check):
         # The readings stopped moving before the check could tell.
         return self._movement.still_since(self._frozen) or now
 
+    def dump(self) -> dict[str, Any]:
+        return {"frozen_moved": self._movement.dump()}
+
+    def load(self, stored: Mapping[str, Any]) -> None:
+        self._movement.load(stored.get("frozen_moved") or {})
+
 
 class CounterStalled(Check):
     """An energy counter stands still while the power it counts keeps flowing.
@@ -356,6 +380,22 @@ class CounterStalled(Check):
     def onset(self, now: datetime, /) -> datetime:
         return min((self._last[counter][1] for counter in self._stalled), default=now)
 
+    def dump(self) -> dict[str, Any]:
+        return {
+            "counters_moved": {
+                counter: [total, since.isoformat(), energy_wh]
+                for counter, (total, since, energy_wh) in self._last.items()
+            }
+        }
+
+    def load(self, stored: Mapping[str, Any]) -> None:
+        self._last = {
+            counter: (float(total), datetime.fromisoformat(since), float(energy_wh))
+            for counter, (total, since, energy_wh) in (
+                stored.get("counters_moved") or {}
+            ).items()
+        }
+
 
 class TelemetryStalled(Check):
     """The inverter answers, but its readings stopped updating (#227).
@@ -404,6 +444,12 @@ class TelemetryStalled(Check):
             (check.onset(now) for check in self._evidence if check.failed),
             default=now,
         )
+
+    def dump(self) -> dict[str, Any]:
+        return {"stall_moved": self._movement.dump()}
+
+    def load(self, stored: Mapping[str, Any]) -> None:
+        self._movement.load(stored.get("stall_moved") or {})
 
 
 def with_derived(keys: frozenset[str]) -> frozenset[str]:

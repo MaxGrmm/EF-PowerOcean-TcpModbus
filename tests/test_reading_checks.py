@@ -494,7 +494,8 @@ def test_what_the_model_reports_survives_a_restart() -> None:
     checks = reading_checks.ReadingChecks()
     checks.run({"grid_voltage_l1": 231.0, **_modes()}, T0)
     stored = checks.dump_state()
-    assert stored == {"grid_seen": True, "bms_seen": True}
+    assert stored["grid_seen"] is True
+    assert stored["bms_seen"] is True
 
     restarted = reading_checks.ReadingChecks()
     restarted.load_state(stored)
@@ -506,6 +507,33 @@ def test_what_the_model_reports_survives_a_restart() -> None:
 
     assert restarted.active is not None
     assert restarted.active.check == "grid_voltage"
+
+
+def test_how_long_readings_stood_still_survives_a_restart() -> None:
+    """In #227 the readings stood still for a week; a restart must not hide that."""
+    import json
+
+    checks = reading_checks.ReadingChecks()
+    at = _polls()
+    frame = _stalled(0.0)
+    for now in at[:30]:
+        checks.run(frame, now)
+    stored = json.loads(json.dumps(checks.dump_state()))
+
+    restarted = reading_checks.ReadingChecks()
+    restarted.load_state(stored)
+    for now in at[30:]:
+        restarted.run(frame, now)
+
+    assert restarted.active == Finding(Status.INCONSISTENT_READINGS, "frozen", at[0])
+
+
+def test_a_state_that_cannot_be_read_starts_afresh() -> None:
+    checks = reading_checks.ReadingChecks()
+    checks.load_state({"frozen_moved": {"frequency": ["50.0", "not a time"]}})
+    checks.run(_live(), T0)
+
+    assert checks.active is None
 
 
 # ── What control does ─────────────────────────────────────────────────────────
