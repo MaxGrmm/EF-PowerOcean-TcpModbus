@@ -48,7 +48,7 @@
     },
     "error": {
       "cannot_connect": "Connection failed - please check IP address and port",
-      "modbus_silent": "The inverter takes connections on this port but sends no Modbus replies. Modbus TCP is most likely switched off, which a firmware update can do. Ask your installer to enable it in the EcoFlow Pro app, then try again."
+      "modbus_silent": "The inverter takes connections on this port but sends no Modbus replies. In a few cases, a firmware update has switched Modbus TCP off: if the inverter updated recently, ask your installer to enable it again in the EcoFlow Pro app, then try again."
     },
     "abort": {
       "already_configured": "This device is already configured",
@@ -119,11 +119,11 @@
     },
     "not_answering_unreachable": {
       "title": "The inverter at {host} is not reachable",
-      "description": "Nothing has answered on the inverter's Modbus port since {since}. Check that the inverter is powered and still has the IP address {host}, for example in your router. The entities stay unavailable until it answers again, and this message then disappears by itself."
+      "description": "Nothing has answered on the inverter's Modbus port since {since}. Check that the inverter is powered and still has the IP address {host}, for example in your router. In a few cases, a firmware update has also switched Modbus TCP off: if the inverter updated recently, ask your installer to enable it again in the EcoFlow Pro app. The entities stay unavailable until it answers again, and this message then disappears by itself."
     },
     "not_answering_modbus_silent": {
       "title": "The inverter at {host} stopped answering Modbus",
-      "description": "Since {since} the inverter takes connections on its Modbus port but sends no replies. Modbus TCP is most likely switched off, which a firmware update can do. Ask your installer to enable it again in the EcoFlow Pro app. The integration then recovers by itself, and this message disappears."
+      "description": "Since {since} the inverter takes connections on its Modbus port but sends no replies. In a few cases, a firmware update has switched Modbus TCP off: if the inverter updated recently, ask your installer to enable it again in the EcoFlow Pro app. The integration recovers by itself once the inverter answers, and this message then disappears."
     },
     "energy_totals_held": {
       "title": "Energy totals of the inverter at {host} have been held for over a day",
