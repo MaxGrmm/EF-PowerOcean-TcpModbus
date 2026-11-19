@@ -99,6 +99,7 @@ from .models import (
     encode_register,
 )
 from .reading_checks import KEYS_BY_CHECK, Finding
+from .reading_checks import REPORTED as READING_CHECKS_REPORTED
 from .telemetry import (
     TelemetryData,
     calculate_derived_values,
@@ -795,7 +796,9 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         readings the check judged.
         """
         raw = self.raw_registers
-        failing = self.control.reading_checks.failing
+        # Evidence for another check, such as counters a model updates late, would
+        # push out the snapshots of the checks that matter.
+        failing = self.control.reading_checks.failing & READING_CHECKS_REPORTED
         for check in sorted(failing - self._failing_before):
             self._check_snapshots.append(
                 {

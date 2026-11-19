@@ -348,6 +348,11 @@ class CounterStalled(Check):
     def __init__(self) -> None:
         self._movement = Movement(self._SUPPLY, zero_is_missing=True)
 
+    @property
+    def reported(self) -> bool:
+        """Return whether this model reports any counter that supplies the house."""
+        return bool(self._movement.reported)
+
     def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:
         # The device's own count, not the total held back from it.
         counts = {
@@ -374,9 +379,11 @@ class TelemetryStalled(Check):
 
     Frozen voltages alone may be a coarse model or a short glitch, and still
     counters can be a model that counts late. Frozen voltages with the counters
-    that supply the house still, or, for a model without them, with most readings
-    still for STALLED_WITHOUT_COUNTERS, is the inverter serving readings it no
-    longer updates. Every measured reading that has not
+    that supply the house still is the inverter serving readings it no longer
+    updates. Only a model that reports none of those counters is judged by most
+    readings standing still for STALLED_WITHOUT_COUNTERS instead: on a healthy
+    system at night many stand still, such as the PV strings, so that alone is
+    not enough where the counters can say more. Every measured reading that has not
     moved is then distrusted, while those that still move, such as the grid power
     from the meter, stay shown.
     """
@@ -400,9 +407,12 @@ class TelemetryStalled(Check):
     def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:
         self._movement.observe(data, now)
         frozen, counters = self._evidence
-        quiet = self._movement.still(now, STALLED_WITHOUT_COUNTERS)
-        mostly_quiet = 2 * len(quiet) > len(self._movement.reported)
-        if not frozen.failed or not (counters.failed or mostly_quiet):
+        if isinstance(counters, CounterStalled) and counters.reported:
+            evidence = counters.failed
+        else:
+            quiet = self._movement.still(now, STALLED_WITHOUT_COUNTERS)
+            evidence = 2 * len(quiet) > len(self._movement.reported)
+        if not frozen.failed or not evidence:
             self._stalled = frozenset()
             return False
         self._stalled = self._movement.still(now)
@@ -439,6 +449,9 @@ CHECKS: Final[tuple[type[Check], ...]] = (
     FrozenReadings,
     CounterStalled,
 )
+
+# The checks reported on their own, rather than as evidence for another.
+REPORTED: Final = frozenset(check.name for check in CHECKS if check.steps_aside)
 
 # Kept polled whatever entities are enabled, as the control inputs are.
 KEYS: Final = frozenset[str]().union(*(check.keys for check in CHECKS))

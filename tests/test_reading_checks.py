@@ -234,6 +234,45 @@ def test_frozen_voltages_alone_are_not_a_stall() -> None:
     assert "house_power" not in checks.distrusted
 
 
+def test_a_quiet_night_on_a_healthy_system_is_not_a_stall() -> None:
+    """At night the PV strings, the battery and its level all stand still.
+
+    Even if the voltages happened to look frozen, the grid counter keeps moving
+    with the house it supplies, so readings standing still prove nothing.
+    """
+    checks = reading_checks.ReadingChecks()
+    for poll, now in enumerate(_polls(int(60 * 60 / 5))):
+        frame = {
+            **_stalled(0.0),
+            "pv1_voltage": 0.0,
+            "pv1_current": 0.0,
+            "battery_power": 0.0,
+            # The house draws from the grid: a step of 0.01 kWh every 6 minutes.
+            "grid_import_total": 11579.97 + poll // 72 / 100,
+            "grid_power": 100.0 + poll % 3,
+        }
+        checks.run(frame, now)
+
+    assert checks.active is not None
+    assert checks.active.check == "frozen"
+    assert "battery_power" not in checks.distrusted
+
+
+def test_only_checks_reported_on_their_own_are_kept_in_snapshots(
+    coordinator,  # noqa: F811
+) -> None:
+    coordinator.control = SimpleNamespace(
+        reading_checks=SimpleNamespace(failing=frozenset({"counter_stalled"}))
+    )
+    coordinator._failing_before = frozenset()
+    coordinator._raw_before = None
+    coordinator._raw_blocks = {}
+
+    coordinator._record_check_snapshots({})
+
+    assert not coordinator._check_snapshots
+
+
 def test_a_stall_is_caught_at_night_as_soon_as_by_day() -> None:
     """In #227 the night export was 20 W; the counters prove it all the same."""
     checks = reading_checks.ReadingChecks()

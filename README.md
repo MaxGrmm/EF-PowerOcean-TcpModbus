@@ -254,15 +254,15 @@ before.
 Every poll is also checked for conditions in which the inverter is best left to
 itself:
 
-| Check               | Fails when                                                                            | Control Status        |
-| ------------------- | ------------------------------------------------------------------------------------- | --------------------- |
-| `off_grid`          | The inverter reports running off-grid                                                 | Off-grid              |
-| `grid_voltage`      | The grid-side voltage is gone while the inverter still reports on-grid                | Off-grid              |
-| `bms`               | The inverter reports its battery disconnected, after it reported one                  | Battery disconnected  |
-| `telemetry_stalled` | `frozen` fails and `counter_stalled` too, or most readings stood still for 30 minutes | Readings inconsistent |
-| `battery_soc`       | The system Battery SOC drops to 0 % from a level no battery empties from              | Readings inconsistent |
-| `frozen`            | Most voltages and the frequency haven't changed at all for five minutes               | Readings inconsistent |
-| `counter_stalled`   | No solar, grid import or battery discharge counter moved for 20 minutes               | None on its own       |
+| Check               | Fails when                                                                                | Control Status        |
+| ------------------- | ----------------------------------------------------------------------------------------- | --------------------- |
+| `off_grid`          | The inverter reports running off-grid                                                     | Off-grid              |
+| `grid_voltage`      | The grid-side voltage is gone while the inverter still reports on-grid                    | Off-grid              |
+| `bms`               | The inverter reports its battery disconnected, after it reported one                      | Battery disconnected  |
+| `telemetry_stalled` | `frozen` and `counter_stalled` fail; without counters, most readings still for 30 minutes | Readings inconsistent |
+| `battery_soc`       | The system Battery SOC drops to 0 % from a level no battery empties from                  | Readings inconsistent |
+| `frozen`            | Most voltages and the frequency haven't changed at all for five minutes                   | Readings inconsistent |
+| `counter_stalled`   | No solar, grid import or battery discharge counter moved for 20 minutes                   | None on its own       |
 
 A check counts once it fails three polls in a row. While one does, control hands the
 inverter its own self-consumption and resumes the selected mode once it passes again.
