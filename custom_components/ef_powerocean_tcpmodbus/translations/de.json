@@ -145,7 +145,7 @@
     },
     "telemetry_stalled": {
       "title": "Der Wechselrichter unter {host} aktualisiert seine Messwerte nicht mehr",
-      "description": "Der Wechselrichter antwortet noch, aber die meisten seiner Messwerte haben sich mindestens seit {since} nicht geändert. Stillstehende Messwerte werden als nicht verfügbar angezeigt, und die Modbus-Steuerung überlässt den Wechselrichter, falls aktiv, seiner eigenen Logik. Starten Sie den Wechselrichter neu, zum Beispiel indem Sie ihn in der EcoFlow-App oder am Gerät aus- und wieder einschalten. Dieses Problem verschwindet, sobald sich die Messwerte wieder ändern. Wenn es immer wieder auftritt, melden Sie es mit den Diagnosedaten der Integration und der Firmware-Version des Wechselrichters."
+      "description": "Der Wechselrichter antwortet noch, aber die meisten seiner Messwerte haben sich mindestens seit {since} nicht geändert. Stillstehende Messwerte werden als nicht verfügbar angezeigt, und die Modbus-Steuerung überlässt den Wechselrichter, falls aktiv, seiner eigenen Logik. Starten Sie den Wechselrichter gemäß der Bedienungsanleitung neu. Dieses Problem verschwindet, sobald sich die Messwerte wieder ändern. Wenn es immer wieder auftritt, melden Sie es mit den Diagnosedaten der Integration und der Firmware-Version des Wechselrichters."
     }
   },
   "selector": {
