@@ -73,6 +73,7 @@ CONF_MAX_BATTERY_CHARGED_POWER: Final = "battery_charged_power_max"
 CONF_MAX_BATTERY_DISCHARGED_POWER: Final = "battery_discharged_power_max"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_CALC_SOLAR_POWER: Final = "calc_solar_power"
+CONF_CALC_GRID_ENERGY: Final = "calc_grid_energy"
 CONF_MODBUS_CONTROL: Final = "modbus_control"
 CONF_INVERTER_MODEL: Final = "inverter_model"
 # kWh added to what the device reports for a lifetime total, by its key. Set by the
@@ -163,6 +164,22 @@ STATE_SAVE_DELAY_S: Final = 30
 # a repairs issue offering to take the inverter's value. Longer than any glitch on
 # record, a bogus 0 that lasted hours.
 HELD_TOTAL_ISSUE_AFTER_S: Final = 24 * 3600
+# The grid energy registers, which some inverters leave at 0 while Grid Power reads
+# right (#218). Grid energy can then be integrated from Grid Power instead.
+GRID_ENERGY_REGISTER_KEYS: Final = (
+    "grid_import_total",
+    "grid_import_today",
+    "grid_export_total",
+    "grid_export_today",
+)
+# Grid Power is not integrated across a longer gap between two readings, so an
+# outage adds no made-up energy.
+GRID_ENERGY_MAX_GAP_S: Final = 120
+# The grid energy registers reading 0 this long, while this much energy flowed
+# through the grid, raises a repairs issue offering to integrate Grid Power. As long
+# as a held total, since a bogus 0 has lasted hours.
+GRID_ENERGY_ISSUE_AFTER_S: Final = HELD_TOTAL_ISSUE_AFTER_S
+GRID_ENERGY_ISSUE_MIN_KWH: Final = 1.0
 # Where a user reports a held total they believe is wrong, with the bug form's
 # fields filled in from the device.
 BUG_REPORT_URL: Final = "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues/new"

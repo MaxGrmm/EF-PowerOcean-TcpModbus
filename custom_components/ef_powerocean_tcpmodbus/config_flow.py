@@ -27,6 +27,7 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
+    CONF_CALC_GRID_ENERGY,
     CONF_CALC_SOLAR_POWER,
     CONF_ENERGY_OFFSETS,
     CONF_HOST,
@@ -288,6 +289,10 @@ class EcoflowConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_CALC_SOLAR_POWER,
                         default=False,
                     ): BooleanSelector({}),
+                    vol.Required(
+                        CONF_CALC_GRID_ENERGY,
+                        default=False,
+                    ): BooleanSelector({}),
                 }
             ),
             errors=errors,
@@ -431,6 +436,10 @@ class EcoflowOptionsFlow(OptionsFlow):
             vol.Required(
                 CONF_CALC_SOLAR_POWER,
                 default=self.config_entry.options.get(CONF_CALC_SOLAR_POWER, False),
+            ): BooleanSelector({}),
+            vol.Required(
+                CONF_CALC_GRID_ENERGY,
+                default=self.config_entry.options.get(CONF_CALC_GRID_ENERGY, False),
             ): BooleanSelector({}),
             vol.Required(
                 CONF_BATTERY_RESERVE,

@@ -35,6 +35,7 @@ from .const import (
     BATTERY_MODULES,
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
+    CONF_CALC_GRID_ENERGY,
     CONF_CALC_SOLAR_POWER,
     CONF_ENERGY_OFFSETS,
     CONF_HOST,
@@ -86,6 +87,7 @@ from .energy_processor import (
     HeldTotal,
     offsets_from,
 )
+from .grid_energy import GridEnergyIntegrator
 from .modbus import ModbusClient, ModbusReadRejected, create_client
 from .models import (
     ControlFeature,
@@ -118,6 +120,13 @@ def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
 
 def held_totals_issue_id(entry: ConfigEntry) -> str:
     return f"energy_totals_held_{entry.entry_id}"
+
+
+GRID_ENERGY_ISSUE_PREFIX = "grid_energy_not_counted_"
+
+
+def grid_energy_issue_id(entry: ConfigEntry) -> str:
+    return f"{GRID_ENERGY_ISSUE_PREFIX}{entry.entry_id}"
 
 
 def battery_power_limits(capacity_wh: float) -> tuple[int, int]:
@@ -158,6 +167,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _pinned_serial: str | None = None
     # The totals the held-totals issue was last raised for.
     _held_issue_keys: frozenset[str] = frozenset()
+    _grid_energy_issue_raised: bool = False
     # The failed reading check last announced.
     _announced_finding: Finding | None = None
     # The checks the last poll failed and the words it read, to tell when one
@@ -200,6 +210,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ena_calc_solar_power = config_entry.options.get(
             CONF_CALC_SOLAR_POWER, False
         )
+        self._ena_calc_grid_energy = config_entry.options.get(
+            CONF_CALC_GRID_ENERGY, False
+        )
+        self._grid_energy = GridEnergyIntegrator()
         self.inverter_model = InverterModel(
             config_entry.options.get(CONF_INVERTER_MODEL, DEFAULT_INVERTER_MODEL)
         )
@@ -344,6 +358,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "reading_check_snapshots": list(self._check_snapshots),
             **self.control.dump_state(),
             **self._energy_processor.dump_state(),
+            "grid_energy": self._grid_energy.dump_state(),
         }
 
     async def async_load_persisted_state(self) -> None:
@@ -378,6 +393,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_checked_data = stored.get("last_checked_data") or {}
         self._last_checked_time = parse_datetime(stored.get("last_checked_time"))
         self._energy_processor.load_state(stored)
+        self._grid_energy.load_state(stored.get("grid_energy"))
 
     # ── Connection ────────────────────────────────────────────────────────────
 
@@ -761,6 +777,68 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception:
             _LOGGER.exception("Could not update the held energy totals issue")
 
+    @property
+    def grid_energy_not_counted(self) -> bool:
+        """Whether the grid energy registers stay at 0 while Grid Power reads.
+
+        Only while grid energy is not calculated: with it, there is nothing to fix.
+        """
+        return not self._ena_calc_grid_energy and (
+            self._grid_energy.registers_not_counting(dt.now())
+        )
+
+    @callback
+    def _async_update_grid_energy_issue_safely(self) -> None:
+        """Update the grid energy issue without ever failing the poll it follows."""
+        try:
+            self._async_update_grid_energy_issue()
+        except Exception:
+            _LOGGER.exception("Could not update the grid energy issue")
+
+    @callback
+    def _async_update_grid_energy_issue(self) -> None:
+        """Offer to calculate grid energy while its registers do not count.
+
+        Never turned on by itself: a register can read a bogus 0 for hours, and
+        the integrated totals are an estimate, so the user decides.
+        """
+        not_counted = self.grid_energy_not_counted
+        if not_counted == self._grid_energy_issue_raised:
+            return
+        self._grid_energy_issue_raised = not_counted
+        issue_id = grid_energy_issue_id(self.config_entry)
+        if not not_counted:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        _LOGGER.warning(
+            "The grid energy registers have read 0 since %s while %.2f kWh went "
+            "through the grid; grid energy can be calculated from Grid Power instead",
+            self._grid_energy.zero_since,
+            self._grid_energy.kwh_while_zero,
+        )
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=True,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="grid_energy_not_counted",
+            translation_placeholders={"host": str(self.host)},
+            data={"entry_id": self.config_entry.entry_id},
+        )
+
+    @callback
+    def async_enable_grid_energy_calculation(self) -> None:
+        """Turn grid energy calculation on, which the entry's reload applies."""
+        _LOGGER.warning(
+            "Calculating grid energy from Grid Power, as confirmed in repairs"
+        )
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            options={**self.config_entry.options, CONF_CALC_GRID_ENERGY: True},
+        )
+
     # ── Control stepping aside ────────────────────────────────────────────────
 
     def _async_track_reading_checks_safely(self) -> None:
@@ -961,6 +1039,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 for key, held in processor.held.items()
             },
             **processor.dump_state(),
+            "grid_energy": {
+                "calculated": self._ena_calc_grid_energy,
+                **self._grid_energy.dump_state(),
+            },
         }
 
     @property
@@ -996,7 +1078,9 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def _own_keys(self) -> frozenset[str]:
         """Return the keys the coordinator's own processing reads."""
-        return TelemetryData.keys(REGISTERS_BY_KEY) | ENERGY_KEYS
+        # Grid Power is integrated into grid energy, or watched for whether its
+        # registers count.
+        return TelemetryData.keys(REGISTERS_BY_KEY) | ENERGY_KEYS | {"grid_power"}
 
     def _plan_reads(self) -> None:
         """Group the registers to read, leaving out what nothing asks for."""
@@ -1185,7 +1269,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             self._size_battery_limits(raw_data.get("battery_capacity"))
             result = self._energy_processor.validate_totals(
-                self._energy_processor.apply_offsets(raw_data),
+                self._with_grid_energy(raw_data),
                 self._last_checked_data,
                 self._last_checked_time,
             )
@@ -1223,6 +1307,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._store is not None:
                 self._store.async_delay_save(self._persisted_state, STATE_SAVE_DELAY_S)
             self._async_update_held_totals_issue_safely()
+            self._async_update_grid_energy_issue_safely()
 
             return dict(result)
         except Exception:
@@ -1230,6 +1315,30 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # entities unavailable, rather than publishing an empty frame.
             self._status = CoordinatorStatus.PROCESSING_FAILED
             raise
+
+    def _with_grid_energy(self, raw_data: Mapping[str, Any]) -> dict[str, Any]:
+        """Return the device's readings, offset, with the grid totals to validate.
+
+        With grid energy calculated, the grid totals are integrated from Grid Power
+        instead. They already continue from the totals published, so no offset is
+        added to them. The (Device) sensors still show what the inverter reports.
+        """
+        integrator = self._grid_energy
+        if not self._ena_calc_grid_energy:
+            integrator.stop()
+        elif not integrator.active:
+            integrator.start(self._last_checked_data)
+            _LOGGER.info(
+                "Calculating grid energy from Grid Power, from %s",
+                integrator.totals(),
+            )
+        now = dt.now()
+        kwh = sum(integrator.add(raw_data.get("grid_power"), now))
+        integrator.observe_registers(raw_data, kwh, now)
+        result = self._energy_processor.apply_offsets(raw_data)
+        if integrator.active:
+            result.update(integrator.totals())
+        return result
 
     def _hold_battery_capacity(self, capacity_wh: float | None) -> float | None:
         """Return a plausible capacity, else the last one read.

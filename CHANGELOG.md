@@ -7,6 +7,7 @@
 - A repairs issue when the inverter has not answered for 5 minutes or more, as after a firmware update that switched Modbus TCP off (#222). The inverter then stays silent instead of reading 0, which the Modbus disabled issue does not catch. The issue says whether the port still takes connections or nothing answers at all, and that in a few cases a firmware update has switched Modbus TCP off. It stays across a reload and clears with the next good read.
 - Setup and Reconfigure say when the inverter takes connections but sends no replies, instead of asking to check the address, and that a firmware update has in a few cases switched Modbus TCP off.
 - Firmware changes appear in the logbook, from an `ef_powerocean_tcpmodbus_firmware_changed` event.
+- A **Calculation of grid energy** option, for inverters whose grid import and export registers stay at 0 while Grid Power reads right (#218). Grid Import and Grid Export are then integrated from Grid Power, continuing from the totals shown, and House Consumption follows. A repairs issue offers to turn it on once the registers have read 0 for a day while at least 1 kWh went through the grid; it is never turned on by itself.
 
 ### Changed
 

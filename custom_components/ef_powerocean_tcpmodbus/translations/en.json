@@ -22,7 +22,8 @@
           "solar_power_max": "Maximum solar power [W]",
           "grid_power_max": "Maximum grid power [W]",
           "scan_interval": "Poll Interval [s]",
-          "calc_solar_power": "Calculation of solar power"
+          "calc_solar_power": "Calculation of solar power",
+          "calc_grid_energy": "Calculation of grid energy"
         },
         "data_description": {
           "inverter_model": "Select the inverter model.",
@@ -30,7 +31,8 @@
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Most your grid connection can import or export, set by your main fuse. Not the inverter rating: the house alone can draw more than that.",
           "scan_interval": "How often values are polled (2-30 seconds)",
-          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
+          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
+          "calc_grid_energy": "In some inverters, the grid import and export registers stay at 0 while Grid Power reads right. This switch calculates grid import and export from Grid Power instead. An estimate: it can differ from your meter by a few percent."
         }
       },
       "reconfigure": {
@@ -68,6 +70,7 @@
           "grid_power_max": "Maximum grid power [W]",
           "scan_interval": "Poll Interval [s]",
           "calc_solar_power": "Calculation of solar power",
+          "calc_grid_energy": "Calculation of grid energy",
           "battery_reserve": "Battery Reserve"
         },
         "data_description": {
@@ -77,6 +80,7 @@
           "grid_power_max": "Most your grid connection can import or export, set by your main fuse. Not the inverter rating: the house alone can draw more than that.",
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
+          "calc_grid_energy": "In some inverters, the grid import and export registers stay at 0 while Grid Power reads right. This switch calculates grid import and export from Grid Power instead. An estimate: it can differ from your meter by a few percent.",
           "battery_reserve": "Native: the inverter enforces the reserve itself, like the one set in the EcoFlow app, but not every model accepts a change to it over Modbus. Emulated: the integration imitates the app's reserve with its own logic, while Modbus Control is on. Set for your model; change it only to test a model."
         },
         "sections": {
@@ -140,6 +144,20 @@
         },
         "abort": {
           "not_held": "These energy totals are no longer held."
+        }
+      }
+    },
+    "grid_energy_not_counted": {
+      "title": "Grid energy of the inverter at {host} is not counted",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Calculate grid energy from Grid Power",
+            "description": "For more than a day, the inverter has reported 0 for grid import and export, while Grid Power showed energy flowing through the grid. Grid Import, Grid Export and House Consumption therefore stay wrong.\n\nSubmit to calculate grid import and export from Grid Power instead. The totals continue from their current values, so the Energy dashboard records no jump. The calculation is an estimate: it can differ from your meter by a few percent, and energy is not counted while the inverter cannot be read. The (Device) sensors keep showing what the inverter reports.\n\nYou can turn this off again under the integration's [settings]({settings_page}): choose Configure and switch off Calculation of grid energy."
+          }
+        },
+        "abort": {
+          "not_needed": "The grid energy registers are counting again, or grid energy is already calculated."
         }
       }
     }
