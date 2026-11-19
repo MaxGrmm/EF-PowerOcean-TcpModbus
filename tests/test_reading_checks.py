@@ -111,58 +111,58 @@ def test_a_model_without_these_readings_is_never_frozen() -> None:
     )
 
 
-# 1 kWh at 3.6 kW takes 1000 s, 200 polls 5 s apart.
-STALLED_POLLS = 201
+# The supply counters standing still for 20 minutes, 240 polls 5 s apart.
+STALLED_POLLS = 241
 
 
-def test_a_counter_fails_once_its_power_adds_up_to_a_kwh_without_it() -> None:
+def test_counters_fail_once_none_that_supplies_the_house_moved_for_20_minutes() -> None:
     check = reading_checks.CounterStalled()
-    frame = {"solar_total": 20719.85, "solar_power": 3600.0}
+    frame = {"solar_total": 20719.85, "grid_import_total": 11579.97}
 
     results = [check.check(frame, now) for now in _polls(STALLED_POLLS + 5)]
 
     assert not any(results[: STALLED_POLLS - 1])
     assert all(results[STALLED_POLLS - 1 :])
-    # Moving again clears it at once.
-    assert not check.check({**frame, "solar_total": 20719.86}, T0 + timedelta(hours=1))
+    # One of them moving again clears it at once.
+    later = T0 + timedelta(hours=1)
+    assert not check.check({**frame, "grid_import_total": 11579.98}, later)
 
 
 @pytest.mark.parametrize(
     ("frame", "fails"),
     (
-        # Importing does not move the export counter.
-        ({"grid_export_total": 1674.18, "grid_power": 3600.0}, False),
-        ({"grid_export_total": 1674.18, "grid_power": -3600.0}, True),
+        # At night only the grid or the battery supplies the house.
+        ({"solar_total": 5.0, "bat_discharged_total": "moves"}, False),
+        ({"solar_total": 5.0, "grid_import_total": "moves"}, False),
+        # Export and charging do not supply the house, so they prove nothing.
+        ({"solar_total": 5.0, "grid_export_total": "moves"}, True),
+        ({"solar_total": 5.0, "bat_charged_total": "moves"}, True),
         # The device's own count is judged, not a total held back from it.
-        ({"solar_total": 5.0, "solar_total_raw": 5.0, "solar_power": 3600.0}, True),
-        # No power, nothing to count.
-        ({"solar_total": 5.0, "solar_power": 0.0}, False),
-        ({"solar_total": None, "solar_power": 3600.0}, False),
+        ({"solar_total": 5.0, "solar_total_raw": "moves"}, False),
+        # A model that reports no supply counter is not judged by them.
+        ({"grid_export_total": 5.0}, False),
+        ({"solar_total": None}, False),
     ),
 )
-def test_a_counter_is_judged_by_the_power_it_counts(
+def test_counters_are_judged_by_those_that_supply_the_house(
     frame: dict[str, Any], fails: bool
 ) -> None:
     check = reading_checks.CounterStalled()
-    results = [check.check(frame, now) for now in _polls(STALLED_POLLS)]
+    results = [
+        check.check(
+            {key: poll if value == "moves" else value for key, value in frame.items()},
+            now,
+        )
+        for poll, now in enumerate(_polls(STALLED_POLLS))
+    ]
     assert results[-1] is fails
 
 
-def test_an_outage_counts_as_a_minute_of_power_at_most() -> None:
-    check = reading_checks.CounterStalled()
-    frame = {"solar_total": 5.0, "solar_power": 10_000.0}
-
-    check.check(frame, T0)
-    # Ten hours apart at 10 kW, but only one minute is believed: 167 Wh.
-    assert not check.check(frame, T0 + timedelta(hours=10))
-
-
-def test_a_still_counter_alone_never_steps_aside() -> None:
-    """A model that counts in coarse steps must not hand control back for it."""
+def test_still_counters_alone_never_step_aside() -> None:
+    """A model that counts late must not hand control back for it."""
     checks = reading_checks.ReadingChecks()
-    frame = {**_live(), "solar_total": 5.0, "solar_power": 3600.0}
     for now in _polls(STALLED_POLLS + 5):
-        checks.run({**frame, **_live()}, now)
+        checks.run({**_live(), "solar_total": 5.0}, now)
 
     assert "counter_stalled" in checks.failing
     assert checks.active is None
@@ -222,25 +222,24 @@ def test_a_stalled_reading_at_0_is_distrusted_too() -> None:
     assert "battery_current" in checks.distrusted
 
 
-def test_frozen_voltages_alone_are_not_a_stall_at_first() -> None:
+def test_frozen_voltages_alone_are_not_a_stall() -> None:
     checks = reading_checks.ReadingChecks()
-    for now in _polls(STALLED_POLLS + 5):
-        # The voltages stand still, but the counter keeps counting.
-        checks.run({**_stalled(3600.0), "solar_total": now.timestamp()}, now)
+    for poll, now in enumerate(_polls(STALLED_POLLS + 5)):
+        # The voltages stand still, but the grid keeps supplying the house.
+        frame = {**_stalled(3600.0 + poll % 7), "grid_import_total": now.timestamp()}
+        checks.run(frame, now)
 
     assert checks.active is not None
     assert checks.active.check == "frozen"
     assert "house_power" not in checks.distrusted
 
 
-def test_a_stalled_battery_proves_a_stall_without_the_sun() -> None:
-    """At night in #227 the export was 20 W, but the battery read 490 W."""
+def test_a_stall_is_caught_at_night_as_soon_as_by_day() -> None:
+    """In #227 the night export was 20 W; the counters prove it all the same."""
     checks = reading_checks.ReadingChecks()
-    frame = {**_stalled(0.0), "bat_charged_total": 11451.31}
-    # 490.9 W adds up to 1 kWh in a little over 2 hours.
-    at = _polls(int(2.1 * 3600 / 5))
+    at = _polls(STALLED_POLLS + 5)
     for poll, now in enumerate(at):
-        checks.run({**frame, "grid_power": -15.0 - poll % 7}, now)
+        checks.run({**_stalled(0.0), "grid_power": -15.0 - poll % 7}, now)
 
     assert checks.active is not None
     assert checks.active.check == "telemetry_stalled"
