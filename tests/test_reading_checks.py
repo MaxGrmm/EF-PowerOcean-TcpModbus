@@ -103,6 +103,24 @@ def test_one_reading_a_model_rounds_coarsely_never_fails_it_alone() -> None:
     assert not any(results)
 
 
+def test_coarse_readings_never_fail_it_while_an_ac_voltage_moves() -> None:
+    """A single-phase model may round the frequency, and the battery idles."""
+    check = reading_checks.FrozenReadings()
+    results = [
+        check.check(
+            {
+                "frequency": 50.0,
+                "battery_voltage": 53.6,
+                "voltage_l1": 230 + p % 9 / 10,
+            },
+            now,
+        )
+        for p, now in enumerate(_polls())
+    ]
+
+    assert not any(results)
+
+
 def test_a_model_without_these_readings_is_never_frozen() -> None:
     check = reading_checks.FrozenReadings()
     assert not any(

@@ -67,6 +67,11 @@ def keys_of(*signals: Signal) -> tuple[str, ...]:
 
 # On a live grid these jitter from poll to poll, whatever the power flows do.
 _JITTER_KEYS: Final = keys_of(Signal.JITTER)
+# The finest of them: the frequency or an idle battery's voltage may be rounded
+# coarsely enough to sit still for minutes, an AC voltage in 0.01 V never does.
+_AC_VOLTAGE_KEYS: Final = frozenset(
+    {"voltage_l1", "voltage_l2", "voltage_l3", *_GRID_VOLTAGE_KEYS}
+)
 # What an inverter that stopped updating stops moving, settings and counters aside.
 _STALL_KEYS: Final = keys_of(Signal.JITTER, Signal.MEASURE, Signal.LEVEL)
 
@@ -291,8 +296,9 @@ class FrozenReadings(Check):
     """Most voltages and the frequency have not changed at all for a while.
 
     Judged per reading, so one that still jitters does not hide the others (#227),
-    and only the ones that stopped are distrusted. It takes most of them, so one
-    reading a model rounds coarsely never fails it on its own.
+    and only the ones that stopped are distrusted. It takes most of them, and an
+    AC voltage among them, so readings a model rounds coarsely, such as the
+    frequency and an idle battery's voltage, never fail it on their own.
     """
 
     name = "frozen"
@@ -308,7 +314,9 @@ class FrozenReadings(Check):
         reported = self._movement.reported
         self._frozen = self._movement.still(now)
         # Nothing to judge by: a model that reports none of these never fails.
-        return bool(reported) and 2 * len(self._frozen) > len(reported)
+        return 2 * len(self._frozen) > len(reported) and not self._frozen.isdisjoint(
+            _AC_VOLTAGE_KEYS
+        )
 
     def distrusted(self) -> frozenset[str]:
         return self._frozen

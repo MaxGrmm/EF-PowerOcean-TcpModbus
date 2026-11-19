@@ -261,7 +261,7 @@ itself:
 | `bms`               | The inverter reports its battery disconnected, after it reported one                      | Battery disconnected  |
 | `telemetry_stalled` | `frozen` and `counter_stalled` fail; without counters, most readings still for 30 minutes | Readings inconsistent |
 | `battery_soc`       | The system Battery SOC drops to 0 % from a level no battery empties from                  | Readings inconsistent |
-| `frozen`            | Most voltages and the frequency haven't changed at all for five minutes                   | Readings inconsistent |
+| `frozen`            | Most voltages and the frequency, an AC voltage among them, haven't changed for 5 minutes  | Readings inconsistent |
 | `counter_stalled`   | No solar, grid import or battery discharge counter moved for 20 minutes                   | None on its own       |
 
 A check counts once it fails three polls in a row. While one does, control hands the
