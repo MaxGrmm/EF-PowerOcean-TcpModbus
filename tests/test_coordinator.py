@@ -24,6 +24,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const, models, outage
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
+from custom_components.ef_powerocean_tcpmodbus.announcer import Announcer
 from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowConfigEntry
 from custom_components.ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
@@ -66,6 +67,7 @@ def coordinator():
     instance._store = None
     instance.identity = models.DeviceIdentity()
     instance._consecutive_modbus_disabled_reads = 0
+    instance._announcer = Announcer()
     instance._optional_stalls = {}
     instance._battery_capacity_wh = None
     instance._raw_blocks = {}

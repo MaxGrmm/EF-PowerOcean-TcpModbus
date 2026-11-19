@@ -23,11 +23,10 @@ from pymodbus import __version__ as pyModbusVersion
 from pymodbus.exceptions import ModbusException
 
 from . import outage
+from .announcer import Announcer
 from .const import (
-    ATTR_CHECK,
     ATTR_FROM,
     ATTR_MODE,
-    ATTR_STATUS,
     ATTR_TO,
     BATTERY_CHARGE_W_PER_WH,
     BATTERY_DISCHARGE_W_PER_WH,
@@ -60,8 +59,6 @@ from .const import (
     ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
     EVENT_FIRMWARE_CHANGED,
-    EVENT_READING_CHECK_CLEARED,
-    EVENT_READING_CHECK_FAILED,
     FIRMWARE_VERSION,
     HELD_TOTAL_ISSUE_AFTER_S,
     MAX_BATTERY_CAPACITY_WH,
@@ -98,7 +95,7 @@ from .models import (
     battery_reserve_for,
     encode_register,
 )
-from .reading_checks import KEYS_BY_CHECK, Finding
+from .reading_checks import KEYS_BY_CHECK
 from .reading_checks import REPORTED as READING_CHECKS_REPORTED
 from .telemetry import (
     TelemetryData,
@@ -159,8 +156,8 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _pinned_serial: str | None = None
     # The totals the held-totals issue was last raised for.
     _held_issue_keys: frozenset[str] = frozenset()
-    # The failed reading check last announced.
-    _announced_finding: Finding | None = None
+    # Tells the user about the reading checks' findings.
+    _announcer: Announcer
     # The checks the last poll failed and the words it read, to tell when one
     # starts failing and to show what came before.
     _failing_before: frozenset[str] = frozenset()
@@ -227,6 +224,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._modbus_client.block_writes("identity_unverified")
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
+        self._announcer = Announcer()
 
         self.control = ControlManager(
             self._modbus_client,
@@ -773,20 +771,14 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @callback
     def _async_track_reading_checks(self) -> None:
-        """Announce a failed check and its end as events, which the logbook shows.
-
-        Not raised in repairs: what fails one, an outage, a battery the battery
-        saver turned off or an inverter fault, is nothing the user can fix, and
-        Control Status already shows why control stepped aside.
-        """
-        finding = self.control.reading_checks.active
-        previous, self._announced_finding = self._announced_finding, finding
-        # Another check standing for the same state is not news.
-        if (finding and finding.status) != (previous and previous.status):
-            if previous is not None:
-                self._fire_check_event(EVENT_READING_CHECK_CLEARED, previous)
-            if finding is not None:
-                self._fire_check_event(EVENT_READING_CHECK_FAILED, finding)
+        """Announce the findings that started or ended with this poll."""
+        self._announcer.update(
+            self.hass,
+            self.config_entry,
+            str(self.host),
+            self.control.reading_checks.findings,
+            dt.now(),
+        )
 
     def _record_check_snapshots(self, data: Mapping[str, Any]) -> None:
         """Keep the readings of a poll in which a check starts failing.
@@ -817,20 +809,6 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def reading_check_snapshots(self) -> list[dict[str, Any]]:
         """Return the readings of the checks that last started failing, oldest first."""
         return list(self._check_snapshots)
-
-    @callback
-    def _fire_check_event(self, event_type: str, finding: Finding) -> None:
-        devices = device_registry.async_entries_for_config_entry(
-            device_registry.async_get(self.hass), self.config_entry.entry_id
-        )
-        self.hass.bus.async_fire(
-            event_type,
-            {
-                ATTR_DEVICE_ID: devices[0].id if devices else None,
-                ATTR_STATUS: str(finding.status),
-                ATTR_CHECK: finding.check,
-            },
-        )
 
     @callback
     def _async_update_held_totals_issue(self) -> None:

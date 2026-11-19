@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from itertools import count
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from homeassistant.helpers import device_registry as dr
@@ -712,7 +712,7 @@ def test_the_checks_run_while_modbus_control_is_off(
     assert Status.INCONSISTENT_READINGS not in run.status
 
 
-# ── Events, and no repairs issue ──────────────────────────────────────────────
+# ── Events and repairs issues ──────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -723,11 +723,13 @@ def tracked(coordinator, issues, monkeypatch: pytest.MonkeyPatch):  # noqa: F811
     monkeypatch.setattr(dr, "async_get", lambda _: None)
     clock = {"now": T0}
     monkeypatch.setattr(dt_util, "now", lambda *_: clock["now"])
-    checks = SimpleNamespace(active=None)
+    checks = SimpleNamespace(findings=())
     coordinator.control = SimpleNamespace(reading_checks=checks)
 
-    def poll(finding: Finding | None, minutes: float) -> None:
-        checks.active = finding
+    def poll(finding: Finding | tuple[Finding, ...] | None, minutes: float) -> None:
+        if isinstance(finding, Finding):
+            finding = (finding,)
+        checks.findings = finding or ()
         clock["now"] = T0 + timedelta(minutes=minutes)
         coordinator._async_track_reading_checks()
 
@@ -756,12 +758,29 @@ def test_a_failed_check_is_announced_when_it_starts_and_when_it_ends(tracked) ->
     ]
 
 
-def test_another_cause_for_the_same_state_is_not_announced_again(tracked) -> None:
-    tracked.poll(Finding(Status.INCONSISTENT_READINGS, "battery_soc", T0), 12)
-    tracked.poll(Finding(Status.INCONSISTENT_READINGS, "frozen", T0), 13)
+def test_each_finding_is_announced_on_its_own(tracked) -> None:
+    """A stall follows frozen voltages with the same status, and is still news."""
+    frozen = Finding(Status.INCONSISTENT_READINGS, "frozen", T0)
+    stalled = Finding(Status.INCONSISTENT_READINGS, "telemetry_stalled", T0)
+
+    tracked.poll(frozen, 5)
+    tracked.poll((stalled, frozen), 30)
+    tracked.poll((stalled, frozen), 31)
+    tracked.poll(None, 40)
 
     assert _fired(tracked) == [
-        (const.EVENT_READING_CHECK_FAILED, "inconsistent_readings", "battery_soc")
+        (const.EVENT_READING_CHECK_FAILED, "inconsistent_readings", "frozen"),
+        (
+            const.EVENT_READING_CHECK_FAILED,
+            "inconsistent_readings",
+            "telemetry_stalled",
+        ),
+        (const.EVENT_READING_CHECK_CLEARED, "inconsistent_readings", "frozen"),
+        (
+            const.EVENT_READING_CHECK_CLEARED,
+            "inconsistent_readings",
+            "telemetry_stalled",
+        ),
     ]
 
 
@@ -787,6 +806,53 @@ def test_a_failed_check_is_never_raised_in_repairs(tracked) -> None:
     tracked.issues.created.assert_not_called()
 
 
+def _stall(since: datetime = T0) -> Finding:
+    return Finding(
+        Status.INCONSISTENT_READINGS,
+        "telemetry_stalled",
+        since,
+        remedy="telemetry_stalled",
+        issue_after=timedelta(minutes=30),
+    )
+
+
+def test_a_stall_is_raised_in_repairs_after_half_an_hour(tracked) -> None:
+    """A restart is the user's to do, unlike what fails the other checks."""
+    tracked.poll(_stall(), 29)
+    tracked.issues.created.assert_not_called()
+
+    tracked.poll(_stall(), 30)
+    tracked.poll(_stall(), 45)
+    tracked.issues.created.assert_called_once()
+    kwargs = tracked.issues.created.call_args.kwargs
+    assert kwargs["translation_key"] == "telemetry_stalled"
+    assert kwargs["is_persistent"] is False
+
+    tracked.poll(None, 46)
+    tracked.issues.deleted.assert_called_once()
+
+
+def test_a_stall_that_started_before_a_restart_is_raised_at_once(tracked) -> None:
+    """How long readings stood still survives a restart, so the issue need not wait."""
+    tracked.poll(_stall(since=T0 - timedelta(days=7)), 0)
+
+    tracked.issues.created.assert_called_once()
+
+
+def test_frozen_readings_alone_are_not_raised_in_repairs(tracked) -> None:
+    for minute in range(0, 120, 5):
+        tracked.poll(Finding(Status.INCONSISTENT_READINGS, "frozen", T0), minute)
+
+    tracked.issues.created.assert_not_called()
+
+
+def test_every_issue_a_finding_raises_goes_with_the_entry() -> None:
+    from custom_components.ef_powerocean_tcpmodbus import announcer
+
+    entry = SimpleNamespace(entry_id="entry")
+    assert announcer.issue_ids(cast(Any, entry)) == ["telemetry_stalled_entry"]
+
+
 def test_every_status_a_check_stands_for_has_its_text() -> None:
     import json
     from pathlib import Path
@@ -795,6 +861,8 @@ def test_every_status_a_check_stands_for_has_its_text() -> None:
     for language in ("en", "de"):
         strings = json.loads((folder / f"{language}.json").read_text())
         assert not [key for key in strings["issues"] if key.startswith("reading_")]
+        remedies = {check.remedy for check in reading_checks.CHECKS if check.remedy}
+        assert remedies <= strings["issues"].keys()
         states = strings["entity"]["sensor"]["control_status"]["state"]
         assert "inconsistent_readings" in states
 
@@ -803,7 +871,9 @@ def test_an_error_announcing_a_step_aside_never_fails_the_poll(
     coordinator,  # noqa: F811
 ) -> None:
     coordinator.control = SimpleNamespace(
-        reading_checks=SimpleNamespace(active=Finding(Status.OFF_GRID, "off_grid", T0))
+        reading_checks=SimpleNamespace(
+            findings=(Finding(Status.OFF_GRID, "off_grid", T0),)
+        )
     )
     coordinator.hass.bus.async_fire.side_effect = RuntimeError("bus gone")
 

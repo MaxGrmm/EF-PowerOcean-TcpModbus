@@ -21,6 +21,7 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from . import outage
+from .announcer import issue_ids as announcer_issue_ids
 from .const import CONF_HOST, CONF_PORT, DOMAIN
 from .control import ControlInputs
 from .coordinator import (
@@ -224,6 +225,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
     ir.async_delete_issue(hass, DOMAIN, _modbus_disabled_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, identity_mismatch_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, held_totals_issue_id(entry))
+    for issue_id in announcer_issue_ids(entry):
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
     # An outage outlives a reload, so its issue stays; async_setup drops it when
     # the entry is disabled.
     # The coordinator's async_shutdown, registered with the entry, hands control
