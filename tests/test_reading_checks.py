@@ -340,6 +340,18 @@ def test_frozen_readings_and_what_is_calculated_from_them_are_distrusted() -> No
     assert reading_checks.with_derived(frozenset({"pv1_current"})) >= {"pv1_power"}
 
 
+def test_a_finding_carries_its_readings_and_what_the_user_can_do() -> None:
+    checks = reading_checks.ReadingChecks()
+    for now in _polls():
+        checks.run({**_live(), **_socs(0, 99, 99)}, now)
+
+    soc = next(f for f in checks.findings if f.check == "battery_soc")
+    assert soc.keys == {"battery_soc", "bat_remaining"}
+    # Nothing the user can do about a bad read.
+    assert soc.remedy is None
+    assert reading_checks.TelemetryStalled.remedy == "telemetry_stalled"
+
+
 def test_another_cause_for_the_same_state_keeps_its_start() -> None:
     checks = reading_checks.ReadingChecks()
     at = [T0 + timedelta(seconds=5 * poll) for poll in range(8)]

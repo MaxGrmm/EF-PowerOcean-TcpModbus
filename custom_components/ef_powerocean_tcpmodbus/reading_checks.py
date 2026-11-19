@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, Final
 
@@ -121,6 +121,12 @@ class Check:
     steps_aside: ClassVar[bool] = True
     # Checks whose verdict this one weighs, run before it on every poll.
     needs: ClassVar[tuple[type[Check], ...]] = ()
+    # Readings it judges without keeping them polled, kept in its snapshots.
+    shows: ClassVar[frozenset[str]] = frozenset()
+    # The repairs issue that tells the user what to do, by its translation key,
+    # once a failure has lasted issue_after. None where there is nothing to do.
+    remedy: ClassVar[str | None] = None
+    issue_after: ClassVar[timedelta | None] = None
     # Whether the last poll failed this check, as the runner counted it.
     failed = False
 
@@ -137,6 +143,13 @@ class Check:
     def onset(self, now: datetime, /) -> datetime:
         """Return when what this check fails on began, once it fails at *now*."""
         return now
+
+    def dump(self) -> dict[str, Any]:
+        """Return what this check learned, to survive a restart, keyed uniquely."""
+        return {}
+
+    def load(self, stored: Mapping[str, Any]) -> None:
+        """Restore what dump() returned before a restart."""
 
 
 class OffGridReported(Check):
@@ -178,6 +191,12 @@ class GridVoltageLost(Check):
             return False
         return self._grid_seen and max(voltages) <= GRID_ABSENT_V
 
+    def dump(self) -> dict[str, Any]:
+        return {"grid_seen": self._grid_seen}
+
+    def load(self, stored: Mapping[str, Any]) -> None:
+        self._grid_seen = bool(stored.get("grid_seen"))
+
 
 class BatteryDisconnected(Check):
     """The inverter reports its battery management system gone.
@@ -199,6 +218,12 @@ class BatteryDisconnected(Check):
         if report.bms_connected:
             self._bms_seen = True
         return self._bms_seen and not report.bms_connected
+
+    def dump(self) -> dict[str, Any]:
+        return {"bms_seen": self._bms_seen}
+
+    def load(self, stored: Mapping[str, Any]) -> None:
+        self._bms_seen = bool(stored.get("bms_seen"))
 
 
 class SystemSocMismatch(Check):
@@ -340,6 +365,9 @@ class TelemetryStalled(Check):
     # of them polled itself: the checks it weighs keep their own evidence polled,
     # and a reading nobody shows needs no verdict.
     keys = frozenset()
+    shows = frozenset(_STALL_KEYS)
+    remedy = "telemetry_stalled"
+    issue_after = timedelta(minutes=30)
 
     def __init__(self, *evidence: Check) -> None:
         self._evidence = evidence
@@ -382,16 +410,26 @@ CHECKS: Final[tuple[type[Check], ...]] = (
 
 # Kept polled whatever entities are enabled, as the control inputs are.
 KEYS: Final = frozenset[str]().union(*(check.keys for check in CHECKS))
-KEYS_BY_CHECK: Final = {check.name: check.keys for check in CHECKS}
+# The readings each check judges, kept in the snapshots of its failures.
+KEYS_BY_CHECK: Final = {check.name: check.keys | check.shows for check in CHECKS}
 
 
 @dataclass(frozen=True, slots=True)
 class Finding:
-    """A check that has failed for long enough to act on, and since when."""
+    """A check that has failed for long enough to act on, and since when.
+
+    It carries what the consumers need to react to it, so none of them has to
+    know one check from another: the readings it distrusts, and the repairs issue
+    that tells the user what to do. A finding is the same finding while its
+    check, state and start are, whatever its readings do.
+    """
 
     status: ControlStatus
     check: str
     since: datetime
+    keys: frozenset[str] = field(default=frozenset(), compare=False)
+    remedy: str | None = field(default=None, compare=False)
+    issue_after: timedelta | None = field(default=None, compare=False)
 
 
 class ReadingChecks:
@@ -416,6 +454,9 @@ class ReadingChecks:
         self._broken: set[str] = set()
         # The failure that holds, if any: the first in CHECKS that has held.
         self.active: Finding | None = None
+        # Every failure that holds, in the order of CHECKS. Evidence for another
+        # check is not one: it is never reported on its own.
+        self.findings: tuple[Finding, ...] = ()
         # The checks this poll failed, whether or not that has held yet.
         self.failing: frozenset[str] = frozenset()
         # The readings this poll's failures show to be wrong.
@@ -439,22 +480,28 @@ class ReadingChecks:
             check.steps_aside and check.status is ControlStatus.INCONSISTENT_READINGS
             for check in failed
         )
-        held = next(
-            (
-                check
-                for check in failed
-                if check.steps_aside
-                and self._polls[check.name] >= CONTROL_STATUS_DAMPING_POLLS
-            ),
-            None,
+        self.findings = tuple(
+            Finding(
+                check.status,
+                check.name,
+                self._since[check.name],
+                keys=with_derived(check.distrusted()),
+                remedy=check.remedy,
+                issue_after=check.issue_after,
+            )
+            for check in failed
+            if check.steps_aside
+            and self._polls[check.name] >= CONTROL_STATUS_DAMPING_POLLS
         )
+        held = self.findings[0] if self.findings else None
         if held is None:
             self.active = None
         elif self.active is None or self.active.status is not held.status:
-            self.active = Finding(held.status, held.name, self._since[held.name])
-        elif self.active.check != held.name:
-            # Another cause for the same state: it has lasted since the first.
-            self.active = replace(self.active, check=held.name)
+            self.active = held
+        else:
+            # Another cause for the same state, or the same one with other
+            # readings: it has lasted since the first.
+            self.active = replace(held, since=self.active.since)
 
     def _failed(self, check: Check, data: Mapping[str, Any], now: datetime) -> bool:
         """Run one check, counting its failures; an error in it passes the poll."""
@@ -473,20 +520,20 @@ class ReadingChecks:
             self._since.pop(check.name, None)
         return failed
 
-    def dump_state(self) -> dict[str, bool]:
-        """Return what the checks learned about the model, to survive a restart."""
-        state = {"grid_seen": False, "bms_seen": False}
+    def dump_state(self) -> dict[str, Any]:
+        """Return what the checks learned, to survive a restart."""
+        state: dict[str, Any] = {}
         for check in self._checks:
-            if isinstance(check, GridVoltageLost):
-                state["grid_seen"] = check._grid_seen
-            if isinstance(check, BatteryDisconnected):
-                state["bms_seen"] = check._bms_seen
+            state.update(check.dump())
         return state
 
     def load_state(self, stored: Mapping[str, Any]) -> None:
-        """Restore what the checks learned about the model before a restart."""
+        """Restore what the checks learned before a restart.
+
+        A check whose stored state cannot be read starts afresh, as on first use.
+        """
         for check in self._checks:
-            if isinstance(check, GridVoltageLost) and stored.get("grid_seen"):
-                check._grid_seen = True
-            if isinstance(check, BatteryDisconnected) and stored.get("bms_seen"):
-                check._bms_seen = True
+            try:
+                check.load(stored)
+            except (TypeError, ValueError, KeyError):
+                _LOGGER.debug("Could not restore the %s check", check.name)
