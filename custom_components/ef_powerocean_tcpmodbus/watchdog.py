@@ -1,0 +1,476 @@
+"""Developer alerts: a notification whenever the integration misbehaves.
+
+Off unless switched on in the integration's settings, for whoever tests a release
+on a live inverter. It only watches: after each poll it looks at what the poll
+left behind, each rule on its own, and it turns the integration's own warnings
+and errors into alerts. Nothing here changes what the integration does, and a
+rule that breaks is switched off and logged once.
+
+Each rule raises one persistent notification, updated in place as it recurs, so a
+problem that repeats every poll is one notification with a count, not hundreds.
+"""
+
+from __future__ import annotations
+
+import logging
+import zlib
+from collections import deque
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
+
+from homeassistant.components import persistent_notification
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry
+from homeassistant.util import dt
+
+from .const import CONTROL_COMMAND_REGISTER, DOMAIN
+from .models import ControlStatus
+from .reading_checks import Finding
+
+if TYPE_CHECKING:
+    from .coordinator import EcoflowCoordinator
+
+_LOGGER = logging.getLogger(__name__)
+# Every logger of the integration is a child of this one.
+_PACKAGE_LOGGER: Final = __name__.rsplit(".", 1)[0]
+
+# A notification that recurs is updated at most this often, past its first.
+UPDATE_EVERY: Final = timedelta(minutes=10)
+
+
+@dataclass(frozen=True, slots=True)
+class PollView:
+    """What one poll left behind, as the rules may see it."""
+
+    at: datetime
+    ok: bool
+    connected: bool
+    data: Mapping[str, Any]
+    findings: tuple[Finding, ...]
+    distrusted: frozenset[str]
+    control_enabled: bool
+    control_testing: bool
+    control_status: ControlStatus | None
+    writes: Mapping[int, int]
+    reconnects: int
+    held_totals: frozenset[str]
+    scan_interval: timedelta
+    # Keys of this entry's entities that show unavailable.
+    unavailable: frozenset[str] = frozenset()
+
+
+class Rule:
+    """One thing that should not happen on a healthy system."""
+
+    name: ClassVar[str]
+    title: ClassVar[str]
+
+    def check(self, view: PollView) -> str | None:
+        """Return what went wrong in this poll, or None."""
+        raise NotImplementedError
+
+
+class ControlWritesWhileOff(Rule):
+    """Control words sent again and again with Modbus Control off (#227).
+
+    A user toggling battery saver writes one now and then; a loop writes one
+    every poll.
+    """
+
+    name = "control_writes_while_off"
+    title = "Control writes while Modbus Control is off"
+    LIMIT: ClassVar[int] = 3
+    WINDOW: ClassVar[timedelta] = timedelta(minutes=10)
+
+    def __init__(self) -> None:
+        self._last: int | None = None
+        self._times: deque[datetime] = deque()
+
+    def check(self, view: PollView) -> str | None:
+        count = view.writes.get(CONTROL_COMMAND_REGISTER, 0)
+        sent = 0 if self._last is None else count - self._last
+        self._last = count
+        if view.control_enabled or view.control_testing:
+            self._times.clear()
+            return None
+        self._times.extend([view.at] * sent)
+        while self._times and view.at - self._times[0] > self.WINDOW:
+            self._times.popleft()
+        if len(self._times) <= self.LIMIT:
+            return None
+        return (
+            f"{len(self._times)} writes to the control register "
+            f"{CONTROL_COMMAND_REGISTER} in the last "
+            f"{int(self.WINDOW.total_seconds() // 60)} minutes, "
+            "while Modbus Control is off."
+        )
+
+
+class FrequentReconnects(Rule):
+    """The connection drops again and again."""
+
+    name = "frequent_reconnects"
+    title = "Frequent reconnects"
+    LIMIT: ClassVar[int] = 5
+    WINDOW: ClassVar[timedelta] = timedelta(hours=1)
+
+    def __init__(self) -> None:
+        self._last: int | None = None
+        self._times: deque[datetime] = deque()
+
+    def check(self, view: PollView) -> str | None:
+        started = 0 if self._last is None else view.reconnects - self._last
+        self._last = view.reconnects
+        self._times.extend([view.at] * started)
+        while self._times and view.at - self._times[0] > self.WINDOW:
+            self._times.popleft()
+        if len(self._times) <= self.LIMIT:
+            return None
+        return f"{len(self._times)} reconnects in the last hour."
+
+
+class SlowPolls(Rule):
+    """Polls arrive far apart from what the poll interval asks for."""
+
+    name = "slow_polls"
+    title = "Polls run late"
+    FACTOR: ClassVar[int] = 3
+    IN_A_ROW: ClassVar[int] = 5
+
+    def __init__(self) -> None:
+        self._last: datetime | None = None
+        self._late = 0
+
+    def check(self, view: PollView) -> str | None:
+        gap = None if self._last is None else view.at - self._last
+        # While reads fail, Home Assistant retries every 30 s on purpose; the
+        # outage has its own repairs issue.
+        self._last = view.at if view.ok else None
+        if gap is None or not view.ok or gap <= self.FACTOR * view.scan_interval:
+            self._late = 0
+            return None
+        self._late += 1
+        if self._late < self.IN_A_ROW:
+            return None
+        return (
+            f"{self._late} polls in a row came {gap.total_seconds():.0f} s apart, "
+            f"with a poll interval of {view.scan_interval.total_seconds():.0f} s."
+        )
+
+
+class ReadingFindings(Rule):
+    """A reading check found readings to be wrong, or the inverter in a state."""
+
+    name = "reading_findings"
+    title = "Reading check failed"
+
+    def __init__(self) -> None:
+        self._seen: set[str] = set()
+
+    def check(self, view: PollView) -> str | None:
+        current = {finding.check: finding for finding in view.findings}
+        started = [current[check] for check in current.keys() - self._seen]
+        self._seen = set(current)
+        if not started:
+            return None
+        return "; ".join(
+            f"{finding.check} ({finding.status}) since {finding.since:%Y-%m-%d %H:%M}"
+            + (
+                f", distrusting {', '.join(sorted(finding.keys))}"
+                if finding.keys
+                else ""
+            )
+            for finding in started
+        )
+
+
+class EnergyBalance(Rule):
+    """The house power does not add up from solar, grid and battery.
+
+    Grid power is positive importing and battery power positive charging, so the
+    house draws solar + grid - battery, less what the inverter loses. A gap well
+    past that for a minute is a wrong register or sign.
+    """
+
+    name = "energy_balance"
+    title = "House power does not add up"
+    MARGIN_W: ClassVar[float] = 300.0
+    MARGIN_SHARE: ClassVar[float] = 0.2
+    IN_A_ROW: ClassVar[int] = 12
+    _KEYS: ClassVar[tuple[str, ...]] = (
+        "house_power",
+        "solar_power",
+        "grid_power",
+        "battery_power",
+    )
+
+    def __init__(self) -> None:
+        self._off = 0
+
+    def check(self, view: PollView) -> str | None:
+        values = [view.data.get(key) for key in self._KEYS]
+        # Readings the checks distrust prove nothing about the mapping.
+        if (
+            not view.ok
+            or view.findings
+            or any(value is None for value in values)
+            or view.distrusted.intersection(self._KEYS)
+        ):
+            self._off = 0
+            return None
+        house, solar, grid, battery = (float(cast(float, value)) for value in values)
+        gap = house - (solar + grid - battery)
+        if abs(gap) <= max(self.MARGIN_W, self.MARGIN_SHARE * abs(house)):
+            self._off = 0
+            return None
+        self._off += 1
+        if self._off < self.IN_A_ROW:
+            return None
+        return (
+            f"House {house:.0f} W, but solar {solar:.0f} + grid {grid:.0f} "
+            f"- battery {battery:.0f} = {solar + grid - battery:.0f} W, "
+            f"{self._off} polls in a row."
+        )
+
+
+class CountersBack(Rule):
+    """A lifetime counter of the inverter went back, or a total is held."""
+
+    name = "counters"
+    title = "Energy counter went back or is held"
+
+    def __init__(self) -> None:
+        self._last: dict[str, float] = {}
+        self._held: frozenset[str] = frozenset()
+
+    def check(self, view: PollView) -> str | None:
+        problems = []
+        for key, value in view.data.items():
+            if not key.endswith("_total_raw") or value is None:
+                continue
+            last = self._last.get(key)
+            self._last[key] = float(value)
+            if last is not None and float(value) < last:
+                problems.append(
+                    f"{key.removesuffix('_raw')} went from {last} to {value}"
+                )
+        if new_held := view.held_totals - self._held:
+            problems.append(f"held: {', '.join(sorted(new_held))}")
+        self._held = view.held_totals
+        return "; ".join(problems) or None
+
+
+class ControlNotAccepted(Rule):
+    """The inverter ignores the commanded control method."""
+
+    name = "control_not_accepted"
+    title = "Inverter does not accept control"
+
+    def __init__(self) -> None:
+        self._was = False
+
+    def check(self, view: PollView) -> str | None:
+        now = view.control_status is ControlStatus.NOT_ACCEPTED
+        started, self._was = now and not self._was, now
+        return "Control Status turned to Not accepted." if started else None
+
+
+class UnexpectedlyUnavailable(Rule):
+    """Entities show unavailable after a good poll, with no check to explain it."""
+
+    name = "unavailable_entities"
+    title = "Entities unavailable after a good poll"
+    IN_A_ROW: ClassVar[int] = 3
+
+    def __init__(self) -> None:
+        self._polls = 0
+
+    def check(self, view: PollView) -> str | None:
+        unexplained = view.unavailable - view.distrusted
+        if not view.ok or not view.connected or not unexplained:
+            self._polls = 0
+            return None
+        self._polls += 1
+        if self._polls < self.IN_A_ROW:
+            return None
+        return f"Unavailable: {', '.join(sorted(unexplained))}."
+
+
+RULES: Final[tuple[type[Rule], ...]] = (
+    ControlWritesWhileOff,
+    FrequentReconnects,
+    SlowPolls,
+    ReadingFindings,
+    EnergyBalance,
+    CountersBack,
+    ControlNotAccepted,
+    UnexpectedlyUnavailable,
+)
+
+
+@dataclass(slots=True)
+class _Seen:
+    count: int
+    first: datetime
+    last: datetime
+    shown: datetime | None = None
+    message: str = ""
+
+
+@dataclass
+class Notifier:
+    """One persistent notification per alert, updated in place and not too often."""
+
+    hass: HomeAssistant
+    entry_id: str
+    _seen: dict[str, _Seen] = field(default_factory=dict)
+
+    def notification_id(self, alert: str) -> str:
+        return f"{DOMAIN}_{self.entry_id}_developer_{alert}"
+
+    @callback
+    def notify(self, alert: str, title: str, message: str, now: datetime) -> None:
+        seen = self._seen.get(alert)
+        if seen is None:
+            seen = self._seen[alert] = _Seen(0, now, now)
+        seen.count += 1
+        seen.last = now
+        seen.message = message
+        if seen.shown is not None and now - seen.shown < UPDATE_EVERY:
+            return
+        seen.shown = now
+        persistent_notification.async_create(
+            self.hass,
+            f"{message}\n\nSeen {seen.count} times, first "
+            f"{dt.as_local(seen.first):%Y-%m-%d %H:%M:%S}, last "
+            f"{dt.as_local(seen.last):%Y-%m-%d %H:%M:%S}. Developer alerts are "
+            "switched on in the EcoFlow PowerOcean integration's settings.",
+            title=f"EcoFlow PowerOcean: {title}",
+            notification_id=self.notification_id(alert),
+        )
+
+
+class Watchdog:
+    """Runs every rule after each poll and raises what they find."""
+
+    def __init__(self, notifier: Notifier) -> None:
+        self._notifier = notifier
+        self._rules: list[Rule] = [rule() for rule in RULES]
+
+    @callback
+    def observe(self, view: PollView) -> None:
+        for rule in list(self._rules):
+            try:
+                message = rule.check(view)
+            except Exception:
+                self._rules.remove(rule)
+                _LOGGER.debug("The %s alert rule broke", rule.name, exc_info=True)
+                continue
+            if message is not None:
+                self._notifier.notify(rule.name, rule.title, message, view.at)
+
+    @callback
+    def log_record(self, logger: str, message: str, template: str) -> None:
+        """Raise a warning or error the integration logged."""
+        # One notification per kind of message, whatever values it carried.
+        key = f"log_{zlib.crc32(f'{logger}:{template}'.encode()):08x}"
+        self._notifier.notify(
+            key, f"Logged by {logger.rsplit('.', 1)[-1]}", message, dt.now()
+        )
+
+
+class _Forwarder(logging.Handler):
+    """Hands the integration's warnings and errors to the watchdog, on its loop."""
+
+    def __init__(self, hass: HomeAssistant, watchdog: Watchdog) -> None:
+        super().__init__(logging.WARNING)
+        self._hass = hass
+        self._watchdog = watchdog
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.name == __name__:
+            return
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = str(record.msg)
+        if record.exc_info and record.exc_info[1] is not None:
+            message += f"\n\n{type(record.exc_info[1]).__name__}: {record.exc_info[1]}"
+        self._hass.loop.call_soon_threadsafe(
+            self._watchdog.log_record, record.name, message, str(record.msg)
+        )
+
+
+# Only readings: a control is unavailable on purpose while Modbus Control is off.
+_READING_DOMAINS: Final = frozenset({"sensor", "binary_sensor"})
+
+
+def unavailable_keys(
+    hass: HomeAssistant, entry: ConfigEntry, entries: Iterable[Any] | None = None
+) -> frozenset[str]:
+    """Return the keys of this entry's enabled readings that show unavailable."""
+    prefix = f"{entry.entry_id}_"
+    if entries is None:
+        entries = entity_registry.async_entries_for_config_entry(
+            entity_registry.async_get(hass), entry.entry_id
+        )
+    return frozenset(
+        registry_entry.unique_id.removeprefix(prefix)
+        for registry_entry in entries
+        if registry_entry.domain in _READING_DOMAINS
+        and not registry_entry.disabled_by
+        and (state := hass.states.get(registry_entry.entity_id)) is not None
+        and state.state == STATE_UNAVAILABLE
+    )
+
+
+def view_of(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: EcoflowCoordinator
+) -> PollView:
+    """Take what the last poll left behind."""
+    checks = coordinator.control.reading_checks
+    client = coordinator.modbus_client
+    return PollView(
+        at=dt.now(),
+        ok=coordinator.last_update_success,
+        connected=coordinator.connected,
+        data=coordinator.data or {},
+        findings=checks.findings,
+        distrusted=checks.distrusted,
+        control_enabled=coordinator.control.enabled,
+        control_testing=coordinator.control.test_running,
+        control_status=coordinator.control.status,
+        writes=dict(client.writes),
+        reconnects=client.reconnects,
+        held_totals=frozenset(coordinator.long_held_totals),
+        scan_interval=timedelta(seconds=coordinator.scan_interval),
+        unavailable=unavailable_keys(hass, entry),
+    )
+
+
+@callback
+def async_start(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: EcoflowCoordinator
+) -> Callable[[], None]:
+    """Watch *coordinator* until the returned callback stops it."""
+    watchdog = Watchdog(Notifier(hass, entry.entry_id))
+    handler = _Forwarder(hass, watchdog)
+    package = logging.getLogger(_PACKAGE_LOGGER)
+    package.addHandler(handler)
+
+    @callback
+    def _after_poll() -> None:
+        watchdog.observe(view_of(hass, entry, coordinator))
+
+    remove_listener = coordinator.async_add_listener(_after_poll)
+    _LOGGER.info("Developer alerts are on")
+
+    def _stop() -> None:
+        remove_listener()
+        package.removeHandler(handler)
+
+    return _stop

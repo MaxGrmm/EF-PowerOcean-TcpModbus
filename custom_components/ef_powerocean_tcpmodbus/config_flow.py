@@ -28,6 +28,7 @@ from .const import (
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
     CONF_CALC_SOLAR_POWER,
+    CONF_DEVELOPER_ALERTS,
     CONF_ENERGY_OFFSETS,
     CONF_HOST,
     CONF_INVERTER_MODEL,
@@ -431,6 +432,10 @@ class EcoflowOptionsFlow(OptionsFlow):
             vol.Required(
                 CONF_CALC_SOLAR_POWER,
                 default=self.config_entry.options.get(CONF_CALC_SOLAR_POWER, False),
+            ): BooleanSelector({}),
+            vol.Required(
+                CONF_DEVELOPER_ALERTS,
+                default=self.config_entry.options.get(CONF_DEVELOPER_ALERTS, False),
             ): BooleanSelector({}),
             vol.Required(
                 CONF_BATTERY_RESERVE,

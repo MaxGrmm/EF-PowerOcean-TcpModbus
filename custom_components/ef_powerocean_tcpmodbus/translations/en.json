@@ -68,6 +68,7 @@
           "grid_power_max": "Maximum grid power [W]",
           "scan_interval": "Poll Interval [s]",
           "calc_solar_power": "Calculation of solar power",
+          "developer_alerts": "Developer alerts",
           "battery_reserve": "Battery Reserve"
         },
         "data_description": {
@@ -77,6 +78,7 @@
           "grid_power_max": "Most your grid connection can import or export, set by your main fuse. Not the inverter rating: the house alone can draw more than that.",
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
+          "developer_alerts": "For testing a release: a notification whenever the integration misbehaves, such as warnings and errors it logs, writes while Modbus Control is off, frequent reconnects, late polls, power that does not add up, or counters that go back. Leave off in normal use.",
           "battery_reserve": "Native: the inverter enforces the reserve itself, like the one set in the EcoFlow app, but not every model accepts a change to it over Modbus. Emulated: the integration imitates the app's reserve with its own logic, while Modbus Control is on. Set for your model; change it only to test a model."
         },
         "sections": {

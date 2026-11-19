@@ -20,9 +20,9 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from . import outage
+from . import outage, watchdog
 from .announcer import issue_ids as announcer_issue_ids
-from .const import CONF_HOST, CONF_PORT, DOMAIN
+from .const import CONF_DEVELOPER_ALERTS, CONF_HOST, CONF_PORT, DOMAIN
 from .control import ControlInputs
 from .coordinator import (
     EcoflowConfigEntry,
@@ -203,6 +203,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
         coordinator.async_require(ControlInputs.keys() | READING_CHECK_KEYS)
     )
     coordinator.async_poll_on_demand()
+    if entry.options.get(CONF_DEVELOPER_ALERTS):
+        entry.async_on_unload(watchdog.async_start(hass, entry, coordinator))
 
     # Reload integration when config entry data changes
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
