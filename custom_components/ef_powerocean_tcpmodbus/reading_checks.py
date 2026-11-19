@@ -71,18 +71,20 @@ _STALL_KEYS: Final = keys_of(Signal.JITTER, Signal.MEASURE, Signal.LEVEL)
 class Movement:
     """When each reading last changed, for the checks that look for stillness.
 
-    A reading that is missing or 0 is not reported by this model, or not now, and
-    is forgotten, so it never counts as still.
+    A missing reading is not reported by this model, or not now, and is
+    forgotten, so it never counts as still. So is a 0 where *zero_is_missing*,
+    as for voltages a model does not measure, but a power can really stand at 0.
     """
 
-    def __init__(self, keys: tuple[str, ...]) -> None:
+    def __init__(self, keys: tuple[str, ...], *, zero_is_missing: bool) -> None:
         self._keys = keys
+        self._zero_is_missing = zero_is_missing
         self._seen: dict[str, tuple[Any, datetime]] = {}
 
     def observe(self, data: Mapping[str, Any], now: datetime) -> None:
         for key in self._keys:
             value = data.get(key)
-            if not value:
+            if value is None or (self._zero_is_missing and not value):
                 self._seen.pop(key, None)
                 continue
             last = self._seen.get(key)
@@ -277,7 +279,7 @@ class FrozenReadings(Check):
     keys = frozenset(_JITTER_KEYS)
 
     def __init__(self) -> None:
-        self._movement = Movement(_JITTER_KEYS)
+        self._movement = Movement(_JITTER_KEYS, zero_is_missing=True)
         self._frozen: frozenset[str] = frozenset()
 
     def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:
@@ -371,7 +373,7 @@ class TelemetryStalled(Check):
 
     def __init__(self, *evidence: Check) -> None:
         self._evidence = evidence
-        self._movement = Movement(_STALL_KEYS)
+        self._movement = Movement(_STALL_KEYS, zero_is_missing=False)
         self._stalled: frozenset[str] = frozenset()
 
     def check(self, data: Mapping[str, Any], now: datetime, /) -> bool:

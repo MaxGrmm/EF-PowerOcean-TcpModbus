@@ -212,6 +212,16 @@ def test_an_inverter_that_stopped_updating_distrusts_what_stands_still() -> None
     assert not checks.distrusted & {"solar_power", "grid_power", "solar_total"}
 
 
+def test_a_stalled_reading_at_0_is_distrusted_too() -> None:
+    """An idle battery reads 0 W; stalled, that 0 is no more live than any other."""
+    checks = reading_checks.ReadingChecks()
+    for poll, now in enumerate(_polls(STALLED_POLLS + 5)):
+        frame = {**_stalled(3600.0 + poll % 7), "battery_current": 0.0}
+        checks.run(frame, now)
+
+    assert "battery_current" in checks.distrusted
+
+
 def test_a_stalled_inverter_needs_both_kinds_of_evidence() -> None:
     checks = reading_checks.ReadingChecks()
     for now in _polls(STALLED_POLLS + 5):
