@@ -668,11 +668,34 @@ def encode_register(value: int, data_type: RegisterType) -> list[int]:
     return [(word >> 16) & 0xFFFF, word & 0xFFFF]
 
 
+class Signal(StrEnum):
+    """What kind of signal a register carries, which says how it can go wrong.
+
+    The reading checks judge by kind, so a new register is covered by naming its kind.
+    """
+
+    # Jitters from poll to poll on a live grid, whatever the power flows do. One
+    # that does not move at all has stopped updating.
+    JITTER = "jitter"
+    # A measured power, current, voltage or temperature. It may sit still for a
+    # while, but not while the readings around it show the inverter stalled.
+    MEASURE = "measure"
+    # A state of charge.
+    LEVEL = "level"
+    # An energy counter.
+    COUNTER = "counter"
+    # A setting, limit or rating that only changes when someone changes it.
+    STATIC = "static"
+    # Status bits and fault codes: the device's own word, never judged.
+    STATUS = "status"
+
+
 @dataclass(frozen=True)
 class RegisterDef:
     key: str
     address: int
     data_type: RegisterType = RegisterType.FLOAT32
+    signal: Signal = Signal.STATIC
     address_overrides: Mapping[InverterModel, int] = field(default_factory=dict)
     # Where writes go when the register is read from somewhere else.
     write_address: int | None = None
