@@ -728,9 +728,10 @@ class ControlManager:
         Only an outage that outlasted the inverter's 60 s window handed it back to
         the app; a shorter one left it following the command it already has. The
         verdict is reached here, before the reconnected heartbeat refreshes the
-        window, because afterwards the two are indistinguishable.
+        window, because afterwards the two are indistinguishable. With Modbus
+        Control off there is nothing to re-send: the inverter was never ours.
         """
-        if not self._heartbeat.in_control:
+        if self._enabled and not self._heartbeat.in_control:
             self._control_stale = True
         self._heartbeat.note_reconnect()
 

@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- With Modbus Control off, a reconnect no longer makes every poll write the default control method to the inverter (#227). An inverter that left the write unanswered dropped the connection each time, so polls ran every 25 seconds instead of every 5 and never stopped writing.
 - On the connection Home Assistant shares, a request that times out now drops the connection, and the next poll opens a new one. A connection whose packets a firewall dropped stayed open without answers, and kept the inverter unreadable for minutes after it was reachable again.
 - Entities whose value had not changed could stay unavailable after a start whose first read failed, until their value next changed (#219).
 

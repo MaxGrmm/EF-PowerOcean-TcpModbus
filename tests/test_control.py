@@ -197,6 +197,23 @@ def test_a_reconnect_keeps_control_unless_the_window_lapsed(
     assert control._control_stale is True
 
 
+def test_a_reconnect_writes_nothing_while_modbus_control_is_off(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With control off the heartbeat never holds the inverter, so every reconnect
+    looked like a lapsed window and re-sent the default method (#227). A write the
+    inverter left unanswered dropped the link, and the next poll did it again."""
+    write = allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_enabled(False))
+    control._heartbeat._last_success = None
+
+    control.mark_stale()
+    asyncio.run(control.async_poll({"battery_soc": 50.0}))
+
+    assert control._control_stale is False
+    write.assert_not_awaited()
+
+
 def test_a_failed_beat_is_retried_before_the_deadline_not_after_it(
     control, monkeypatch: pytest.MonkeyPatch
 ) -> None:
