@@ -66,6 +66,11 @@ class EcoFlowBaseEntity[DefinitionT: EntityDef](CoordinatorEntity[EcoflowCoordin
     def available(self) -> bool:
         if not super().available or not self.coordinator.connected:
             return False
+        # A reading the checks show to be wrong, such as a system level of 0 while
+        # the batteries are full (#200) or one that stopped updating (#227), is not
+        # shown as if it were real.
+        if self._definition.key in self.coordinator.control.reading_checks.distrusted:
+            return False
         # Controls that only act while the device follows us carry a rule.
         if (
             isinstance(self._definition, ControlEntityDef)

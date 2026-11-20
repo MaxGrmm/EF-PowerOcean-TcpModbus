@@ -24,7 +24,9 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
+from . import watchdog
 from .const import (
+    CONF_ALERT_VERBOSITY,
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
     CONF_CALC_SOLAR_POWER,
@@ -51,7 +53,12 @@ from .const import (
     SERIAL_NUMBER,
 )
 from .modbus import TRANSPORT_ERRORS, ModbusClient, async_temporary_client
-from .models import InverterModel, ReserveSupport, battery_reserve_for
+from .models import (
+    AlertVerbosity,
+    InverterModel,
+    ReserveSupport,
+    battery_reserve_for,
+)
 from .outage import Cause, async_classify
 from .telemetry import decode_register, decode_serial_number
 from .util import parse_kwh, portal_history_url
@@ -387,6 +394,16 @@ class EcoflowOptionsFlow(OptionsFlow):
                     self._warned_lower = lowered
                     errors["base"] = "energy_total_lowered"
             if not errors:
+                # Back to Essential forgets which alerts were ignored.
+                essential = AlertVerbosity.ESSENTIAL
+                if (
+                    self.config_entry.options.get(CONF_ALERT_VERBOSITY, essential)
+                    != essential
+                    and user_input.get(CONF_ALERT_VERBOSITY, essential) == essential
+                ):
+                    await watchdog.async_forget_ignores(
+                        self.hass, self.config_entry.entry_id
+                    )
                 return self.async_create_entry(
                     data={**self.config_entry.options, **user_input, **corrected}
                 )
@@ -432,6 +449,18 @@ class EcoflowOptionsFlow(OptionsFlow):
                 CONF_CALC_SOLAR_POWER,
                 default=self.config_entry.options.get(CONF_CALC_SOLAR_POWER, False),
             ): BooleanSelector({}),
+            vol.Required(
+                CONF_ALERT_VERBOSITY,
+                default=self.config_entry.options.get(
+                    CONF_ALERT_VERBOSITY, AlertVerbosity.ESSENTIAL
+                ),
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=[level.value for level in AlertVerbosity],
+                    translation_key=CONF_ALERT_VERBOSITY,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
             vol.Required(
                 CONF_BATTERY_RESERVE,
                 default=battery_reserve_for(
