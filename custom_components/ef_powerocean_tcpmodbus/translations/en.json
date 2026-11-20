@@ -155,8 +155,9 @@
         "step": {
           "init": {
             "title": "Alert: {title}",
-            "description": "{message}\n\nSeen {count} times, first {first}, last {last}.\n\nIgnore this alert until the next release of the integration, for 24 hours, or permanently. Setting the alert verbosity back to Essential forgets every alert you ignored.",
+            "description": "{message}\n\nSeen {count} times, first {first}, last {last}.\n\nIgnore this alert this time, until it goes away and comes back; until the next release of the integration; for 24 hours; or permanently. Setting the alert verbosity back to Essential forgets every alert you ignored.",
             "menu_options": {
+              "ignore_once": "Ignore this time",
               "ignore_release": "Ignore until the next release",
               "ignore_day": "Ignore for 24 hours",
               "ignore_forever": "Ignore permanently"

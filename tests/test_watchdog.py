@@ -376,6 +376,44 @@ def test_an_alert_ignored_for_a_day_comes_back_after_it(
     issues.created.assert_called_once()
 
 
+def test_an_alert_ignored_this_time_comes_back_once_it_went_away(
+    issues: SimpleNamespace,
+) -> None:
+    notifier = watchdog.Notifier(cast(Any, SimpleNamespace()), "entry")
+    dog = watchdog.Watchdog(notifier, AlertVerbosity.READINGS)
+    accepted = ControlStatus.NOT_ACCEPTED
+    dog.observe(_view(0, control_status=accepted))
+    assert issues.created.call_count == 1
+
+    dog.async_ignore_this_time("control_not_accepted")
+    issues.deleted.assert_called_once()
+    # Gone for now, so it raises nothing while it lasts...
+    dog.observe(_view(5, control_status=accepted))
+    assert issues.created.call_count == 1
+
+    # ...and comes back once it went away and happens again.
+    dog.observe(_view(10))
+    dog.observe(_view(15, control_status=accepted))
+    assert issues.created.call_count == 2
+
+
+def test_a_logged_message_ignored_this_time_comes_back_after_a_quiet_spell(
+    issues: SimpleNamespace,
+) -> None:
+    notifier = watchdog.Notifier(cast(Any, SimpleNamespace()), "entry")
+    notifier.notify("log_x", "Logged", "Odd", T0)
+    notifier.async_ignore_this_time("log_x")
+
+    # Logged again and again, never quiet for long: still ignored.
+    for minute in range(1, 30):
+        notifier.notify("log_x", "Logged", "Odd", T0 + timedelta(minutes=minute))
+    assert issues.created.call_count == 1
+
+    # Quiet for over 10 minutes, then logged again: it is back.
+    notifier.notify("log_x", "Logged", "Odd", T0 + timedelta(minutes=45))
+    assert issues.created.call_count == 2
+
+
 def test_an_alert_ignored_permanently_stays_away(issues: SimpleNamespace) -> None:
     ignores = _ignores()
     ignores.async_ignore("rule", ignores.forever())

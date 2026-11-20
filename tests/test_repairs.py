@@ -212,6 +212,7 @@ def test_an_alert_shows_what_was_seen_and_how_to_ignore_it(
 
     assert result["type"] == "menu"
     assert result.get("menu_options") == [
+        "ignore_once",
         "ignore_release",
         "ignore_day",
         "ignore_forever",
@@ -224,6 +225,7 @@ def test_an_alert_shows_what_was_seen_and_how_to_ignore_it(
 @pytest.mark.parametrize(
     ("step", "ignore"),
     (
+        ("async_step_ignore_once", "async_ignore_this_time"),
         ("async_step_ignore_release", "async_ignore_until_next_release"),
         ("async_step_ignore_day", "async_ignore_for_a_day"),
         ("async_step_ignore_forever", "async_ignore_permanently"),
@@ -244,6 +246,7 @@ def test_an_alert_is_ignored_as_chosen(
     "step",
     (
         "async_step_init",
+        "async_step_ignore_once",
         "async_step_ignore_release",
         "async_step_ignore_day",
         "async_step_ignore_forever",

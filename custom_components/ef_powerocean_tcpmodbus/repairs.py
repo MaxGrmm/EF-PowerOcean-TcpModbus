@@ -119,7 +119,7 @@ class HeldTotalsRepairFlow(RepairsFlow):
 
 
 class AlertRepairFlow(RepairsFlow):
-    """Ignore an alert permanently, until the next release, or for a day."""
+    """Ignore an alert this time, permanently, until the next release, or a day."""
 
     def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
@@ -136,7 +136,12 @@ class AlertRepairFlow(RepairsFlow):
             return self.async_abort(reason="not_watching")
         return self.async_show_menu(
             step_id="init",
-            menu_options=["ignore_release", "ignore_day", "ignore_forever"],
+            menu_options=[
+                "ignore_once",
+                "ignore_release",
+                "ignore_day",
+                "ignore_forever",
+            ],
             description_placeholders={
                 key: str(self._data.get(key, ""))
                 for key in ("title", "message", "count", "first", "last")
@@ -151,6 +156,16 @@ class AlertRepairFlow(RepairsFlow):
         if (running := self._watchdog()) is None:
             return self.async_abort(reason="not_watching")
         running.async_ignore_until_next_release(str(self._data.get("alert", "")))
+        return self.async_create_entry(data={})
+
+    async def async_step_ignore_once(
+        self,
+        user_input: dict[str, str] | None = None,  # noqa: ARG002 - a menu choice
+    ) -> RepairsFlowResult:
+        """Ignore the alert until what raised it goes away and comes back."""
+        if (running := self._watchdog()) is None:
+            return self.async_abort(reason="not_watching")
+        running.async_ignore_this_time(str(self._data.get("alert", "")))
         return self.async_create_entry(data={})
 
     async def async_step_ignore_forever(

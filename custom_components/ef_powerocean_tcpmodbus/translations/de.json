@@ -155,8 +155,9 @@
         "step": {
           "init": {
             "title": "Hinweis: {title}",
-            "description": "{message}\n\n{count}-mal gesehen, zuerst {first}, zuletzt {last}.\n\nIgnorieren Sie diesen Hinweis bis zum nächsten Release der Integration, für 24 Stunden oder dauerhaft. Wenn Sie den Verbositätsgrad wieder auf Wesentlich stellen, werden alle ignorierten Hinweise vergessen.",
+            "description": "{message}\n\n{count}-mal gesehen, zuerst {first}, zuletzt {last}.\n\nIgnorieren Sie diesen Hinweis dieses Mal, bis er verschwindet und wiederkommt; bis zum nächsten Release der Integration; für 24 Stunden; oder dauerhaft. Wenn Sie den Verbositätsgrad wieder auf Wesentlich stellen, werden alle ignorierten Hinweise vergessen.",
             "menu_options": {
+              "ignore_once": "Dieses Mal ignorieren",
               "ignore_release": "Bis zum nächsten Release ignorieren",
               "ignore_day": "Für 24 Stunden ignorieren",
               "ignore_forever": "Dauerhaft ignorieren"

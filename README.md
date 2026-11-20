@@ -648,8 +648,8 @@ raises under Settings → Repairs. Each level raises everything the one before i
 | **Debug**     | Every warning and error the integration logs                                                                   |
 
 Each kind of alert is one issue, updated at most every 10 minutes with how often and
-when it was seen. Open it to ignore it until the next release of the integration, for
-24 hours, or permanently. Setting the verbosity back to Essential forgets every alert
+when it was seen. Open it to ignore it this time, until it goes away and comes back;
+until the next release of the integration; for 24 hours; or permanently. Setting the verbosity back to Essential forgets every alert
 you ignored. The alerts only watch: they never change what the integration does.
 Debug is meant for testing a release on a live inverter.
 

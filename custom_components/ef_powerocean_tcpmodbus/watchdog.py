@@ -9,7 +9,7 @@ rule that breaks is switched off and logged once.
 
 Each rule raises one repairs issue, updated in place as it recurs, so a problem
 that repeats every poll is one issue with a count, not hundreds. Each can be
-ignored permanently, until the next release, or for a day.
+ignored this time, permanently, until the next release, or for a day.
 """
 
 from __future__ import annotations
@@ -405,21 +405,30 @@ class Notifier:
     """One repairs issue per alert, updated in place and not too often.
 
     A repairs issue, rather than a notification, so its fix flow can ignore it
-    permanently, until the next release, or for a day.
+    this time, permanently, until the next release, or for a day.
     """
 
     hass: HomeAssistant
     entry_id: str
     ignores: Ignores | None = None
     _seen: dict[str, _Seen] = field(default_factory=dict)
+    # Alerts ignored this time: hidden until what raised them goes away and
+    # comes back. Not kept across a restart, after which it shows again.
+    _this_time: set[str] = field(default_factory=set)
 
     @callback
     def notify(self, alert: str, title: str, message: str, now: datetime) -> None:
         seen = self._seen.get(alert)
         if seen is None:
             seen = self._seen[alert] = _Seen(0, now, now)
+        # A logged message has no poll that passes: quiet for UPDATE_EVERY, it
+        # went away.
+        if alert in self._this_time and now - seen.last >= UPDATE_EVERY:
+            self._this_time.discard(alert)
         seen.count += 1
         seen.last = now
+        if alert in self._this_time:
+            return
         if self.ignores is not None and self.ignores.ignored(alert, now):
             return
         if seen.shown is not None and now - seen.shown < UPDATE_EVERY:
@@ -449,6 +458,19 @@ class Notifier:
         )
 
     @callback
+    def async_passed(self, alert: str) -> None:
+        """Note that what raised *alert* went away, for an alert ignored this time."""
+        self._this_time.discard(alert)
+
+    @callback
+    def async_ignore_this_time(self, alert: str) -> None:
+        """Hide *alert* until what raised it goes away and comes back."""
+        self._this_time.add(alert)
+        if (seen := self._seen.get(alert)) is not None:
+            seen.shown = None
+        ir.async_delete_issue(self.hass, DOMAIN, issue_id(self.entry_id, alert))
+
+    @callback
     def async_forget(self, alert: str) -> None:
         """Take down an alert's issue, until it comes back after an ignore lapses."""
         self._seen.pop(alert, None)
@@ -471,6 +493,10 @@ class Watchdog:
         self._rules: list[Rule] = [
             rule() for rule in RULES if rule.level.rank <= verbosity.rank
         ]
+
+    @callback
+    def async_ignore_this_time(self, alert: str) -> None:
+        self._notifier.async_ignore_this_time(alert)
 
     @callback
     def async_ignore_permanently(self, alert: str) -> None:
@@ -501,7 +527,9 @@ class Watchdog:
                 self._rules.remove(rule)
                 _LOGGER.debug("The %s alert rule broke", rule.name, exc_info=True)
                 continue
-            if message is not None:
+            if message is None:
+                self._notifier.async_passed(rule.name)
+            else:
                 self._notifier.notify(rule.name, rule.title, message, view.at)
 
     @callback
