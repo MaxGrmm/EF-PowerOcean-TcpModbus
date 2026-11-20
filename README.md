@@ -638,8 +638,8 @@ page, after checking it for anything you would rather not share.
 ### Developer alerts
 
 For testing a release on a live inverter, switch on **Developer alerts** in the
-integration's settings. A notification then appears whenever the integration
-misbehaves, so there is no need to watch the debug log:
+integration's settings. An issue then appears under Settings → Repairs whenever the
+integration misbehaves, so there is no need to watch the debug log:
 
 - a warning or error the integration logs
 - the control register written again and again while Modbus Control is off
@@ -651,8 +651,10 @@ misbehaves, so there is no need to watch the debug log:
 - Control Status turning to Not accepted
 - a reading showing unavailable after good polls, with no check to explain it
 
-Each kind of alert is one notification, updated at most every 10 minutes with how
-often and when it was seen. The alerts only watch: they never change what the
+Each kind of alert is one issue, updated at most every 10 minutes with how often and
+when it was seen. Open it to ignore it until the next release of the integration or
+for 24 hours, or choose Ignore from its menu to ignore it for good; Home Assistant
+lists ignored issues under Repairs. The alerts only watch: they never change what the
 integration does. Leave them off in normal use.
 
 ## Removing the Integration

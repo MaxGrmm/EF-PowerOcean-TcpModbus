@@ -6,8 +6,9 @@ left behind, each rule on its own, and it turns the integration's own warnings
 and errors into alerts. Nothing here changes what the integration does, and a
 rule that breaks is switched off and logged once.
 
-Each rule raises one persistent notification, updated in place as it recurs, so a
-problem that repeats every poll is one notification with a count, not hundreds.
+Each rule raises one repairs issue, updated in place as it recurs, so a problem
+that repeats every poll is one issue with a count, not hundreds. Each can be
+ignored for good, until the next release, or for a day.
 """
 
 from __future__ import annotations
@@ -20,11 +21,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
-from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.storage import Store
+from homeassistant.loader import async_get_integration
 from homeassistant.util import dt
 
 from .const import CONTROL_COMMAND_REGISTER, DOMAIN
@@ -38,8 +41,14 @@ _LOGGER = logging.getLogger(__name__)
 # Every logger of the integration is a child of this one.
 _PACKAGE_LOGGER: Final = __name__.rsplit(".", 1)[0]
 
-# A notification that recurs is updated at most this often, past its first.
+# An alert that recurs is updated at most this often, past its first.
 UPDATE_EVERY: Final = timedelta(minutes=10)
+# How long "ignore for a day" lasts.
+IGNORE_FOR: Final = timedelta(hours=24)
+STORAGE_VERSION: Final = 1
+
+# The watchdog running for each entry, for the fix flows to reach.
+_RUNNING: dict[str, Watchdog] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,19 +327,69 @@ class _Seen:
     first: datetime
     last: datetime
     shown: datetime | None = None
-    message: str = ""
+
+
+class Ignores:
+    """Which alerts the user chose to ignore, and until when.
+
+    Kept per entry in a store of its own. An alert ignored until the next
+    release comes back once another version of the integration runs; one ignored
+    for a day, a day later. Ignoring for good is Home Assistant's own Ignore,
+    which the repairs issue offers anyway.
+    """
+
+    def __init__(self, store: Store[dict[str, Any]], release: str) -> None:
+        self._store = store
+        self._release = release
+        self._until: dict[str, dict[str, str]] = {}
+
+    async def async_load(self) -> None:
+        stored = await self._store.async_load() or {}
+        self._until = {
+            alert: until for alert, until in stored.items() if isinstance(until, dict)
+        }
+
+    def ignored(self, alert: str, now: datetime) -> bool:
+        until = self._until.get(alert)
+        if until is None:
+            return False
+        if "release" in until:
+            return until["release"] == self._release
+        try:
+            return now < datetime.fromisoformat(until["time"])
+        except (KeyError, ValueError):
+            return False
+
+    @callback
+    def async_ignore(self, alert: str, until: Mapping[str, str]) -> None:
+        self._until[alert] = dict(until)
+        self._store.async_delay_save(lambda: dict(self._until), 1)
+
+    def until_next_release(self) -> dict[str, str]:
+        return {"release": self._release}
+
+    @staticmethod
+    def until_time(time: datetime) -> dict[str, str]:
+        return {"time": time.isoformat()}
+
+
+def issue_id(entry_id: str, alert: str) -> str:
+    return f"developer_{alert}_{entry_id}"
 
 
 @dataclass
 class Notifier:
-    """One persistent notification per alert, updated in place and not too often."""
+    """One repairs issue per alert, updated in place and not too often.
+
+    A repairs issue, rather than a notification, so it can be ignored: for good
+    with Home Assistant's Ignore, or until the next release or for a day with its
+    fix flow.
+    """
 
     hass: HomeAssistant
     entry_id: str
+    ignores: Ignores | None = None
     _seen: dict[str, _Seen] = field(default_factory=dict)
-
-    def notification_id(self, alert: str) -> str:
-        return f"{DOMAIN}_{self.entry_id}_developer_{alert}"
 
     @callback
     def notify(self, alert: str, title: str, message: str, now: datetime) -> None:
@@ -339,19 +398,45 @@ class Notifier:
             seen = self._seen[alert] = _Seen(0, now, now)
         seen.count += 1
         seen.last = now
-        seen.message = message
+        if self.ignores is not None and self.ignores.ignored(alert, now):
+            return
         if seen.shown is not None and now - seen.shown < UPDATE_EVERY:
             return
         seen.shown = now
-        persistent_notification.async_create(
+        first = f"{dt.as_local(seen.first):%Y-%m-%d %H:%M:%S}"
+        last = f"{dt.as_local(seen.last):%Y-%m-%d %H:%M:%S}"
+        ir.async_create_issue(
             self.hass,
-            f"{message}\n\nSeen {seen.count} times, first "
-            f"{dt.as_local(seen.first):%Y-%m-%d %H:%M:%S}, last "
-            f"{dt.as_local(seen.last):%Y-%m-%d %H:%M:%S}. Developer alerts are "
-            "switched on in the EcoFlow PowerOcean integration's settings.",
-            title=f"EcoFlow PowerOcean: {title}",
-            notification_id=self.notification_id(alert),
+            DOMAIN,
+            issue_id(self.entry_id, alert),
+            is_fixable=True,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="developer_alert",
+            translation_placeholders={"title": title},
+            data={
+                "flow": "developer_alert",
+                "entry_id": self.entry_id,
+                "alert": alert,
+                "title": title,
+                "message": message,
+                "count": str(seen.count),
+                "first": first,
+                "last": last,
+            },
         )
+
+    @callback
+    def async_forget(self, alert: str) -> None:
+        """Take down an alert's issue, until it comes back after an ignore lapses."""
+        self._seen.pop(alert, None)
+        ir.async_delete_issue(self.hass, DOMAIN, issue_id(self.entry_id, alert))
+
+    @callback
+    def async_clear(self) -> None:
+        """Take down every alert this entry raised."""
+        for alert in list(self._seen):
+            self.async_forget(alert)
 
 
 class Watchdog:
@@ -360,6 +445,22 @@ class Watchdog:
     def __init__(self, notifier: Notifier) -> None:
         self._notifier = notifier
         self._rules: list[Rule] = [rule() for rule in RULES]
+
+    @callback
+    def async_ignore_until_next_release(self, alert: str) -> None:
+        self._ignore(alert, lambda ignores: ignores.until_next_release())
+
+    @callback
+    def async_ignore_for_a_day(self, alert: str) -> None:
+        until = dt.now() + IGNORE_FOR
+        self._ignore(alert, lambda ignores: ignores.until_time(until))
+
+    def _ignore(
+        self, alert: str, until: Callable[[Ignores], Mapping[str, str]]
+    ) -> None:
+        if (ignores := self._notifier.ignores) is not None:
+            ignores.async_ignore(alert, until(ignores))
+        self._notifier.async_forget(alert)
 
     @callback
     def observe(self, view: PollView) -> None:
@@ -452,12 +553,24 @@ def view_of(
     )
 
 
-@callback
-def async_start(
+def running(entry_id: str) -> Watchdog | None:
+    """Return the watchdog of *entry_id*, if developer alerts are on for it."""
+    return _RUNNING.get(entry_id)
+
+
+async def async_start(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: EcoflowCoordinator
 ) -> Callable[[], None]:
     """Watch *coordinator* until the returned callback stops it."""
-    watchdog = Watchdog(Notifier(hass, entry.entry_id))
+    integration = await async_get_integration(hass, DOMAIN)
+    ignores = Ignores(
+        Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}.developer_alerts"),
+        str(integration.version),
+    )
+    await ignores.async_load()
+    notifier = Notifier(hass, entry.entry_id, ignores)
+    watchdog = Watchdog(notifier)
+    _RUNNING[entry.entry_id] = watchdog
     handler = _Forwarder(hass, watchdog)
     package = logging.getLogger(_PACKAGE_LOGGER)
     package.addHandler(handler)
@@ -472,5 +585,7 @@ def async_start(
     def _stop() -> None:
         remove_listener()
         package.removeHandler(handler)
+        _RUNNING.pop(entry.entry_id, None)
+        notifier.async_clear()
 
     return _stop

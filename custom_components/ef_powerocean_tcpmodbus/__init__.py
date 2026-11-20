@@ -204,7 +204,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
     )
     coordinator.async_poll_on_demand()
     if entry.options.get(CONF_DEVELOPER_ALERTS):
-        entry.async_on_unload(watchdog.async_start(hass, entry, coordinator))
+        entry.async_on_unload(await watchdog.async_start(hass, entry, coordinator))
 
     # Reload integration when config entry data changes
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))

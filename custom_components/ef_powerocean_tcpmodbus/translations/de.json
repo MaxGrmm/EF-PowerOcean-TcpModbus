@@ -78,7 +78,7 @@
           "grid_power_max": "Die max. Leistung Ihres Netzanschlusses, begrenzt durch die Hauptsicherung. Nicht die Wechselrichterleistung: das Haus allein kann mehr beziehen.",
           "scan_interval": "Wie oft Werte abgefragt werden (2-30 Sekunden)",
           "calc_solar_power": "Bei einigen Wechselrichtern liefert das Modbus-Register der Solarleistung 0W. Mit diesem Schalter kann die Solarleistung aus den Einzelleistungen der String berechnet werden.",
-          "developer_alerts": "Zum Testen eines Releases: eine Benachrichtigung, sobald sich die Integration auffällig verhält, etwa bei Warnungen und Fehlern im Log, Schreibzugriffen bei ausgeschalteter Modbus-Steuerung, häufigen Neuverbindungen, verspäteten Abfragen, Leistungen, die nicht aufgehen, oder Zählern, die zurückgehen. Im normalen Betrieb ausgeschaltet lassen.",
+          "developer_alerts": "Zum Testen eines Releases: ein Eintrag unter Reparaturen, sobald sich die Integration auffällig verhält, etwa bei Warnungen und Fehlern im Log, Schreibzugriffen bei ausgeschalteter Modbus-Steuerung, häufigen Neuverbindungen, verspäteten Abfragen, Leistungen, die nicht aufgehen, oder Zählern, die zurückgehen. Im normalen Betrieb ausgeschaltet lassen.",
           "battery_reserve": "Nativ: Der Wechselrichter hält die Reserve selbst, wie die in der EcoFlow-App eingestellte, aber nicht jedes Modell übernimmt eine Änderung über Modbus. Emuliert: Die Integration bildet die Reserve der App mit eigener Logik nach, solange die Modbus-Steuerung an ist. Für dein Modell voreingestellt; nur ändern, um ein Modell zu testen."
         },
         "sections": {
@@ -148,6 +148,24 @@
     "telemetry_stalled": {
       "title": "Der Wechselrichter unter {host} aktualisiert seine Messwerte nicht mehr",
       "description": "Der Wechselrichter antwortet noch, aber die meisten seiner Messwerte haben sich mindestens seit {since} nicht geändert. Stillstehende Messwerte werden als nicht verfügbar angezeigt, und die Modbus-Steuerung überlässt den Wechselrichter, falls aktiv, seiner eigenen Logik. Starten Sie den Wechselrichter gemäß der Bedienungsanleitung neu. Dieses Problem verschwindet, sobald sich die Messwerte wieder ändern. Wenn es immer wieder auftritt, melden Sie es mit den Diagnosedaten der Integration und der Firmware-Version des Wechselrichters."
+    },
+    "developer_alert": {
+      "title": "Entwickler-Hinweis: {title}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Entwickler-Hinweis: {title}",
+            "description": "{message}\n\n{count}-mal gesehen, zuerst {first}, zuletzt {last}.\n\nIgnorieren Sie diesen Hinweis bis zum nächsten Release der Integration oder für 24 Stunden. Um ihn dauerhaft zu ignorieren, schließen Sie dies und wählen Sie im Menü des Problems Ignorieren.",
+            "menu_options": {
+              "ignore_release": "Bis zum nächsten Release ignorieren",
+              "ignore_day": "Für 24 Stunden ignorieren"
+            }
+          }
+        },
+        "abort": {
+          "not_watching": "Die Entwickler-Hinweise sind für diesen Wechselrichter nicht mehr eingeschaltet."
+        }
+      }
     }
   },
   "selector": {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -10,11 +11,11 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
-from homeassistant.components import persistent_notification
 from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
-from custom_components.ef_powerocean_tcpmodbus import const, watchdog
+from custom_components.ef_powerocean_tcpmodbus import const, repairs, watchdog
 from custom_components.ef_powerocean_tcpmodbus.models import ControlStatus
 from custom_components.ef_powerocean_tcpmodbus.reading_checks import Finding
 
@@ -236,34 +237,115 @@ def test_entities_a_check_distrusts_are_expected_to_be_unavailable() -> None:
     assert not any(_run(watchdog.UnexpectedlyUnavailable(), views))
 
 
-# ── Notifications ─────────────────────────────────────────────────────────────
+# ── Repairs issues and ignoring them ─────────────────────────────────────────
 
 
 @pytest.fixture
-def created(monkeypatch: pytest.MonkeyPatch) -> Mock:
-    create = Mock()
-    monkeypatch.setattr(persistent_notification, "async_create", create)
+def issues(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    created, deleted = Mock(), Mock()
+    monkeypatch.setattr(ir, "async_create_issue", created)
+    monkeypatch.setattr(ir, "async_delete_issue", deleted)
     monkeypatch.setattr(dt_util, "as_local", lambda value: value)
     monkeypatch.setattr(dt_util, "now", lambda *_: T0)
-    return create
+    return SimpleNamespace(created=created, deleted=deleted)
 
 
-def test_a_recurring_alert_is_one_notification_updated_now_and_then(
-    created: Mock,
+class _Store:
+    def __init__(self, stored: dict[str, Any] | None = None) -> None:
+        self.stored = stored
+        self.saved: dict[str, Any] | None = None
+
+    async def async_load(self) -> dict[str, Any] | None:
+        return self.stored
+
+    def async_delay_save(self, data: Any, _delay: float) -> None:
+        self.saved = data()
+
+
+def _ignores(release: str = "2.9.6", stored: dict[str, Any] | None = None):
+    ignores = watchdog.Ignores(cast(Any, _Store(stored)), release)
+    asyncio.run(ignores.async_load())
+    return ignores
+
+
+def test_a_recurring_alert_is_one_issue_updated_now_and_then(
+    issues: SimpleNamespace,
 ) -> None:
     notifier = watchdog.Notifier(cast(Any, SimpleNamespace()), "entry")
     for minute in range(25):
         notifier.notify("rule", "Title", "Went wrong", T0 + timedelta(minutes=minute))
 
-    # At minutes 0, 10 and 20, always the same notification.
-    assert created.call_count == 3
-    ids = {call.kwargs["notification_id"] for call in created.call_args_list}
-    assert ids == {f"{const.DOMAIN}_entry_developer_rule"}
-    assert "Seen 21 times" in created.call_args.args[1]
+    # At minutes 0, 10 and 20, always the same issue, with a way to ignore it.
+    assert issues.created.call_count == 3
+    ids = {call.args[2] for call in issues.created.call_args_list}
+    assert ids == {"developer_rule_entry"}
+    kwargs = issues.created.call_args.kwargs
+    assert kwargs["is_fixable"] is True
+    assert kwargs["translation_key"] == "developer_alert"
+    assert kwargs["data"]["count"] == "21"
+    assert kwargs["data"]["message"] == "Went wrong"
+
+
+def test_an_alert_ignored_until_the_next_release_comes_back_with_it(
+    issues: SimpleNamespace,
+) -> None:
+    stored = {"rule": {"release": "2.9.5"}}
+
+    same = watchdog.Notifier(
+        cast(Any, SimpleNamespace()), "e", _ignores("2.9.5", stored)
+    )
+    same.notify("rule", "Title", "Went wrong", T0)
+    issues.created.assert_not_called()
+
+    newer = watchdog.Notifier(
+        cast(Any, SimpleNamespace()), "e", _ignores("2.9.6", stored)
+    )
+    newer.notify("rule", "Title", "Went wrong", T0)
+    issues.created.assert_called_once()
+
+
+def test_an_alert_ignored_for_a_day_comes_back_after_it(
+    issues: SimpleNamespace,
+) -> None:
+    ignores = _ignores()
+    ignores.async_ignore("rule", ignores.until_time(T0 + timedelta(hours=24)))
+    notifier = watchdog.Notifier(cast(Any, SimpleNamespace()), "e", ignores)
+
+    notifier.notify("rule", "Title", "Went wrong", T0 + timedelta(hours=23))
+    issues.created.assert_not_called()
+
+    notifier.notify("rule", "Title", "Went wrong", T0 + timedelta(hours=25))
+    issues.created.assert_called_once()
+
+
+def test_ignoring_takes_the_issue_down_and_is_remembered(
+    issues: SimpleNamespace,
+) -> None:
+    store = _Store()
+    ignores = watchdog.Ignores(cast(Any, store), "2.9.6")
+    notifier = watchdog.Notifier(cast(Any, SimpleNamespace()), "entry", ignores)
+    dog = watchdog.Watchdog(notifier)
+    notifier.notify("rule", "Title", "Went wrong", T0)
+
+    dog.async_ignore_until_next_release("rule")
+    dog.async_ignore_for_a_day("other")
+
+    issues.deleted.assert_any_call(notifier.hass, const.DOMAIN, "developer_rule_entry")
+    assert store.saved == {
+        "rule": {"release": "2.9.6"},
+        "other": {"time": (T0 + watchdog.IGNORE_FOR).isoformat()},
+    }
+
+
+def test_a_stored_ignore_that_cannot_be_read_is_not_an_ignore() -> None:
+    ignores = _ignores(stored={"rule": {"time": "not a time"}, "other": "junk"})
+
+    assert not ignores.ignored("rule", T0)
+    assert not ignores.ignored("other", T0)
 
 
 def test_a_rule_that_breaks_is_dropped_and_the_others_go_on(
-    created: Mock, monkeypatch: pytest.MonkeyPatch
+    issues: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dog = watchdog.Watchdog(watchdog.Notifier(cast(Any, SimpleNamespace()), "entry"))
     broken = Mock(side_effect=RuntimeError("bad rule"))
@@ -273,13 +355,29 @@ def test_a_rule_that_breaks_is_dropped_and_the_others_go_on(
     dog.observe(_view(5))
 
     broken.assert_called_once()
-    assert created.call_count == 1
+    assert issues.created.call_count == 1
+
+
+def test_the_fix_flow_ignores_the_alert_it_was_opened_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    running = Mock()
+    monkeypatch.setattr(watchdog, "_RUNNING", {"entry": running})
+    data = {"flow": "developer_alert", "entry_id": "entry", "alert": "rule"}
+
+    flow = asyncio.run(repairs.async_create_fix_flow(cast(Any, None), "id", data))
+    assert isinstance(flow, repairs.DeveloperAlertRepairFlow)
+    asyncio.run(flow.async_step_ignore_release())
+    asyncio.run(flow.async_step_ignore_day())
+
+    running.async_ignore_until_next_release.assert_called_once_with("rule")
+    running.async_ignore_for_a_day.assert_called_once_with("rule")
 
 
 # ── The integration's own log ─────────────────────────────────────────────────
 
 
-def test_warnings_the_integration_logs_become_alerts(created: Mock) -> None:
+def test_warnings_the_integration_logs_become_alerts(issues: SimpleNamespace) -> None:
     dog = watchdog.Watchdog(watchdog.Notifier(cast(Any, SimpleNamespace()), "entry"))
     loop = SimpleNamespace(call_soon_threadsafe=lambda fn, *args: fn(*args))
     handler = watchdog._Forwarder(cast(Any, SimpleNamespace(loop=loop)), dog)
@@ -294,24 +392,42 @@ def test_warnings_the_integration_logs_become_alerts(created: Mock) -> None:
         logger.removeHandler(handler)
 
     # One alert for the kind of message, not one per value.
-    assert created.call_count == 1
-    assert created.call_args.args[1].startswith("Odd value 42")
+    assert issues.created.call_count == 1
+    assert issues.created.call_args.kwargs["data"]["message"].startswith("Odd value 42")
 
 
-def test_watching_starts_and_stops_with_the_entry(created: Mock) -> None:  # noqa: ARG001
+def test_watching_starts_and_stops_with_the_entry(
+    issues: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stopping takes down the alerts it raised; they come back if still true."""
+
+    async def integration(*_: Any) -> Any:
+        return SimpleNamespace(version="2.9.6")
+
+    monkeypatch.setattr(watchdog, "async_get_integration", integration)
+    monkeypatch.setattr(watchdog, "Store", lambda *_: _Store())
     remove_listener = Mock()
     coordinator = SimpleNamespace(async_add_listener=Mock(return_value=remove_listener))
     package = logging.getLogger("custom_components.ef_powerocean_tcpmodbus")
     before = list(package.handlers)
 
-    stop = watchdog.async_start(
-        cast(Any, SimpleNamespace()),
-        cast(Any, SimpleNamespace(entry_id="entry")),
-        cast(Any, coordinator),
+    stop = asyncio.run(
+        watchdog.async_start(
+            cast(Any, SimpleNamespace()),
+            cast(Any, SimpleNamespace(entry_id="entry")),
+            cast(Any, coordinator),
+        )
     )
     assert len(package.handlers) == len(before) + 1
+    running = watchdog.running("entry")
+    assert running is not None
+    running.observe(_view(0, control_status=ControlStatus.NOT_ACCEPTED))
+    issues.created.assert_called_once()
 
     stop()
 
+    issues.deleted.assert_called_once()
+
     remove_listener.assert_called_once()
     assert package.handlers == before
+    assert watchdog.running("entry") is None
