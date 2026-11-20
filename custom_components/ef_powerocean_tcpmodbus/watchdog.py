@@ -8,7 +8,7 @@ rule that breaks is switched off and logged once.
 
 Each rule raises one repairs issue, updated in place as it recurs, so a problem
 that repeats every poll is one issue with a count, not hundreds. Each can be
-ignored for good, until the next release, or for a day.
+ignored permanently, until the next release, or for a day.
 """
 
 from __future__ import annotations
@@ -334,8 +334,8 @@ class Ignores:
 
     Kept per entry in a store of its own. An alert ignored until the next
     release comes back once another version of the integration runs; one ignored
-    for a day, a day later. Ignoring for good is Home Assistant's own Ignore,
-    which the repairs issue offers anyway.
+    for a day, a day later; one ignored permanently, once developer alerts are
+    switched off, which forgets every choice.
     """
 
     def __init__(self, store: Store[dict[str, Any]], release: str) -> None:
@@ -353,6 +353,8 @@ class Ignores:
         until = self._until.get(alert)
         if until is None:
             return False
+        if until.get("forever"):
+            return True
         if "release" in until:
             return until["release"] == self._release
         try:
@@ -364,6 +366,10 @@ class Ignores:
     def async_ignore(self, alert: str, until: Mapping[str, str]) -> None:
         self._until[alert] = dict(until)
         self._store.async_delay_save(lambda: dict(self._until), 1)
+
+    @staticmethod
+    def forever() -> dict[str, str]:
+        return {"forever": "yes"}
 
     def until_next_release(self) -> dict[str, str]:
         return {"release": self._release}
@@ -381,9 +387,8 @@ def issue_id(entry_id: str, alert: str) -> str:
 class Notifier:
     """One repairs issue per alert, updated in place and not too often.
 
-    A repairs issue, rather than a notification, so it can be ignored: for good
-    with Home Assistant's Ignore, or until the next release or for a day with its
-    fix flow.
+    A repairs issue, rather than a notification, so its fix flow can ignore it
+    permanently, until the next release, or for a day.
     """
 
     hass: HomeAssistant
@@ -445,6 +450,10 @@ class Watchdog:
     def __init__(self, notifier: Notifier) -> None:
         self._notifier = notifier
         self._rules: list[Rule] = [rule() for rule in RULES]
+
+    @callback
+    def async_ignore_permanently(self, alert: str) -> None:
+        self._ignore(alert, lambda ignores: ignores.forever())
 
     @callback
     def async_ignore_until_next_release(self, alert: str) -> None:
@@ -553,6 +562,15 @@ def view_of(
     )
 
 
+def _store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
+    return Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}.developer_alerts")
+
+
+async def async_forget_ignores(hass: HomeAssistant, entry_id: str) -> None:
+    """Forget every alert ignored for *entry_id*, as when alerts are switched off."""
+    await _store(hass, entry_id).async_remove()
+
+
 def running(entry_id: str) -> Watchdog | None:
     """Return the watchdog of *entry_id*, if developer alerts are on for it."""
     return _RUNNING.get(entry_id)
@@ -563,10 +581,7 @@ async def async_start(
 ) -> Callable[[], None]:
     """Watch *coordinator* until the returned callback stops it."""
     integration = await async_get_integration(hass, DOMAIN)
-    ignores = Ignores(
-        Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}.developer_alerts"),
-        str(integration.version),
-    )
+    ignores = Ignores(_store(hass, entry.entry_id), str(integration.version))
     await ignores.async_load()
     notifier = Notifier(hass, entry.entry_id, ignores)
     watchdog = Watchdog(notifier)

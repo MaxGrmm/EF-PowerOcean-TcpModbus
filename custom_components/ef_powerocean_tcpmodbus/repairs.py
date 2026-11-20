@@ -119,10 +119,7 @@ class HeldTotalsRepairFlow(RepairsFlow):
 
 
 class DeveloperAlertRepairFlow(RepairsFlow):
-    """Ignore a developer alert until the next release, or for a day.
-
-    Ignoring it for good is Home Assistant's own Ignore, offered next to this.
-    """
+    """Ignore a developer alert permanently, until the next release, or for a day."""
 
     def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
@@ -139,7 +136,7 @@ class DeveloperAlertRepairFlow(RepairsFlow):
             return self.async_abort(reason="not_watching")
         return self.async_show_menu(
             step_id="init",
-            menu_options=["ignore_release", "ignore_day"],
+            menu_options=["ignore_release", "ignore_day", "ignore_forever"],
             description_placeholders={
                 key: str(self._data.get(key, ""))
                 for key in ("title", "message", "count", "first", "last")
@@ -154,6 +151,16 @@ class DeveloperAlertRepairFlow(RepairsFlow):
         if (running := self._watchdog()) is None:
             return self.async_abort(reason="not_watching")
         running.async_ignore_until_next_release(str(self._data.get("alert", "")))
+        return self.async_create_entry(data={})
+
+    async def async_step_ignore_forever(
+        self,
+        user_input: dict[str, str] | None = None,  # noqa: ARG002 - a menu choice
+    ) -> RepairsFlowResult:
+        """Ignore the alert until developer alerts are switched off."""
+        if (running := self._watchdog()) is None:
+            return self.async_abort(reason="not_watching")
+        running.async_ignore_permanently(str(self._data.get("alert", "")))
         return self.async_create_entry(data={})
 
     async def async_step_ignore_day(

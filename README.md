@@ -652,10 +652,10 @@ integration misbehaves, so there is no need to watch the debug log:
 - a reading showing unavailable after good polls, with no check to explain it
 
 Each kind of alert is one issue, updated at most every 10 minutes with how often and
-when it was seen. Open it to ignore it until the next release of the integration or
-for 24 hours, or choose Ignore from its menu to ignore it for good; Home Assistant
-lists ignored issues under Repairs. The alerts only watch: they never change what the
-integration does. Leave them off in normal use.
+when it was seen. Open it to ignore it until the next release of the integration, for
+24 hours, or permanently. Switching developer alerts off forgets every alert you
+ignored. The alerts only watch: they never change what the integration does. Leave
+them off in normal use.
 
 ## Removing the Integration
 

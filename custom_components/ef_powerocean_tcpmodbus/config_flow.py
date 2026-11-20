@@ -24,6 +24,7 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
+from . import watchdog
 from .const import (
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
@@ -388,6 +389,13 @@ class EcoflowOptionsFlow(OptionsFlow):
                     self._warned_lower = lowered
                     errors["base"] = "energy_total_lowered"
             if not errors:
+                # Switching developer alerts off forgets which ones were ignored.
+                if self.config_entry.options.get(
+                    CONF_DEVELOPER_ALERTS
+                ) and not user_input.get(CONF_DEVELOPER_ALERTS):
+                    await watchdog.async_forget_ignores(
+                        self.hass, self.config_entry.entry_id
+                    )
                 return self.async_create_entry(
                     data={**self.config_entry.options, **user_input, **corrected}
                 )

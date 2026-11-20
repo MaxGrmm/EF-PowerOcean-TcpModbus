@@ -17,7 +17,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from pymodbus.exceptions import ModbusException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import config_flow, const
+from custom_components.ef_powerocean_tcpmodbus import config_flow, const, watchdog
 from custom_components.ef_powerocean_tcpmodbus.models import RegisterType
 from custom_components.ef_powerocean_tcpmodbus.outage import Cause
 from tests.fake_inverter import HOST, FakeInverter
@@ -169,6 +169,31 @@ async def test_changing_the_settings_keeps_the_energy_corrections(
     )
 
     assert entry.options[const.CONF_ENERGY_OFFSETS] == offsets
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
+@pytest.mark.parametrize(
+    ("before", "after", "forgets"),
+    ((True, False, True), (True, True, False), (False, False, False)),
+)
+async def test_switching_developer_alerts_off_forgets_the_ignored_ones(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    before: bool,
+    after: bool,
+    forgets: bool,
+) -> None:
+    forget = AsyncMock()
+    monkeypatch.setattr(watchdog, "async_forget_ignores", forget)
+    entry = _configured_entry(hass, {const.CONF_DEVELOPER_ALERTS: before})
+
+    form = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(
+        form["flow_id"], {const.CONF_DEVELOPER_ALERTS: after}
+    )
+
+    assert entry.options[const.CONF_DEVELOPER_ALERTS] is after
+    assert forget.await_count == int(forgets)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")

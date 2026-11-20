@@ -213,7 +213,11 @@ def test_a_developer_alert_shows_what_was_seen_and_how_to_ignore_it(
     result = asyncio.run(_alert_flow(monkeypatch, Mock()).async_step_init())
 
     assert result["type"] == "menu"
-    assert result.get("menu_options") == ["ignore_release", "ignore_day"]
+    assert result.get("menu_options") == [
+        "ignore_release",
+        "ignore_day",
+        "ignore_forever",
+    ]
     placeholders = result.get("description_placeholders") or {}
     assert placeholders["message"] == ALERT["message"]
     assert placeholders["count"] == "5"
@@ -224,6 +228,7 @@ def test_a_developer_alert_shows_what_was_seen_and_how_to_ignore_it(
     (
         ("async_step_ignore_release", "async_ignore_until_next_release"),
         ("async_step_ignore_day", "async_ignore_for_a_day"),
+        ("async_step_ignore_forever", "async_ignore_permanently"),
     ),
 )
 def test_a_developer_alert_is_ignored_as_chosen(
@@ -238,7 +243,13 @@ def test_a_developer_alert_is_ignored_as_chosen(
 
 
 @pytest.mark.parametrize(
-    "step", ("async_step_init", "async_step_ignore_release", "async_step_ignore_day")
+    "step",
+    (
+        "async_step_init",
+        "async_step_ignore_release",
+        "async_step_ignore_day",
+        "async_step_ignore_forever",
+    ),
 )
 def test_a_developer_alert_flow_ends_once_alerts_are_off(
     monkeypatch: pytest.MonkeyPatch, step: str

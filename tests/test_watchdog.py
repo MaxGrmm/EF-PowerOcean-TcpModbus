@@ -318,6 +318,16 @@ def test_an_alert_ignored_for_a_day_comes_back_after_it(
     issues.created.assert_called_once()
 
 
+def test_an_alert_ignored_permanently_stays_away(issues: SimpleNamespace) -> None:
+    ignores = _ignores()
+    ignores.async_ignore("rule", ignores.forever())
+    notifier = watchdog.Notifier(cast(Any, SimpleNamespace()), "e", ignores)
+
+    notifier.notify("rule", "Title", "Went wrong", T0 + timedelta(days=400))
+
+    issues.created.assert_not_called()
+
+
 def test_ignoring_takes_the_issue_down_and_is_remembered(
     issues: SimpleNamespace,
 ) -> None:
@@ -329,11 +339,13 @@ def test_ignoring_takes_the_issue_down_and_is_remembered(
 
     dog.async_ignore_until_next_release("rule")
     dog.async_ignore_for_a_day("other")
+    dog.async_ignore_permanently("third")
 
     issues.deleted.assert_any_call(notifier.hass, const.DOMAIN, "developer_rule_entry")
     assert store.saved == {
         "rule": {"release": "2.9.6"},
         "other": {"time": (T0 + watchdog.IGNORE_FOR).isoformat()},
+        "third": {"forever": "yes"},
     }
 
 
