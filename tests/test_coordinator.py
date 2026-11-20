@@ -2077,6 +2077,35 @@ def test_calculated_grid_energy_continues_from_the_totals_shown(
     assert result["grid_import_total_raw"] == 0.0
 
 
+def test_a_distrusted_grid_power_counts_no_grid_energy(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stalled inverter can show a Grid Power frozen at some value (#227)."""
+    start = datetime(2026, 11, 19, 10, tzinfo=UTC)
+    coordinator._ena_calc_grid_energy = True
+    coordinator._last_checked_data = {
+        "grid_import_total": 12.0,
+        "grid_export_total": 3.0,
+    }
+    coordinator._last_checked_time = start - timedelta(seconds=5)
+    coordinator._energy_processor.accepted_at = dict.fromkeys(
+        ("grid_import_total", "grid_export_total"), start - timedelta(seconds=5)
+    )
+    # Held there, rather than worked out again from these frames by the checks.
+    coordinator.control.reading_checks.distrusted = frozenset({"grid_power"})
+    monkeypatch.setattr(coordinator, "_async_track_reading_checks_safely", Mock())
+
+    for poll in range(13):
+        result = run_update(
+            coordinator,
+            _grid_frame(3600.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    assert result["grid_import_total"] == 12.0
+
+
 def test_grid_energy_is_left_to_the_inverter_unless_calculated(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:

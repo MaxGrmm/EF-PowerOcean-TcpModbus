@@ -1320,7 +1320,15 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 integrator.totals(),
             )
         now = dt.now()
-        kwh = sum(integrator.add(raw_data.get("grid_power"), now))
+        # A Grid Power the reading checks distrust, such as one frozen while the
+        # inverter stalls, would count energy that never flowed: take it as missing.
+        # The checks run later in the poll, so this is the last poll's verdict.
+        power = (
+            None
+            if "grid_power" in self.control.reading_checks.distrusted
+            else raw_data.get("grid_power")
+        )
+        kwh = sum(integrator.add(power, now))
         integrator.observe_registers(raw_data, kwh, now)
         result = self._energy_processor.apply_offsets(raw_data)
         if integrator.active:
