@@ -20,8 +20,9 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from . import outage
-from .const import CONF_HOST, CONF_PORT, DOMAIN
+from . import outage, watchdog
+from .announcer import issue_ids as announcer_issue_ids
+from .const import CONF_ALERT_VERBOSITY, CONF_HOST, CONF_PORT, DOMAIN
 from .control import ControlInputs
 from .coordinator import (
     EcoflowConfigEntry,
@@ -31,6 +32,7 @@ from .coordinator import (
     state_store,
 )
 from .modbus import async_prepare
+from .models import AlertVerbosity
 from .reading_checks import KEYS as READING_CHECK_KEYS
 from .services import async_setup_services
 
@@ -202,6 +204,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
         coordinator.async_require(ControlInputs.keys() | READING_CHECK_KEYS)
     )
     coordinator.async_poll_on_demand()
+    verbosity = AlertVerbosity(
+        entry.options.get(CONF_ALERT_VERBOSITY, AlertVerbosity.ESSENTIAL)
+    )
+    if verbosity is not AlertVerbosity.ESSENTIAL:
+        entry.async_on_unload(
+            await watchdog.async_start(hass, entry, coordinator, verbosity)
+        )
 
     # Reload integration when config entry data changes
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
@@ -224,6 +233,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
     ir.async_delete_issue(hass, DOMAIN, _modbus_disabled_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, identity_mismatch_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, held_totals_issue_id(entry))
+    for issue_id in announcer_issue_ids(entry):
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
     # An outage outlives a reload, so its issue stays; async_setup drops it when
     # the entry is disabled.
     # The coordinator's async_shutdown, registered with the entry, hands control
