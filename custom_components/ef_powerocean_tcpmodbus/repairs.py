@@ -119,7 +119,7 @@ class HeldTotalsRepairFlow(RepairsFlow):
 
 
 class AlertRepairFlow(RepairsFlow):
-    """Ignore an alert this time, permanently, until the next release, or a day."""
+    """Ignore an alert this time, for a day, until the next release, or for good."""
 
     def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
@@ -138,8 +138,8 @@ class AlertRepairFlow(RepairsFlow):
             step_id="init",
             menu_options=[
                 "ignore_once",
-                "ignore_release",
                 "ignore_day",
+                "ignore_release",
                 "ignore_forever",
             ],
             description_placeholders={

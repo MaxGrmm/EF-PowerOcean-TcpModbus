@@ -213,8 +213,8 @@ def test_an_alert_shows_what_was_seen_and_how_to_ignore_it(
     assert result["type"] == "menu"
     assert result.get("menu_options") == [
         "ignore_once",
-        "ignore_release",
         "ignore_day",
+        "ignore_release",
         "ignore_forever",
     ]
     placeholders = result.get("description_placeholders") or {}
