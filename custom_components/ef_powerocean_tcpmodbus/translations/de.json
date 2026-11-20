@@ -68,7 +68,7 @@
           "grid_power_max": "Maximale Netz-Leistung [W]",
           "scan_interval": "Abfrageintervall [s]",
           "calc_solar_power": "Berechnung der Solarleistung",
-          "alert_verbosity": "Ausführlichkeit der Hinweise",
+          "alert_verbosity": "Verbositätsgrad",
           "battery_reserve": "Batteriereserve"
         },
         "data_description": {
@@ -155,7 +155,7 @@
         "step": {
           "init": {
             "title": "Hinweis: {title}",
-            "description": "{message}\n\n{count}-mal gesehen, zuerst {first}, zuletzt {last}.\n\nIgnorieren Sie diesen Hinweis bis zum nächsten Release der Integration, für 24 Stunden oder dauerhaft. Wenn Sie die Ausführlichkeit der Hinweise wieder auf Wesentlich stellen, werden alle ignorierten Hinweise vergessen.",
+            "description": "{message}\n\n{count}-mal gesehen, zuerst {first}, zuletzt {last}.\n\nIgnorieren Sie diesen Hinweis bis zum nächsten Release der Integration, für 24 Stunden oder dauerhaft. Wenn Sie den Verbositätsgrad wieder auf Wesentlich stellen, werden alle ignorierten Hinweise vergessen.",
             "menu_options": {
               "ignore_release": "Bis zum nächsten Release ignorieren",
               "ignore_day": "Für 24 Stunden ignorieren",
