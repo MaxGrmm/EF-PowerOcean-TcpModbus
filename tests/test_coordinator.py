@@ -2091,9 +2091,11 @@ def test_a_distrusted_grid_power_counts_no_grid_energy(
     coordinator._energy_processor.accepted_at = dict.fromkeys(
         ("grid_import_total", "grid_export_total"), start - timedelta(seconds=5)
     )
-    # Held there, rather than worked out again from these frames by the checks.
-    coordinator.control.reading_checks.distrusted = frozenset({"grid_power"})
-    monkeypatch.setattr(coordinator, "_async_track_reading_checks_safely", Mock())
+    # Held there, rather than worked out again from these frames by the checks,
+    # which every poll runs.
+    checks = coordinator.control.reading_checks
+    checks.distrusted = frozenset({"grid_power"})
+    monkeypatch.setattr(checks, "run", Mock())
 
     for poll in range(13):
         result = run_update(
