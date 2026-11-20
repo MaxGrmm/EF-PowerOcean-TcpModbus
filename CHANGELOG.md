@@ -16,7 +16,6 @@
 ### Changed
 
 - The `frozen` check judges each voltage and the frequency on its own, and fails once most of them, an AC voltage among them, haven't changed for five minutes instead of all of them for two (#227). One reading that still moved hid the others before. Each one that stopped shows unavailable while the check fails, and so does anything calculated from a distrusted reading, such as Battery Remaining Energy from the Battery SOC.
-- The `frozen` check judges each voltage and the frequency on its own, and fails once most of them haven't changed for five minutes instead of all of them for two (#227). One reading that still moved hid the others before. Each one that stopped shows unavailable while the check fails, and so does anything calculated from a distrusted reading, such as Battery Remaining Energy from the Battery SOC.
 - A lost connection is retried after 0, 5, 10 and 20 seconds, then every 30 seconds instead of every 2 minutes, so the inverter is read again soon after it is back. On the connection Home Assistant shares, requests time out after 3 seconds, as on an own connection, instead of 10.
 - Entities now show unavailable while a poll fails, and available again with the next good one, as the README describes. Before, they kept showing their last value, because a value that had not changed wrote no state (#219).
 
