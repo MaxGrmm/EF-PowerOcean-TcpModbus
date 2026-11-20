@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.10.0] - 2026-11-20
+
 ### Added
 
 - An Alert verbosity setting: Essential (the default, as before), Readings, Detailed or Debug. Each level raises more in repairs, from readings that can't be trusted, to the connection's health, to every warning and error the integration logs. Each alert can be ignored this time, for 24 hours, until the next release, or permanently.
