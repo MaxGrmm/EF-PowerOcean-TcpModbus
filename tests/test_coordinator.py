@@ -28,6 +28,7 @@ from custom_components.ef_powerocean_tcpmodbus.announcer import Announcer
 from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowConfigEntry
 from custom_components.ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
+from custom_components.ef_powerocean_tcpmodbus.grid_energy import GridEnergyIntegrator
 from custom_components.ef_powerocean_tcpmodbus.modbus import (
     ModbusClient,
     ModbusReadRejected,
@@ -73,6 +74,8 @@ def coordinator():
     instance._raw_blocks = {}
     instance._check_snapshots = deque(maxlen=const.READING_CHECK_SNAPSHOTS)
     instance._ena_calc_solar_power = False
+    instance._ena_calc_grid_energy = False
+    instance._grid_energy = GridEnergyIntegrator()
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
     instance._register_blocks = const.register_blocks_for(instance.inverter_model)
     instance._registers_by_key = {
@@ -2028,4 +2031,203 @@ def test_offsets_for_entered_totals_are_worked_out_from_the_device(
     # Entering the device's value removes the correction.
     assert coordinator.energy_offsets_for({"solar_total": 4296.8}) == {
         "grid_export_total": 1041.23
+    }
+
+
+# ── Grid energy calculated from Grid Power ────────────────────────────────────
+
+
+def _grid_frame(power: float, **registers: float) -> dict[str, float]:
+    """A poll of an inverter whose grid energy registers read 0, as in #218."""
+    return {
+        "grid_power": power,
+        **dict.fromkeys(const.GRID_ENERGY_REGISTER_KEYS, 0.0),
+        **registers,
+    }
+
+
+def test_calculated_grid_energy_continues_from_the_totals_shown(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = datetime(2026, 11, 19, 10, tzinfo=UTC)
+    coordinator._ena_calc_grid_energy = True
+    coordinator._energy_offsets = {"grid_import_total": 100.0}
+    coordinator._energy_processor.offsets = {"grid_import_total": 100.0}
+    coordinator._last_checked_data = {
+        "grid_import_total": 12.0,
+        "grid_export_total": 3.0,
+    }
+    coordinator._last_checked_time = start - timedelta(seconds=5)
+    coordinator._energy_processor.accepted_at = dict.fromkeys(
+        ("grid_import_total", "grid_export_total"), start - timedelta(seconds=5)
+    )
+
+    # 3.6 kW for a minute, polled every 5 s.
+    for poll in range(13):
+        result = run_update(
+            coordinator,
+            _grid_frame(3600.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    assert result["grid_import_total"] == 12.06
+    assert result["grid_import_today"] == 0.06
+    assert result["grid_export_total"] == 3.0
+    assert result["grid_import_total_raw"] == 0.0
+
+
+def test_a_distrusted_grid_power_counts_no_grid_energy(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stalled inverter can show a Grid Power frozen at some value (#227)."""
+    start = datetime(2026, 11, 19, 10, tzinfo=UTC)
+    coordinator._ena_calc_grid_energy = True
+    coordinator._last_checked_data = {
+        "grid_import_total": 12.0,
+        "grid_export_total": 3.0,
+    }
+    coordinator._last_checked_time = start - timedelta(seconds=5)
+    coordinator._energy_processor.accepted_at = dict.fromkeys(
+        ("grid_import_total", "grid_export_total"), start - timedelta(seconds=5)
+    )
+    # Held there, rather than worked out again from these frames by the checks,
+    # which every poll runs.
+    checks = coordinator.control.reading_checks
+    checks.distrusted = frozenset({"grid_power"})
+    monkeypatch.setattr(checks, "run", Mock())
+
+    for poll in range(13):
+        result = run_update(
+            coordinator,
+            _grid_frame(3600.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    assert result["grid_import_total"] == 12.0
+
+
+def test_grid_energy_is_left_to_the_inverter_unless_calculated(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = datetime(2026, 11, 19, 10, tzinfo=UTC)
+    for poll in range(3):
+        result = run_update(
+            coordinator,
+            _grid_frame(3600.0, grid_import_total=8.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    assert result["grid_import_total"] == 8.0
+
+
+def _zero_for_a_day(coordinator) -> datetime:
+    """Grid registers at 0 for a day, just short of the energy that raises it."""
+    start = datetime(2026, 11, 19, 10, tzinfo=UTC)
+    coordinator._grid_energy.zero_since = start - timedelta(days=1)
+    coordinator._grid_energy.kwh_while_zero = 0.998
+    return start
+
+
+def test_grid_registers_that_do_not_count_offer_the_calculation_once(
+    coordinator, issues, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = _zero_for_a_day(coordinator)
+
+    run_update(coordinator, _grid_frame(3600.0), start, monkeypatch)
+    issues.created.assert_not_called()
+    for poll in (1, 2):
+        run_update(
+            coordinator,
+            _grid_frame(3600.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    issues.created.assert_called_once()
+    args, kwargs = issues.created.call_args
+    assert args[2] == "grid_energy_not_counted_entry"
+    assert kwargs["is_fixable"] is True
+    assert kwargs["translation_key"] == "grid_energy_not_counted"
+    assert kwargs["data"] == {"entry_id": "entry"}
+
+
+def test_a_grid_register_that_counts_again_clears_the_offer(
+    coordinator, issues, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = _zero_for_a_day(coordinator)
+    for poll in (0, 1):
+        run_update(
+            coordinator,
+            _grid_frame(3600.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    run_update(
+        coordinator,
+        _grid_frame(3600.0, grid_import_today=0.2),
+        start + timedelta(seconds=10),
+        monkeypatch,
+    )
+
+    assert "grid_energy_not_counted_entry" in {
+        call.args[2] for call in issues.deleted.call_args_list
+    }
+    assert not coordinator.grid_energy_not_counted
+
+
+def test_nothing_is_offered_while_grid_energy_is_calculated(
+    coordinator, issues, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = _zero_for_a_day(coordinator)
+    coordinator._ena_calc_grid_energy = True
+    for poll in range(3):
+        run_update(
+            coordinator,
+            _grid_frame(3600.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    issues.created.assert_not_called()
+
+
+def test_enabling_the_calculation_saves_it_to_the_entry(coordinator) -> None:
+    coordinator.config_entry = cast(
+        EcoflowConfigEntry,
+        SimpleNamespace(entry_id="entry", options={const.CONF_SCAN_INTERVAL: 5}),
+    )
+
+    coordinator.async_enable_grid_energy_calculation()
+
+    coordinator.hass.config_entries.async_update_entry.assert_called_once_with(
+        coordinator.config_entry,
+        options={const.CONF_SCAN_INTERVAL: 5, const.CONF_CALC_GRID_ENERGY: True},
+    )
+
+
+def test_calculated_grid_energy_survives_a_restart(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = datetime(2026, 11, 19, 10, tzinfo=UTC)
+    coordinator._ena_calc_grid_energy = True
+    for poll in range(3):
+        run_update(
+            coordinator,
+            _grid_frame(-1800.0),
+            start + poll * timedelta(seconds=10),
+            monkeypatch,
+        )
+    saved = coordinator._persisted_state()
+
+    coordinator._grid_energy = GridEnergyIntegrator()
+    coordinator._load_stored_state(saved)
+
+    assert coordinator._grid_energy.active
+    assert coordinator._grid_energy.totals() == {
+        "grid_import_total": 0.0,
+        "grid_export_total": 0.01,
     }
