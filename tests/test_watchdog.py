@@ -1,4 +1,4 @@
-"""Developer alerts: each rule on its own, the notifications, and the log."""
+"""Alerts by verbosity: each rule on its own, the repairs issues, and the log."""
 
 from __future__ import annotations
 
@@ -16,7 +16,10 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
 from custom_components.ef_powerocean_tcpmodbus import const, repairs, watchdog
-from custom_components.ef_powerocean_tcpmodbus.models import ControlStatus
+from custom_components.ef_powerocean_tcpmodbus.models import (
+    AlertVerbosity,
+    ControlStatus,
+)
 from custom_components.ef_powerocean_tcpmodbus.reading_checks import Finding
 
 T0 = datetime(2026, 11, 19, 12, 0, tzinfo=UTC)
@@ -70,6 +73,61 @@ def test_a_healthy_hour_raises_nothing() -> None:
             writes={CONTROL: 1 if poll > 100 else 0},
         )
         assert [rule.check(view) for rule in rules] == [None] * len(rules)
+
+
+# ── Verbosity ─────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("verbosity", "rules"),
+    (
+        (
+            AlertVerbosity.READINGS,
+            {
+                "reading_findings",
+                "counters",
+                "control_not_accepted",
+                "unavailable_entities",
+            },
+        ),
+        (
+            AlertVerbosity.DETAILED,
+            {
+                "reading_findings",
+                "counters",
+                "control_not_accepted",
+                "unavailable_entities",
+                "control_writes_while_off",
+                "frequent_reconnects",
+                "slow_polls",
+                "energy_balance",
+            },
+        ),
+    ),
+)
+def test_each_level_raises_what_the_one_before_does_and_more(
+    verbosity: AlertVerbosity, rules: set[str]
+) -> None:
+    dog = watchdog.Watchdog(
+        watchdog.Notifier(cast(Any, SimpleNamespace()), "entry"), verbosity
+    )
+    assert {rule.name for rule in dog._rules} == rules
+
+
+def test_every_rule_has_a_level_above_essential() -> None:
+    """Essential is what the user must act on, raised where it arises."""
+    assert all(rule.level is not AlertVerbosity.ESSENTIAL for rule in watchdog.RULES)
+    assert [level.rank for level in AlertVerbosity] == [0, 1, 2, 3]
+
+
+def test_a_finding_with_its_own_issue_is_not_raised_twice() -> None:
+    stalled = Finding(
+        ControlStatus.INCONSISTENT_READINGS,
+        "telemetry_stalled",
+        T0,
+        remedy="telemetry_stalled",
+    )
+    assert watchdog.ReadingFindings().check(_view(findings=(stalled,))) is None
 
 
 # ── Each rule ─────────────────────────────────────────────────────────────────
@@ -278,10 +336,10 @@ def test_a_recurring_alert_is_one_issue_updated_now_and_then(
     # At minutes 0, 10 and 20, always the same issue, with a way to ignore it.
     assert issues.created.call_count == 3
     ids = {call.args[2] for call in issues.created.call_args_list}
-    assert ids == {"developer_rule_entry"}
+    assert ids == {"alert_rule_entry"}
     kwargs = issues.created.call_args.kwargs
     assert kwargs["is_fixable"] is True
-    assert kwargs["translation_key"] == "developer_alert"
+    assert kwargs["translation_key"] == "alert"
     assert kwargs["data"]["count"] == "21"
     assert kwargs["data"]["message"] == "Went wrong"
 
@@ -341,7 +399,7 @@ def test_ignoring_takes_the_issue_down_and_is_remembered(
     dog.async_ignore_for_a_day("other")
     dog.async_ignore_permanently("third")
 
-    issues.deleted.assert_any_call(notifier.hass, const.DOMAIN, "developer_rule_entry")
+    issues.deleted.assert_any_call(notifier.hass, const.DOMAIN, "alert_rule_entry")
     assert store.saved == {
         "rule": {"release": "2.9.6"},
         "other": {"time": (T0 + watchdog.IGNORE_FOR).isoformat()},
@@ -375,10 +433,10 @@ def test_the_fix_flow_ignores_the_alert_it_was_opened_for(
 ) -> None:
     running = Mock()
     monkeypatch.setattr(watchdog, "_RUNNING", {"entry": running})
-    data = {"flow": "developer_alert", "entry_id": "entry", "alert": "rule"}
+    data = {"flow": "alert", "entry_id": "entry", "alert": "rule"}
 
     flow = asyncio.run(repairs.async_create_fix_flow(cast(Any, None), "id", data))
-    assert isinstance(flow, repairs.DeveloperAlertRepairFlow)
+    assert isinstance(flow, repairs.AlertRepairFlow)
     asyncio.run(flow.async_step_ignore_release())
     asyncio.run(flow.async_step_ignore_day())
 
@@ -428,6 +486,7 @@ def test_watching_starts_and_stops_with_the_entry(
             cast(Any, SimpleNamespace()),
             cast(Any, SimpleNamespace(entry_id="entry")),
             cast(Any, coordinator),
+            AlertVerbosity.DEBUG,
         )
     )
     assert len(package.handlers) == len(before) + 1
@@ -443,3 +502,29 @@ def test_watching_starts_and_stops_with_the_entry(
     remove_listener.assert_called_once()
     assert package.handlers == before
     assert watchdog.running("entry") is None
+
+
+def test_the_log_is_only_watched_at_debug(
+    issues: SimpleNamespace,  # noqa: ARG001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def integration(*_: Any) -> Any:
+        return SimpleNamespace(version="2.9.6")
+
+    monkeypatch.setattr(watchdog, "async_get_integration", integration)
+    monkeypatch.setattr(watchdog, "Store", lambda *_: _Store())
+    coordinator = SimpleNamespace(async_add_listener=Mock(return_value=Mock()))
+    package = logging.getLogger("custom_components.ef_powerocean_tcpmodbus")
+    before = list(package.handlers)
+
+    stop = asyncio.run(
+        watchdog.async_start(
+            cast(Any, SimpleNamespace()),
+            cast(Any, SimpleNamespace(entry_id="entry")),
+            cast(Any, coordinator),
+            AlertVerbosity.DETAILED,
+        )
+    )
+
+    assert package.handlers == before
+    stop()

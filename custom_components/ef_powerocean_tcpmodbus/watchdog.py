@@ -1,9 +1,10 @@
-"""Developer alerts: a notification whenever the integration misbehaves.
+"""Alerts beyond what the user must act on, as verbose as the user chose.
 
-Off unless switched on in the integration's settings, for whoever tests a release
-on a live inverter. It only watches: after each poll it looks at what the poll
-left behind, each rule on its own, and it turns the integration's own warnings
-and errors into alerts. Nothing here changes what the integration does, and a
+At the default, Essential, nothing here runs: the repairs issues the user must
+act on are raised where they arise. Each level above adds rules: readings that
+cannot be trusted, then the connection's health, then every warning and error
+the integration logs. After each poll the rules look at what the poll left
+behind, each on its own. Nothing here changes what the integration does, and a
 rule that breaks is switched off and logged once.
 
 Each rule raises one repairs issue, updated in place as it recurs, so a problem
@@ -31,7 +32,7 @@ from homeassistant.loader import async_get_integration
 from homeassistant.util import dt
 
 from .const import CONTROL_COMMAND_REGISTER, DOMAIN
-from .models import ControlStatus
+from .models import AlertVerbosity, ControlStatus
 from .reading_checks import Finding
 
 if TYPE_CHECKING:
@@ -77,6 +78,8 @@ class Rule:
 
     name: ClassVar[str]
     title: ClassVar[str]
+    # The least verbosity that raises it.
+    level: ClassVar[AlertVerbosity]
 
     def check(self, view: PollView) -> str | None:
         """Return what went wrong in this poll, or None."""
@@ -92,6 +95,7 @@ class ControlWritesWhileOff(Rule):
 
     name = "control_writes_while_off"
     title = "Control writes while Modbus Control is off"
+    level = AlertVerbosity.DETAILED
     LIMIT: ClassVar[int] = 3
     WINDOW: ClassVar[timedelta] = timedelta(minutes=10)
 
@@ -124,6 +128,7 @@ class FrequentReconnects(Rule):
 
     name = "frequent_reconnects"
     title = "Frequent reconnects"
+    level = AlertVerbosity.DETAILED
     LIMIT: ClassVar[int] = 5
     WINDOW: ClassVar[timedelta] = timedelta(hours=1)
 
@@ -147,6 +152,7 @@ class SlowPolls(Rule):
 
     name = "slow_polls"
     title = "Polls run late"
+    level = AlertVerbosity.DETAILED
     FACTOR: ClassVar[int] = 3
     IN_A_ROW: ClassVar[int] = 5
 
@@ -172,16 +178,23 @@ class SlowPolls(Rule):
 
 
 class ReadingFindings(Rule):
-    """A reading check found readings to be wrong, or the inverter in a state."""
+    """A reading check found readings to be wrong, or the inverter in a state.
+
+    A finding that raises its own repairs issue, such as stalled readings, is
+    not raised twice.
+    """
 
     name = "reading_findings"
     title = "Reading check failed"
+    level = AlertVerbosity.READINGS
 
     def __init__(self) -> None:
         self._seen: set[str] = set()
 
     def check(self, view: PollView) -> str | None:
-        current = {finding.check: finding for finding in view.findings}
+        current = {
+            finding.check: finding for finding in view.findings if not finding.remedy
+        }
         started = [current[check] for check in current.keys() - self._seen]
         self._seen = set(current)
         if not started:
@@ -207,6 +220,7 @@ class EnergyBalance(Rule):
 
     name = "energy_balance"
     title = "House power does not add up"
+    level = AlertVerbosity.DETAILED
     MARGIN_W: ClassVar[float] = 300.0
     MARGIN_SHARE: ClassVar[float] = 0.2
     IN_A_ROW: ClassVar[int] = 12
@@ -251,6 +265,7 @@ class CountersBack(Rule):
 
     name = "counters"
     title = "Energy counter went back or is held"
+    level = AlertVerbosity.READINGS
 
     def __init__(self) -> None:
         self._last: dict[str, float] = {}
@@ -278,6 +293,7 @@ class ControlNotAccepted(Rule):
 
     name = "control_not_accepted"
     title = "Inverter does not accept control"
+    level = AlertVerbosity.READINGS
 
     def __init__(self) -> None:
         self._was = False
@@ -293,6 +309,7 @@ class UnexpectedlyUnavailable(Rule):
 
     name = "unavailable_entities"
     title = "Entities unavailable after a good poll"
+    level = AlertVerbosity.READINGS
     IN_A_ROW: ClassVar[int] = 3
 
     def __init__(self) -> None:
@@ -334,8 +351,8 @@ class Ignores:
 
     Kept per entry in a store of its own. An alert ignored until the next
     release comes back once another version of the integration runs; one ignored
-    for a day, a day later; one ignored permanently, once developer alerts are
-    switched off, which forgets every choice.
+    for a day, a day later; one ignored permanently, once the verbosity is set
+    back to Essential, which forgets every choice.
     """
 
     def __init__(self, store: Store[dict[str, Any]], release: str) -> None:
@@ -380,7 +397,7 @@ class Ignores:
 
 
 def issue_id(entry_id: str, alert: str) -> str:
-    return f"developer_{alert}_{entry_id}"
+    return f"alert_{alert}_{entry_id}"
 
 
 @dataclass
@@ -417,10 +434,10 @@ class Notifier:
             is_fixable=True,
             is_persistent=False,
             severity=ir.IssueSeverity.WARNING,
-            translation_key="developer_alert",
+            translation_key="alert",
             translation_placeholders={"title": title},
             data={
-                "flow": "developer_alert",
+                "flow": "alert",
                 "entry_id": self.entry_id,
                 "alert": alert,
                 "title": title,
@@ -447,9 +464,13 @@ class Notifier:
 class Watchdog:
     """Runs every rule after each poll and raises what they find."""
 
-    def __init__(self, notifier: Notifier) -> None:
+    def __init__(
+        self, notifier: Notifier, verbosity: AlertVerbosity = AlertVerbosity.DEBUG
+    ) -> None:
         self._notifier = notifier
-        self._rules: list[Rule] = [rule() for rule in RULES]
+        self._rules: list[Rule] = [
+            rule() for rule in RULES if rule.level.rank <= verbosity.rank
+        ]
 
     @callback
     def async_ignore_permanently(self, alert: str) -> None:
@@ -563,43 +584,47 @@ def view_of(
 
 
 def _store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
-    return Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}.developer_alerts")
+    return Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}.alerts")
 
 
 async def async_forget_ignores(hass: HomeAssistant, entry_id: str) -> None:
-    """Forget every alert ignored for *entry_id*, as when alerts are switched off."""
+    """Forget every alert ignored for *entry_id*, as when set back to Essential."""
     await _store(hass, entry_id).async_remove()
 
 
 def running(entry_id: str) -> Watchdog | None:
-    """Return the watchdog of *entry_id*, if developer alerts are on for it."""
+    """Return the watchdog of *entry_id*, if its verbosity is above Essential."""
     return _RUNNING.get(entry_id)
 
 
 async def async_start(
-    hass: HomeAssistant, entry: ConfigEntry, coordinator: EcoflowCoordinator
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: EcoflowCoordinator,
+    verbosity: AlertVerbosity,
 ) -> Callable[[], None]:
     """Watch *coordinator* until the returned callback stops it."""
     integration = await async_get_integration(hass, DOMAIN)
     ignores = Ignores(_store(hass, entry.entry_id), str(integration.version))
     await ignores.async_load()
     notifier = Notifier(hass, entry.entry_id, ignores)
-    watchdog = Watchdog(notifier)
+    watchdog = Watchdog(notifier, verbosity)
     _RUNNING[entry.entry_id] = watchdog
     handler = _Forwarder(hass, watchdog)
     package = logging.getLogger(_PACKAGE_LOGGER)
-    package.addHandler(handler)
+    if verbosity is AlertVerbosity.DEBUG:
+        package.addHandler(handler)
 
     @callback
     def _after_poll() -> None:
         watchdog.observe(view_of(hass, entry, coordinator))
 
     remove_listener = coordinator.async_add_listener(_after_poll)
-    _LOGGER.info("Developer alerts are on")
+    _LOGGER.info("Alerts at %s verbosity", verbosity)
 
     def _stop() -> None:
         remove_listener()
-        package.removeHandler(handler)
+        package.removeHandler(handler)  # a no-op unless it was added
         _RUNNING.pop(entry.entry_id, None)
         notifier.async_clear()
 

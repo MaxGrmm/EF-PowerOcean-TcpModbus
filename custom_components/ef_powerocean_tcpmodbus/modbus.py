@@ -348,7 +348,7 @@ class ModbusClient:
         # Reads the device replied to, a refusal included. Compared across a poll,
         # it tells a slow or refusing inverter from a silent one.
         self.answers = 0
-        # Writes sent, by address, and reconnects started, for developer alerts.
+        # Writes sent, by address, and reconnects started, for the alerts.
         self.writes: Counter[int] = Counter()
         self.reconnects = 0
 

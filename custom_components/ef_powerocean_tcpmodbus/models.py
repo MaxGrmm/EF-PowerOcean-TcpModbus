@@ -71,6 +71,29 @@ class BatteryModule:
     discharge_w: int
 
 
+class AlertVerbosity(StrEnum):
+    """How much the integration raises in repairs, from least to most.
+
+    Each level raises everything the one before it does.
+    """
+
+    # What the user must act on: the inverter stopped updating, Modbus is off, it
+    # does not answer, totals are held, another inverter answers.
+    ESSENTIAL = "essential"
+    # Also readings that cannot be trusted: a failed reading check, a counter
+    # going back, sensors unavailable unexplained, control not accepted.
+    READINGS = "readings"
+    # Also the connection's health: reconnects, late polls, control writes with
+    # control off, power that does not add up.
+    DETAILED = "detailed"
+    # Also every warning and error the integration logs.
+    DEBUG = "debug"
+
+    @property
+    def rank(self) -> int:
+        return list(AlertVerbosity).index(self)
+
+
 class ReserveSupport(StrEnum):
     """Whether the inverter or the integration enforces the Battery Reserve."""
 

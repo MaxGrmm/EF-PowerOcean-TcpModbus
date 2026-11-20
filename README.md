@@ -635,27 +635,23 @@ page, after checking it for anything you would rather not share.
 
 ---
 
-### Developer alerts
+### Alert verbosity
 
-For testing a release on a live inverter, switch on **Developer alerts** in the
-integration's settings. An issue then appears under Settings → Repairs whenever the
-integration misbehaves, so there is no need to watch the debug log:
+**Alert verbosity** in the integration's settings sets how much the integration
+raises under Settings → Repairs. Each level raises everything the one before it does:
 
-- a warning or error the integration logs
-- the control register written again and again while Modbus Control is off
-- more than 5 reconnects in an hour, or polls coming in far later than the poll
-  interval
-- a reading check failing
-- house power that doesn't add up from solar, grid and battery for a minute
-- a lifetime energy counter going back, or a total being held
-- Control Status turning to Not accepted
-- a reading showing unavailable after good polls, with no check to explain it
+| Level         | Also raises                                                                                                    |
+| ------------- | -------------------------------------------------------------------------------------------------------------- |
+| **Essential** | Only what you must act on: readings that stopped updating, Modbus off, no answer, held totals (the default)    |
+| **Readings**  | A reading check failing, a lifetime counter going back, readings unavailable unexplained, control not accepted |
+| **Detailed**  | Frequent reconnects, late polls, repeated control writes with Modbus Control off, power that doesn't add up    |
+| **Debug**     | Every warning and error the integration logs                                                                   |
 
 Each kind of alert is one issue, updated at most every 10 minutes with how often and
 when it was seen. Open it to ignore it until the next release of the integration, for
-24 hours, or permanently. Switching developer alerts off forgets every alert you
-ignored. The alerts only watch: they never change what the integration does. Leave
-them off in normal use.
+24 hours, or permanently. Setting the verbosity back to Essential forgets every alert
+you ignored. The alerts only watch: they never change what the integration does.
+Debug is meant for testing a release on a live inverter.
 
 ## Removing the Integration
 

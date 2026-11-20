@@ -68,7 +68,7 @@
           "grid_power_max": "Maximum grid power [W]",
           "scan_interval": "Poll Interval [s]",
           "calc_solar_power": "Calculation of solar power",
-          "developer_alerts": "Developer alerts",
+          "alert_verbosity": "Alert verbosity",
           "battery_reserve": "Battery Reserve"
         },
         "data_description": {
@@ -78,7 +78,7 @@
           "grid_power_max": "Most your grid connection can import or export, set by your main fuse. Not the inverter rating: the house alone can draw more than that.",
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
-          "developer_alerts": "For testing a release: a repairs issue whenever the integration misbehaves, such as warnings and errors it logs, writes while Modbus Control is off, frequent reconnects, late polls, power that does not add up, or counters that go back. Switching them off forgets every alert you ignored. Leave off in normal use.",
+          "alert_verbosity": "How much the integration raises in Settings \u2192 Repairs. Essential: only what you must act on, such as an inverter that stopped updating. Readings: also readings that cannot be trusted. Detailed: also the connection's health, such as frequent reconnects or late polls. Debug: also every warning and error the integration logs. Each alert can be ignored. Setting it back to Essential forgets the ignored alerts.",
           "battery_reserve": "Native: the inverter enforces the reserve itself, like the one set in the EcoFlow app, but not every model accepts a change to it over Modbus. Emulated: the integration imitates the app's reserve with its own logic, while Modbus Control is on. Set for your model; change it only to test a model."
         },
         "sections": {
@@ -149,13 +149,13 @@
       "title": "The inverter at {host} stopped updating its readings",
       "description": "The inverter still answers, but most of its readings haven't changed since at least {since}. Readings that stand still show as unavailable, and Modbus Control, if on, leaves the inverter to its own logic. Restart the inverter according to its manual. This issue goes away once the readings move again. If it keeps coming back, report it with the integration's diagnostics and the inverter's firmware version."
     },
-    "developer_alert": {
-      "title": "Developer alert: {title}",
+    "alert": {
+      "title": "Alert: {title}",
       "fix_flow": {
         "step": {
           "init": {
-            "title": "Developer alert: {title}",
-            "description": "{message}\n\nSeen {count} times, first {first}, last {last}.\n\nIgnore this alert until the next release of the integration, for 24 hours, or permanently. Switching developer alerts off forgets every alert you ignored.",
+            "title": "Alert: {title}",
+            "description": "{message}\n\nSeen {count} times, first {first}, last {last}.\n\nIgnore this alert until the next release of the integration, for 24 hours, or permanently. Setting the alert verbosity back to Essential forgets every alert you ignored.",
             "menu_options": {
               "ignore_release": "Ignore until the next release",
               "ignore_day": "Ignore for 24 hours",
@@ -164,7 +164,7 @@
           }
         },
         "abort": {
-          "not_watching": "Developer alerts are no longer on for this inverter."
+          "not_watching": "Alerts beyond Essential are no longer on for this inverter."
         }
       }
     }
@@ -205,6 +205,14 @@
         "700": "Device off-grid event",
         "702": "Low power mode",
         "703": "EMS module power-on notification"
+      }
+    },
+    "alert_verbosity": {
+      "options": {
+        "essential": "Essential",
+        "readings": "Readings",
+        "detailed": "Detailed",
+        "debug": "Debug"
       }
     }
   },

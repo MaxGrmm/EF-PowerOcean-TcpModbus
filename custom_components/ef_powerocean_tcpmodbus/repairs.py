@@ -118,8 +118,8 @@ class HeldTotalsRepairFlow(RepairsFlow):
         return f"{BUG_REPORT_URL}?{urlencode(fields, quote_via=quote)}"
 
 
-class DeveloperAlertRepairFlow(RepairsFlow):
-    """Ignore a developer alert permanently, until the next release, or for a day."""
+class AlertRepairFlow(RepairsFlow):
+    """Ignore an alert permanently, until the next release, or for a day."""
 
     def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
@@ -157,7 +157,7 @@ class DeveloperAlertRepairFlow(RepairsFlow):
         self,
         user_input: dict[str, str] | None = None,  # noqa: ARG002 - a menu choice
     ) -> RepairsFlowResult:
-        """Ignore the alert until developer alerts are switched off."""
+        """Ignore the alert until the verbosity is set back to Essential."""
         if (running := self._watchdog()) is None:
             return self.async_abort(reason="not_watching")
         running.async_ignore_permanently(str(self._data.get("alert", "")))
@@ -181,6 +181,6 @@ async def async_create_fix_flow(
 ) -> RepairsFlow:
     """Create the fix flow for a repairs issue raised by this integration."""
     data = data or {}
-    if data.get("flow") == "developer_alert":
-        return DeveloperAlertRepairFlow(data)
+    if data.get("flow") == "alert":
+        return AlertRepairFlow(data)
     return HeldTotalsRepairFlow(str(data.get("entry_id", "")))

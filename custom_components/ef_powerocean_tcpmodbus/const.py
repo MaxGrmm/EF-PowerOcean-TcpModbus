@@ -74,8 +74,8 @@ CONF_MAX_BATTERY_CHARGED_POWER: Final = "battery_charged_power_max"
 CONF_MAX_BATTERY_DISCHARGED_POWER: Final = "battery_discharged_power_max"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_CALC_SOLAR_POWER: Final = "calc_solar_power"
-# Notifications whenever the integration misbehaves, for testing a release.
-CONF_DEVELOPER_ALERTS: Final = "developer_alerts"
+# How much the integration raises in repairs, beyond what the user must act on.
+CONF_ALERT_VERBOSITY: Final = "alert_verbosity"
 CONF_MODBUS_CONTROL: Final = "modbus_control"
 CONF_INVERTER_MODEL: Final = "inverter_model"
 # kWh added to what the device reports for a lifetime total, by its key. Set by the

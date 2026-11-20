@@ -174,25 +174,30 @@ async def test_changing_the_settings_keeps_the_energy_corrections(
 @pytest.mark.usefixtures("enable_custom_integrations", "device_settings")
 @pytest.mark.parametrize(
     ("before", "after", "forgets"),
-    ((True, False, True), (True, True, False), (False, False, False)),
+    (
+        ("debug", "essential", True),
+        ("readings", "essential", True),
+        ("debug", "detailed", False),
+        ("essential", "essential", False),
+    ),
 )
-async def test_switching_developer_alerts_off_forgets_the_ignored_ones(
+async def test_back_to_essential_alerts_forgets_the_ignored_ones(
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
-    before: bool,
-    after: bool,
+    before: str,
+    after: str,
     forgets: bool,
 ) -> None:
     forget = AsyncMock()
     monkeypatch.setattr(watchdog, "async_forget_ignores", forget)
-    entry = _configured_entry(hass, {const.CONF_DEVELOPER_ALERTS: before})
+    entry = _configured_entry(hass, {const.CONF_ALERT_VERBOSITY: before})
 
     form = await hass.config_entries.options.async_init(entry.entry_id)
     await hass.config_entries.options.async_configure(
-        form["flow_id"], {const.CONF_DEVELOPER_ALERTS: after}
+        form["flow_id"], {const.CONF_ALERT_VERBOSITY: after}
     )
 
-    assert entry.options[const.CONF_DEVELOPER_ALERTS] is after
+    assert entry.options[const.CONF_ALERT_VERBOSITY] == after
     assert forget.await_count == int(forgets)
 
 

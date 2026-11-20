@@ -17,7 +17,7 @@ from homeassistant.util.yaml import parse_yaml
 
 from custom_components.ef_powerocean_tcpmodbus import const, models, repairs, watchdog
 from custom_components.ef_powerocean_tcpmodbus.repairs import (
-    DeveloperAlertRepairFlow,
+    AlertRepairFlow,
     HeldTotalsRepairFlow,
     async_create_fix_flow,
 )
@@ -182,10 +182,10 @@ def test_every_language_uses_exactly_the_placeholders_the_flow_provides() -> Non
         } == {"host"}, path.name
 
 
-# ── Developer alerts ──────────────────────────────────────────────────────────
+# ── Alerts ──────────────────────────────────────────────────────────
 
 ALERT = {
-    "flow": "developer_alert",
+    "flow": "alert",
     "entry_id": "entry",
     "alert": "slow_polls",
     "title": "Polls run late",
@@ -196,18 +196,16 @@ ALERT = {
 }
 
 
-def _alert_flow(
-    monkeypatch: pytest.MonkeyPatch, running: Any
-) -> DeveloperAlertRepairFlow:
+def _alert_flow(monkeypatch: pytest.MonkeyPatch, running: Any) -> AlertRepairFlow:
     monkeypatch.setattr(watchdog, "_RUNNING", {"entry": running} if running else {})
     flow = asyncio.run(async_create_fix_flow(None, "issue", dict(ALERT)))  # type: ignore[arg-type]
-    assert isinstance(flow, DeveloperAlertRepairFlow)
+    assert isinstance(flow, AlertRepairFlow)
     flow.hass = SimpleNamespace()  # type: ignore[assignment]
     flow.flow_id, flow.handler = "flow", const.DOMAIN
     return flow
 
 
-def test_a_developer_alert_shows_what_was_seen_and_how_to_ignore_it(
+def test_an_alert_shows_what_was_seen_and_how_to_ignore_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     result = asyncio.run(_alert_flow(monkeypatch, Mock()).async_step_init())
@@ -231,7 +229,7 @@ def test_a_developer_alert_shows_what_was_seen_and_how_to_ignore_it(
         ("async_step_ignore_forever", "async_ignore_permanently"),
     ),
 )
-def test_a_developer_alert_is_ignored_as_chosen(
+def test_an_alert_is_ignored_as_chosen(
     monkeypatch: pytest.MonkeyPatch, step: str, ignore: str
 ) -> None:
     running = Mock()
@@ -251,7 +249,7 @@ def test_a_developer_alert_is_ignored_as_chosen(
         "async_step_ignore_forever",
     ),
 )
-def test_a_developer_alert_flow_ends_once_alerts_are_off(
+def test_an_alert_flow_ends_once_alerts_are_off(
     monkeypatch: pytest.MonkeyPatch, step: str
 ) -> None:
     result = asyncio.run(getattr(_alert_flow(monkeypatch, None), step)())
@@ -260,7 +258,7 @@ def test_a_developer_alert_flow_ends_once_alerts_are_off(
     assert result.get("reason") == "not_watching"
 
 
-def test_every_language_explains_a_developer_alert_with_what_the_flow_provides(
+def test_every_language_explains_an_alert_with_what_the_flow_provides(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     result = asyncio.run(_alert_flow(monkeypatch, Mock()).async_step_init())
@@ -268,9 +266,7 @@ def test_every_language_explains_a_developer_alert_with_what_the_flow_provides(
     choices = set(cast(list[str], result.get("menu_options")))
 
     for path in sorted(Path(const.__file__).parent.glob("translations/*.json")):
-        issue = json.loads(path.read_text(encoding="utf-8"))["issues"][
-            "developer_alert"
-        ]
+        issue = json.loads(path.read_text(encoding="utf-8"))["issues"]["alert"]
         step = issue["fix_flow"]["step"]["init"]
         used = {
             name for _, name, _, _ in Formatter().parse(step["description"]) if name
