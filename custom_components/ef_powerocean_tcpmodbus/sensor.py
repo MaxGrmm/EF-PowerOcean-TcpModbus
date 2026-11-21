@@ -34,6 +34,7 @@ from .const import (
     DAILY_ENERGY_SENSORS_DEVICE_RAW,
     EFFECTIVE_RESERVE_SENSOR,
     ENERGY_SENSOR_MAP,
+    EXTERNAL_METER_KEYS,
     FAULT_KEYS,
     SENSOR_MAP,
     TOTAL_ENERGY_SENSORS_DEVICE_RAW,
@@ -223,6 +224,9 @@ class EcoflowSensor(EcoFlowBaseEntity[SensorDef | EnergySensorDef], RestoreSenso
             )
 
         self._attr_entity_category = self._definition.entity_category
+        # Created disabled without an external meter, like the existing ones.
+        if definition.key in EXTERNAL_METER_KEYS:
+            self._attr_entity_registry_enabled_default = coordinator.has_external_meter
 
     @callback
     def _handle_coordinator_update(self) -> None:

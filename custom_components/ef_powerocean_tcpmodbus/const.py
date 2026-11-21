@@ -234,6 +234,18 @@ FAULT_KEYS: Final = tuple(
     f"fault_{fault_number}" for fault_number in range(1, MAX_FAULT_EVENTS + 1)
 )
 
+# Read from an external EcoFlow Smart Meter at the grid connection. Without one the
+# device reads 0 in all of them, as on a PowerOcean Plus that relies on its built-in
+# meter, whose readings show as the inverter's voltage and current (#240).
+EXTERNAL_METER_KEYS: Final = (
+    "grid_voltage_l1",
+    "grid_voltage_l2",
+    "grid_voltage_l3",
+    "grid_current_l1",
+    "grid_current_l2",
+    "grid_current_l3",
+)
+
 BATTERY_SOC_KEYS: Final = tuple(
     f"soc_battery_{battery_number}"
     for battery_number in range(1, MAX_BATTERY_COUNT + 1)
@@ -287,8 +299,9 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("battery_capacity", 40552, RegisterType.UINT32),
     RegisterDef("battery_discharge_power_limit", 40554, RegisterType.UINT32),
     RegisterDef("battery_charge_power_limit", 40556, RegisterType.UINT32),
-    # Measured at the grid connection, unlike voltage_l1 and current_l1 below which
-    # are the inverter's own phases.
+    # Read from an external meter (EXTERNAL_METER_KEYS), unlike voltage_l1 and
+    # current_l1 below, which the inverter measures itself. On a PowerOcean Plus
+    # those come from its built-in meter at the GRID terminals.
     RegisterDef("grid_current_l1", 40559, optional=True, signal=Signal.MEASURE),
     RegisterDef("grid_current_l2", 40561, optional=True, signal=Signal.MEASURE),
     RegisterDef("grid_current_l3", 40563, optional=True, signal=Signal.MEASURE),

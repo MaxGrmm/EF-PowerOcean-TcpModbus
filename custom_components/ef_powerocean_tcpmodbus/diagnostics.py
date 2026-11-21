@@ -88,6 +88,7 @@ async def async_get_config_entry_diagnostics(
             "control_power": coordinator.control.power,
             "control_command": f"0x{coordinator.control.command:08X}",
             "unsupported_registers": sorted(coordinator.unsupported_registers),
+            "has_external_meter": coordinator.has_external_meter,
             # The words the last poll read, undecoded, which the test suite's fake
             # inverter can serve again. Never the serial number.
             "raw_registers": redact_raw_registers(coordinator.raw_registers),
