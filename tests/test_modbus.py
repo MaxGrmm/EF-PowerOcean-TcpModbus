@@ -14,7 +14,7 @@ from awesomeversion import AwesomeVersion
 from homeassistant.const import MAJOR_VERSION, MINOR_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from pymodbus.exceptions import ModbusException
+from pymodbus.exceptions import ConnectionException, ModbusException, ModbusIOException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const
@@ -25,6 +25,7 @@ SHARED = (MAJOR_VERSION, MINOR_VERSION) >= (2026, 9)
 
 if SHARED:
     from modbus_connection import (
+        ClientClosedError,
         IllegalDataAddressError,
         ModbusConnectionError,
         ModbusTimeoutError,
@@ -242,31 +243,307 @@ async def test_a_shared_link_drops_a_connection_that_stops_answering(
 ) -> None:
     """A firewall that swallows packets leaves the old connection open but useless."""
     unit.disconnect = AsyncMock()
-    unit.fail_requests(ModbusTimeoutError("Response timeout after 3.0 seconds"))
+    unit.fail_requests(ModbusTimeoutError("Response timeout"))
 
-    with pytest.raises(ModbusException):
-        await shared_client.async_read(100, 2)
-    with pytest.raises(HomeAssistantError):
-        await shared_client.async_write(40608, [1], what="heartbeat")
     assert not await shared_client.async_connect()
 
-    assert unit.disconnect.await_count == 3
+    unit.disconnect.assert_awaited_once()
 
 
 @shared_only
-async def test_a_shared_link_keeps_a_connection_that_fails_otherwise(
+async def test_a_failed_probe_keeps_a_connection_that_did_not_time_out(
     shared_client, unit
 ) -> None:
+    unit.disconnect = AsyncMock()
+    unit.fail_requests(ModbusConnectionError("link down"))
+
+    assert not await shared_client.async_connect()
+
+    unit.disconnect.assert_not_awaited()
+
+
+# ── A request the connection lost is sent once more, on a new connection ─────
+
+OWN_CONNECTION_ERRORS = (
+    ConnectionException("Not connected"),
+    ModbusIOException("No response received after 0 retries"),
+    ConnectionResetError("reset by peer"),
+    BrokenPipeError("broken pipe"),
+    TimeoutError(),
+)
+
+
+def _reconnecting(pymodbus, *, works: bool = True) -> None:
+    pymodbus.connected = True
+    pymodbus.close = Mock()
+    pymodbus.connect = AsyncMock(
+        side_effect=lambda: setattr(pymodbus, "connected", works)
+    )
+
+
+@pytest.mark.parametrize("error", OWN_CONNECTION_ERRORS, ids=repr)
+def test_an_own_link_resends_a_read_the_connection_lost(
+    client, pymodbus, error: Exception
+) -> None:
+    _reconnecting(pymodbus)
+    pymodbus.read_holding_registers = AsyncMock(
+        side_effect=[error, answer(is_error=False, registers=[11, 22])]
+    )
+
+    assert asyncio.run(client.async_read(100, 2)) == [11, 22]
+
+    pymodbus.close.assert_called_once()
+    pymodbus.connect.assert_awaited_once()
+    assert pymodbus.read_holding_registers.await_count == 2
+    # The lost attempt was no answer.
+    assert client.answers == 1
+
+
+def test_an_own_link_resends_a_write_the_connection_lost(client, pymodbus) -> None:
+    _reconnecting(pymodbus)
+    pymodbus.write_register = AsyncMock(
+        side_effect=[ConnectionResetError("reset"), answer(is_error=False)]
+    )
+
+    asyncio.run(client.async_write(40608, [1], what="heartbeat"))
+
+    assert pymodbus.write_register.await_count == 2
+
+
+def test_an_own_link_sends_a_request_once_more_at_most(client, pymodbus) -> None:
+    _reconnecting(pymodbus)
+    pymodbus.read_holding_registers = AsyncMock(side_effect=ModbusIOException("none"))
+
+    with pytest.raises(ModbusException):
+        asyncio.run(client.async_read(100, 2))
+
+    assert pymodbus.read_holding_registers.await_count == 2
+    assert client.answers == 0
+
+
+def test_an_own_link_does_not_resend_when_no_new_connection_opens(
+    client, pymodbus
+) -> None:
+    _reconnecting(pymodbus, works=False)
+    pymodbus.read_holding_registers = AsyncMock(side_effect=ConnectionResetError())
+
+    with pytest.raises(ModbusException):
+        asyncio.run(client.async_read(100, 2))
+
+    assert pymodbus.read_holding_registers.await_count == 1
+
+
+def test_an_own_link_does_not_resend_when_opening_one_fails(client, pymodbus) -> None:
+    _reconnecting(pymodbus)
+    pymodbus.connect = AsyncMock(side_effect=OSError("unreachable"))
+    pymodbus.read_holding_registers = AsyncMock(side_effect=ConnectionResetError())
+
+    with pytest.raises(ModbusException):
+        asyncio.run(client.async_read(100, 2))
+
+    assert pymodbus.read_holding_registers.await_count == 1
+
+
+def test_a_refusal_is_not_sent_again(client, pymodbus) -> None:
+    _reconnecting(pymodbus)
+    pymodbus.read_holding_registers = AsyncMock(return_value=answer(is_error=True))
+
+    with pytest.raises(modbus_module.ModbusReadRejected):
+        asyncio.run(client.async_read(100, 2))
+
+    pymodbus.read_holding_registers.assert_awaited_once()
+    pymodbus.close.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("left_s", "sends"),
+    ((const.MODBUS_REQUEST_TIMEOUT_S - 1, 1), (const.MODBUS_REQUEST_TIMEOUT_S, 2)),
+    ids=("less than a timeout left", "a timeout left"),
+)
+def test_a_retry_starts_only_with_time_left_for_it(
+    client, pymodbus, left_s: float, sends: int
+) -> None:
+    _reconnecting(pymodbus)
+    pymodbus.read_holding_registers = AsyncMock(side_effect=ConnectionResetError())
+
+    async def read() -> None:
+        deadline = asyncio.get_running_loop().time() + left_s + 0.5
+        with modbus_module.retries_until(deadline):
+            await client.async_read(100, 2)
+
+    with pytest.raises(ModbusException):
+        asyncio.run(read())
+
+    assert pymodbus.read_holding_registers.await_count == sends
+
+
+def test_a_reconnect_that_uses_up_the_budget_leaves_no_resend(client, pymodbus) -> None:
+    _reconnecting(pymodbus)
+    pymodbus.read_holding_registers = AsyncMock(side_effect=ConnectionResetError())
+
+    def slow_connect() -> None:
+        # Connecting took long enough to use up what was left of the poll.
+        modbus_module._retry_deadline.set(asyncio.get_running_loop().time())
+        pymodbus.connected = True
+
+    pymodbus.connect = AsyncMock(side_effect=slow_connect)
+
+    async def read() -> None:
+        left = 2 * const.MODBUS_REQUEST_TIMEOUT_S
+        with modbus_module.retries_until(asyncio.get_running_loop().time() + left):
+            await client.async_read(100, 2)
+
+    with pytest.raises(ModbusException):
+        asyncio.run(read())
+
+    pymodbus.connect.assert_awaited_once()
+    pymodbus.read_holding_registers.assert_awaited_once()
+
+
+def test_a_closed_client_does_not_resend(client, pymodbus) -> None:
+    _reconnecting(pymodbus)
+    pymodbus.read_holding_registers = AsyncMock(side_effect=ConnectionResetError())
+    asyncio.run(client.async_close())
+
+    with pytest.raises(ModbusException):
+        asyncio.run(client.async_read(100, 2))
+
+    pymodbus.read_holding_registers.assert_awaited_once()
+
+
+def _lost_once(unit, error: Exception) -> None:
+    """Fail every request until the connection is dropped, as a dead connection."""
+    unit.fail_requests(error)
+    unit.disconnect = AsyncMock(side_effect=lambda: unit.fail_requests(None))
+
+
+SHARED_CONNECTION_ERRORS = (
+    (
+        "lost before the answer",
+        lambda: ModbusConnectionError(
+            "read_holding_registers(40519, 89): Connection lost before response "
+            "was received."
+        ),
+    ),
+    ("closed", lambda: ClientClosedError("connection is closed")),
+    ("timeout", lambda: ModbusTimeoutError("Response timeout")),
+)
+
+
+@shared_only
+@pytest.mark.parametrize(
+    "error",
+    [make for _, make in SHARED_CONNECTION_ERRORS],
+    ids=[name for name, _ in SHARED_CONNECTION_ERRORS],
+)
+async def test_a_shared_link_resends_a_read_the_connection_lost(
+    shared_client, unit, error
+) -> None:
+    unit.holding[100] = 7
+    _lost_once(unit, error())
+
+    assert await shared_client.async_read(100, 1) == [7]
+
+    unit.disconnect.assert_awaited_once()
+    assert len(unit.read_events) == 2
+    assert shared_client.answers == 1
+
+
+@shared_only
+async def test_a_shared_link_resends_a_write_the_connection_lost(
+    shared_client, unit
+) -> None:
+    written: list[Any] = []
+    unit.on_write(written.append)
+    _lost_once(unit, ModbusConnectionError("Connection lost before response"))
+
+    await shared_client.async_write(40608, [1], what="heartbeat")
+
+    unit.disconnect.assert_awaited_once()
+    assert [(w.address, w.values) for w in written] == [(40608, [1])]
+
+
+@shared_only
+@pytest.mark.parametrize(
+    "error",
+    [make for _, make in SHARED_CONNECTION_ERRORS],
+    ids=[name for name, _ in SHARED_CONNECTION_ERRORS],
+)
+async def test_a_shared_link_sends_a_request_once_more_at_most(
+    shared_client, unit, error
+) -> None:
+    unit.disconnect = AsyncMock()
+    unit.fail_requests(error())
+
+    with pytest.raises(ModbusException):
+        await shared_client.async_read(100, 2)
+
+    assert len(unit.read_events) == 2
+    # Dropped after each attempt, so the next poll starts on a new connection.
+    assert unit.disconnect.await_count == 2
+
+
+@shared_only
+async def test_a_shared_link_drops_a_connection_it_has_no_time_to_resend_on(
+    shared_client, unit
+) -> None:
+    unit.disconnect = AsyncMock()
+    unit.fail_requests(ModbusTimeoutError("Response timeout"))
+
+    deadline = asyncio.get_running_loop().time() + 1
+    with (
+        modbus_module.retries_until(deadline),
+        pytest.raises(ModbusException),
+    ):
+        await shared_client.async_read(100, 2)
+
+    assert len(unit.read_events) == 1
+    unit.disconnect.assert_awaited_once()
+
+
+@shared_only
+async def test_a_closed_shared_client_drops_the_connection_without_resending(
+    shared_client, unit
+) -> None:
+    unit.disconnect = AsyncMock()
+    unit.fail_requests(ModbusConnectionError("link down"))
+    await shared_client.async_close()
+
+    with pytest.raises(ModbusException):
+        await shared_client.async_read(100, 2)
+
+    assert len(unit.read_events) == 1
+    unit.disconnect.assert_awaited_once()
+
+
+@shared_only
+async def test_a_shared_link_does_not_resend_a_refusal(shared_client, unit) -> None:
     unit.disconnect = AsyncMock()
     unit.fail_read(100, IllegalDataAddressError())
 
     with pytest.raises(modbus_module.ModbusReadRejected):
         await shared_client.async_read(100, 2)
-    unit.fail_requests(ModbusConnectionError("link down"))
-    with pytest.raises(ModbusException):
-        await shared_client.async_read(100, 2)
 
+    assert len(unit.read_events) == 1
     unit.disconnect.assert_not_awaited()
+
+
+@shared_only
+async def test_a_shared_link_without_disconnect_resends_all_the_same() -> None:
+    """Releases before 4.9 cannot drop the connection; a lost one reopens anyway."""
+    import modbus_connection
+
+    shared = SimpleNamespace(
+        connected=True,
+        read_holding_registers=AsyncMock(
+            side_effect=[ModbusConnectionError("lost"), [7]]
+        ),
+    )
+    client = modbus_module.ModbusClient(
+        modbus_module.SharedLink(shared, modbus_connection)
+    )
+
+    assert await client.async_read(100, 1) == [7]
 
 
 class _FlakyLink:

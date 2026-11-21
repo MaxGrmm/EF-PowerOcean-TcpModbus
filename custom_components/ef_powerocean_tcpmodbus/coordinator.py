@@ -85,7 +85,7 @@ from .energy_processor import (
     offsets_from,
 )
 from .grid_energy import GridEnergyIntegrator
-from .modbus import ModbusClient, ModbusReadRejected, create_client
+from .modbus import ModbusClient, ModbusReadRejected, create_client, retries_until
 from .models import (
     ControlFeature,
     CoordinatorStatus,
@@ -644,24 +644,25 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             # The reconnect above has its own backoff, so it is not budgeted.
-            async with asyncio.timeout(MODBUS_POLL_BUDGET_S):
-                if not self._identity_verified:
-                    await self.async_read_device_info()
-                    if self._identity_mismatch:
-                        raise IdentityMismatch(
-                            f"The device at {self.host} is not the inverter this "
-                            "entry belongs to"
-                        )
+            async with asyncio.timeout(MODBUS_POLL_BUDGET_S) as budget:
+                with retries_until(budget.when()):
                     if not self._identity_verified:
-                        _LOGGER.debug(
-                            "Serial number not confirmed yet; skipping this poll"
-                        )
-                        return None
+                        await self.async_read_device_info()
+                        if self._identity_mismatch:
+                            raise IdentityMismatch(
+                                f"The device at {self.host} is not the inverter this "
+                                "entry belongs to"
+                            )
+                        if not self._identity_verified:
+                            _LOGGER.debug(
+                                "Serial number not confirmed yet; skipping this poll"
+                            )
+                            return None
 
-                self._raw_blocks = {}
-                # A probe may replan the blocks.
-                for register_block in tuple(self._register_blocks):
-                    await self._async_read_block(register_block, data)
+                    self._raw_blocks = {}
+                    # A probe may replan the blocks.
+                    for register_block in tuple(self._register_blocks):
+                        await self._async_read_block(register_block, data)
         except TimeoutError:
             # A late answer to the cancelled request would confuse the next one.
             _LOGGER.debug(

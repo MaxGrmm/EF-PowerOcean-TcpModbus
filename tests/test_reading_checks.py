@@ -562,7 +562,7 @@ def test_what_the_model_reports_survives_a_restart() -> None:
     assert stored["bms_seen"] is True
 
     restarted = reading_checks.ReadingChecks()
-    restarted.load_state(stored)
+    restarted.load_state(stored, saved_at=None, now=T0)
     for poll in range(const.CONTROL_STATUS_DAMPING_POLLS):
         restarted.run(
             {"grid_voltage_l1": 0.0, **_modes(bms=False)},
@@ -573,8 +573,8 @@ def test_what_the_model_reports_survives_a_restart() -> None:
     assert restarted.active.check == "grid_voltage"
 
 
-def test_how_long_readings_stood_still_survives_a_restart() -> None:
-    """In #227 the readings stood still for a week; a restart must not hide that."""
+def test_how_long_readings_stood_still_survives_a_short_restart() -> None:
+    """In #227 the readings stood still for a week; a reload must not hide that."""
     import json
 
     checks = reading_checks.ReadingChecks()
@@ -585,16 +585,49 @@ def test_how_long_readings_stood_still_survives_a_restart() -> None:
     stored = json.loads(json.dumps(checks.dump_state()))
 
     restarted = reading_checks.ReadingChecks()
-    restarted.load_state(stored)
+    restarted.load_state(stored, saved_at=at[29], now=at[30])
     for now in at[30:]:
         restarted.run(frame, now)
 
     assert restarted.active == Finding(Status.INCONSISTENT_READINGS, "frozen", at[0])
 
 
+@pytest.mark.parametrize(
+    "saved_at",
+    (T0 + timedelta(seconds=5 * 29), None),
+    ids=("saved before a long restart", "saved without a time"),
+)
+def test_a_long_restart_does_not_count_as_standing_still(
+    saved_at: datetime | None,
+) -> None:
+    """Coarse readings, such as the frequency, often read the same after one."""
+    checks = reading_checks.ReadingChecks()
+    frame = _stalled(0.0)
+    for now in _polls(30):
+        checks.run(frame, now)
+    stored = checks.dump_state()
+
+    back = T0 + timedelta(hours=1)
+    restarted = reading_checks.ReadingChecks()
+    restarted.load_state(stored, saved_at=saved_at, now=back)
+    restored = restarted.dump_state()
+    for poll in range(FROZEN_POLLS - 1):
+        restarted.run(frame, back + timedelta(seconds=5 * poll))
+
+    assert not restarted.failing
+    # The values are kept to compare with; only the time starts again.
+    for key in ("frozen_moved", "supply_moved", "stall_moved"):
+        assert restored[key] == {
+            reading: [value, back.isoformat()]
+            for reading, (value, _) in stored[key].items()
+        }
+
+
 def test_a_state_that_cannot_be_read_starts_afresh() -> None:
     checks = reading_checks.ReadingChecks()
-    checks.load_state({"frozen_moved": {"frequency": ["50.0", "not a time"]}})
+    checks.load_state(
+        {"frozen_moved": {"frequency": ["50.0", "not a time"]}}, saved_at=T0, now=T0
+    )
     checks.run(_live(), T0)
 
     assert checks.active is None
