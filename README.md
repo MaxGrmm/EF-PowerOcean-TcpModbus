@@ -419,20 +419,43 @@ that need the EcoFlow app open, or that change device settings, are left to
 
 ### AC Grid
 
-| Sensor                | Unit | Description                                          |
-| --------------------- | ---- | ---------------------------------------------------- |
-| Grid Voltage L1/L2/L3 | V    | Per-phase voltage                                    |
-| Grid Current L1/L2/L3 | A    | Per-phase current                                    |
-| Grid Frequency        | Hz   | Grid frequency                                       |
-| Inverter Temperature  | °C   | Inverter temperature                                 |
-| Grid Connection Code  | –    | Grid standard code set by the installer (diagnostic) |
+| Sensor                     | Unit | Description                                                          |
+| -------------------------- | ---- | -------------------------------------------------------------------- |
+| Inverter Voltage L1/L2/L3  | V    | Per-phase voltage at the inverter's AC side                          |
+| Inverter Current L1/L2/L3  | A    | Per-phase current at the inverter's AC side                          |
+| Inverter AC Power          | W    | Power through the inverter's AC side (positive = drawn) (diagnostic) |
+| Grid Frequency             | Hz   | Frequency the inverter measures                                      |
+| Grid-side Voltage L1/L2/L3 | V    | Per-phase voltage at the grid connection (diagnostic)                |
+| Grid-side Current L1/L2/L3 | A    | Per-phase current at the grid connection (diagnostic)                |
+| Inverter Temperature       | °C   | Inverter temperature                                                 |
+| Grid Connection Code       | –    | Grid standard code set by the installer (diagnostic)                 |
 
 The _Grid Connection Code_ is the grid standard the inverter was commissioned with, as a
 raw number. EcoFlow doesn't document which standard each number stands for and (in my testing)
-the mapping used by other EcoFlow products doesn't full match the PowerOcean series.
+the mapping used by other EcoFlow products doesn't fully match the PowerOcean series, so ask
+your installer if you need to know.
 
-, so ask your
-installer if you need to know.
+#### Inverter side and grid side
+
+The _Inverter_ sensors and _Grid Frequency_ are measured by the inverter itself. While
+it runs on-grid its AC side is connected to the grid, so Inverter Voltage and Grid
+Frequency follow the grid's. Off-grid they are the inverter's own.
+
+The PowerOcean Plus has a built-in smart meter at its GRID terminals, so it needs no
+external meter. Its readings are the ones the inverter reports: Inverter Voltage,
+Inverter Current and Inverter AC Power are then the grid connection per phase, and Grid
+Power and the grid energy counters come from the same meter. In #240, Grid Power matched
+Inverter AC Power to within a few watts, Grid Import and Export Total matched Inverter
+AC Input and Output Total to within about 2 %, and a single-phase load showed up as
+current on its own phase only.
+
+The _Grid-side_ sensors are read from an external EcoFlow Smart Meter, which the
+installation guide wires to the COM port for a partial home backup, an existing PV
+inverter or cascaded inverters. An installation without one reads 0 V and 0 A on every
+phase, including a PowerOcean Plus that uses its built-in meter (#240). The sensors show
+unavailable until one of them reads anything but 0, and then stay shown for good, 0 V
+while the grid is down included. That is kept across restarts, and the diagnostics
+download lists what was seen under `measured_keys`.
 
 ### Status
 
@@ -742,6 +765,9 @@ The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus
   PowerOcean DC Fit is untested, and controls are untested on several models.
 - **Some registers read a constant 0 on some models.** Sensors for those are left out
   on the models concerned rather than showing a value that misleads.
+- **The Grid-side sensors need an external EcoFlow Smart Meter.** Without one they stay
+  unavailable. On a PowerOcean Plus, the built-in meter's readings show as the Inverter
+  sensors; see [Inverter side and grid side](#inverter-side-and-grid-side).
 - **The protocol is EcoFlow's trial version.** A firmware update can change which
   controls the inverter follows; see
   [Testing the controls after a firmware update](#testing-the-controls-after-a-firmware-update).
