@@ -196,6 +196,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
 
     entry.runtime_data = coordinator
     _async_make_device_physical(hass, entry)
+    # Before the sensors are added, so a disabled one is never added at all.
+    coordinator.async_sync_external_meter_entities()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # The control loop reads its inputs, and what its reading checks compare,

@@ -2251,3 +2251,68 @@ def test_calculated_grid_energy_survives_a_restart(
         "grid_import_total": 0.0,
         "grid_export_total": 0.01,
     }
+
+
+# ── External meter ────────────────────────────────────────────────────────────
+
+
+def _poll(coordinator, monkeypatch: pytest.MonkeyPatch, raw: dict[str, Any]) -> None:
+    """Run one accepted poll that publishes *raw* as read."""
+    _accept_updates(coordinator, monkeypatch)
+    coordinator.async_get_raw_data = AsyncMock(return_value=dict(raw))
+    coordinator._energy_processor.validate_totals = Mock(
+        side_effect=lambda data, *_: dict(data)
+    )
+    coordinator.async_sync_external_meter_entities = Mock()
+    asyncio.run(coordinator._async_update_data())
+
+
+NO_METER = dict.fromkeys(const.EXTERNAL_METER_KEYS, 0.0)
+
+
+def test_meter_readings_of_zero_show_no_external_meter(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PowerOcean Plus on its built-in meter reads 0 in all six (#240)."""
+    _poll(coordinator, monkeypatch, NO_METER)
+
+    assert not coordinator.has_external_meter
+    coordinator.async_sync_external_meter_entities.assert_not_called()
+
+
+@pytest.mark.parametrize("key", const.EXTERNAL_METER_KEYS)
+def test_any_meter_reading_shows_an_external_meter(
+    coordinator, monkeypatch: pytest.MonkeyPatch, key: str
+) -> None:
+    _poll(coordinator, monkeypatch, {**NO_METER, key: 0.12})
+
+    assert coordinator.has_external_meter
+    coordinator.async_sync_external_meter_entities.assert_called_once()
+
+
+def test_an_external_meter_stays_known_when_it_reads_zero(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A grid that goes down reads 0 V, which is then a real reading."""
+    _poll(coordinator, monkeypatch, {**NO_METER, "grid_voltage_l1": 231.2})
+    _poll(coordinator, monkeypatch, NO_METER)
+
+    assert coordinator.has_external_meter
+
+
+def test_an_external_meter_survives_a_restart(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _poll(coordinator, monkeypatch, {**NO_METER, "grid_current_l2": 3.4})
+    stored = coordinator._persisted_state()
+
+    coordinator._has_external_meter = False
+    coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
+    asyncio.run(coordinator.async_load_persisted_state())
+
+    assert coordinator.has_external_meter
+
+
+def test_the_meter_readings_are_polled_with_no_sensor_asking(coordinator) -> None:
+    """So a meter is noticed while its sensors are disabled."""
+    assert set(const.EXTERNAL_METER_KEYS) <= coordinator._own_keys

@@ -60,6 +60,7 @@ from .const import (
     ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
     EVENT_FIRMWARE_CHANGED,
+    EXTERNAL_METER_KEYS,
     FIRMWARE_VERSION,
     HELD_TOTAL_ISSUE_AFTER_S,
     MAX_BATTERY_CAPACITY_WH,
@@ -172,6 +173,9 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # starts failing and to show what came before.
     _failing_before: frozenset[str] = frozenset()
     _raw_before: dict[int, list[int]] | None = None
+    # Whether an external meter has ever reported, kept across restarts so a grid
+    # that is down at a restart does not disable its sensors.
+    _has_external_meter: bool = False
 
     def __init__(
         self,
@@ -307,6 +311,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._identity_verified
 
     @property
+    def has_external_meter(self) -> bool:
+        return self._has_external_meter
+
+    @property
     def is_modbus_disabled(self) -> bool:
         """Return whether the last telemetry read indicates Modbus is disabled."""
         return self._consecutive_modbus_disabled_reads >= MODBUS_DISABLED_READ_THRESHOLD
@@ -354,6 +362,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._last_checked_time is not None
             else None,
             "battery_capacity_wh": self._battery_capacity_wh,
+            "has_external_meter": self._has_external_meter,
             "reading_check_snapshots": list(self._check_snapshots),
             **self.control.dump_state(),
             **self._energy_processor.dump_state(),
@@ -380,6 +389,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         # So a battery asleep at its reserve across a restart keeps its capacity.
         self._hold_battery_capacity(stored.get("battery_capacity_wh"))
+        self._has_external_meter = bool(stored.get("has_external_meter"))
 
         revision = self.inverter_model.traits.energy_state_revision
         if stored.get("energy_state_revision", 0) != revision:
@@ -1027,6 +1037,39 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             },
         }
 
+    @callback
+    def async_sync_external_meter_entities(self) -> None:
+        """Disable the external meter's sensors while there is none, else enable them.
+
+        Home Assistant cannot say why a sensor is unavailable, so six that always
+        read 0 are disabled instead, which their settings show as by the
+        integration. One the user disabled is left alone. Enabling one makes Home
+        Assistant reload the entry, which adds it.
+        """
+        registry = entity_registry.async_get(self.hass)
+        ours = entity_registry.RegistryEntryDisabler.INTEGRATION
+        wanted = None if self._has_external_meter else ours
+        for key in EXTERNAL_METER_KEYS:
+            entity_id = registry.async_get_entity_id(
+                Platform.SENSOR, DOMAIN, f"{self.config_entry.entry_id}_{key}"
+            )
+            registry_entry = registry.async_get(entity_id) if entity_id else None
+            if registry_entry is None or registry_entry.disabled_by not in (None, ours):
+                continue
+            if registry_entry.disabled_by is not wanted:
+                registry.async_update_entity(
+                    registry_entry.entity_id, disabled_by=wanted
+                )
+        if self._has_external_meter:
+            _LOGGER.info("An external meter reports; Grid-side sensors are enabled")
+        else:
+            _LOGGER.info(
+                "No external EcoFlow Smart Meter has reported, so the Grid-side "
+                "sensors are disabled until one does. On a model with a built-in "
+                "meter, like the PowerOcean Plus, the Inverter Voltage and Current "
+                "show the grid connection"
+            )
+
     @property
     def unsupported_registers(self) -> frozenset[str]:
         """Return the optional registers the device refused, which are not polled."""
@@ -1062,7 +1105,14 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Return the keys the coordinator's own processing reads."""
         # Grid Power is integrated into grid energy, or watched for whether its
         # registers count.
-        return TelemetryData.keys(REGISTERS_BY_KEY) | ENERGY_KEYS | {"grid_power"}
+        # The external meter's readings are watched for a meter, also while its
+        # sensors are disabled.
+        return (
+            TelemetryData.keys(REGISTERS_BY_KEY)
+            | ENERGY_KEYS
+            | set(EXTERNAL_METER_KEYS)
+            | {"grid_power"}
+        )
 
     def _plan_reads(self) -> None:
         """Group the registers to read, leaving out what nothing asks for."""
@@ -1282,6 +1332,11 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception:
                 _LOGGER.exception("Could not keep the readings of a failed check")
 
+            if not self._has_external_meter and any(
+                result.get(key) for key in EXTERNAL_METER_KEYS
+            ):
+                self._has_external_meter = True
+                self.async_sync_external_meter_entities()
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
             self._take_long_held_inverter_only_totals()

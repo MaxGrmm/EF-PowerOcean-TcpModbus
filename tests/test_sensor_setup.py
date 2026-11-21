@@ -28,6 +28,7 @@ async def effective_reserve(hass, reserve_in_force):
         limits={const.CONF_BATTERY_COUNT: 1},
         connected=True,
         last_update_success=True,
+        has_external_meter=False,
     )
     entry = MockConfigEntry(domain=const.DOMAIN, entry_id="entry")
     entry.add_to_hass(hass)
