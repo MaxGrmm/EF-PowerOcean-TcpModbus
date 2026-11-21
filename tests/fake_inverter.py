@@ -25,6 +25,9 @@ class FakeInverter:
         self.registers: defaultdict[int, int] = defaultdict(int)
         self.requests = 0
         self.writes: list[tuple[int, list[int]]] = []
+        # Requests to come that are met by closing the connection, unanswered, as
+        # an inverter closing an idle connection just as a request goes out.
+        self.hang_ups = 0
 
     def serve_serial(self, serial: str, address: int) -> None:
         """Put a serial number at *address*, two characters a word."""
@@ -71,7 +74,11 @@ class FakeInverter:
                 transaction, _, length, unit = MBAP.unpack(
                     await reader.readexactly(MBAP.size)
                 )
-                pdu = self.answer(await reader.readexactly(length - 1))
+                request = await reader.readexactly(length - 1)
+                if self.hang_ups:
+                    self.hang_ups -= 1
+                    break
+                pdu = self.answer(request)
                 writer.write(MBAP.pack(transaction, 0, len(pdu) + 1, unit) + pdu)
                 await writer.drain()
         except (asyncio.IncompleteReadError, ConnectionError):

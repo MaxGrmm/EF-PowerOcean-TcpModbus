@@ -38,6 +38,7 @@ from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
 from custom_components.ef_powerocean_tcpmodbus.models import (
+    CoordinatorStatus,
     EnergySensorDef,
     InverterModel,
     RegisterType,
@@ -564,6 +565,76 @@ async def test_steady_entities_recover_after_a_start_whose_first_poll_fails(
     assert len(restored) > 50
     # One good read later, none is left unavailable.
     assert [e for e in shown if after[e][0] == STATE_UNAVAILABLE] == []
+
+
+# ── A request the inverter hangs up on is sent again on a new connection ──────
+
+
+async def _set_up(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> tuple[MockConfigEntry, EcoflowCoordinator]:
+    """Set up with every entity and poll once."""
+    _fill_registers(inverter)
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+    _enable_every_entity(hass, entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator: EcoflowCoordinator = entry.runtime_data
+    link = coordinator.modbus_client._link
+    if isinstance(link, modbus_module.PymodbusLink):
+        # pymodbus waits out the timeout for a request whose connection closed.
+        link._pymodbus.comm_params.timeout_connect = 0.2
+    await _poll(hass, coordinator)
+    return entry, coordinator
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_poll_the_inverter_hangs_up_on_still_succeeds(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    """An inverter that closes idle connections, at a poll interval just as long."""
+    entry, coordinator = await _set_up(hass, inverter)
+    shown = [
+        entity_id
+        for entity_id, (state, _) in _states(hass, entry).items()
+        if entity_id in _reading_entities(hass, entry) and state != STATE_UNAVAILABLE
+    ]
+
+    inverter.hang_ups = 1
+    await _poll(hass, coordinator)
+    after = _states(hass, entry)
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert coordinator.last_update_success
+    assert coordinator.status is CoordinatorStatus.SUCCESS
+    assert len(shown) > 50
+    assert [e for e in shown if after[e][0] == STATE_UNAVAILABLE] == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_poll_whose_retry_is_hung_up_on_too_fails(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    entry, coordinator = await _set_up(hass, inverter)
+
+    inverter.hang_ups = 2
+    with patch.object(
+        coordinator, "async_poll_failed", wraps=coordinator.async_poll_failed
+    ) as poll_failed:
+        await _poll(hass, coordinator)
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert not coordinator.last_update_success
+    assert coordinator.status is CoordinatorStatus.READ_FAILED
+    poll_failed.assert_awaited_once()
 
 
 # ── Refused registers are retried after a firmware update ─────────────────────

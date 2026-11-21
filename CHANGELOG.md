@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- A request the connection loses, as when the inverter closes an idle connection just as a poll starts, is sent once more on a new connection instead of failing the poll (#237). A refusal from the inverter is not sent again.
+
 ## [2.10.0] - 2026-11-20
 
 ### Added

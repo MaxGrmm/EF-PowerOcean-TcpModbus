@@ -11,8 +11,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass
 from types import ModuleType
 from typing import Any, Final, Protocol
@@ -24,7 +25,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.setup import async_setup_component
 from pymodbus.client import AsyncModbusTcpClient
-from pymodbus.exceptions import ModbusException
+from pymodbus.exceptions import ConnectionException, ModbusException, ModbusIOException
 from pymodbus.pdu import ModbusPDU
 
 from .const import (
@@ -56,6 +57,13 @@ _unshared_reason = "Home Assistant older than 2026.9"
 # connect to a device on the local network.
 RECONNECT_DELAYS_S: Final = (0, 5, 10, 20)
 TRANSPORT_ERRORS: Final = (ModbusException, ConnectionError, asyncio.TimeoutError)
+# What pymodbus raises when the connection fails a request: not connected, no
+# answer, as after the inverter closed the connection, or a socket error or timeout.
+_PYMODBUS_CONNECTION_ERRORS: Final = (ConnectionException, ModbusIOException, OSError)
+
+# When the request running in this task must be done, as a loop time. A retry that
+# could not finish before then is not started.
+_retry_deadline: ContextVar[float | None] = ContextVar("retry_deadline", default=None)
 
 
 def is_shared() -> bool:
@@ -144,6 +152,14 @@ class ModbusReadRejected(ModbusException):
         return self.exception_code in ModbusRejected.PERMANENT_CODES
 
 
+class ConnectionLost(ModbusException):
+    """A link's report that the connection failed a request the device never saw.
+
+    Not connected, lost before the answer, a socket error or a timeout: asking
+    again on a new connection may well work.
+    """
+
+
 class DeviceRefused(Exception):
     """A link's report that the device answered with a Modbus exception response."""
 
@@ -155,14 +171,18 @@ class DeviceRefused(Exception):
 class ModbusLink(Protocol):
     """The part that reaches the inverter; the only thing that differs per client.
 
-    Requests raise DeviceRefused when the device refuses, and one of
-    TRANSPORT_ERRORS when it cannot be reached.
+    Requests raise DeviceRefused when the device refuses, ConnectionLost when the
+    connection failed them, and one of TRANSPORT_ERRORS for anything else.
     """
 
     @property
     def connected(self) -> bool: ...
 
     async def connect(self) -> bool: ...
+
+    async def reopen(self) -> bool:
+        """Drop the connection and open a new one; return whether it is open."""
+        ...
 
     def close(self) -> None: ...
 
@@ -197,29 +217,48 @@ class PymodbusLink:
         await self._pymodbus.connect()
         return self._pymodbus.connected
 
+    async def reopen(self) -> bool:
+        self.close()
+        try:
+            return await self.connect()
+        except _PYMODBUS_CONNECTION_ERRORS as err:
+            _LOGGER.debug("Could not open a new connection: %s", err)
+            return False
+
     def close(self) -> None:
         self._pymodbus.close()
 
     async def read_holding_registers(self, address: int, count: int) -> list[int]:
-        with _cancellation_kept():
+        with _connection_errors_told_apart(), _cancellation_kept():
             response = await self._pymodbus.read_holding_registers(
                 address=address, count=count, device_id=self._device_id
             )
         return list(_answered(response).registers)
 
     async def write_register(self, address: int, value: int) -> None:
-        with _cancellation_kept():
+        with _connection_errors_told_apart(), _cancellation_kept():
             response = await self._pymodbus.write_register(
                 address=address, value=value, device_id=self._device_id
             )
         _answered(response)
 
     async def write_registers(self, address: int, values: list[int]) -> None:
-        with _cancellation_kept():
+        with _connection_errors_told_apart(), _cancellation_kept():
             response = await self._pymodbus.write_registers(
                 address=address, values=values, device_id=self._device_id
             )
         _answered(response)
+
+
+@contextmanager
+def _connection_errors_told_apart() -> Iterator[None]:
+    """Raise what pymodbus raises for a failed connection as ConnectionLost."""
+    try:
+        yield
+    except ConnectionLost:
+        raise
+    except _PYMODBUS_CONNECTION_ERRORS as err:
+        raise ConnectionLost(str(err) or type(err).__name__) from err
 
 
 @contextmanager
@@ -254,8 +293,16 @@ def _translated_errors(mc: ModuleType) -> Iterator[None]:
         yield
     except mc.ModbusExceptionError as err:
         raise DeviceRefused(int(err.exception_code), err) from err
+    except (mc.ModbusConnectionError, _timeout_error(mc)) as err:
+        raise ConnectionLost(str(err)) from err
     except mc.ModbusError as err:
         raise ModbusException(str(err)) from err
+
+
+def _timeout_error(mc: ModuleType) -> type[Exception]:
+    # Older modbus-connection releases lack it.
+    error: type[Exception] = getattr(mc, "ModbusTimeoutError", TimeoutError)
+    return error
 
 
 class SharedLink:
@@ -264,39 +311,29 @@ class SharedLink:
     The connection opens on the first request and again on the next one after it
     drops. It belongs to the modbus integration, which closes it once the last
     config entry holding a unit on it unloads, so this link never closes it. It
-    only drops it after a timeout, for the next request to open a new one.
+    only drops it when it failed a request, for the next one to open a new one.
     """
 
     def __init__(self, unit: Any, mc: ModuleType) -> None:
         self._unit = unit
         self._mc = mc
-        # Older modbus-connection releases lack these; the link then works as
-        # before, on the library's 10 s timeout and without dropping a dead link.
-        self._timeout_error: type[Exception] = getattr(
-            mc, "ModbusTimeoutError", TimeoutError
-        )
+        # Older modbus-connection releases lack this; the link then works on the
+        # library's 10 s timeout.
         if hasattr(unit, "require_timeout"):
-            # The connection uses the longest timeout any unit on it asks for, and
-            # its own 10 s only when none asks.
+            # The connection uses the longest timeout any unit on it asks for.
             unit.require_timeout(MODBUS_REQUEST_TIMEOUT_S)
 
-    @asynccontextmanager
-    async def _dropped_on_timeout(self) -> AsyncIterator[None]:
-        """Drop the connection when a request times out.
+    async def _drop(self) -> None:
+        """Drop the connection, for the next request to open a new one.
 
         A connection whose packets a firewall or a dead route swallows stays open
-        without answers, and TCP sends nothing new on it until its unanswered
-        requests get through, minutes apart. It is the same device for every unit
-        on it, so a new connection serves them all better.
+        without answers. It is the same device for every unit on it, so a new
+        connection serves them all better. Releases before 4.9 cannot drop it.
         """
-        try:
-            yield
-        except self._timeout_error:
-            disconnect = getattr(self._unit, "disconnect", None)
-            if disconnect is not None:
-                with suppress(self._mc.ModbusError):
-                    await disconnect()
-            raise
+        disconnect = getattr(self._unit, "disconnect", None)
+        if disconnect is not None:
+            with suppress(self._mc.ModbusError):
+                await disconnect()
 
     @property
     def connected(self) -> bool:
@@ -308,13 +345,21 @@ class SharedLink:
         Any answer counts, even a refusal: it proves the inverter is reachable.
         """
         try:
-            async with self._dropped_on_timeout():
-                await self._unit.read_holding_registers(DEVICE_INFO_BLOCK.start, 1)
+            await self._unit.read_holding_registers(DEVICE_INFO_BLOCK.start, 1)
         except self._mc.ModbusExceptionError:
             return True
+        except _timeout_error(self._mc) as err:
+            _LOGGER.debug("Modbus probe failed: %s", err)
+            await self._drop()
+            return False
         except self._mc.ModbusError as err:
             _LOGGER.debug("Modbus probe failed: %s", err)
             return False
+        return True
+
+    async def reopen(self) -> bool:
+        """Drop the connection; the request sent next opens a new one."""
+        await self._drop()
         return True
 
     def close(self) -> None:
@@ -322,18 +367,15 @@ class SharedLink:
 
     async def read_holding_registers(self, address: int, count: int) -> list[int]:
         with _translated_errors(self._mc):
-            async with self._dropped_on_timeout():
-                return list(await self._unit.read_holding_registers(address, count))
+            return list(await self._unit.read_holding_registers(address, count))
 
     async def write_register(self, address: int, value: int) -> None:
         with _translated_errors(self._mc):
-            async with self._dropped_on_timeout():
-                await self._unit.write_register(address, value)
+            await self._unit.write_register(address, value)
 
     async def write_registers(self, address: int, values: list[int]) -> None:
         with _translated_errors(self._mc):
-            async with self._dropped_on_timeout():
-                await self._unit.write_registers(address, values)
+            await self._unit.write_registers(address, values)
 
 
 class ModbusClient:
@@ -415,11 +457,29 @@ class ModbusClient:
         _LOGGER.debug("All reconnect attempts failed; retrying at the next poll")
         return False
 
+    async def _sent[T](self, request: Callable[[], Awaitable[T]]) -> T:
+        """Send *request*, and once more on a new connection if the connection lost it.
+
+        The inverter may close an idle connection just as a request goes out. A
+        refusal is an answer and is not retried. Called with the lock held.
+        """
+        try:
+            return await request()
+        except ConnectionLost as err:
+            if self._closed or not _time_for_a_retry():
+                raise
+            _LOGGER.debug("%s; retrying on a new connection", err)
+            if not await self._link.reopen():
+                raise
+        return await request()
+
     async def async_read(self, address: int, count: int) -> list[int]:
         """Read *count* holding registers starting at *address*."""
         async with self._lock:
             try:
-                registers = await self._link.read_holding_registers(address, count)
+                registers = await self._sent(
+                    lambda: self._link.read_holding_registers(address, count)
+                )
             except DeviceRefused as err:
                 self.answers += 1
                 raise ModbusReadRejected(
@@ -461,11 +521,16 @@ class ModbusClient:
         )
 
         try:
+            # The control writes set absolute values, so sending one twice is safe.
             async with self._lock:
                 if len(values) == 1:
-                    await self._link.write_register(address, values[0])
+                    await self._sent(
+                        lambda: self._link.write_register(address, values[0])
+                    )
                 else:
-                    await self._link.write_registers(address, values)
+                    await self._sent(
+                        lambda: self._link.write_registers(address, values)
+                    )
         except DeviceRefused as err:
             raise ModbusRejected(
                 exception_code=err.exception_code,
@@ -485,6 +550,23 @@ class ModbusClient:
                     "error": repr(err),
                 },
             ) from err
+
+
+@contextmanager
+def retries_until(deadline: float) -> Iterator[None]:
+    """Start no retry in this task that could not finish by *deadline*, a loop time."""
+    token = _retry_deadline.set(deadline)
+    try:
+        yield
+    finally:
+        _retry_deadline.reset(token)
+
+
+def _time_for_a_retry() -> bool:
+    deadline = _retry_deadline.get()
+    if deadline is None:
+        return True
+    return deadline - asyncio.get_running_loop().time() >= MODBUS_REQUEST_TIMEOUT_S
 
 
 def create_client(

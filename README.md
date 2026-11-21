@@ -618,6 +618,7 @@ address from your router. Nothing is read or written until this is fixed.
 The connection to the inverter was lost. It is retried automatically and the entities
 come back with the next successful poll. If they stay unavailable, check that the
 inverter is powered and reachable, and look at the log with debug logging enabled.
+Coordinator Status shows why the last poll failed.
 
 </details>
 
@@ -696,9 +697,10 @@ enabled entities, the control loop and the reading checks need, so disabling sen
 you don't use makes polls lighter. The serial number and firmware are read again each
 time the connection opens.
 
-If a poll fails, the entities become unavailable until the next one succeeds. A lost
-connection is retried within the poll after 0, 5, 10 and 20 seconds, then again 30
-seconds later. If the inverter can't be reached when Home Assistant starts, the setup
+A request the connection loses, such as when the inverter closes an idle connection, is
+sent once more on a new connection. If a poll still fails, the entities become
+unavailable until the next one succeeds. A lost connection is retried within the poll
+after 0, 5, 10 and 20 seconds, then again 30 seconds later. If the inverter can't be reached when Home Assistant starts, the setup
 is retried automatically in the background.
 
 With Modbus Control on, a heartbeat is written to the inverter independently of the
