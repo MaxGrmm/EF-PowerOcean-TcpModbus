@@ -311,7 +311,8 @@ class SharedLink:
     The connection opens on the first request and again on the next one after it
     drops. It belongs to the modbus integration, which closes it once the last
     config entry holding a unit on it unloads, so this link never closes it. It
-    only drops it when it failed a request, for the next one to open a new one.
+    drops it after any request the connection failed, for the next one to open a
+    new one.
     """
 
     def __init__(self, unit: Any, mc: ModuleType) -> None:
@@ -358,23 +359,36 @@ class SharedLink:
         return True
 
     async def reopen(self) -> bool:
-        """Drop the connection; the request sent next opens a new one."""
-        await self._drop()
+        """Return True: the failed request dropped the connection already."""
         return True
 
     def close(self) -> None:
         """Leave the link up, since other integrations may be using it."""
 
+    @asynccontextmanager
+    async def _request(self) -> AsyncIterator[None]:
+        """Translate the library's errors, dropping a connection that failed.
+
+        Dropped whether or not the request is sent again, so a connection whose
+        packets are swallowed does not hold up the polls after it.
+        """
+        try:
+            with _translated_errors(self._mc):
+                yield
+        except ConnectionLost:
+            await self._drop()
+            raise
+
     async def read_holding_registers(self, address: int, count: int) -> list[int]:
-        with _translated_errors(self._mc):
+        async with self._request():
             return list(await self._unit.read_holding_registers(address, count))
 
     async def write_register(self, address: int, value: int) -> None:
-        with _translated_errors(self._mc):
+        async with self._request():
             await self._unit.write_register(address, value)
 
     async def write_registers(self, address: int, values: list[int]) -> None:
-        with _translated_errors(self._mc):
+        async with self._request():
             await self._unit.write_registers(address, values)
 
 
