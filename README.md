@@ -437,25 +437,16 @@ your installer if you need to know.
 
 #### Inverter side and grid side
 
-The _Inverter_ sensors and _Grid Frequency_ are measured by the inverter itself. While
-it runs on-grid its AC side is connected to the grid, so Inverter Voltage and Grid
-Frequency follow the grid's. Off-grid they are the inverter's own.
+The _Inverter_ sensors and _Grid Frequency_ are measured by the inverter itself.
+On-grid, Inverter Voltage and Grid Frequency follow the grid's.
 
-The PowerOcean Plus has a built-in smart meter at its GRID terminals, so it needs no
-external meter. Its readings are the ones the inverter reports: Inverter Voltage,
-Inverter Current and Inverter AC Power are then the grid connection per phase, and Grid
-Power and the grid energy counters come from the same meter. In #240, Grid Power matched
-Inverter AC Power to within a few watts, Grid Import and Export Total matched Inverter
-AC Input and Output Total to within about 2 %, and a single-phase load showed up as
-current on its own phase only.
+On models with a built-in smart meter, like the PowerOcean Plus, the meter sits at the
+GRID terminals. Inverter Voltage, Inverter Current and Inverter AC Power then show the
+grid connection per phase.
 
-The _Grid-side_ sensors are read from an external EcoFlow Smart Meter, which the
-installation guide wires to the COM port for a partial home backup, an existing PV
-inverter or cascaded inverters. An installation without one reads 0 V and 0 A on every
-phase, including a PowerOcean Plus that uses its built-in meter (#240). The sensors show
-unavailable until one of them reads anything but 0, and then stay shown for good, 0 V
-while the grid is down included. That is kept across restarts, and the diagnostics
-download lists what was seen under `measured_keys`.
+The _Grid-side_ sensors need an external EcoFlow Smart Meter. Without one they read 0
+and show unavailable, until one of them reads anything else. From then on they stay
+shown, also across restarts.
 
 ### Status
 
@@ -766,8 +757,7 @@ The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus
 - **Some registers read a constant 0 on some models.** Sensors for those are left out
   on the models concerned rather than showing a value that misleads.
 - **The Grid-side sensors need an external EcoFlow Smart Meter.** Without one they stay
-  unavailable. On a PowerOcean Plus, the built-in meter's readings show as the Inverter
-  sensors; see [Inverter side and grid side](#inverter-side-and-grid-side).
+  unavailable; see [Inverter side and grid side](#inverter-side-and-grid-side).
 - **The protocol is EcoFlow's trial version.** A firmware update can change which
   controls the inverter follows; see
   [Testing the controls after a firmware update](#testing-the-controls-after-a-firmware-update).
