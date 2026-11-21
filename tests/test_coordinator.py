@@ -2263,76 +2263,71 @@ def _poll(coordinator, monkeypatch: pytest.MonkeyPatch, raw: dict[str, Any]) -> 
     asyncio.run(coordinator._async_update_data())
 
 
-GRID_SIDE_ZERO = dict.fromkeys(const.GRID_SIDE_KEYS, 0.0)
+NO_METER = dict.fromkeys(models.EXTERNAL_METER_KEYS, 0.0)
 
 
-def test_a_grid_side_that_reads_zero_throughout_is_not_measured(
+def test_meter_readings_of_zero_throughout_show_no_external_meter(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A PowerOcean Plus without an EcoFlow Smart Meter reads 0 in all six (#240)."""
+    """A PowerOcean Plus on its built-in meter reads 0 in all six (#240)."""
     for _ in range(3):
-        _poll(coordinator, monkeypatch, GRID_SIDE_ZERO)
+        _poll(coordinator, monkeypatch, NO_METER)
 
-    assert not coordinator.measures(const.GRID_SIDE_KEYS)
-    assert coordinator.measured_keys == frozenset()
+    assert not coordinator.has_external_meter
+    assert coordinator.external_meter_readings == frozenset()
 
 
-@pytest.mark.parametrize("key", const.GRID_SIDE_KEYS)
-def test_any_grid_side_reading_shows_the_group_is_measured(
+@pytest.mark.parametrize("key", models.EXTERNAL_METER_KEYS)
+def test_any_meter_reading_shows_an_external_meter(
     coordinator, monkeypatch: pytest.MonkeyPatch, key: str
 ) -> None:
-    _poll(coordinator, monkeypatch, GRID_SIDE_ZERO)
+    _poll(coordinator, monkeypatch, NO_METER)
 
-    _poll(coordinator, monkeypatch, {**GRID_SIDE_ZERO, key: 0.12})
+    _poll(coordinator, monkeypatch, {**NO_METER, key: 0.12})
 
-    assert coordinator.measures(const.GRID_SIDE_KEYS)
+    assert coordinator.has_external_meter
 
 
-def test_a_measured_grid_side_stays_measured_when_it_reads_zero(
+def test_an_external_meter_stays_known_when_it_reads_zero(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A grid that goes down reads 0 V, which is then a real reading."""
-    _poll(coordinator, monkeypatch, {**GRID_SIDE_ZERO, "grid_voltage_l1": 231.2})
+    _poll(coordinator, monkeypatch, {**NO_METER, "grid_voltage_l1": 231.2})
 
-    _poll(coordinator, monkeypatch, GRID_SIDE_ZERO)
+    _poll(coordinator, monkeypatch, NO_METER)
 
-    assert coordinator.measures(const.GRID_SIDE_KEYS)
+    assert coordinator.has_external_meter
 
 
 @pytest.mark.parametrize("value", (None, float("nan"), float("inf")))
-def test_an_unread_or_undecodable_grid_side_is_not_measured(
+def test_an_unread_or_undecodable_meter_reading_shows_no_meter(
     coordinator, monkeypatch: pytest.MonkeyPatch, value: float | None
 ) -> None:
-    _poll(coordinator, monkeypatch, {**GRID_SIDE_ZERO, "grid_voltage_l1": value})
+    _poll(coordinator, monkeypatch, {**NO_METER, "grid_voltage_l1": value})
 
-    assert not coordinator.measures(const.GRID_SIDE_KEYS)
-
-
-def test_readings_every_installation_measures_need_no_reading() -> None:
-    assert coordinator_module.EcoflowCoordinator.measures(
-        cast(coordinator_module.EcoflowCoordinator, SimpleNamespace()), ()
-    )
+    assert not coordinator.has_external_meter
 
 
-def test_a_measured_grid_side_survives_a_restart(
+def test_an_external_meter_survives_a_restart(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """So a grid that is down across a restart still shows its 0 V."""
-    _poll(coordinator, monkeypatch, {**GRID_SIDE_ZERO, "grid_current_l2": 3.4})
+    _poll(coordinator, monkeypatch, {**NO_METER, "grid_current_l2": 3.4})
     stored = coordinator._persisted_state()
     # Of a key no longer read, nothing is kept.
-    stored["measured_keys"].append("no_such_reading")
+    stored["external_meter_readings"].append("no_such_reading")
 
-    coordinator._measured_keys = frozenset()
+    coordinator._external_meter_readings = frozenset()
     coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
     asyncio.run(coordinator.async_load_persisted_state())
 
-    assert coordinator.measured_keys == {"grid_current_l2"}
-    assert coordinator.measures(const.GRID_SIDE_KEYS)
+    assert coordinator.external_meter_readings == {"grid_current_l2"}
+    assert coordinator.has_external_meter
 
 
-def test_the_grid_side_readings_are_polled_together() -> None:
+def test_the_meter_readings_are_polled_together() -> None:
     """One shown on its own still sees whether the others read anything."""
-    for key in const.GRID_SIDE_KEYS:
+    for key in models.EXTERNAL_METER_KEYS:
         definition = next(sensor for sensor in const.SENSOR_MAP if sensor.key == key)
-        assert set(const.GRID_SIDE_KEYS) <= models.shown_keys(definition)
+        assert definition.needs_external_meter
+        assert set(models.EXTERNAL_METER_KEYS) <= models.shown_keys(definition)

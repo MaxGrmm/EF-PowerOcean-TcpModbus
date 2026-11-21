@@ -881,6 +881,19 @@ def plan_blocks_for_model(
     )
 
 
+# Measured at the grid connection by an external EcoFlow Smart Meter. Without one the
+# device reads 0 in all of them, as on a PowerOcean Plus that relies on its built-in
+# smart meter, whose readings show as the inverter's voltage and current (#240).
+EXTERNAL_METER_KEYS: Final = (
+    "grid_voltage_l1",
+    "grid_voltage_l2",
+    "grid_voltage_l3",
+    "grid_current_l1",
+    "grid_current_l2",
+    "grid_current_l3",
+)
+
+
 @dataclass(frozen=True)
 class SensorDef:
     key: str
@@ -895,10 +908,9 @@ class SensorDef:
     # Data keys published as state attributes, such as the raw word a value is
     # decoded from.
     attribute_keys: tuple[str, ...] = ()
-    # Readings only some installations measure, such as the grid side an EcoFlow
-    # Smart Meter feeds. A device that does not measure them reads 0 in all of
-    # them, so the sensor is unavailable until one of them has read anything else.
-    measured_with: tuple[str, ...] = ()
+    # Read from an external EcoFlow Smart Meter. Without one the device reads 0, so
+    # the sensor is unavailable until a meter reading has been anything else.
+    needs_external_meter: bool = False
 
 
 @dataclass(frozen=True)
@@ -980,7 +992,8 @@ def shown_keys(definition: EntityDef) -> frozenset[str]:
         case SensorDef():
             keys.update(definition.attribute_keys)
             # Polled together, so one shown on its own still sees the others.
-            keys.update(definition.measured_with)
+            if definition.needs_external_meter:
+                keys.update(EXTERNAL_METER_KEYS)
         case EnergySensorDef(total_source=str() as total_source):
             keys.add(total_source)
         case NumberWritableDef():

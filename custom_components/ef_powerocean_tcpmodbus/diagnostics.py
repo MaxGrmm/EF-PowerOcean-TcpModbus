@@ -88,9 +88,8 @@ async def async_get_config_entry_diagnostics(
             "control_power": coordinator.control.power,
             "control_command": f"0x{coordinator.control.command:08X}",
             "unsupported_registers": sorted(coordinator.unsupported_registers),
-            # Of the readings only some installations measure, such as the grid side
-            # an EcoFlow Smart Meter feeds, those this device has reported.
-            "measured_keys": sorted(coordinator.measured_keys),
+            # The readings an external EcoFlow Smart Meter has reported, if any.
+            "external_meter_readings": sorted(coordinator.external_meter_readings),
             # The words the last poll read, undecoded, which the test suite's fake
             # inverter can serve again. Never the serial number.
             "raw_registers": redact_raw_registers(coordinator.raw_registers),
