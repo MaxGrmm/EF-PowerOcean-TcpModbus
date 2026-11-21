@@ -8,12 +8,13 @@ reads anything else, all of them show, 0 included.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const, sensor
+from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
 from custom_components.ef_powerocean_tcpmodbus.models import EXTERNAL_METER_KEYS
 
 
@@ -37,7 +38,9 @@ def fake_coordinator(*, has_external_meter: bool) -> SimpleNamespace:
 
 def make(coordinator: SimpleNamespace, key: str) -> sensor.EcoflowSensor:
     entry = MockConfigEntry(domain=const.DOMAIN, entry_id="entry")
-    return sensor.EcoflowSensor(coordinator, entry, _definition(key))
+    return sensor.EcoflowSensor(
+        cast(EcoflowCoordinator, coordinator), entry, _definition(key)
+    )
 
 
 @pytest.mark.parametrize("key", EXTERNAL_METER_KEYS)
