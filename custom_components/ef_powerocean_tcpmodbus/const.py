@@ -104,10 +104,11 @@ MAX_FAULT_EVENTS: Final = 20
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 
-# Short, so a silent inverter cannot hold the lock the heartbeat waits on.
-MODBUS_REQUEST_TIMEOUT_S: Final = 3
-# Well under the sum of all request timeouts, which could pass a minute.
-MODBUS_POLL_BUDGET_S: Final = 4 * MODBUS_REQUEST_TIMEOUT_S
+# Inverters on Wi-Fi can answer slowly (#42).
+MODBUS_REQUEST_TIMEOUT_S: Final = 10
+# Room for a request that times out and its retry, and well under the sum of all
+# request timeouts, which could pass minutes.
+MODBUS_POLL_BUDGET_S: Final = 25
 
 # The inverter runs on its app settings and merely stores the commands it is sent,
 # until this register is written; each write buys it a minute of obeying them. Every

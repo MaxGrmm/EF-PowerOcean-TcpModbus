@@ -355,6 +355,28 @@ def test_a_refusal_is_not_sent_again(client, pymodbus) -> None:
     pymodbus.close.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("left_s", "sends"),
+    ((const.MODBUS_REQUEST_TIMEOUT_S - 1, 1), (const.MODBUS_REQUEST_TIMEOUT_S, 2)),
+    ids=("less than a timeout left", "a timeout left"),
+)
+def test_a_retry_starts_only_with_time_left_for_it(
+    client, pymodbus, left_s: float, sends: int
+) -> None:
+    _reconnecting(pymodbus)
+    pymodbus.read_holding_registers = AsyncMock(side_effect=ConnectionResetError())
+
+    async def read() -> None:
+        deadline = asyncio.get_running_loop().time() + left_s + 0.5
+        with modbus_module.retries_until(deadline):
+            await client.async_read(100, 2)
+
+    with pytest.raises(ModbusException):
+        asyncio.run(read())
+
+    assert pymodbus.read_holding_registers.await_count == sends
+
+
 def test_a_closed_client_does_not_resend(client, pymodbus) -> None:
     _reconnecting(pymodbus)
     pymodbus.read_holding_registers = AsyncMock(side_effect=ConnectionResetError())

@@ -553,7 +553,7 @@ class ModbusClient:
 
 
 @contextmanager
-def retries_until(deadline: float) -> Iterator[None]:
+def retries_until(deadline: float | None) -> Iterator[None]:
     """Start no retry in this task that could not finish by *deadline*, a loop time."""
     token = _retry_deadline.set(deadline)
     try:

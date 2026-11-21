@@ -6,6 +6,10 @@
 
 - A request the connection loses, as when the inverter closes an idle connection just as a poll starts, is sent once more on a new connection instead of failing the poll (#237). A refusal from the inverter is not sent again.
 
+### Changed
+
+- Requests time out after 10 seconds instead of 3, on both connections, as inverters on Wi-Fi can answer slowly (#42). A poll gets 25 seconds, so a request that times out still leaves time to send it again.
+
 ## [2.10.0] - 2026-11-20
 
 ### Added

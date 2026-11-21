@@ -24,6 +24,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const, models, outage
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
+from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
 from custom_components.ef_powerocean_tcpmodbus.announcer import Announcer
 from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowConfigEntry
@@ -574,6 +575,25 @@ def test_a_poll_over_its_budget_fails_and_drops_the_connection(
     assert coordinator.status == models.CoordinatorStatus.READ_FAILED
     coordinator._modbus_client.close.assert_called_once()
     assert not coordinator.identity_verified
+
+
+def test_a_poll_bounds_its_retries_by_its_budget(coordinator) -> None:
+    left: list[float] = []
+
+    async def read(*_args: Any) -> list[int]:
+        deadline = modbus_module._retry_deadline.get()
+        assert deadline is not None
+        left.append(deadline - asyncio.get_running_loop().time())
+        raise ConnectionResetError("reset")
+
+    coordinator._modbus_client.async_read = read
+
+    with pytest.raises(UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert 0 < left[0] <= const.MODBUS_POLL_BUDGET_S
+    # Requests outside a poll, such as the heartbeat's, are not bounded by it.
+    assert modbus_module._retry_deadline.get() is None
 
 
 def test_a_lost_socket_is_a_read_failure(coordinator) -> None:
