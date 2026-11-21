@@ -377,6 +377,29 @@ def test_a_retry_starts_only_with_time_left_for_it(
     assert pymodbus.read_holding_registers.await_count == sends
 
 
+def test_a_reconnect_that_uses_up_the_budget_leaves_no_resend(client, pymodbus) -> None:
+    _reconnecting(pymodbus)
+    pymodbus.read_holding_registers = AsyncMock(side_effect=ConnectionResetError())
+
+    def slow_connect() -> None:
+        # Connecting took long enough to use up what was left of the poll.
+        modbus_module._retry_deadline.set(asyncio.get_running_loop().time())
+        pymodbus.connected = True
+
+    pymodbus.connect = AsyncMock(side_effect=slow_connect)
+
+    async def read() -> None:
+        left = 2 * const.MODBUS_REQUEST_TIMEOUT_S
+        with modbus_module.retries_until(asyncio.get_running_loop().time() + left):
+            await client.async_read(100, 2)
+
+    with pytest.raises(ModbusException):
+        asyncio.run(read())
+
+    pymodbus.connect.assert_awaited_once()
+    pymodbus.read_holding_registers.assert_awaited_once()
+
+
 def test_a_closed_client_does_not_resend(client, pymodbus) -> None:
     _reconnecting(pymodbus)
     pymodbus.read_holding_registers = AsyncMock(side_effect=ConnectionResetError())

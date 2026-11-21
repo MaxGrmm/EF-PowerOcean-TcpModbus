@@ -480,11 +480,13 @@ class ModbusClient:
         try:
             return await request()
         except ConnectionLost as err:
-            if self._closed or not _time_for_a_retry():
+            if self._closed:
+                raise
+            # Checked once the connection is open: opening it can take a timeout.
+            # Without time left, the new connection serves the next poll.
+            if not await self._link.reopen() or not _time_for_a_retry():
                 raise
             _LOGGER.debug("%s; retrying on a new connection", err)
-            if not await self._link.reopen():
-                raise
         return await request()
 
     async def async_read(self, address: int, count: int) -> list[int]:
