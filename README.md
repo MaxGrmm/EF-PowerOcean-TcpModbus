@@ -701,8 +701,9 @@ time the connection opens.
 A request the connection loses, such as when the inverter closes an idle connection, is
 sent once more on a new connection. If a poll still fails, the entities become
 unavailable until the next one succeeds. A lost connection is retried within the poll
-after 0, 5, 10 and 20 seconds, then again 30 seconds later. If the inverter can't be reached when Home Assistant starts, the setup
-is retried automatically in the background.
+after 0, 5, 10 and 20 seconds, then again 30 seconds later. If the inverter can't be
+reached when Home Assistant starts, the setup is retried automatically in the
+background.
 
 With Modbus Control on, a heartbeat is written to the inverter independently of the
 polls, to keep control from passing back to the EcoFlow app.

@@ -104,7 +104,8 @@ MAX_FAULT_EVENTS: Final = 20
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 
-# Inverters on Wi-Fi can answer slowly (#42).
+# Inverters on Wi-Fi can answer slowly (#42). A request and its resend hold the
+# client lock for up to about two of these, well inside the heartbeat's window.
 MODBUS_REQUEST_TIMEOUT_S: Final = 10
 # Room for a request that times out and its retry, and well under the sum of all
 # request timeouts, which could pass minutes.
@@ -124,8 +125,10 @@ HEARTBEAT_JITTER_S: Final = 2
 # A write this recent still holds the deadline off, so a command rides on it rather
 # than sending one of its own.
 HEARTBEAT_REUSE_S: Final = 10
-# How long one write may spend being retried, all attempts together. Below
-# HEARTBEAT_INTERVAL_S, so the retries are over before the next write is due.
+# How long one write may spend waiting between its retries. Below
+# HEARTBEAT_INTERVAL_S, so the retries are over before the next write is due. A
+# write that times out takes longer, but only while the inverter is not answering,
+# when control is lost anyway.
 HEARTBEAT_RETRY_TOTAL_S: Final = 15
 # The shortest gap between two writes. Only reached after a failed one, where the
 # deadline has kept running and waiting a full interval would risk passing it.
