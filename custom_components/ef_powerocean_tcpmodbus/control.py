@@ -70,6 +70,7 @@ from .models import (
 )
 from .plans import CHARGE, DISCHARGE, Mode, ModeState, Step, Way, battery_power
 from .reading_checks import ReadingChecks
+from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -653,6 +654,7 @@ class ControlManager:
             "grid_feed_stopped": self._grid_feed_stopped,
             "latches": {name: getattr(self, f"_{name}") for name in _LATCHES},
             "reading_checks": self._checks.dump_state(),
+            "saved_at": dt.now().isoformat(),
         }
 
     def load_state(self, stored: dict[str, Any]) -> None:
@@ -683,7 +685,11 @@ class ControlManager:
                 setattr(self, f"_{name}", bool(latched))
         # Which readings the model reports at all, so an outage or a dropped battery
         # that outlasts a restart is still caught.
-        self._checks.load_state(stored.get("reading_checks") or {})
+        self._checks.load_state(
+            stored.get("reading_checks") or {},
+            saved_at=parse_datetime(stored.get("saved_at")),
+            now=dt.now(),
+        )
 
     def start(self) -> None:
         """Begin holding control authority, if the user switched control on."""

@@ -49,6 +49,10 @@ SUPPLY_STILL_AFTER: Final = timedelta(minutes=20)
 # Readings that stood still for this long while the voltages are frozen show a
 # stalled inverter even with no counter to prove it, as at night.
 STALLED_WITHOUT_COUNTERS: Final = timedelta(minutes=30)
+# A restart no longer than a gap between polls, with time to spare, keeps how long
+# readings stood still. After a longer one the downtime would count as standing
+# still, so the readings count from the restart.
+RESTART_GAP_KEPT: Final = timedelta(minutes=1)
 # Grid-side voltage above this shows a grid is there; at or below the lower one,
 # on every phase that reports, it is gone.
 GRID_PRESENT_V: Final = 100.0
@@ -116,14 +120,15 @@ class Movement:
             for key, (value, since) in self._seen.items()
         }
 
-    def load(self, stored: Mapping[str, Any]) -> None:
-        """Restore when each reading last changed.
+    def load(self, stored: Mapping[str, Any], restarted: datetime | None) -> None:
+        """Restore each reading's value and when it last changed.
 
         A reading that still has the stored value on the first poll keeps its
-        time, so a restart does not hide how long it has stood still.
+        time, so a short restart does not hide how long it has stood still. After
+        a long one, every reading counts from *restarted* instead.
         """
         self._seen = {
-            key: (value, datetime.fromisoformat(since))
+            key: (value, restarted or datetime.fromisoformat(since))
             for key, (value, since) in stored.items()
             if key in self._keys
         }
@@ -178,8 +183,11 @@ class Check:
         """Return what this check learned, to survive a restart, keyed uniquely."""
         return {}
 
-    def load(self, stored: Mapping[str, Any]) -> None:
-        """Restore what dump() returned before a restart."""
+    def load(self, stored: Mapping[str, Any], restarted: datetime | None, /) -> None:
+        """Restore what dump() returned before a restart.
+
+        *restarted* is when a long restart ended, None after a short one.
+        """
 
 
 class OffGridReported(Check):
@@ -224,7 +232,7 @@ class GridVoltageLost(Check):
     def dump(self) -> dict[str, Any]:
         return {"grid_seen": self._grid_seen}
 
-    def load(self, stored: Mapping[str, Any]) -> None:
+    def load(self, stored: Mapping[str, Any], _restarted: datetime | None, /) -> None:
         self._grid_seen = bool(stored.get("grid_seen"))
 
 
@@ -252,7 +260,7 @@ class BatteryDisconnected(Check):
     def dump(self) -> dict[str, Any]:
         return {"bms_seen": self._bms_seen}
 
-    def load(self, stored: Mapping[str, Any]) -> None:
+    def load(self, stored: Mapping[str, Any], _restarted: datetime | None, /) -> None:
         self._bms_seen = bool(stored.get("bms_seen"))
 
 
@@ -330,8 +338,8 @@ class FrozenReadings(Check):
     def dump(self) -> dict[str, Any]:
         return {"frozen_moved": self._movement.dump()}
 
-    def load(self, stored: Mapping[str, Any]) -> None:
-        self._movement.load(stored.get("frozen_moved") or {})
+    def load(self, stored: Mapping[str, Any], restarted: datetime | None, /) -> None:
+        self._movement.load(stored.get("frozen_moved") or {}, restarted)
 
 
 class CounterStalled(Check):
@@ -380,8 +388,8 @@ class CounterStalled(Check):
     def dump(self) -> dict[str, Any]:
         return {"supply_moved": self._movement.dump()}
 
-    def load(self, stored: Mapping[str, Any]) -> None:
-        self._movement.load(stored.get("supply_moved") or {})
+    def load(self, stored: Mapping[str, Any], restarted: datetime | None, /) -> None:
+        self._movement.load(stored.get("supply_moved") or {}, restarted)
 
 
 class TelemetryStalled(Check):
@@ -441,8 +449,8 @@ class TelemetryStalled(Check):
     def dump(self) -> dict[str, Any]:
         return {"stall_moved": self._movement.dump()}
 
-    def load(self, stored: Mapping[str, Any]) -> None:
-        self._movement.load(stored.get("stall_moved") or {})
+    def load(self, stored: Mapping[str, Any], restarted: datetime | None, /) -> None:
+        self._movement.load(stored.get("stall_moved") or {}, restarted)
 
 
 def with_derived(keys: frozenset[str]) -> frozenset[str]:
@@ -590,13 +598,21 @@ class ReadingChecks:
             state.update(check.dump())
         return state
 
-    def load_state(self, stored: Mapping[str, Any]) -> None:
+    def load_state(
+        self, stored: Mapping[str, Any], *, saved_at: datetime | None, now: datetime
+    ) -> None:
         """Restore what the checks learned before a restart.
 
-        A check whose stored state cannot be read starts afresh, as on first use.
+        State without *saved_at*, as from 2.10.0, counts as after a long restart. A
+        check whose stored state cannot be read starts afresh, as on first use.
         """
+        short = (
+            saved_at is not None
+            and saved_at.tzinfo is not None
+            and timedelta(0) <= now - saved_at <= RESTART_GAP_KEPT
+        )
         for check in self._checks:
             try:
-                check.load(stored)
+                check.load(stored, None if short else now)
             except (TypeError, ValueError, KeyError):
                 _LOGGER.debug("Could not restore the %s check", check.name)

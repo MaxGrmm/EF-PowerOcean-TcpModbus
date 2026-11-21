@@ -279,7 +279,8 @@ inverter counts them. `counter_stalled` only counts as evidence for
 `telemetry_stalled`, since some models may update a counter late. A house draws about
 100 W or more at any hour, from the sun, the grid or the battery, and the counters step
 in 0.01 kWh, so one of them moves every few minutes; 20 minutes is about three missed
-steps. How long each reading has stood still survives a restart.
+steps. How long each reading has stood still survives a reload. After a restart longer
+than a minute, the readings count from the restart, so the downtime does not count.
 
 The `ef_powerocean_tcpmodbus_reading_check_failed` and
 `ef_powerocean_tcpmodbus_reading_check_cleared` events, also shown in the logbook,

@@ -5,6 +5,7 @@
 ### Fixed
 
 - A request the connection loses, as when the inverter closes an idle connection just as a poll starts, is sent once more on a new connection instead of failing the poll (#237). A refusal from the inverter is not sent again.
+- A restart no longer counts as readings standing still, which could fail the `frozen`, `counter_stalled` or `telemetry_stalled` check right after Home Assistant was down.
 
 ### Changed
 

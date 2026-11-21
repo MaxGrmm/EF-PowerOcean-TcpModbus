@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -1860,6 +1860,32 @@ def test_the_charge_limit_outranks_charging_to_the_reserve(
     )
     assert control._commanded_feature is not Feature.CHARGE_BATTERY
     assert control.status is not Status.CHARGING_TO_RESERVE
+
+
+@pytest.mark.parametrize(
+    ("saved", "kept"),
+    ((timedelta(seconds=5), True), (timedelta(minutes=10), False), (None, False)),
+    ids=("short restart", "long restart", "saved without a time"),
+)
+def test_readings_count_as_still_through_a_short_restart_only(
+    control, monkeypatch: pytest.MonkeyPatch, saved: timedelta | None, kept: bool
+) -> None:
+    then = datetime(2026, 11, 21, 12, 0, tzinfo=UTC)
+    stored: dict[str, Any] = {
+        "reading_checks": {"frozen_moved": {"frequency": [50.0, then.isoformat()]}}
+    }
+    if saved is not None:
+        monkeypatch.setattr(dt_util, "now", lambda: then)
+        stored["saved_at"] = control.dump_state()["saved_at"]
+    back = then + (saved or timedelta(hours=1))
+    monkeypatch.setattr(dt_util, "now", lambda: back)
+
+    control.load_state(stored)
+
+    since = then if kept else back
+    assert control.reading_checks.dump_state()["frozen_moved"] == {
+        "frequency": [50.0, since.isoformat()]
+    }
 
 
 def test_charge_to_reserve_survives_a_restart(control) -> None:
