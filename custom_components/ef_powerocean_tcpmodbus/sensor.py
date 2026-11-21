@@ -260,6 +260,13 @@ class EcoflowSensor(EcoFlowBaseEntity[SensorDef | EnergySensorDef], RestoreSenso
         """Keep coordinator diagnostics available when normal entities are not."""
         if self._definition.key == "coordinator_status":
             return self.coordinator.status is not None
+        # A 0 from a device that does not measure the reading is no reading (#240).
+        if (
+            isinstance(self._definition, SensorDef)
+            and self._definition.measured_with
+            and not self.coordinator.measures(self._definition.measured_with)
+        ):
+            return False
         return super().available
 
     @property

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timedelta
 from functools import partial
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_DEVICE_ID, ATTR_ENTITY_ID, Platform
@@ -70,6 +71,7 @@ from .const import (
     PRODUCT_NUMBER,
     READING_CHECK_SNAPSHOTS,
     REGISTERS_BY_KEY,
+    SENSOR_MAP,
     SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
@@ -110,6 +112,11 @@ from .telemetry import (
 from .util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
+
+# Readings only some installations measure, which read 0 where they are not.
+_MEASURED_ONLY_SOMEWHERE: Final = frozenset(
+    key for sensor in SENSOR_MAP for key in sensor.measured_with
+)
 
 
 def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
@@ -172,6 +179,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # starts failing and to show what came before.
     _failing_before: frozenset[str] = frozenset()
     _raw_before: dict[int, list[int]] | None = None
+    # Of the readings only some installations measure, those this device has read
+    # as anything but 0, kept across restarts. Never forgotten, so a reading once
+    # measured is never hidden again, not even when the grid is down.
+    _measured_keys: frozenset[str] = frozenset()
 
     def __init__(
         self,
@@ -307,6 +318,20 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._identity_verified
 
     @property
+    def measured_keys(self) -> frozenset[str]:
+        """Return the readings only some installations measure that this one has."""
+        return self._measured_keys
+
+    def measures(self, keys: Iterable[str]) -> bool:
+        """Return whether this device measures the readings in *keys*.
+
+        A group of readings is measured once any of them has read anything but 0;
+        an empty group always is.
+        """
+        keys = frozenset(keys)
+        return not keys or not keys.isdisjoint(self._measured_keys)
+
+    @property
     def is_modbus_disabled(self) -> bool:
         """Return whether the last telemetry read indicates Modbus is disabled."""
         return self._consecutive_modbus_disabled_reads >= MODBUS_DISABLED_READ_THRESHOLD
@@ -354,6 +379,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._last_checked_time is not None
             else None,
             "battery_capacity_wh": self._battery_capacity_wh,
+            "measured_keys": sorted(self._measured_keys),
             "reading_check_snapshots": list(self._check_snapshots),
             **self.control.dump_state(),
             **self._energy_processor.dump_state(),
@@ -380,6 +406,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         # So a battery asleep at its reserve across a restart keeps its capacity.
         self._hold_battery_capacity(stored.get("battery_capacity_wh"))
+        # So a grid that is down across a restart still shows its 0 V.
+        self._measured_keys = _MEASURED_ONLY_SOMEWHERE.intersection(
+            stored.get("measured_keys") or ()
+        )
 
         revision = self.inverter_model.traits.energy_state_revision
         if stored.get("energy_state_revision", 0) != revision:
@@ -1027,6 +1057,19 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             },
         }
 
+    def _note_measured(self, data: Mapping[str, Any]) -> None:
+        """Keep the readings only some installations measure that read non-zero."""
+        measured = {
+            key
+            for key in _MEASURED_ONLY_SOMEWHERE - self._measured_keys
+            if isinstance(value := data.get(key), int | float)
+            and math.isfinite(value)
+            and value != 0
+        }
+        if measured:
+            _LOGGER.debug("The device measures %s", ", ".join(sorted(measured)))
+            self._measured_keys |= measured
+
     @property
     def unsupported_registers(self) -> frozenset[str]:
         """Return the optional registers the device refused, which are not polled."""
@@ -1282,6 +1325,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception:
                 _LOGGER.exception("Could not keep the readings of a failed check")
 
+            self._note_measured(result)
             self._last_checked_data = dict(result)
             self._last_checked_time = dt.now()
             self._take_long_held_inverter_only_totals()

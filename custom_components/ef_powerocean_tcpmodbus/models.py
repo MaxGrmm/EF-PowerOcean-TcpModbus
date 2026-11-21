@@ -895,6 +895,10 @@ class SensorDef:
     # Data keys published as state attributes, such as the raw word a value is
     # decoded from.
     attribute_keys: tuple[str, ...] = ()
+    # Readings only some installations measure, such as the grid side an EcoFlow
+    # Smart Meter feeds. A device that does not measure them reads 0 in all of
+    # them, so the sensor is unavailable until one of them has read anything else.
+    measured_with: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -975,6 +979,8 @@ def shown_keys(definition: EntityDef) -> frozenset[str]:
     match definition:
         case SensorDef():
             keys.update(definition.attribute_keys)
+            # Polled together, so one shown on its own still sees the others.
+            keys.update(definition.measured_with)
         case EnergySensorDef(total_source=str() as total_source):
             keys.add(total_source)
         case NumberWritableDef():
