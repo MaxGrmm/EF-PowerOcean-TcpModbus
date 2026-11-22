@@ -372,6 +372,9 @@
       "inverter_output_power": {
         "name": "Wechselrichter AC-Leistung"
       },
+      "inverter_reactive_power": {
+        "name": "Wechselrichter Blindleistung"
+      },
       "grid_voltage_l1": {
         "name": "Netzanschluss Phase L1 Spannung"
       },

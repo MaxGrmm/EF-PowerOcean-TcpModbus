@@ -372,6 +372,9 @@
       "inverter_output_power": {
         "name": "Inverter AC Power"
       },
+      "inverter_reactive_power": {
+        "name": "Inverter Reactive Power"
+      },
       "grid_voltage_l1": {
         "name": "Grid-side Voltage L1"
       },

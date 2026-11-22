@@ -4,6 +4,7 @@
 
 ### Added
 
+- An **Inverter Reactive Power** sensor (diagnostic), from register 40024 in [EcoFlow's register schema](https://github.com/ecoflow-oasis-official/ha-ecoflow-official/blob/main/custom_components/ha_ecoflow_official/registers_schema.py). Confirmed on a PowerOcean Plus, where it follows the built-in meter like Inverter AC Power. On a model that refuses the register, the read is dropped and the sensor stays unknown.
 - The register scan reads the registers EcoFlow's register schema lists for the PowerOcean that the integration does not poll yet, such as the battery control mode, the reactive power limits and the house consumption counters, so they can be confirmed on a live inverter first.
 - A **Run register scan** action that reads, without writing anything, the register map, those candidate registers and the address ranges around them from Home Assistant, and puts the report in the diagnostics download, so an untested model can be reported without running the script.
 

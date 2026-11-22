@@ -29,7 +29,8 @@ this integration's register handling.
 
 1. **EcoFlow Open Modbus Protocol V1.0** (10 June 2026).
    EcoFlow's own register table for the PowerOcean and Ocean2 series. Every
-   register the integration reads is in it, at the address it gives plus 40001.
+   register the integration reads is in it, at the address it gives plus 40001,
+   except Inverter Reactive Power (40024, 0x0017), which is only in the schema below.
    Where it disagrees with the hardware, the hardware wins, see
    [Where the specification and the hardware disagree](#where-the-specification-and-the-hardware-disagree).
    A copy is kept in [docs/EcoFlow_Open_Modbus_Protocol_V1.0_June_2026.pdf](EcoFlow_Open_Modbus_Protocol_V1.0_June_2026.pdf).

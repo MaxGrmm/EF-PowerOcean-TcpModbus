@@ -14,6 +14,7 @@ from homeassistant.const import (
     UnitOfEnergy,
     UnitOfFrequency,
     UnitOfPower,
+    UnitOfReactivePower,
     UnitOfTemperature,
 )
 
@@ -258,6 +259,16 @@ OPTIONAL_STALLS_TO_DROP: Final = 3
 # Every polled register, by absolute Modbus address. Order is for readability only;
 # the reads are worked out by plan_blocks().
 MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
+    # In var. Only in EcoFlow's register schema, confirmed on a PowerOcean Plus, where
+    # it follows the built-in meter like inverter_output_power. Read on its own, far
+    # from the other registers, so a model without it only drops this read.
+    RegisterDef(
+        "inverter_reactive_power",
+        40024,
+        RegisterType.INT16,
+        optional=True,
+        signal=Signal.MEASURE,
+    ),
     RegisterDef("grid_connection_code", 40513, RegisterType.UINT16, optional=True),
     RegisterDef("house_power", 40519, signal=Signal.MEASURE),
     RegisterDef("grid_power", 40521, signal=Signal.MEASURE),
@@ -373,8 +384,6 @@ REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTE
 CANDIDATE_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     # 0x0016, total active power at the inverter; reads 0 on a PowerOcean Plus.
     RegisterDef("inverter_total_active_power", 40023, RegisterType.INT16),
-    # 0x0017, total reactive power at the inverter in var; follows the meter.
-    RegisterDef("inverter_total_reactive_power", 40024, RegisterType.INT16),
     # 0x0205, the time zone times 4, signed; the V1.0 protocol calls it unused.
     RegisterDef("time_zone", 40518, RegisterType.INT16),
     # 0x0262, an unknown battery state enum; read 3 both idle and charging.
@@ -699,6 +708,13 @@ SENSOR_MAP: list[SensorDef] = [
         key="inverter_output_power",
         unit=UnitOfPower.WATT,
         device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorDef(
+        key="inverter_reactive_power",
+        unit=UnitOfReactivePower.VOLT_AMPERE_REACTIVE,
+        device_class=SensorDeviceClass.REACTIVE_POWER,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
