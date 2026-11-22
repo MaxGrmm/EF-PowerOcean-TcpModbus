@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .control import ControlManager
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
-from .descriptions import EcoflowSwitchEntityDescription
+from .definitions import EcoflowSwitchEntityDescription
 from .entity import EcoFlowBaseEntity
 from .powerocean.models import requires_modbus_control
 

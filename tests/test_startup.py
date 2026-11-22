@@ -35,14 +35,14 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.ef_powerocean_tcpmodbus import (
     PLATFORMS,
     const,
-    descriptions,
+    definitions,
     outage,
 )
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
-from custom_components.ef_powerocean_tcpmodbus.descriptions import (
+from custom_components.ef_powerocean_tcpmodbus.definitions import (
     EcoflowEnergySensorEntityDescription,
     EcoflowSensorEntityDescription,
 )
@@ -301,7 +301,7 @@ class _RecordingData(dict):
 def _enable_every_entity(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     """Register the entities that start disabled as enabled, so they load too."""
     registry = er.async_get(hass)
-    for number in descriptions.WRITABLE_NUMBERS_MAP:
+    for number in definitions.WRITABLE_NUMBERS_MAP:
         registry.async_get_or_create(
             "number",
             const.DOMAIN,
@@ -447,10 +447,10 @@ def _reading_entities(hass: HomeAssistant, entry: MockConfigEntry) -> list[str]:
     sensor_definitions: tuple[
         EcoflowSensorEntityDescription | EcoflowEnergySensorEntityDescription, ...
     ] = (
-        *descriptions.SENSOR_MAP,
-        *descriptions.ENERGY_SENSOR_MAP,
-        *descriptions.DAILY_ENERGY_SENSORS_DEVICE_RAW,
-        *descriptions.TOTAL_ENERGY_SENSORS_DEVICE_RAW,
+        *definitions.SENSOR_MAP,
+        *definitions.ENERGY_SENSOR_MAP,
+        *definitions.DAILY_ENERGY_SENSORS_DEVICE_RAW,
+        *definitions.TOTAL_ENERGY_SENSORS_DEVICE_RAW,
     )
     readings = {
         *(
@@ -460,11 +460,11 @@ def _reading_entities(hass: HomeAssistant, entry: MockConfigEntry) -> list[str]:
         ),
         *(
             ("binary_sensor", definition.key)
-            for definition in descriptions.BINARY_SENSOR_MAP
+            for definition in definitions.BINARY_SENSOR_MAP
         ),
         *(
             ("number", definition.key)
-            for definition in descriptions.WRITABLE_NUMBERS_MAP
+            for definition in definitions.WRITABLE_NUMBERS_MAP
         ),
     }
     prefix = f"{entry.entry_id}_"

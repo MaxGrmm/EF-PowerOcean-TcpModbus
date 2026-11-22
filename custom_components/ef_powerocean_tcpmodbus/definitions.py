@@ -1,4 +1,6 @@
-"""The entity descriptions of the integration: what each entity shows, and how.
+"""The integration's entities: what each one shows, and how.
+
+Each is defined as a Home Assistant entity description.
 
 They live apart from the platforms because the coordinator and the energy
 processor read them too: which counters there are, and how fast each can rise.

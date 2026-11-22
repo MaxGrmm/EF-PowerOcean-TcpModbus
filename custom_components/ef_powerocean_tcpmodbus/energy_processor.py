@@ -11,7 +11,7 @@ from typing import Any, Final, TypeIs
 
 from homeassistant.util import dt
 
-from .descriptions import ENERGY_SENSOR_MAP, EcoflowEnergySensorEntityDescription
+from .definitions import ENERGY_SENSOR_MAP, EcoflowEnergySensorEntityDescription
 from .powerocean.const import DEFAULT_MAX_POWER, ENERGY_RESOLUTION_KWH
 from .powerocean.util import parse_datetime
 

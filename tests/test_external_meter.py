@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const, descriptions, sensor
+from custom_components.ef_powerocean_tcpmodbus import const, definitions, sensor
 from custom_components.ef_powerocean_tcpmodbus.coordinator import (
     EcoflowConfigEntry,
     EcoflowCoordinator,
@@ -110,7 +110,7 @@ async def test_a_new_meter_sensor_is_enabled_only_with_a_meter(
     coordinator = SimpleNamespace(has_external_meter=has_external_meter)
     definition = next(
         definition
-        for definition in descriptions.SENSOR_MAP
+        for definition in definitions.SENSOR_MAP
         if definition.key == "grid_voltage_l2"
     )
 

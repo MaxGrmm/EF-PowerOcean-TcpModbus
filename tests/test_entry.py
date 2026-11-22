@@ -24,7 +24,7 @@ from pytest_homeassistant_custom_component.common import (
     async_capture_events,
 )
 
-from custom_components.ef_powerocean_tcpmodbus import const, descriptions, logbook
+from custom_components.ef_powerocean_tcpmodbus import const, definitions, logbook
 from custom_components.ef_powerocean_tcpmodbus.diagnostics import (
     async_get_config_entry_diagnostics,
 )
@@ -183,7 +183,7 @@ async def test_battery_controls_are_unavailable_while_modbus_control_is_off(
     hass: HomeAssistant, set_up: SetUp
 ) -> None:
     entry = await set_up()
-    select_id = _entity_id(hass, entry, "select", descriptions.BATTERY_MODE_SELECT.key)
+    select_id = _entity_id(hass, entry, "select", definitions.BATTERY_MODE_SELECT.key)
     assert _state(hass, select_id) == STATE_UNAVAILABLE
 
     await hass.services.async_call(
@@ -207,7 +207,7 @@ async def test_a_command_that_runs_out_returns_to_automatic_and_says_why(
 ) -> None:
     entry = await set_up(**{const.CONF_MODBUS_CONTROL: True})
     device = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)[0]
-    select_id = _entity_id(hass, entry, "select", descriptions.BATTERY_MODE_SELECT.key)
+    select_id = _entity_id(hass, entry, "select", definitions.BATTERY_MODE_SELECT.key)
     expired = async_capture_events(hass, const.EVENT_COMMAND_EXPIRED)
 
     await hass.services.async_call(
@@ -257,7 +257,7 @@ async def test_a_setting_the_register_cannot_hold_is_never_sent(
     entry = await set_up()
     setting = next(
         number
-        for number in descriptions.WRITABLE_NUMBERS_MAP
+        for number in definitions.WRITABLE_NUMBERS_MAP
         if number.data_type is RegisterType.UINT16
     )
 
@@ -308,7 +308,7 @@ async def test_diagnostics_show_every_energy_counter_at_every_stage(
     assert energy["device_totals"]["solar_total_raw"] == pytest.approx(4296.8)
     assert set(energy["device_totals"]) == {
         f"{s.key}_raw"
-        for s in descriptions.ENERGY_SENSOR_MAP
+        for s in definitions.ENERGY_SENSOR_MAP
         if not s.is_calculated and not s.resets_daily
     }
     assert "solar_today_raw" in energy["device_daily"]

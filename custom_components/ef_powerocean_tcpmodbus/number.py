@@ -20,7 +20,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, RETIRED_MIN_SOC_NUMBER_KEY, UNIT_OF_RATIO
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
-from .descriptions import (
+from .definitions import (
     BATTERY_RESERVE_SOC_NUMBER,
     CHARGE_LIMIT_SOC_NUMBER,
     WRITABLE_NUMBERS_MAP,

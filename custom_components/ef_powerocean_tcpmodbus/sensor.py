@@ -27,7 +27,7 @@ from homeassistant.helpers.typing import StateType
 
 from .const import CONF_BATTERY_COUNT, UNIT_OF_RATIO
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
-from .descriptions import (
+from .definitions import (
     CONTROL_STATUS_SENSOR,
     CONTROL_TEST_SENSOR,
     DAILY_ENERGY_SENSORS_DEVICE_RAW,

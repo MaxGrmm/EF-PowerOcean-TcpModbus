@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
-from .descriptions import (
+from .definitions import (
     BINARY_SENSOR_MAP,
     MODBUS_CONTROL_BINARY_SENSOR,
     READING_CHECK_BINARY_SENSOR,

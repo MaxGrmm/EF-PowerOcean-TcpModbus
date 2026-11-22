@@ -9,7 +9,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const, descriptions, number
+from custom_components.ef_powerocean_tcpmodbus import const, definitions, number
 from custom_components.ef_powerocean_tcpmodbus.powerocean.models import InverterModel
 
 
@@ -41,7 +41,7 @@ def reserve(entities: list):
     return next(
         entity
         for entity in entities
-        if entity.entity_description.key == descriptions.BATTERY_RESERVE_SOC_NUMBER.key
+        if entity.entity_description.key == definitions.BATTERY_RESERVE_SOC_NUMBER.key
     )
 
 

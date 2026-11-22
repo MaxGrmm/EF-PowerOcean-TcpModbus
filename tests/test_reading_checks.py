@@ -12,7 +12,7 @@ import pytest
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
 
-from custom_components.ef_powerocean_tcpmodbus import binary_sensor, const, descriptions
+from custom_components.ef_powerocean_tcpmodbus import binary_sensor, const, definitions
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
 from custom_components.ef_powerocean_tcpmodbus.powerocean import models as device_models
@@ -898,7 +898,7 @@ def test_the_reading_check_sensor_shows_wrong_readings_with_control_off() -> Non
     entity = binary_sensor.EcoFlowReadingCheckBinarySensor(
         cast(Any, fake),
         cast(Any, SimpleNamespace(entry_id="entry")),
-        descriptions.READING_CHECK_BINARY_SENSOR,
+        definitions.READING_CHECK_BINARY_SENSOR,
     )
     assert not entity.is_on
 

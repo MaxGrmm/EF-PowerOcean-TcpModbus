@@ -24,7 +24,7 @@ def load_integration() -> tuple[types.SimpleNamespace | types.ModuleType, ...]:
     """Load the register map without importing all of Home Assistant.
 
     The device's constants and types live in the powerocean package, the entity
-    descriptions next to the integration; const and models offer both, as before.
+    definitions next to the integration; const and models offer both, as before.
     """
     if importlib.util.find_spec("homeassistant") is None:
         stub = types.ModuleType("homeassistant.const")
@@ -49,7 +49,7 @@ def load_integration() -> tuple[types.SimpleNamespace | types.ModuleType, ...]:
         )
 
     return (
-        merged("powerocean.const", "powerocean.registers", "const", "descriptions"),
+        merged("powerocean.const", "powerocean.registers", "const", "definitions"),
         merged("powerocean.models", "powerocean.registers", "models"),
         importlib.import_module(f"{PACKAGE}.powerocean.telemetry"),
         importlib.import_module(f"{PACKAGE}.powerocean.control_test_core"),

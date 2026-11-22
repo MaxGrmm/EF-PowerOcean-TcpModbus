@@ -17,10 +17,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityDescription
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const, descriptions
+from custom_components.ef_powerocean_tcpmodbus import const, definitions
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
-from custom_components.ef_powerocean_tcpmodbus.descriptions import (
+from custom_components.ef_powerocean_tcpmodbus.definitions import (
     EcoflowEnergySensorEntityDescription,
     EcoflowSensorEntityDescription,
     shown_keys,
@@ -74,11 +74,11 @@ def test_telemetry_asks_for_the_fault_registers() -> None:
 def test_every_register_has_something_that_asks_for_it() -> None:
     """A register nothing asks for is never read, so it should not be mapped."""
     every_description: tuple[EntityDescription, ...] = (
-        *descriptions.SENSOR_MAP,
-        *descriptions.ENERGY_SENSOR_MAP,
-        *descriptions.DAILY_ENERGY_SENSORS_DEVICE_RAW,
-        *descriptions.BINARY_SENSOR_MAP,
-        *descriptions.WRITABLE_NUMBERS_MAP,
+        *definitions.SENSOR_MAP,
+        *definitions.ENERGY_SENSOR_MAP,
+        *definitions.DAILY_ENERGY_SENSORS_DEVICE_RAW,
+        *definitions.BINARY_SENSOR_MAP,
+        *definitions.WRITABLE_NUMBERS_MAP,
     )
     shown = frozenset().union(*(shown_keys(d) for d in every_description))
     assert REGISTERS - OWN - ControlInputs.keys() - shown == set()
@@ -200,8 +200,8 @@ async def test_a_refused_register_stays_out_whatever_is_asked(coordinator) -> No
             {"solar_today", "solar_total"},
         ),
         (
-            descriptions.WRITABLE_NUMBERS_MAP[0],
-            {descriptions.WRITABLE_NUMBERS_MAP[0].key, "device_led_brightness"},
+            definitions.WRITABLE_NUMBERS_MAP[0],
+            {definitions.WRITABLE_NUMBERS_MAP[0].key, "device_led_brightness"},
         ),
     ),
 )

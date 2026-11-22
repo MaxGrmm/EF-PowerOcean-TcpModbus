@@ -54,7 +54,7 @@ from .const import (
 )
 from .control import ControlManager
 from .control_test import ControlTest
-from .descriptions import (
+from .definitions import (
     BATTERY_MODE_SELECT,
     DEVICE_ENERGY_KEYS,
     ENERGY_SENSOR_MAP,

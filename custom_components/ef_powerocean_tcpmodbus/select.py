@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
-from .descriptions import BATTERY_MODE_SELECT, ControlSelectEntityDescription
+from .definitions import BATTERY_MODE_SELECT, ControlSelectEntityDescription
 from .entity import EcoFlowBaseEntity
 from .powerocean.models import ControlFeature
 

@@ -24,7 +24,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import (
     const,
-    descriptions,
+    definitions,
     models,
     outage,
 )
@@ -1143,8 +1143,8 @@ def test_other_models_report_energy_counters_in_kilowatt_hours(coordinator) -> N
 def test_every_device_energy_counter_is_read_from_a_register() -> None:
     """The Wh conversion applies to what the coordinator reads, so each counter
     the device reports has to be a register."""
-    assert descriptions.DEVICE_ENERGY_KEYS
-    assert register_map.REGISTERS_BY_KEY.keys() >= descriptions.DEVICE_ENERGY_KEYS
+    assert definitions.DEVICE_ENERGY_KEYS
+    assert register_map.REGISTERS_BY_KEY.keys() >= definitions.DEVICE_ENERGY_KEYS
 
 
 def test_modbus_disabled_recovers_when_telemetry_returns(
@@ -1260,7 +1260,7 @@ def test_the_plus_gets_no_feed_in_sensor_that_reads_zero_on_it() -> None:
     plus = device_models.InverterModel.POWEROCEAN_PLUS
     hidden = {
         sensor.key
-        for sensor in descriptions.SENSOR_MAP
+        for sensor in definitions.SENSOR_MAP
         if plus in sensor.unsupported_models
     }
 
@@ -1284,7 +1284,7 @@ def test_the_feed_in_cap_is_written_to_the_configured_register(coordinator) -> N
 
 
 def test_writable_numbers_write_to_the_register_they_read() -> None:
-    for number in descriptions.WRITABLE_NUMBERS_MAP:
+    for number in definitions.WRITABLE_NUMBERS_MAP:
         expected = register_map.REGISTERS_BY_KEY[number.read_key].address
 
         assert number.register == expected, (
@@ -1296,16 +1296,16 @@ def test_writable_numbers_write_to_the_register_they_read() -> None:
 def test_raw_daily_sensors_exist_only_for_device_read_values() -> None:
     """The processor only echoes dailies backed by a total, so entities must match."""
     produced = EnergyProcessor.raw_daily_values(
-        {energy_sensor.key: 1.0 for energy_sensor in descriptions.ENERGY_SENSOR_MAP}
+        {energy_sensor.key: 1.0 for energy_sensor in definitions.ENERGY_SENSOR_MAP}
     )
 
     assert {
-        sensor.key for sensor in descriptions.DAILY_ENERGY_SENSORS_DEVICE_RAW
+        sensor.key for sensor in definitions.DAILY_ENERGY_SENSORS_DEVICE_RAW
     } == set(produced)
 
 
 def test_enum_sensors_declare_their_options() -> None:
-    for sensor in descriptions.SENSOR_MAP:
+    for sensor in definitions.SENSOR_MAP:
         if sensor.device_class == "enum":
             assert sensor.options, f"{sensor.key} is an enum without options"
 

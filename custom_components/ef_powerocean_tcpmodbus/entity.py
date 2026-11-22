@@ -10,7 +10,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import EcoflowCoordinator
-from .descriptions import (
+from .definitions import (
     ControlNumberEntityDescription,
     ControlSelectEntityDescription,
     shown_keys,
