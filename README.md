@@ -10,7 +10,9 @@
 
 > [!IMPORTANT]
 > This integration communicates directly with your device over your local network via
-> Modbus TCP. No cloud connection required. Modbus is disabled on the inverter by
+> Modbus TCP. No cloud connection required.
+>
+> Modbus is disabled on the inverter by
 > default, so your EcoFlow partner or installer has to enable it before setup, see
 > [Prerequisites](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus#prerequisites).
 
