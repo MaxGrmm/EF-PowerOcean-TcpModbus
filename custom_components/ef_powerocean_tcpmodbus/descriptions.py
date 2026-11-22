@@ -6,9 +6,9 @@ processor read them too: which counters there are, and how fast each can rise.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -21,6 +21,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
+from homeassistant.components.switch import SwitchEntityDescription
 from homeassistant.const import (
     EntityCategory,
     UnitOfElectricCurrent,
@@ -56,6 +57,10 @@ from .powerocean.models import (
     requires_modbus_control,
 )
 from .powerocean.registers import REGISTER_SIZES, REGISTERS_BY_KEY, RegisterType
+
+if TYPE_CHECKING:
+    from .control import ControlManager
+    from .coordinator import EcoflowCoordinator
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -121,6 +126,20 @@ class ControlNumberEntityDescription(NumberEntityDescription):
     """A number that carries commanded state rather than a device register."""
 
     availability: Availability = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class EcoflowSwitchEntityDescription(SwitchEntityDescription):
+    """A switch over a setting the control manager keeps."""
+
+    is_on_fn: Callable[[EcoflowCoordinator], bool]
+    turn_fn: Callable[[ControlManager, bool], Awaitable[None]]
+    attributes_fn: Callable[[EcoflowCoordinator], dict[str, Any]] | None = None
+    available_fn: Callable[[EcoflowCoordinator], bool] | None = None
+    entity_category: EntityCategory | None = EntityCategory.CONFIG
+    # An icon that overrides the one in icons.json while it returns one, for a
+    # state the switch's on and off cannot show.
+    icon_fn: Callable[[EcoflowCoordinator], str | None] | None = None
 
 
 def shown_keys(description: EntityDescription) -> frozenset[str]:

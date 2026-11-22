@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any, Final
 
-from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
+from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -16,25 +13,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .control import ControlManager
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
+from .descriptions import EcoflowSwitchEntityDescription
 from .entity import EcoFlowBaseEntity
 from .powerocean.models import requires_modbus_control
 
 # One write to the inverter at a time.
 PARALLEL_UPDATES = 1
-
-
-@dataclass(frozen=True, kw_only=True)
-class EcoflowSwitchEntityDescription(SwitchEntityDescription):
-    """A switch over a setting the control manager keeps."""
-
-    is_on_fn: Callable[[EcoflowCoordinator], bool]
-    turn_fn: Callable[[ControlManager, bool], Awaitable[None]]
-    attributes_fn: Callable[[EcoflowCoordinator], dict[str, Any]] | None = None
-    available_fn: Callable[[EcoflowCoordinator], bool] | None = None
-    entity_category: EntityCategory | None = EntityCategory.CONFIG
-    # An icon that overrides the one in icons.json while it returns one, for a
-    # state the switch's on and off cannot show.
-    icon_fn: Callable[[EcoflowCoordinator], str | None] | None = None
 
 
 MODBUS_CONTROL_SWITCH: Final = EcoflowSwitchEntityDescription(
