@@ -64,6 +64,7 @@ from .energy_processor import (
     HeldTotal,
     offsets_from,
 )
+from .identity import IdentityGuard
 from .modbus import ModbusClient, ModbusReadRejected, create_client, retries_until
 from .models import CoordinatorStatus, NumberWritableDef
 from .powerocean.const import (
@@ -149,10 +150,6 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # added: a poll in between would leave out what they have yet to ask for.
     _wanted_keys: frozenset[str] | None = None
     _on_demand: bool = False
-    _identity_verified: bool = False
-    _identity_mismatch: bool = False
-    # For entries still keyed by host:port.
-    _pinned_serial: str | None = None
     # The totals the held-totals issue was last raised for.
     _held_issue_keys: frozenset[str] = frozenset()
     # Tells the user about the reading checks' findings.
@@ -228,7 +225,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_inverter_temperature: float | None = None
         self._consecutive_modbus_disabled_reads = 0
         self._modbus_client = create_client(hass, config_entry, self.host, self.port)
-        self._modbus_client.block_writes("identity_unverified")
+        self.identity_guard = IdentityGuard(
+            hass, config_entry, self._modbus_client, self.host
+        )
+        self.identity_guard.mark_unverified()
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
         self._announcer = Announcer()
@@ -298,7 +298,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def identity_verified(self) -> bool:
-        return self._identity_verified
+        return self.identity_guard.verified
 
     @property
     def has_external_meter(self) -> bool:
@@ -450,7 +450,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         identity = self.identity
         if identity.serial_number is None:
             identity.serial_number = "unknown"
-        self._mark_identity_unverified()
+        self.identity_guard.mark_unverified()
 
         try:
             raw = await self._modbus_client.async_read(
@@ -458,17 +458,17 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except ModbusException as err:
             _LOGGER.warning("Can not read device information: %s", err)
-            self._accept_unreadable_identity()
+            self.identity_guard.accept_unreadable()
             return
 
         if not raw or len(raw) < DEVICE_INFO_BLOCK.count:
-            self._accept_unreadable_identity()
+            self.identity_guard.accept_unreadable()
             return
 
         registers_for = partial(DEVICE_INFO_BLOCK.registers_for, raw)
 
         serial = decode_serial_number(registers_for(SERIAL_NUMBER))
-        if not self._check_identity(serial):
+        if not self.identity_guard.check(serial):
             return
         identity.serial_number = serial or "unknown"
         identity.product_number = registers_for(PRODUCT_NUMBER)[0]
@@ -485,79 +485,6 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_read_device_info_extra()
 
     # ── Identity ──────────────────────────────────────────────────────────────
-
-    def _expected_serial(self) -> str | None:
-        unique_id = self.config_entry.unique_id
-        if unique_id and ":" not in unique_id:
-            return unique_id
-        return self._pinned_serial
-
-    def _mark_identity_unverified(self) -> None:
-        self._identity_verified = False
-        self._modbus_client.block_writes("identity_unverified")
-
-    def _accept_unreadable_identity(self) -> None:
-        # Nothing to compare against: keep the behaviour from before the check.
-        if self._expected_serial() is None:
-            self._set_identity_verified()
-
-    def _check_identity(self, serial: str | None) -> bool:
-        """Block reads and writes to a device with another serial.
-
-        Otherwise a changed DHCP lease could hand us Modbus control of an
-        inverter nobody configured.
-        """
-        if not serial:
-            self._accept_unreadable_identity()
-            return self._identity_verified
-
-        expected = self._expected_serial()
-        if expected is not None and serial != expected:
-            reason = (
-                f"the device at {self.host} reports serial {serial}, not {expected}"
-            )
-            self._modbus_client.block_writes(
-                "identity_mismatch",
-                {"host": self.host, "found": serial, "expected": expected},
-            )
-            if not self._identity_mismatch:
-                _LOGGER.warning(
-                    "%s. Nothing is read from or written to it. Check the address, "
-                    "or remove the entry and add the new inverter",
-                    reason[0].upper() + reason[1:],
-                )
-                ir.async_create_issue(
-                    self.hass,
-                    DOMAIN,
-                    issues.issue_id(issues.IDENTITY_MISMATCH, self.config_entry),
-                    is_fixable=False,
-                    is_persistent=False,
-                    severity=ir.IssueSeverity.ERROR,
-                    translation_key="identity_mismatch",
-                    translation_placeholders={
-                        "host": str(self.host),
-                        "expected": expected,
-                        "found": serial,
-                    },
-                )
-            self._identity_mismatch = True
-            return False
-
-        self._pinned_serial = self._pinned_serial or serial
-        self._set_identity_verified()
-        return True
-
-    def _set_identity_verified(self) -> None:
-        self._identity_verified = True
-        self._modbus_client.allow_writes()
-        if self._identity_mismatch:
-            _LOGGER.info("The device at %s shows the expected serial again", self.host)
-            ir.async_delete_issue(
-                self.hass,
-                DOMAIN,
-                issues.issue_id(issues.IDENTITY_MISMATCH, self.config_entry),
-            )
-        self._identity_mismatch = False
 
     @callback
     def _firmware_changed(self, previous: str, firmware: str) -> None:
@@ -649,14 +576,14 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # The reconnect above has its own backoff, so it is not budgeted.
             async with asyncio.timeout(MODBUS_POLL_BUDGET_S) as budget:
                 with retries_until(budget.when()):
-                    if not self._identity_verified:
+                    if not self.identity_guard.verified:
                         await self.async_read_device_info()
-                        if self._identity_mismatch:
+                        if self.identity_guard.mismatch:
                             raise IdentityMismatch(
                                 f"The device at {self.host} is not the inverter this "
                                 "entry belongs to"
                             )
-                        if not self._identity_verified:
+                        if not self.identity_guard.verified:
                             _LOGGER.debug(
                                 "Serial number not confirmed yet; skipping this poll"
                             )
@@ -706,7 +633,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _read_failed(self) -> None:
         self._modbus_client.close()
         # A shared link can reconnect without us seeing it drop.
-        self._mark_identity_unverified()
+        self.identity_guard.mark_unverified()
 
     def _held_over_a_day(self) -> dict[str, HeldTotal]:
         now = dt.now()
