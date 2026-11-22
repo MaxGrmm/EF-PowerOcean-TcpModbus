@@ -395,7 +395,7 @@ polls, to keep control from passing back to the EcoFlow app.
 - **Tested firmware:** 3.0.19.19 + 3.0.20.54(PO+)
 - **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 
-The register map lives in [`const.py`](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. Word order, decoding, how reads are grouped into blocks and known gaps are in the [protocol notes](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/EcoFlow_PowerOcean_Modbus.md).
+The register map lives in [`const.py`](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. Word order, decoding, how reads are grouped into blocks and known gaps are in the [protocol notes](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md).
 
 ### Contributing
 
@@ -427,7 +427,7 @@ Special thanks to all contributors for the massive amount of time and effort tha
 
 This integration follows EcoFlow's Open Modbus Protocol V1.0, a trial version,
 corrected by community measurements where the hardware differs from it. See the
-[protocol notes](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/EcoFlow_PowerOcean_Modbus.md#where-the-specification-and-the-hardware-disagree).
+[protocol notes](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#where-the-specification-and-the-hardware-disagree).
 Use at your own risk. Not affiliated with EcoFlow Technology Co., Ltd.
 
 ### License

@@ -80,7 +80,7 @@ Loads that cycle on and off, like an oven, make it wait longer each time.
 The guards are soft limits: the battery may move the wrong way for a few seconds before
 it is caught. While held, it drifts a few hundred watts as clouds pass, because EcoFlow
 doesn't expose a hard power limit over Modbus. See
-[Battery power limits](../EcoFlow_PowerOcean_Modbus.md#battery-power-limits).
+[Battery power limits](ecoflow-modbus-protocol-implementation.md#battery-power-limits).
 
 </details>
 

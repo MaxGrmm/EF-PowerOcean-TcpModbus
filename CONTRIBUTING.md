@@ -74,7 +74,7 @@ Keep changes within the layer that owns the behavior and place tests alongside t
 
 Register changes need stronger evidence than a field name or a successful read:
 
-- Read the [technical details](README.md#technical-details) and [protocol notes](EcoFlow_PowerOcean_Modbus.md) before changing register handling.
+- Read the [technical details](README.md#technical-details) and [protocol notes](docs/ecoflow-modbus-protocol-implementation.md) before changing register handling.
 - Add decoding and block-planning tests where the change affects either behavior.
 - Treat missing or invalid telemetry as unavailable. Do not replace it with zero, especially for `total_increasing` energy sensors, because that can corrupt Home Assistant long-term statistics.
 - Use synthetic values and placeholder identifiers in tests and fixtures.
@@ -122,7 +122,7 @@ Reading the result:
 
 - Every register reading zero usually means Modbus TCP is switched off in the EcoFlow app, not that the map differs.
 - A refused register that is readable elsewhere means the address moved on that model. Add an `address_overrides` entry to its `RegisterDef` rather than changing the shared address.
-- A `maybe ...` in the `looks like` column is only a guess from the value's magnitude. It's an educated guess, but can be wrong. Use it as a reference together with the [protocol notes](EcoFlow_PowerOcean_Modbus.md).
+- A `maybe ...` in the `looks like` column is only a guess from the value's magnitude. It's an educated guess, but can be wrong. Use it as a reference together with the [protocol notes](docs/ecoflow-modbus-protocol-implementation.md).
 
 To find where a setting in the EcoFlow app lives on Modbus, run it with `--watch` instead. It reads everything a few times to learn which registers move by themselves, then asks you to make one change in the app at a time, waits for it to reach Modbus (`--settle`, default 20 s) and lists the registers that followed. Mapped measurements are left out of that list, as they drift on their own; the ones that show what the inverter did (battery, grid, inverter and house power, and the status word) are shown decoded after each change instead. It ends with a table of both after every step, and stays read-only.
 
