@@ -259,16 +259,6 @@ OPTIONAL_STALLS_TO_DROP: Final = 3
 # Every polled register, by absolute Modbus address. Order is for readability only;
 # the reads are worked out by plan_blocks().
 MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
-    # In var. Only in EcoFlow's register schema, confirmed on a PowerOcean Plus, where
-    # it follows the built-in meter like inverter_output_power. Read on its own, far
-    # from the other registers, so a model without it only drops this read.
-    RegisterDef(
-        "inverter_reactive_power",
-        40024,
-        RegisterType.INT16,
-        optional=True,
-        signal=Signal.MEASURE,
-    ),
     RegisterDef("grid_connection_code", 40513, RegisterType.UINT16, optional=True),
     RegisterDef("house_power", 40519, signal=Signal.MEASURE),
     RegisterDef("grid_power", 40521, signal=Signal.MEASURE),
@@ -368,6 +358,17 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("bat_discharged_today", 42243, signal=Signal.COUNTER),
     RegisterDef("solar_total", 42257, signal=Signal.COUNTER),
     RegisterDef("solar_today", 42259, signal=Signal.COUNTER),
+    # In var. Only in EcoFlow's register schema, confirmed on a PowerOcean Plus, where
+    # it follows the built-in meter like inverter_output_power. Read on its own, far
+    # from the other registers, so a model without it only drops this read. Listed
+    # last, as the tests fill each register with a value from its place here.
+    RegisterDef(
+        "inverter_reactive_power",
+        40024,
+        RegisterType.INT16,
+        optional=True,
+        signal=Signal.MEASURE,
+    ),
 )
 
 REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTERS}
