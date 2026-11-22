@@ -14,19 +14,19 @@ from unittest.mock import AsyncMock
 import pytest
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityDescription
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const
+from custom_components.ef_powerocean_tcpmodbus import const, descriptions
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
-from custom_components.ef_powerocean_tcpmodbus.energy_processor import ENERGY_KEYS
-from custom_components.ef_powerocean_tcpmodbus.entity import EcoFlowBaseEntity
-from custom_components.ef_powerocean_tcpmodbus.models import (
-    EnergySensorDef,
-    EntityDef,
-    SensorDef,
+from custom_components.ef_powerocean_tcpmodbus.descriptions import (
+    EcoflowEnergySensorEntityDescription,
+    EcoflowSensorEntityDescription,
     shown_keys,
 )
+from custom_components.ef_powerocean_tcpmodbus.energy_processor import ENERGY_KEYS
+from custom_components.ef_powerocean_tcpmodbus.entity import EcoFlowBaseEntity
 from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
 from custom_components.ef_powerocean_tcpmodbus.powerocean import models as device_models
 from custom_components.ef_powerocean_tcpmodbus.powerocean import (
@@ -73,12 +73,12 @@ def test_telemetry_asks_for_the_fault_registers() -> None:
 
 def test_every_register_has_something_that_asks_for_it() -> None:
     """A register nothing asks for is never read, so it should not be mapped."""
-    definitions: tuple[EntityDef, ...] = (
-        *const.SENSOR_MAP,
-        *const.ENERGY_SENSOR_MAP,
-        *const.DAILY_ENERGY_SENSORS_DEVICE_RAW,
-        *const.BINARY_SENSOR_MAP,
-        *const.WRITABLE_NUMBERS_MAP,
+    definitions: tuple[EntityDescription, ...] = (
+        *descriptions.SENSOR_MAP,
+        *descriptions.ENERGY_SENSOR_MAP,
+        *descriptions.DAILY_ENERGY_SENSORS_DEVICE_RAW,
+        *descriptions.BINARY_SENSOR_MAP,
+        *descriptions.WRITABLE_NUMBERS_MAP,
     )
     shown = frozenset().union(*(shown_keys(d) for d in definitions))
     assert REGISTERS - OWN - ControlInputs.keys() - shown == set()
@@ -186,18 +186,22 @@ async def test_a_refused_register_stays_out_whatever_is_asked(coordinator) -> No
 @pytest.mark.parametrize(
     ("definition", "keys"),
     (
-        (SensorDef("frequency"), {"frequency"}),
+        (EcoflowSensorEntityDescription(key="frequency"), {"frequency"}),
         (
-            SensorDef("fault_count", attribute_keys=("system_state_2_hex",)),
+            EcoflowSensorEntityDescription(
+                key="fault_count", attribute_keys=("system_state_2_hex",)
+            ),
             {"fault_count", "system_state_2_hex"},
         ),
         (
-            EnergySensorDef("solar_today", total_source="solar_total"),
+            EcoflowEnergySensorEntityDescription(
+                key="solar_today", total_source="solar_total"
+            ),
             {"solar_today", "solar_total"},
         ),
         (
-            const.WRITABLE_NUMBERS_MAP[0],
-            {const.WRITABLE_NUMBERS_MAP[0].key, "device_led_brightness"},
+            descriptions.WRITABLE_NUMBERS_MAP[0],
+            {descriptions.WRITABLE_NUMBERS_MAP[0].key, "device_led_brightness"},
         ),
     ),
 )

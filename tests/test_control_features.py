@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from custom_components.ef_powerocean_tcpmodbus import const
+from custom_components.ef_powerocean_tcpmodbus import descriptions
 from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
 from custom_components.ef_powerocean_tcpmodbus.powerocean import (
     registers as register_map,
@@ -171,10 +171,10 @@ def test_holding_the_battery_commands_a_method_but_no_power() -> None:
 
 
 def test_the_select_offers_every_mode() -> None:
-    assert const.BATTERY_MODE_SELECT.key == "battery_mode"
-    assert const.CONTROL_STATUS_SENSOR.options == tuple(
+    assert descriptions.BATTERY_MODE_SELECT.key == "battery_mode"
+    assert descriptions.CONTROL_STATUS_SENSOR.options == [
         str(status) for status in ControlStatus
-    )
+    ]
 
 
 def test_a_setpoint_that_is_being_met_reads_as_active() -> None:
@@ -277,7 +277,7 @@ def test_the_app_backup_reserve_is_not_a_battery_level() -> None:
     """Home Assistant would otherwise show it as the battery's charge."""
     sensor = next(
         sensor
-        for sensor in const.SENSOR_MAP
+        for sensor in descriptions.SENSOR_MAP
         if sensor.key == device_const.BATTERY_RESERVE_REGISTER_KEY
     )
 

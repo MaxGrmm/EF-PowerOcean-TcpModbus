@@ -8,7 +8,7 @@ from typing import cast
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const, sensor
+from custom_components.ef_powerocean_tcpmodbus import const, descriptions, sensor
 from custom_components.ef_powerocean_tcpmodbus.powerocean.models import (
     DeviceIdentity,
     InverterModel,
@@ -38,7 +38,7 @@ async def effective_reserve(hass, reserve_in_force):
     return next(
         entity
         for entity in added
-        if entity._definition.key == const.EFFECTIVE_RESERVE_SENSOR.key
+        if entity.entity_description.key == descriptions.EFFECTIVE_RESERVE_SENSOR.key
     )
 
 
