@@ -20,16 +20,12 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from . import outage, watchdog
-from .announcer import issue_ids as announcer_issue_ids
+from . import issues, outage, watchdog
 from .const import CONF_ALERT_VERBOSITY, CONF_HOST, CONF_PORT, DOMAIN
 from .control import ControlInputs
 from .coordinator import (
     EcoflowConfigEntry,
     EcoflowCoordinator,
-    grid_energy_issue_id,
-    held_totals_issue_id,
-    identity_mismatch_issue_id,
     state_store,
 )
 from .modbus import async_prepare
@@ -48,11 +44,6 @@ PLATFORMS: Final = [
     Platform.SELECT,
     Platform.SWITCH,
 ]
-
-
-def _modbus_disabled_issue_id(entry: ConfigEntry) -> str:
-    """Return the stable id of the repairs issue raised while Modbus is disabled."""
-    return f"modbus_disabled_{entry.entry_id}"
 
 
 async def async_setup(
@@ -82,7 +73,7 @@ def _async_update_modbus_disabled_issue(
     hass: HomeAssistant, entry: EcoflowConfigEntry, coordinator: EcoflowCoordinator
 ) -> None:
     """Raise a repairs issue while telemetry appears disabled, and clear it after."""
-    issue_id = _modbus_disabled_issue_id(entry)
+    issue_id = issues.issue_id(issues.MODBUS_DISABLED, entry)
     if not coordinator.is_modbus_disabled:
         ir.async_delete_issue(hass, DOMAIN, issue_id)
         return
@@ -233,12 +224,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
     if not unload_ok:
         return False
 
-    ir.async_delete_issue(hass, DOMAIN, _modbus_disabled_issue_id(entry))
-    ir.async_delete_issue(hass, DOMAIN, identity_mismatch_issue_id(entry))
-    ir.async_delete_issue(hass, DOMAIN, held_totals_issue_id(entry))
-    for issue_id in announcer_issue_ids(entry):
-        ir.async_delete_issue(hass, DOMAIN, issue_id)
-    ir.async_delete_issue(hass, DOMAIN, grid_energy_issue_id(entry))
+    issues.async_delete_all(hass, entry)
     # An outage outlives a reload, so its issue stays; async_setup drops it when
     # the entry is disabled.
     # The coordinator's async_shutdown, registered with the entry, hands control

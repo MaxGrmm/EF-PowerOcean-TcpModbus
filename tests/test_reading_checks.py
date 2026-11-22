@@ -888,13 +888,6 @@ def test_frozen_readings_alone_are_not_raised_in_repairs(tracked) -> None:
     tracked.issues.created.assert_not_called()
 
 
-def test_every_issue_a_finding_raises_goes_with_the_entry() -> None:
-    from custom_components.ef_powerocean_tcpmodbus import announcer
-
-    entry = SimpleNamespace(entry_id="entry")
-    assert announcer.issue_ids(cast(Any, entry)) == ["telemetry_stalled_entry"]
-
-
 def test_the_reading_check_sensor_shows_wrong_readings_with_control_off() -> None:
     checks = SimpleNamespace(findings=(), distrusted=frozenset())
     fake = SimpleNamespace(

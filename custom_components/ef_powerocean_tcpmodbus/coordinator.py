@@ -22,7 +22,7 @@ from homeassistant.util import dt
 from pymodbus import __version__ as pyModbusVersion
 from pymodbus.exceptions import ModbusException
 
-from . import outage
+from . import issues, outage
 from .announcer import Announcer
 from .const import (
     ATTR_FROM,
@@ -115,21 +115,6 @@ from .powerocean.util import parse_datetime
 from .register_scan import RegisterScan
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
-    return f"identity_mismatch_{entry.entry_id}"
-
-
-def held_totals_issue_id(entry: ConfigEntry) -> str:
-    return f"energy_totals_held_{entry.entry_id}"
-
-
-GRID_ENERGY_ISSUE_PREFIX = "grid_energy_not_counted_"
-
-
-def grid_energy_issue_id(entry: ConfigEntry) -> str:
-    return f"{GRID_ENERGY_ISSUE_PREFIX}{entry.entry_id}"
 
 
 def battery_power_limits(capacity_wh: float) -> tuple[int, int]:
@@ -544,7 +529,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ir.async_create_issue(
                     self.hass,
                     DOMAIN,
-                    identity_mismatch_issue_id(self.config_entry),
+                    issues.issue_id(issues.IDENTITY_MISMATCH, self.config_entry),
                     is_fixable=False,
                     is_persistent=False,
                     severity=ir.IssueSeverity.ERROR,
@@ -568,7 +553,9 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._identity_mismatch:
             _LOGGER.info("The device at %s shows the expected serial again", self.host)
             ir.async_delete_issue(
-                self.hass, DOMAIN, identity_mismatch_issue_id(self.config_entry)
+                self.hass,
+                DOMAIN,
+                issues.issue_id(issues.IDENTITY_MISMATCH, self.config_entry),
             )
         self._identity_mismatch = False
 
@@ -822,7 +809,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not_counted == self._grid_energy_issue_raised:
             return
         self._grid_energy_issue_raised = not_counted
-        issue_id = grid_energy_issue_id(self.config_entry)
+        issue_id = issues.issue_id(issues.GRID_ENERGY, self.config_entry)
         if not not_counted:
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
@@ -912,7 +899,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if keys == self._held_issue_keys:
             return
         self._held_issue_keys = keys
-        issue_id = held_totals_issue_id(self.config_entry)
+        issue_id = issues.issue_id(issues.HELD_TOTALS, self.config_entry)
         if not keys:
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return

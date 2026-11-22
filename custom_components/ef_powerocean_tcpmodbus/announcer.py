@@ -20,6 +20,7 @@ from homeassistant.helpers import device_registry
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt
 
+from . import issues
 from .const import (
     ATTR_CHECK,
     ATTR_STATUS,
@@ -27,18 +28,9 @@ from .const import (
     EVENT_READING_CHECK_CLEARED,
     EVENT_READING_CHECK_FAILED,
 )
-from .powerocean.reading_checks import CHECKS, Finding
+from .powerocean.reading_checks import Finding
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def issue_id(remedy: str, entry: ConfigEntry) -> str:
-    return f"{remedy}_{entry.entry_id}"
-
-
-def issue_ids(entry: ConfigEntry) -> list[str]:
-    """Return every repairs issue a finding can raise for *entry*."""
-    return sorted({issue_id(c.remedy, entry) for c in CHECKS if c.remedy})
 
 
 class Announcer:
@@ -101,7 +93,7 @@ class Announcer:
         # newer than issue_after, and goes once the finding does.
         for remedy in self._raised - pending:
             self._raised.discard(remedy)
-            ir.async_delete_issue(hass, DOMAIN, issue_id(remedy, entry))
+            ir.async_delete_issue(hass, DOMAIN, issues.issue_id(remedy, entry))
         for remedy, finding in due.items():
             if remedy in self._raised:
                 continue
@@ -109,7 +101,7 @@ class Announcer:
             ir.async_create_issue(
                 hass,
                 DOMAIN,
-                issue_id(remedy, entry),
+                issues.issue_id(remedy, entry),
                 is_fixable=False,
                 is_persistent=False,
                 severity=ir.IssueSeverity.WARNING,
