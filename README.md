@@ -14,32 +14,38 @@
 > Modbus is disabled on the inverter by default. Your EcoFlow partner or installer has
 > to enable it before setup, see [Prerequisites](#prerequisites).
 
-<!-- toc -->
+<!-- toc depth=3 -->
 
 ## Contents
 
-- [Features](#features)
-- [Use Cases](#use-cases)
-- [Screenshots](#screenshots)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Battery Control](#battery-control)
-- [Sensors](#sensors)
-- [Troubleshooting](#troubleshooting)
-- [Removing the Integration](#removing-the-integration)
-- [Known Limitations](#known-limitations)
-- [Technical Details](#technical-details)
-- [Contributing](#contributing)
-- [Credits](#credits)
-- [Disclaimer](#disclaimer)
-- [License](#license)
+- [Overview](#overview)
+  - [Features](#features)
+  - [Use Cases](#use-cases)
+  - [Screenshots](#screenshots)
+  - [Known Limitations](#known-limitations)
+- [Getting Started](#getting-started)
+  - [Requirements](#requirements)
+  - [Installation](#installation)
+  - [Configuration](#configuration)
+- [Using the Integration](#using-the-integration)
+  - [Battery Control](#battery-control)
+  - [Sensors](#sensors)
+  - [Troubleshooting](#troubleshooting)
+  - [Removing the Integration](#removing-the-integration)
+- [Project](#project)
+  - [Technical Details](#technical-details)
+  - [Contributing](#contributing)
+  - [Credits](#credits)
+  - [Disclaimer](#disclaimer)
+  - [License](#license)
 
 <!-- tocstop -->
 
 ---
 
-## Features
+## Overview
+
+### Features
 
 - **Local polling** – no EcoFlow cloud account needed
 - **Configurable poll interval** (2–30 seconds, default 5 s)
@@ -57,9 +63,7 @@
 - Debug logging toggle directly in the HA UI
 - German and English translations
 
----
-
-## Use Cases
+### Use Cases
 
 - **Energy dashboard:** the lifetime totals for grid, solar and battery feed Home
   Assistant's Energy dashboard directly, without the EcoFlow cloud.
@@ -71,9 +75,7 @@
 - **Watching the system:** faults, grid outages and a disconnected battery show up as
   sensors, logbook entries and events, ready to trigger a notification.
 
----
-
-## Screenshots
+### Screenshots
 
 <img width="431" height="555" alt="Controls" src="https://raw.githubusercontent.com/MaxGrmm/EF-PowerOcean-TcpModbus/main/docs/images/controls.jpg" />
 <img width="431" height="510" alt="Configuration" src="https://raw.githubusercontent.com/MaxGrmm/EF-PowerOcean-TcpModbus/main/docs/images/configuration.jpg" />
@@ -86,17 +88,38 @@
 
 </details>
 
+### Known Limitations
+
+- **Modbus has to be enabled by your installer.** It is off by default and can't be
+  switched on from Home Assistant or the regular EcoFlow app.
+- **Modbus Control locks out the EcoFlow app** while it is on. Turning it off hands
+  control back within about 60 seconds.
+- **No automatic discovery.** The inverter doesn't announce itself on the network, so it
+  is added by IP address. Give it a reserved address in your router so it can't move.
+- **One inverter per entry.** Add each inverter as its own entry.
+- **Not every model is tested.** See [Supported Devices](#supported-devices); the
+  PowerOcean DC Fit is untested, and controls are untested on several models.
+- **Some registers read a constant 0 on some models.** Sensors for those are left out
+  on the models concerned rather than showing a value that misleads.
+- **The Grid-side sensors need an external EcoFlow Smart Meter.** Without one they are
+  disabled; see [Inverter side and grid side](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#inverter-side-and-grid-side).
+- **The protocol is EcoFlow's trial version.** A firmware update can change which
+  controls the inverter follows; see
+  [Testing the controls after a firmware update](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#testing-the-controls-after-a-firmware-update).
+
 ---
 
-## Requirements
+## Getting Started
 
-### Prerequisites
+### Requirements
+
+#### Prerequisites
 
 > [!IMPORTANT]
 > Modbus must be enabled by your EcoFlow partner or installer. It is disabled by
 > default!
 
-### Supported Devices
+#### Supported Devices
 
 | Device                       | Read         | Control      |
 | ---------------------------- | ------------ | ------------ |
@@ -110,15 +133,13 @@
 
 Running an untested model? [scripts/register_scan.py](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/scripts/register_scan.py) produces a read-only report comparing your inverter against the register map this integration expects. Attaching its output to an issue is what makes a device supportable, see [Register Scan](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/CONTRIBUTING.md#register-scan).
 
-### Home Assistant Versions
+#### Home Assistant Versions
 
 Home Assistant **2025.12.0** is the earliest supported version. HACS blocks installing it on older releases, and CI tests every change against both 2025.12.0 and a recent release.
 
----
+### Installation
 
-## Installation
-
-### Via HACS (recommended)
+#### Via HACS (recommended)
 
 [![Open your Home Assistant instance and open the repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MaxGrmm&repository=EF-PowerOcean-TcpModbus&category=integration)
 
@@ -129,15 +150,13 @@ Or install it from within HACS:
 3. Open it and click **Download**
 4. Restart Home Assistant
 
-### Manual
+#### Manual
 
 1. Download the latest release
 2. Copy the `custom_components/ef_powerocean_tcpmodbus` folder to your HA `config/custom_components/` directory
 3. Restart Home Assistant
 
----
-
-## Configuration
+### Configuration
 
 1. Go to **Settings → Devices & Services → Add Integration**
 2. Search for **EF-PowerOcean-TcpModbus**
@@ -161,7 +180,9 @@ To change the IP address or port, for example after the inverter got a new addre
 
 ---
 
-## Battery Control
+## Using the Integration
+
+### Battery Control
 
 Off by default. Turn on **Modbus Control** (in the Configuration section) to let the
 integration control the inverter. This **locks out the EcoFlow app** until you turn it
@@ -184,7 +205,7 @@ Discharge at 0 W holds the battery. For Export solar first, **Active Control Met
 shows what it is running, and its limit stays 100 W under your export limit so the
 inverter never has to curtail solar.
 
-### Guards
+#### Guards
 
 **Charge Limit** stops the battery charging above a level, and **Battery Reserve** stops
 it discharging below one. The guards apply in every mode and only ever stop the battery,
@@ -193,7 +214,7 @@ never reverse it. Both are off by default.
 Turn off schedules in the EcoFlow app, since the inverter follows them whenever it runs
 on its own.
 
-### More on battery control
+#### More on battery control
 
 [docs/battery-control.md](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md) covers:
 
@@ -206,9 +227,7 @@ on its own.
 - [Testing the controls after a firmware update](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#testing-the-controls-after-a-firmware-update)
   with the Run control test action
 
----
-
-## Sensors
+### Sensors
 
 The integration creates sensors for power flow, the battery and each module, the PV
 strings, the AC side per phase, the inverter's status, faults and limits, and energy
@@ -223,9 +242,7 @@ The full list, and how the energy totals are checked and corrected, is in
 - [Grid energy calculated from Grid Power](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#grid-energy-calculated-from-grid-power)
 - [Correcting a lifetime total](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#correcting-a-lifetime-total)
 
----
-
-## Troubleshooting
+### Troubleshooting
 
 <details>
 <summary><b>Setup fails with “Connection failed - please check IP address and port”</b></summary>
@@ -303,7 +320,7 @@ inverter still follows.
 
 </details>
 
-### Debug logging and diagnostics
+#### Debug logging and diagnostics
 
 To enable debug logging without editing `configuration.yaml`:
 
@@ -312,7 +329,7 @@ To enable debug logging without editing `configuration.yaml`:
 When reporting a problem, attach the log and the diagnostics download from the device
 page, after checking it for anything you would rather not share.
 
-### Alert verbosity
+#### Alert verbosity
 
 **Alert verbosity** in the integration's settings sets how much the integration
 raises under Settings → Repairs. Each level raises everything the one before it does:
@@ -330,9 +347,7 @@ for 24 hours; until the next release of the integration; or permanently. Setting
 you ignored. The alerts only watch: they never change what the integration does.
 Debug is meant for testing a release on a live inverter.
 
----
-
-## Removing the Integration
+### Removing the Integration
 
 This integration follows the standard removal process:
 
@@ -351,30 +366,11 @@ configuration directory; delete it if you no longer need them.
 
 ---
 
-## Known Limitations
+## Project
 
-- **Modbus has to be enabled by your installer.** It is off by default and can't be
-  switched on from Home Assistant or the regular EcoFlow app.
-- **Modbus Control locks out the EcoFlow app** while it is on. Turning it off hands
-  control back within about 60 seconds.
-- **No automatic discovery.** The inverter doesn't announce itself on the network, so it
-  is added by IP address. Give it a reserved address in your router so it can't move.
-- **One inverter per entry.** Add each inverter as its own entry.
-- **Not every model is tested.** See [Supported Devices](#supported-devices); the
-  PowerOcean DC Fit is untested, and controls are untested on several models.
-- **Some registers read a constant 0 on some models.** Sensors for those are left out
-  on the models concerned rather than showing a value that misleads.
-- **The Grid-side sensors need an external EcoFlow Smart Meter.** Without one they are
-  disabled; see [Inverter side and grid side](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#inverter-side-and-grid-side).
-- **The protocol is EcoFlow's trial version.** A firmware update can change which
-  controls the inverter follows; see
-  [Testing the controls after a firmware update](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#testing-the-controls-after-a-firmware-update).
+### Technical Details
 
----
-
-## Technical Details
-
-### How data is updated
+#### How data is updated
 
 The integration polls the inverter over your local network every **Poll Interval**
 (5 seconds by default, 2–30 configurable). Each poll reads only the registers that
@@ -392,7 +388,7 @@ background.
 With Modbus Control on, a heartbeat is written to the inverter independently of the
 polls, to keep control from passing back to the EcoFlow app.
 
-### Protocol
+#### Protocol
 
 - **Protocol:** Modbus TCP (port 502), reading holding registers and writing single
   or multiple registers
@@ -401,17 +397,13 @@ polls, to keep control from passing back to the EcoFlow app.
 
 The register map lives in [`const.py`](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. Word order, decoding, how reads are grouped into blocks and known gaps are in the [protocol notes](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/EcoFlow_PowerOcean_Modbus.md).
 
----
-
-## Contributing
+### Contributing
 
 Contributions use personal forks and pull requests. See
 [CONTRIBUTING.md](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/CONTRIBUTING.md) for setup, testing, safety requirements, and the
 review checklist.
 
----
-
-## Credits
+### Credits
 
 Special thanks to all contributors for the massive amount of time and effort that helped this project grow so fast!
 
@@ -431,17 +423,13 @@ Special thanks to all contributors for the massive amount of time and effort tha
   Kater Carlo
 </p>
 
----
-
-## Disclaimer
+### Disclaimer
 
 This integration follows EcoFlow's Open Modbus Protocol V1.0, a trial version,
 corrected by community measurements where the hardware differs from it. See the
 [protocol notes](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/EcoFlow_PowerOcean_Modbus.md#where-the-specification-and-the-hardware-disagree).
 Use at your own risk. Not affiliated with EcoFlow Technology Co., Ltd.
 
----
-
-## License
+### License
 
 MIT License – free to use, modify and distribute with attribution.
