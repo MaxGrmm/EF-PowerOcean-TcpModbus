@@ -7,6 +7,8 @@ this integration's register handling.
 
 > [`custom_components/ef_powerocean_tcpmodbus/const.py`](custom_components/ef_powerocean_tcpmodbus/const.py) → `MODBUS_REGISTERS`
 
+<!-- toc -->
+
 ## Contents
 
 - [Sources](#sources)
@@ -20,6 +22,8 @@ this integration's register handling.
 - [Writing registers](#writing-registers)
 - [Battery power limits](#battery-power-limits)
 - [Disclaimer](#disclaimer)
+
+<!-- tocstop -->
 
 ## Sources
 
