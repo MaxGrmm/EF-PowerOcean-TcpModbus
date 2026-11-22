@@ -10,6 +10,29 @@
 
 > ⚠️ This integration communicates directly with your device over your local network via Modbus TCP. No cloud connection required.
 
+<!-- toc -->
+
+## Contents
+
+- [Features](#features)
+- [Use Cases](#use-cases)
+- [Screenshots](#screenshots)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Battery Control](#battery-control)
+- [Sensors](#sensors)
+- [Troubleshooting](#troubleshooting)
+- [Removing the Integration](#removing-the-integration)
+- [Known Limitations](#known-limitations)
+- [Technical Details](#technical-details)
+- [Contributing](#contributing)
+- [Credits](#credits)
+- [Disclaimer](#disclaimer)
+- [License](#license)
+
+<!-- tocstop -->
+
 ---
 
 ## Features
@@ -46,7 +69,24 @@
 
 ---
 
-## Supported Devices
+## Screenshots
+
+<img width="431" height="431" alt="Controls" src="https://github.com/user-attachments/assets/1c0f9217-cba7-47f4-8bc6-9a3632c1bdcd" />
+<img width="431" height="443" alt="Configuration" src="https://github.com/user-attachments/assets/320ce431-1d6b-4f3f-965c-912f9e4be31a" />
+
+<details>
+<summary>Sensor and diagnostic entities</summary>
+
+<img width="431" height="1539" alt="Sensor_Entities" src="https://github.com/user-attachments/assets/dca4b3c8-a56d-4d8d-ad13-6499f2cfd63c" />
+<img width="431" height="2075" alt="Diagnostics" src="https://github.com/user-attachments/assets/4380c0bb-a5f9-4a7d-8225-af3c5f2d3ab2" />
+
+</details>
+
+---
+
+## Requirements
+
+### Supported Devices
 
 | Device                       | Read         | Control      |
 | ---------------------------- | ------------ | ------------ |
@@ -60,15 +100,11 @@
 
 Running an untested model? [scripts/register_scan.py](scripts/register_scan.py) produces a read-only report comparing your inverter against the register map this integration expects. Attaching its output to an issue is what makes a device supportable, see [Register Scan](CONTRIBUTING.md#register-scan).
 
----
-
-## Supported Home Assistant Versions
+### Home Assistant Versions
 
 Home Assistant **2025.12.0** is the earliest supported version. HACS blocks installing it on older releases, and CI tests every change against both 2025.12.0 and a recent release.
 
----
-
-## Prerequisites
+### Prerequisites
 
 The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled by default!
 
@@ -270,8 +306,6 @@ To enable debug logging without editing `configuration.yaml`:
 When reporting a problem, attach the log and the diagnostics download from the device
 page, after checking it for anything you would rather not share.
 
----
-
 ### Alert verbosity
 
 **Alert verbosity** in the integration's settings sets how much the integration
@@ -290,6 +324,8 @@ for 24 hours; until the next release of the integration; or permanently. Setting
 you ignored. The alerts only watch: they never change what the integration does.
 Debug is meant for testing a release on a live inverter.
 
+---
+
 ## Removing the Integration
 
 This integration follows the standard removal process:
@@ -306,54 +342,6 @@ This integration follows the standard removal process:
 Deleting the entry also deletes the energy counters and control state the integration
 saved. Reports of control tests stay in the `ef_powerocean_tcpmodbus` folder of your
 configuration directory; delete it if you no longer need them.
-
----
-
-## Screenshots
-
-<img width="431" height="431" alt="Controls" src="https://github.com/user-attachments/assets/1c0f9217-cba7-47f4-8bc6-9a3632c1bdcd" />
-<img width="431" height="443" alt="Configuration" src="https://github.com/user-attachments/assets/320ce431-1d6b-4f3f-965c-912f9e4be31a" />
-<img width="431" height="1539" alt="Sensor_Entities" src="https://github.com/user-attachments/assets/dca4b3c8-a56d-4d8d-ad13-6499f2cfd63c" />
-<img width="431" height="2075" alt="Diagnostics" src="https://github.com/user-attachments/assets/4380c0bb-a5f9-4a7d-8225-af3c5f2d3ab2" />
-
----
-
-## How Data Is Updated
-
-The integration polls the inverter over your local network every **Poll Interval**
-(5 seconds by default, 2–30 configurable). Each poll reads only the registers that
-enabled entities, the control loop and the reading checks need, so disabling sensors
-you don't use makes polls lighter. The serial number and firmware are read again each
-time the connection opens.
-
-A request the connection loses, such as when the inverter closes an idle connection, is
-sent once more on a new connection. If a poll still fails, the entities become
-unavailable until the next one succeeds. A lost connection is retried within the poll
-after 0, 5, 10 and 20 seconds, then again 30 seconds later. If the inverter can't be
-reached when Home Assistant starts, the setup is retried automatically in the
-background.
-
-With Modbus Control on, a heartbeat is written to the inverter independently of the
-polls, to keep control from passing back to the EcoFlow app.
-
----
-
-## Technical Details
-
-- **Protocol:** Modbus TCP (port 502)
-- **Reads:** Holding Registers (Function Code 3); multi-register values are decoded
-  low word first (word-swapped)
-- **Writes:** Function Code 6 for one register and Function Code 16 for multiple
-  registers; multi-register values are encoded high word first
-- **Float encoding:** 32-bit IEEE 754
-- **Read strategy:** block reads grouped automatically from the register
-  addresses (five per poll cycle on a PowerOcean Plus), plus one
-  device-information read when the connection opens. The write-only heartbeat
-  (40608) is never read. Registers only disabled sensors would show are left out
-- **Tested firmware:** 3.0.19.19 + 3.0.20.54(PO+)
-- **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
-
-The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. For address numbering, word order, decoding and known gaps, see [EcoFlow_PowerOcean_Modbus.md](EcoFlow_PowerOcean_Modbus.md).
 
 ---
 
@@ -375,6 +363,37 @@ The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus
 - **The protocol is EcoFlow's trial version.** A firmware update can change which
   controls the inverter follows; see
   [Testing the controls after a firmware update](docs/battery-control.md#testing-the-controls-after-a-firmware-update).
+
+---
+
+## Technical Details
+
+### How data is updated
+
+The integration polls the inverter over your local network every **Poll Interval**
+(5 seconds by default, 2–30 configurable). Each poll reads only the registers that
+enabled entities, the control loop and the reading checks need, so disabling sensors
+you don't use makes polls lighter. The serial number and firmware are read again each
+time the connection opens.
+
+A request the connection loses, such as when the inverter closes an idle connection, is
+sent once more on a new connection. If a poll still fails, the entities become
+unavailable until the next one succeeds. A lost connection is retried within the poll
+after 0, 5, 10 and 20 seconds, then again 30 seconds later. If the inverter can't be
+reached when Home Assistant starts, the setup is retried automatically in the
+background.
+
+With Modbus Control on, a heartbeat is written to the inverter independently of the
+polls, to keep control from passing back to the EcoFlow app.
+
+### Protocol
+
+- **Protocol:** Modbus TCP (port 502), reading holding registers and writing single
+  or multiple registers
+- **Tested firmware:** 3.0.19.19 + 3.0.20.54(PO+)
+- **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
+
+The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. Word order, decoding, how reads are grouped into blocks and known gaps are in the [protocol notes](EcoFlow_PowerOcean_Modbus.md).
 
 ---
 
