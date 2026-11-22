@@ -32,12 +32,7 @@ from pytest_homeassistant_custom_component.common import (
     async_capture_events,
 )
 
-from custom_components.ef_powerocean_tcpmodbus import (
-    PLATFORMS,
-    const,
-    definitions,
-    outage,
-)
+from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const, definitions
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
@@ -46,6 +41,7 @@ from custom_components.ef_powerocean_tcpmodbus.definitions import (
     EcoflowEnergySensorEntityDescription,
     EcoflowSensorEntityDescription,
 )
+from custom_components.ef_powerocean_tcpmodbus.health import outage
 from custom_components.ef_powerocean_tcpmodbus.models import CoordinatorStatus
 from custom_components.ef_powerocean_tcpmodbus.powerocean import (
     registers as register_map,

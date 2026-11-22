@@ -24,7 +24,6 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
-from . import watchdog
 from .const import (
     CONF_ALERT_VERBOSITY,
     CONF_BATTERY_COUNT,
@@ -42,9 +41,10 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_S,
     DOMAIN,
 )
+from .health import watchdog
+from .health.outage import Cause, async_classify
 from .modbus import TRANSPORT_ERRORS, ModbusClient, async_temporary_client
 from .models import AlertVerbosity
-from .outage import Cause, async_classify
 from .powerocean.const import (
     CONF_MAX_GRID_POWER,
     CONF_MAX_SOLAR_POWER,

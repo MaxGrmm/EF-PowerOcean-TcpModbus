@@ -22,8 +22,6 @@ from homeassistant.util import dt
 from pymodbus import __version__ as pyModbusVersion
 from pymodbus.exceptions import ModbusException
 
-from . import issues, outage
-from .announcer import Announcer
 from .const import (
     ATTR_FROM,
     ATTR_MODE,
@@ -66,6 +64,8 @@ from .energy_processor import (
     HeldTotal,
     offsets_from,
 )
+from .health import issues, outage
+from .health.announcer import Announcer
 from .identity import IdentityGuard
 from .modbus import ModbusClient, ModbusReadRejected, create_client, retries_until
 from .models import CoordinatorStatus

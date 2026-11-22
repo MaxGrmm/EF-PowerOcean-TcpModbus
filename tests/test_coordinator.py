@@ -22,18 +22,14 @@ from homeassistant.util import dt as dt_util
 from pymodbus.exceptions import ModbusException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import (
-    const,
-    definitions,
-    models,
-    outage,
-)
+from custom_components.ef_powerocean_tcpmodbus import const, definitions, models
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
-from custom_components.ef_powerocean_tcpmodbus.announcer import Announcer
 from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowConfigEntry
 from custom_components.ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
+from custom_components.ef_powerocean_tcpmodbus.health import outage
+from custom_components.ef_powerocean_tcpmodbus.health.announcer import Announcer
 from custom_components.ef_powerocean_tcpmodbus.identity import IdentityGuard
 from custom_components.ef_powerocean_tcpmodbus.modbus import (
     ModbusClient,

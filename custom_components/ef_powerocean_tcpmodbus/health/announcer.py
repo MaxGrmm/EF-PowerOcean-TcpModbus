@@ -20,15 +20,15 @@ from homeassistant.helpers import device_registry
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt
 
-from . import issues
-from .const import (
+from ..const import (
     ATTR_CHECK,
     ATTR_STATUS,
     DOMAIN,
     EVENT_READING_CHECK_CLEARED,
     EVENT_READING_CHECK_FAILED,
 )
-from .powerocean.reading_checks import Finding
+from ..powerocean.reading_checks import Finding
+from . import issues
 
 _LOGGER = logging.getLogger(__name__)
 
