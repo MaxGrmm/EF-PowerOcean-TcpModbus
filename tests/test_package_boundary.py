@@ -31,7 +31,10 @@ def test_imports_nothing_from_home_assistant_or_the_integration(
         else:
             continue
         for name in names:
-            assert name.split(".")[0] != "homeassistant", f"{module.name}: {name}"
+            root = name.split(".")[0]
+            assert root not in ("homeassistant", "custom_components"), (
+                f"{module.name}: {name}"
+            )
 
 
 def test_imports_without_home_assistant_installed() -> None:
