@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import zlib
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -565,3 +566,16 @@ def test_the_log_is_only_watched_at_debug(
 
     assert package.handlers == before
     stop()
+
+
+def test_a_log_alert_keeps_its_id_when_its_module_moves() -> None:
+    """An alert the user ignored stays ignored after a module moves package."""
+    package = "custom_components.ef_powerocean_tcpmodbus"
+    template = "The %s reading check could not run"
+    old = watchdog.log_alert(f"{package}.reading_checks", template)
+
+    assert watchdog.log_alert(f"{package}.powerocean.reading_checks", template) == old
+    assert (
+        old == f"log_{zlib.crc32(f'{package}.reading_checks:{template}'.encode()):08x}"
+    )
+    assert watchdog.log_alert(f"{package}.outage", template) != old
