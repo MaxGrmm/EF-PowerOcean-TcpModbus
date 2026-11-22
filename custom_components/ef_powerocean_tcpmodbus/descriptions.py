@@ -80,7 +80,7 @@ class EcoflowEnergySensorEntityDescription(SensorEntityDescription):
 
     native_unit_of_measurement: str | None = UnitOfEnergy.KILO_WATT_HOUR
     device_class: SensorDeviceClass | None = SensorDeviceClass.ENERGY
-    state_class: SensorStateClass | str | None = SensorStateClass.TOTAL_INCREASING
+    state_class: SensorStateClass | None = SensorStateClass.TOTAL_INCREASING
     is_calculated: bool = False
     resets_daily: bool = False
     # Config key of the power that bounds how fast the counter can rise.
