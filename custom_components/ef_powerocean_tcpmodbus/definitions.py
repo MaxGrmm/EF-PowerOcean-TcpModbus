@@ -761,7 +761,7 @@ EFFECTIVE_RESERVE_SENSOR: Final = EcoflowSensorEntityDescription(
 )
 
 # The control test the run_control_test action starts; its states are those of
-# control_test.ControlTestState.
+# tools/control_test.ControlTestState.
 CONTROL_TEST_SENSOR: Final = EcoflowSensorEntityDescription(
     key="control_test",
     device_class=SensorDeviceClass.ENUM,
