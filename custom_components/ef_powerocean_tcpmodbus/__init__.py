@@ -34,7 +34,7 @@ from .coordinator import (
 )
 from .modbus import async_prepare
 from .models import AlertVerbosity
-from .reading_checks import KEYS as READING_CHECK_KEYS
+from .powerocean.reading_checks import KEYS as READING_CHECK_KEYS
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)

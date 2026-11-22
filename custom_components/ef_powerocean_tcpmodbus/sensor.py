@@ -26,16 +26,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
 from .const import (
-    BATTERY_RESERVE_REGISTER_KEY,
-    BATTERY_SOC_KEYS,
     CONF_BATTERY_COUNT,
     CONTROL_STATUS_SENSOR,
     CONTROL_TEST_SENSOR,
     DAILY_ENERGY_SENSORS_DEVICE_RAW,
     EFFECTIVE_RESERVE_SENSOR,
     ENERGY_SENSOR_MAP,
-    EXTERNAL_METER_KEYS,
-    FAULT_KEYS,
     SENSOR_MAP,
     TOTAL_ENERGY_SENSORS_DEVICE_RAW,
     UNIT_OF_RATIO,
@@ -45,7 +41,13 @@ from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
 from .fault_names import async_get_fault_names
 from .models import EnergySensorDef, SensorDef
-from .telemetry import active_fault_codes
+from .powerocean.const import (
+    BATTERY_RESERVE_REGISTER_KEY,
+    BATTERY_SOC_KEYS,
+    EXTERNAL_METER_KEYS,
+    FAULT_KEYS,
+)
+from .powerocean.telemetry import active_fault_codes
 
 # The coordinator polls for every entity, so updates need no limit.
 PARALLEL_UPDATES = 0

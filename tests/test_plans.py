@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from custom_components.ef_powerocean_tcpmodbus.models import ControlFeature
-from custom_components.ef_powerocean_tcpmodbus.plans import (
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import ControlFeature
+from custom_components.ef_powerocean_tcpmodbus.powerocean.plans import (
     CHARGE,
     MODES,
     Mode,

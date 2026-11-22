@@ -40,10 +40,13 @@ from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordin
 from custom_components.ef_powerocean_tcpmodbus.models import (
     CoordinatorStatus,
     EnergySensorDef,
-    InverterModel,
-    RegisterType,
     SensorDef,
 )
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import InverterModel
+from custom_components.ef_powerocean_tcpmodbus.powerocean.registers import RegisterType
 from tests.fake_inverter import HOST, FakeInverter
 
 
@@ -83,7 +86,7 @@ SERIAL = "HJ31ZAS2TEST0001"
 
 
 def _serve_serial(inverter: FakeInverter, serial: str) -> None:
-    inverter.serve_serial(serial, const.SERIAL_NUMBER.address)
+    inverter.serve_serial(serial, register_map.SERIAL_NUMBER.address)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -157,7 +160,9 @@ async def test_raises_a_repairs_issue_while_modbus_is_disabled(
     assert issue is not None
     assert issue.translation_placeholders == {"host": HOST}
 
-    inverter.registers[const.REGISTERS_BY_KEY["inverter_rated_power"].address] = 1
+    inverter.registers[
+        register_map.REGISTERS_BY_KEY["inverter_rated_power"].address
+    ] = 1
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     assert registry.async_get_issue(const.DOMAIN, issue_id) is None
@@ -242,7 +247,7 @@ def _fill_registers(inverter: FakeInverter, start: int = 1) -> None:
         RegisterType.UINT32: "<I",
         RegisterType.INT32: "<i",
     }
-    for index, register in enumerate(const.MODBUS_REGISTERS):
+    for index, register in enumerate(register_map.MODBUS_REGISTERS):
         register = register.for_model(InverterModel.POWEROCEAN_PLUS)
         value = index + start
         if register.data_type in (RegisterType.UINT16, RegisterType.INT16):
@@ -320,7 +325,7 @@ async def test_every_entity_reads_only_what_it_asks_for(
     await hass.async_block_till_done()
 
     coordinator: EcoflowCoordinator = entry.runtime_data
-    registers = frozenset(const.REGISTERS_BY_KEY)
+    registers = frozenset(register_map.REGISTERS_BY_KEY)
     always = coordinator._own_keys | ControlInputs.keys()
     data = coordinator.data
     checked = 0
@@ -642,8 +647,8 @@ async def test_a_poll_whose_retry_is_hung_up_on_too_fails(
 
 def _serve_firmware(inverter: FakeInverter, version: int) -> None:
     """Publish a firmware version, 0x01020304 for 1.2.3.4, low word first."""
-    inverter.registers[const.FIRMWARE_VERSION.address] = version & 0xFFFF
-    inverter.registers[const.FIRMWARE_VERSION.address + 1] = version >> 16
+    inverter.registers[register_map.FIRMWARE_VERSION.address] = version & 0xFFFF
+    inverter.registers[register_map.FIRMWARE_VERSION.address + 1] = version >> 16
 
 
 async def _set_up_refusing(

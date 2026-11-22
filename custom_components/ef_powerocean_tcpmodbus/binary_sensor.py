@@ -16,8 +16,9 @@ from .const import (
 )
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
-from .models import BinarySensorDef, ControlStatus
-from .reading_checks import Finding
+from .models import BinarySensorDef
+from .powerocean.models import ControlStatus
+from .powerocean.reading_checks import Finding
 
 # The coordinator polls for every entity, so updates need no limit.
 PARALLEL_UPDATES = 0

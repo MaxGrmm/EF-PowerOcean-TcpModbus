@@ -18,7 +18,10 @@ from typing import Any, NamedTuple, Protocol
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt
 
-from .const import (
+from .const import DOMAIN
+from .heartbeat import Heartbeat, StartTask
+from .modbus import ModbusClient
+from .powerocean.const import (
     BATTERY_RESERVE_REGISTER_KEY,
     CONTROL_COMMAND_BATTERY_SAVER_BIT,
     CONTROL_COMMAND_METHOD_MASK,
@@ -30,7 +33,6 @@ from .const import (
     CONTROL_STATUS_DAMPING_POLLS,
     DEFAULT_BATTERY_RESERVE_SOC,
     DEFAULT_CHARGE_LIMIT_SOC,
-    DOMAIN,
     FEED_IN_POWER_MAX_SETTING_KEY,
     FOLLOW_GRACE_S,
     FOLLOW_RESENDS,
@@ -49,9 +51,7 @@ from .const import (
     MIN_CONTROL_DWELL_S,
     SOLAR_EXPORT_CAP_MARGIN_W,
 )
-from .heartbeat import Heartbeat, StartTask
-from .modbus import ModbusClient
-from .models import (
+from .powerocean.models import (
     BATTERY_FULL_SOC,
     POWER_TOLERANCE_FRACTION,
     POWER_TOLERANCE_W,
@@ -61,16 +61,22 @@ from .models import (
     DeviceReport,
     GridFeedMode,
     InverterModel,
-    RegisterDef,
-    RegisterType,
     ReserveSource,
     ReserveSupport,
     deviation_state,
-    encode_register,
 )
-from .plans import CHARGE, DISCHARGE, Mode, ModeState, Step, Way, battery_power
-from .reading_checks import ReadingChecks
-from .util import parse_datetime
+from .powerocean.plans import (
+    CHARGE,
+    DISCHARGE,
+    Mode,
+    ModeState,
+    Step,
+    Way,
+    battery_power,
+)
+from .powerocean.reading_checks import ReadingChecks
+from .powerocean.registers import RegisterDef, RegisterType, encode_register
+from .powerocean.util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
 

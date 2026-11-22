@@ -20,7 +20,8 @@ from typing import Any
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt
 
-from .const import (
+from .modbus import ModbusClient, ModbusRejected
+from .powerocean.const import (
     HEARTBEAT_INTERVAL_S,
     HEARTBEAT_JITTER_S,
     HEARTBEAT_MIN_GAP_S,
@@ -31,7 +32,6 @@ from .const import (
     HEARTBEAT_VALUE,
     HEARTBEAT_WINDOW_S,
 )
-from .modbus import ModbusClient, ModbusRejected
 
 _LOGGER = logging.getLogger(__name__)
 

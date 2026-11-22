@@ -6,12 +6,12 @@ import unittest
 
 import pytest
 
-from custom_components.ef_powerocean_tcpmodbus.const import (
+from custom_components.ef_powerocean_tcpmodbus.const import SENSOR_MAP
+from custom_components.ef_powerocean_tcpmodbus.powerocean.registers import (
     REGISTERS_BY_KEY,
-    SENSOR_MAP,
+    RegisterType,
 )
-from custom_components.ef_powerocean_tcpmodbus.models import RegisterType
-from custom_components.ef_powerocean_tcpmodbus.telemetry import (
+from custom_components.ef_powerocean_tcpmodbus.powerocean.telemetry import (
     TelemetryData,
     active_fault_codes,
     calculate_derived_values,

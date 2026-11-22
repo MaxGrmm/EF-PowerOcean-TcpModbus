@@ -34,8 +34,6 @@ from .const import (
     CONF_ENERGY_OFFSETS,
     CONF_HOST,
     CONF_INVERTER_MODEL,
-    CONF_MAX_GRID_POWER,
-    CONF_MAX_SOLAR_POWER,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
     DEFAULT_BATTERY_COUNT,
@@ -44,25 +42,27 @@ from .const import (
     DEFAULT_MAX_SOLAR_POWER,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL_S,
-    DEVICE_INFO_BLOCK,
     DOMAIN,
+)
+from .modbus import TRANSPORT_ERRORS, ModbusClient, async_temporary_client
+from .models import AlertVerbosity
+from .outage import Cause, async_classify
+from .powerocean.const import (
+    CONF_MAX_GRID_POWER,
+    CONF_MAX_SOLAR_POWER,
     ENERGY_RESOLUTION_KWH,
     MAX_BATTERY_COUNT,
+)
+from .powerocean.models import InverterModel, ReserveSupport, battery_reserve_for
+from .powerocean.registers import (
+    DEVICE_INFO_BLOCK,
     PRODUCT_CATEGORY,
     PRODUCT_NUMBER,
     REGISTERS_BY_KEY,
     SERIAL_NUMBER,
 )
-from .modbus import TRANSPORT_ERRORS, ModbusClient, async_temporary_client
-from .models import (
-    AlertVerbosity,
-    InverterModel,
-    ReserveSupport,
-    battery_reserve_for,
-)
-from .outage import Cause, async_classify
-from .telemetry import decode_register, decode_serial_number
-from .util import parse_kwh, portal_history_url
+from .powerocean.telemetry import decode_register, decode_serial_number
+from .powerocean.util import parse_kwh, portal_history_url
 
 if TYPE_CHECKING:
     from .coordinator import EcoflowCoordinator

@@ -12,18 +12,19 @@ import pytest
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
 
-from custom_components.ef_powerocean_tcpmodbus import (
-    binary_sensor,
-    const,
-    models,
-    reading_checks,
-)
+from custom_components.ef_powerocean_tcpmodbus import binary_sensor, const
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
-from custom_components.ef_powerocean_tcpmodbus.reading_checks import Finding
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import models as device_models
+from custom_components.ef_powerocean_tcpmodbus.powerocean import reading_checks
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
+from custom_components.ef_powerocean_tcpmodbus.powerocean.reading_checks import Finding
 from tests.simulation import Simulation
 from tests.test_coordinator import coordinator, issues  # noqa: F401 - fixtures
 
-Status = models.ControlStatus
+Status = device_models.ControlStatus
 T0 = datetime(2026, 10, 28, 16, 14, tzinfo=UTC)
 _jitter = count()
 
@@ -43,7 +44,7 @@ def _live() -> dict[str, float]:
 
 
 def _socs(system: float | None, *packs: float, count: int = 2) -> dict[str, Any]:
-    packs_by_key = dict(zip(const.BATTERY_SOC_KEYS, packs, strict=False))
+    packs_by_key = dict(zip(device_const.BATTERY_SOC_KEYS, packs, strict=False))
     return {"battery_soc": system, "battery_count": count, **packs_by_key}
 
 
@@ -405,7 +406,7 @@ def test_every_key_a_check_reads_is_kept_polled() -> None:
     assert {"soc_battery_1", "battery_count", "frequency", "grid_voltage_l1"} <= (
         reading_checks.KEYS
     )
-    assert const.REGISTERS_BY_KEY.keys() >= reading_checks.KEYS
+    assert register_map.REGISTERS_BY_KEY.keys() >= reading_checks.KEYS
     # Stalled telemetry judges what is polled anyway, so a disabled sensor such
     # as the inverter temperature is not read for it.
     assert "inverter_temperature" not in reading_checks.KEYS
@@ -415,7 +416,7 @@ def test_a_check_that_keeps_failing_holds_while_one_above_it_flickers() -> None:
     """An outage the off-grid bit only reports now and then is still an outage."""
     checks = reading_checks.ReadingChecks()
     checks.run({"grid_voltage_l1": 231.0, **_modes()}, T0)
-    for poll in range(1, const.CONTROL_STATUS_DAMPING_POLLS + 3):
+    for poll in range(1, device_const.CONTROL_STATUS_DAMPING_POLLS + 3):
         checks.run(
             {"grid_voltage_l1": 0.0, **_modes(off_grid=poll % 2 == 1)},
             T0 + timedelta(seconds=5 * poll),
@@ -541,7 +542,7 @@ def test_a_check_that_breaks_passes_and_leaves_the_others_running(
 
     monkeypatch.setattr(reading_checks.SystemSocMismatch, "check", broken)
     checks = reading_checks.ReadingChecks()
-    for poll in range(const.CONTROL_STATUS_DAMPING_POLLS):
+    for poll in range(device_const.CONTROL_STATUS_DAMPING_POLLS):
         checks.run(
             {**_socs(0, 99, 99), **_modes(off_grid=True)},
             T0 + timedelta(seconds=5 * poll),
@@ -563,7 +564,7 @@ def test_what_the_model_reports_survives_a_restart() -> None:
 
     restarted = reading_checks.ReadingChecks()
     restarted.load_state(stored, saved_at=None, now=T0)
-    for poll in range(const.CONTROL_STATUS_DAMPING_POLLS):
+    for poll in range(device_const.CONTROL_STATUS_DAMPING_POLLS):
         restarted.run(
             {"grid_voltage_l1": 0.0, **_modes(bms=False)},
             T0 + timedelta(seconds=5 * poll),
@@ -646,7 +647,7 @@ def _simulate(
         monkeypatch,
         soc=99.0,
         reserve=20.0,
-        model=models.InverterModel.POWEROCEAN_SINGLE_PHASE,
+        model=device_models.InverterModel.POWEROCEAN_SINGLE_PHASE,
         **kwargs,
     )
     real = sim.inverter.frame

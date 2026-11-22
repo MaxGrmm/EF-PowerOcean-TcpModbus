@@ -13,12 +13,19 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const, diagnostics
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
 from tests.fake_inverter import HOST, FakeInverter
 from tests.test_startup import _fill_registers
 
-SYSTEM_SOC = const.REGISTERS_BY_KEY["battery_soc"].address
-BATTERY_COUNT = const.REGISTERS_BY_KEY["battery_count"].address
-PACK_SOCS = [const.REGISTERS_BY_KEY[key].address for key in const.BATTERY_SOC_KEYS[:2]]
+SYSTEM_SOC = register_map.REGISTERS_BY_KEY["battery_soc"].address
+BATTERY_COUNT = register_map.REGISTERS_BY_KEY["battery_count"].address
+PACK_SOCS = [
+    register_map.REGISTERS_BY_KEY[key].address
+    for key in device_const.BATTERY_SOC_KEYS[:2]
+]
 
 
 def _socs(inverter: FakeInverter, system: int, *packs: int) -> None:

@@ -31,9 +31,11 @@ from homeassistant.helpers.storage import Store
 from homeassistant.loader import async_get_integration
 from homeassistant.util import dt
 
-from .const import CONTROL_COMMAND_REGISTER, DOMAIN
-from .models import AlertVerbosity, ControlStatus
-from .reading_checks import Finding
+from .const import DOMAIN
+from .models import AlertVerbosity
+from .powerocean.const import CONTROL_COMMAND_REGISTER
+from .powerocean.models import ControlStatus
+from .powerocean.reading_checks import Finding
 
 if TYPE_CHECKING:
     from .coordinator import EcoflowCoordinator

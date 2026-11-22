@@ -21,7 +21,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import (
     BATTERY_RESERVE_SOC_NUMBER,
     CHARGE_LIMIT_SOC_NUMBER,
-    CONTROL_FEATURES,
     DOMAIN,
     RETIRED_MIN_SOC_NUMBER_KEY,
     UNIT_OF_RATIO,
@@ -29,12 +28,9 @@ from .const import (
 )
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
-from .models import (
-    ControlEntityDef,
-    ControlFeature,
-    NumberWritableDef,
-    requires_modbus_control,
-)
+from .models import ControlEntityDef, NumberWritableDef
+from .powerocean.const import CONTROL_FEATURES
+from .powerocean.models import ControlFeature, requires_modbus_control
 
 # One write to the inverter at a time.
 PARALLEL_UPDATES = 1

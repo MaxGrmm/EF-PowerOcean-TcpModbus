@@ -17,7 +17,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import services
 from custom_components.ef_powerocean_tcpmodbus.const import DOMAIN
-from custom_components.ef_powerocean_tcpmodbus.models import ControlFeature
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import ControlFeature
 
 
 @pytest.fixture

@@ -15,14 +15,18 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.ef_powerocean_tcpmodbus import const
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
 from custom_components.ef_powerocean_tcpmodbus.modbus import ModbusReadRejected
-from custom_components.ef_powerocean_tcpmodbus.models import InverterModel
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import InverterModel
 from custom_components.ef_powerocean_tcpmodbus.register_scan import (
     RegisterScan,
     RegisterScanState,
 )
 
 SERIAL = "HJ31ZDH4ZF6Q0123"
-CANDIDATES = {register.key: register for register in const.CANDIDATE_REGISTERS}
+CANDIDATES = {register.key: register for register in register_map.CANDIDATE_REGISTERS}
 
 
 class FakeClient:
@@ -96,14 +100,14 @@ async def test_a_scan_reads_the_map_the_candidates_and_the_ranges(
     assert report["outcome"] == RegisterScanState.DONE
     assert report["firmware_version"] == "3.0.20.54"
     assert set(report["candidates"]) == set(CANDIDATES)
-    blocks = const.register_blocks_for(InverterModel.POWEROCEAN_PLUS)
+    blocks = register_map.register_blocks_for(InverterModel.POWEROCEAN_PLUS)
     assert {register.key for block in blocks for register in block.registers} == set(
         report["mapped"]
     )
     assert all(block["result"] == "ok" for block in report["blocks"])
     read = read_addresses(client)
-    for low, high in const.REGISTER_SCAN_RANGES:
-        assert set(range(low, high + 1)) - {const.HEARTBEAT_REGISTER} <= read
+    for low, high in register_map.REGISTER_SCAN_RANGES:
+        assert set(range(low, high + 1)) - {device_const.HEARTBEAT_REGISTER} <= read
     assert report["refused"] == {}
 
 
@@ -113,7 +117,7 @@ async def test_the_heartbeat_register_is_never_read(
     """A read of it would make the inverter answer the next beat with device busy."""
     await scan(coordinator).async_run()
 
-    assert const.HEARTBEAT_REGISTER not in read_addresses(client)
+    assert device_const.HEARTBEAT_REGISTER not in read_addresses(client)
 
 
 async def test_a_candidate_is_decoded_with_its_own_type(
@@ -165,13 +169,17 @@ async def test_a_busy_device_is_asked_again(
 async def test_the_serial_number_never_reaches_the_report(
     coordinator: SimpleNamespace, client: FakeClient
 ) -> None:
-    client.serve_serial(SERIAL, const.SERIAL_NUMBER.address)
+    client.serve_serial(SERIAL, register_map.SERIAL_NUMBER.address)
 
     report = await scan(coordinator).async_run()
 
     for start, words in report["words"].items():
         for offset, word in enumerate(words):
-            if const.SERIAL_NUMBER.address <= start + offset < const.SERIAL_NUMBER.end:
+            if (
+                register_map.SERIAL_NUMBER.address
+                <= start + offset
+                < register_map.SERIAL_NUMBER.end
+            ):
                 assert word is None
     assert SERIAL[4:8] not in str(report)
 

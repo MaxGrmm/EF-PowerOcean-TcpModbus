@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const, sensor
-from custom_components.ef_powerocean_tcpmodbus.models import (
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import (
     DeviceIdentity,
     InverterModel,
     ReserveSource,

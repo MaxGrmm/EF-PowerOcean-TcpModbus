@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare an inverter's Modbus registers against the implemented map in const.py.
+"""Compare an inverter's Modbus registers against the integration's register map.
 
 To run it:
 
@@ -168,7 +168,7 @@ def report_mapped_registers(
     reader: RegisterReader, registers: list[models.RegisterDef]
 ) -> tuple[list, list, dict[str, float | None]]:
     """Read every declared register on its own and attempt to parse the results."""
-    print("== Every mapped register in const.py ==")
+    print("== Every mapped register in registers.py ==")
     print(f"  {'key':<30} {'address':>16} {'type':<8} {'value':>14}  note")
     missing: list[models.RegisterDef] = []
     suspect: list[tuple[models.RegisterDef, float | None, str]] = []
@@ -411,7 +411,7 @@ def report_behaviour(
     can show the reading the note is about rather than the one from the scan.
     """
     window = gap * (samples - 1)
-    print("== Scans addresses outside the const.py map ==")
+    print("== Scans addresses outside the registers.py map ==")
     print(
         f"  {samples} samples alongside the mapped registers, {gap}s apart "
         f"({window}s total)"

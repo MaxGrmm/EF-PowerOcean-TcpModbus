@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from custom_components.ef_powerocean_tcpmodbus.control_test_core import (
+from custom_components.ef_powerocean_tcpmodbus.powerocean.control_test_core import (
     CORE_TESTS,
     ControlTestReport,
     Difference,
@@ -19,7 +19,7 @@ from custom_components.ef_powerocean_tcpmodbus.control_test_core import (
     judge_modes,
     plan_test,
 )
-from custom_components.ef_powerocean_tcpmodbus.models import (
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import (
     ControlStatus,
     GridFeedMode,
 )

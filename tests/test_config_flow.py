@@ -18,8 +18,12 @@ from pymodbus.exceptions import ModbusException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import config_flow, const, watchdog
-from custom_components.ef_powerocean_tcpmodbus.models import RegisterType
 from custom_components.ef_powerocean_tcpmodbus.outage import Cause
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
+from custom_components.ef_powerocean_tcpmodbus.powerocean.registers import RegisterType
 from tests.fake_inverter import HOST, FakeInverter
 
 SERIAL = "HJ31ZAS2TEST0001"
@@ -335,9 +339,9 @@ async def test_the_inverter_fills_in_its_model_and_serial(
     hass: HomeAssistant, inverter: FakeInverter
 ) -> None:
     """Read over Modbus TCP from the fake inverter, with nothing patched."""
-    inverter.serve_serial(SERIAL, const.SERIAL_NUMBER.address)
-    inverter.registers[const.PRODUCT_NUMBER.address] = 3  # PowerOcean Plus
-    inverter.registers[const.PRODUCT_CATEGORY.address] = 1  # three-phase
+    inverter.serve_serial(SERIAL, register_map.SERIAL_NUMBER.address)
+    inverter.registers[register_map.PRODUCT_NUMBER.address] = 3  # PowerOcean Plus
+    inverter.registers[register_map.PRODUCT_CATEGORY.address] = 1  # three-phase
 
     result = await _start(hass, HOST, inverter.port)
     with patch(
@@ -432,7 +436,7 @@ def test_every_portal_total_names_its_portal_term_in_every_language() -> None:
         steps = json.loads(path.read_text(encoding="utf-8"))["options"]["step"]
         section = steps["init"]["sections"][config_flow.ENERGY_TOTALS]
         totals = set(section["data"]) - {config_flow.REMOVE_CORRECTIONS}
-        assert totals == const.ECOFLOW_PORTAL_TOTALS, path.name
+        assert totals == device_const.ECOFLOW_PORTAL_TOTALS, path.name
         assert set(section["data_description"]) >= totals, path.name
 
 
@@ -453,7 +457,7 @@ class _Client:
 
 
 async def test_settings_the_device_cannot_read_are_left_out() -> None:
-    refused = {const.DEVICE_INFO_BLOCK.start} | {
+    refused = {register_map.DEVICE_INFO_BLOCK.start} | {
         register.address
         for register, _, _ in config_flow.DEVICE_SUGGESTED_SETTINGS.values()
     }
@@ -466,8 +470,8 @@ async def test_settings_the_device_cannot_read_are_left_out() -> None:
 
 
 async def test_plausible_settings_pre_fill_the_form() -> None:
-    battery_count = const.REGISTERS_BY_KEY["battery_count"]
-    rated_power = const.REGISTERS_BY_KEY["limit_inv_power"]
+    battery_count = register_map.REGISTERS_BY_KEY["battery_count"]
+    rated_power = register_map.REGISTERS_BY_KEY["limit_inv_power"]
     assert battery_count.data_type is RegisterType.UINT16
     words = {battery_count.address: 3}
     words.update(
@@ -483,7 +487,7 @@ async def test_plausible_settings_pre_fill_the_form() -> None:
     )
 
     assert settings[const.CONF_BATTERY_COUNT] == 3
-    assert settings[const.CONF_MAX_SOLAR_POWER] == 10_000
+    assert settings[device_const.CONF_MAX_SOLAR_POWER] == 10_000
 
 
 async def test_an_error_while_connecting_counts_as_unreachable(

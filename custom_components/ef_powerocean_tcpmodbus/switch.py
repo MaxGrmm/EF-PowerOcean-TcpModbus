@@ -14,7 +14,8 @@ from .const import DOMAIN
 from .control import ControlManager
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
-from .models import SwitchDef, requires_modbus_control
+from .models import SwitchDef
+from .powerocean.models import requires_modbus_control
 
 # One write to the inverter at a time.
 PARALLEL_UPDATES = 1

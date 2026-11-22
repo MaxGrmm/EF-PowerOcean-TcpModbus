@@ -20,6 +20,7 @@ from custom_components.ef_powerocean_tcpmodbus.coordinator import (
     EcoflowConfigEntry,
     EcoflowCoordinator,
 )
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
 
 INTEGRATION = er.RegistryEntryDisabler.INTEGRATION
 USER = er.RegistryEntryDisabler.USER
@@ -72,7 +73,7 @@ def entry(hass: HomeAssistant) -> MockConfigEntry:
 async def test_meter_sensors_are_disabled_without_a_meter(
     hass: HomeAssistant, entry: MockConfigEntry
 ) -> None:
-    meter = [_register(hass, entry, key) for key in const.EXTERNAL_METER_KEYS]
+    meter = [_register(hass, entry, key) for key in device_const.EXTERNAL_METER_KEYS]
     other = _register(hass, entry, "battery_soc")
 
     _sync(hass, entry, has_external_meter=False)

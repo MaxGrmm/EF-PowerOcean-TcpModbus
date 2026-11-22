@@ -5,14 +5,18 @@ from __future__ import annotations
 import pytest
 
 from custom_components.ef_powerocean_tcpmodbus import const
-from custom_components.ef_powerocean_tcpmodbus.models import (
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import (
     BATTERY_FULL_SOC,
     ControlFeature,
     ControlMode,
     ControlStatus,
     deviation_state,
 )
-from custom_components.ef_powerocean_tcpmodbus.telemetry import (
+from custom_components.ef_powerocean_tcpmodbus.powerocean.telemetry import (
     TelemetryData,
     calculate_derived_values,
 )
@@ -30,15 +34,15 @@ def derived_keys() -> set[str]:
 
 
 def test_every_feature_is_defined() -> None:
-    assert set(const.CONTROL_FEATURES) == set(ControlFeature)
+    assert set(device_const.CONTROL_FEATURES) == set(ControlFeature)
 
 
 def test_only_automatic_leaves_the_device_to_itself() -> None:
-    automatic = const.CONTROL_FEATURES[ControlFeature.AUTOMATIC]
+    automatic = device_const.CONTROL_FEATURES[ControlFeature.AUTOMATIC]
     assert automatic.method is ControlMode.DEFAULT
     assert not automatic.commands_power
 
-    for feature, definition in const.CONTROL_FEATURES.items():
+    for feature, definition in device_const.CONTROL_FEATURES.items():
         if feature is ControlFeature.AUTOMATIC:
             continue
         assert definition.commands_power
@@ -49,21 +53,21 @@ def test_only_automatic_leaves_the_device_to_itself() -> None:
 @pytest.mark.parametrize("feature", tuple(ControlFeature))
 def test_feature_keys_all_resolve(feature: ControlFeature) -> None:
     """A typo here would silently write to nothing or bound against nothing."""
-    definition = const.CONTROL_FEATURES[feature]
-    known = set(const.REGISTERS_BY_KEY) | derived_keys()
+    definition = device_const.CONTROL_FEATURES[feature]
+    known = set(register_map.REGISTERS_BY_KEY) | derived_keys()
 
     for key in (definition.setpoint_key, definition.limit_key, definition.measure_key):
         if key is not None:
             assert key in known, key
 
     if definition.setpoint_key is not None:
-        assert definition.setpoint_key in const.REGISTERS_BY_KEY
+        assert definition.setpoint_key in register_map.REGISTERS_BY_KEY
 
     if definition.config_limit_key is not None:
         assert definition.config_limit_key in {
-            const.CONF_MAX_BATTERY_CHARGED_POWER,
-            const.CONF_MAX_BATTERY_DISCHARGED_POWER,
-            const.CONF_MAX_GRID_POWER,
+            device_const.CONF_MAX_BATTERY_CHARGED_POWER,
+            device_const.CONF_MAX_BATTERY_DISCHARGED_POWER,
+            device_const.CONF_MAX_GRID_POWER,
         }
 
 
@@ -74,12 +78,12 @@ def test_the_battery_modes_do_not_bound_themselves_by_the_apps_limit() -> None:
     still drew the full 5 kW the modules accept.
     """
     for feature in (ControlFeature.CHARGE_BATTERY, ControlFeature.DISCHARGE_BATTERY):
-        definition = const.CONTROL_FEATURES[feature]
+        definition = device_const.CONTROL_FEATURES[feature]
         assert definition.limit_key is None
         assert definition.config_limit_key is not None
 
     # The export limit is a real firmware cap and stays in force.
-    assert const.CONTROL_FEATURES[ControlFeature.EXPORT_TO_GRID].limit_key == (
+    assert device_const.CONTROL_FEATURES[ControlFeature.EXPORT_TO_GRID].limit_key == (
         "feed_in_power_max"
     )
 
@@ -90,9 +94,9 @@ def test_the_signs_follow_the_devices_own_measurements() -> None:
     Nothing else in the code pins this down, and flipping either sign on the
     assumption that export should be positive inverts the status of every mode.
     """
-    export = const.CONTROL_FEATURES[ControlFeature.EXPORT_TO_GRID]
-    charge = const.CONTROL_FEATURES[ControlFeature.CHARGE_BATTERY]
-    import_ = const.CONTROL_FEATURES[ControlFeature.IMPORT_FROM_GRID]
+    export = device_const.CONTROL_FEATURES[ControlFeature.EXPORT_TO_GRID]
+    charge = device_const.CONTROL_FEATURES[ControlFeature.CHARGE_BATTERY]
+    import_ = device_const.CONTROL_FEATURES[ControlFeature.IMPORT_FROM_GRID]
 
     assert (export.measure_key, export.sign) == ("grid_power", -1)
     assert (charge.measure_key, charge.sign) == ("battery_power", 1)
@@ -122,8 +126,8 @@ def test_the_signs_follow_the_devices_own_measurements() -> None:
 
 def test_opposing_features_share_a_register_but_not_a_sign() -> None:
     """Charge and discharge are one register; the sign is what tells them apart."""
-    charge = const.CONTROL_FEATURES[ControlFeature.CHARGE_BATTERY]
-    discharge = const.CONTROL_FEATURES[ControlFeature.DISCHARGE_BATTERY]
+    charge = device_const.CONTROL_FEATURES[ControlFeature.CHARGE_BATTERY]
+    discharge = device_const.CONTROL_FEATURES[ControlFeature.DISCHARGE_BATTERY]
 
     assert charge.setpoint_key == discharge.setpoint_key
     assert charge.method is discharge.method
@@ -132,8 +136,8 @@ def test_opposing_features_share_a_register_but_not_a_sign() -> None:
 
 
 def test_import_and_export_share_the_meter_setpoint_but_not_a_sign() -> None:
-    export = const.CONTROL_FEATURES[ControlFeature.EXPORT_TO_GRID]
-    import_ = const.CONTROL_FEATURES[ControlFeature.IMPORT_FROM_GRID]
+    export = device_const.CONTROL_FEATURES[ControlFeature.EXPORT_TO_GRID]
+    import_ = device_const.CONTROL_FEATURES[ControlFeature.IMPORT_FROM_GRID]
 
     assert import_.setpoint_key == export.setpoint_key == "system_power_setpoint"
     assert import_.method is export.method is ControlMode.SYSTEM_FEED
@@ -146,21 +150,21 @@ def test_import_and_export_share_the_meter_setpoint_but_not_a_sign() -> None:
 def test_export_solar_first_defaults_to_all_the_inverter_may_export() -> None:
     """Its power is the Solar Export Limit, which means something untouched, so it is
     the one mode the action lets leave its power out."""
-    definition = const.CONTROL_FEATURES[ControlFeature.EXPORT_SOLAR_FIRST]
+    definition = device_const.CONTROL_FEATURES[ControlFeature.EXPORT_SOLAR_FIRST]
 
     assert definition.method is ControlMode.BATTERY_LIMITS
     assert definition.setpoint_key == "battery_power_setpoint"
-    assert definition.default_power == const.DEFAULT_MAX_POWER
+    assert definition.default_power == device_const.DEFAULT_MAX_POWER
     assert [
         feature
-        for feature, feature_def in const.CONTROL_FEATURES.items()
+        for feature, feature_def in device_const.CONTROL_FEATURES.items()
         if feature_def.power_optional
     ] == [ControlFeature.EXPORT_SOLAR_FIRST]
 
 
 def test_holding_the_battery_commands_a_method_but_no_power() -> None:
     """Hold is the same method at zero watts, so it needs no parameters."""
-    definition = const.CONTROL_FEATURES[ControlFeature.HOLD_BATTERY]
+    definition = device_const.CONTROL_FEATURES[ControlFeature.HOLD_BATTERY]
 
     assert definition.commands_power
     assert not definition.has_power
@@ -224,7 +228,7 @@ def test_full_is_judged_below_a_hundred_percent() -> None:
         # to hold, it discharged.
         (1500.0, -2847.0),
         (-1500.0, -2930.0),
-        (const.HOLD_SETPOINT_W, -2000.0),
+        (device_const.HOLD_SETPOINT_W, -2000.0),
     ),
 )
 def test_going_the_other_way_or_past_the_target_is_limited_by_the_inverter(
@@ -251,9 +255,9 @@ def test_an_empty_battery_still_explains_a_discharge_it_cannot_give() -> None:
     ("target", "measured", "soc"),
     (
         # A hold met by a charge still winding down, under a raised reserve.
-        (const.HOLD_SETPOINT_W, 2500.0, 40.0),
+        (device_const.HOLD_SETPOINT_W, 2500.0, 40.0),
         # A hold met by a discharge on a full battery.
-        (const.HOLD_SETPOINT_W, -2500.0, 100.0),
+        (device_const.HOLD_SETPOINT_W, -2500.0, 100.0),
     ),
 )
 def test_a_full_or_empty_battery_only_explains_its_own_direction(
@@ -274,7 +278,7 @@ def test_the_app_backup_reserve_is_not_a_battery_level() -> None:
     sensor = next(
         sensor
         for sensor in const.SENSOR_MAP
-        if sensor.key == const.BATTERY_RESERVE_REGISTER_KEY
+        if sensor.key == device_const.BATTERY_RESERVE_REGISTER_KEY
     )
 
     assert sensor.device_class != "battery"

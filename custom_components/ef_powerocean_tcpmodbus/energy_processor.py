@@ -11,13 +11,10 @@ from typing import Any, Final, TypeIs
 
 from homeassistant.util import dt
 
-from .const import (
-    DEFAULT_MAX_POWER,
-    ENERGY_RESOLUTION_KWH,
-    ENERGY_SENSOR_MAP,
-)
+from .const import ENERGY_SENSOR_MAP
 from .models import EnergySensorDef
-from .util import parse_datetime
+from .powerocean.const import DEFAULT_MAX_POWER, ENERGY_RESOLUTION_KWH
+from .powerocean.util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
 

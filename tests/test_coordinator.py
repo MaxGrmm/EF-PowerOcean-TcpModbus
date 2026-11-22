@@ -29,12 +29,19 @@ from custom_components.ef_powerocean_tcpmodbus.announcer import Announcer
 from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowConfigEntry
 from custom_components.ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
-from custom_components.ef_powerocean_tcpmodbus.grid_energy import GridEnergyIntegrator
 from custom_components.ef_powerocean_tcpmodbus.modbus import (
     ModbusClient,
     ModbusReadRejected,
 )
-from custom_components.ef_powerocean_tcpmodbus.telemetry import TelemetryData
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import models as device_models
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
+from custom_components.ef_powerocean_tcpmodbus.powerocean.grid_energy import (
+    GridEnergyIntegrator,
+)
+from custom_components.ef_powerocean_tcpmodbus.powerocean.telemetry import TelemetryData
 
 
 @pytest.fixture
@@ -67,7 +74,7 @@ def coordinator():
     instance._identity_verified = True
     instance._status = None
     instance._store = None
-    instance.identity = models.DeviceIdentity()
+    instance.identity = device_models.DeviceIdentity()
     instance._consecutive_modbus_disabled_reads = 0
     instance._announcer = Announcer()
     instance._optional_stalls = {}
@@ -78,17 +85,19 @@ def coordinator():
     instance._ena_calc_grid_energy = False
     instance._grid_energy = GridEnergyIntegrator()
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
-    instance._register_blocks = const.register_blocks_for(instance.inverter_model)
+    instance._register_blocks = register_map.register_blocks_for(
+        instance.inverter_model
+    )
     instance._registers_by_key = {
         register.key: register
         for block in instance._register_blocks
         for register in block.registers
     }
     instance.limits = {
-        const.CONF_MAX_GRID_POWER: 15_000,
-        const.CONF_MAX_SOLAR_POWER: 12_000,
-        const.CONF_MAX_BATTERY_CHARGED_POWER: 5_000,
-        const.CONF_MAX_BATTERY_DISCHARGED_POWER: 6_600,
+        device_const.CONF_MAX_GRID_POWER: 15_000,
+        device_const.CONF_MAX_SOLAR_POWER: 12_000,
+        device_const.CONF_MAX_BATTERY_CHARGED_POWER: 5_000,
+        device_const.CONF_MAX_BATTERY_DISCHARGED_POWER: 6_600,
     }
     instance.control = ControlManager(
         instance._modbus_client,
@@ -180,8 +189,11 @@ def test_battery_limits_follow_the_reported_capacity(
         monkeypatch,
     )
 
-    assert coordinator.limits[const.CONF_MAX_BATTERY_CHARGED_POWER] == charge_w
-    assert coordinator.limits[const.CONF_MAX_BATTERY_DISCHARGED_POWER] == discharge_w
+    assert coordinator.limits[device_const.CONF_MAX_BATTERY_CHARGED_POWER] == charge_w
+    assert (
+        coordinator.limits[device_const.CONF_MAX_BATTERY_DISCHARGED_POWER]
+        == discharge_w
+    )
     assert coordinator._energy_processor.limits is coordinator.limits
 
 
@@ -246,9 +258,9 @@ def test_the_kept_capacity_survives_a_restart(
 
 # Every real module as its datasheet rates it, unlike the merged const table.
 DATASHEET_MODULES = (
-    models.BatteryModule(5000, charge_w=2500, discharge_w=3300),  # EF BD-5.1-S1
-    models.BatteryModule(5024, charge_w=2500, discharge_w=4080),  # EF BD-5-S2
-    models.BatteryModule(8030, charge_w=4100, discharge_w=6400),  # EF BD-8-S2
+    device_models.BatteryModule(5000, charge_w=2500, discharge_w=3300),  # EF BD-5.1-S1
+    device_models.BatteryModule(5024, charge_w=2500, discharge_w=4080),  # EF BD-5-S2
+    device_models.BatteryModule(8030, charge_w=4100, discharge_w=6400),  # EF BD-8-S2
 )
 
 
@@ -331,7 +343,7 @@ def test_persisted_state_round_trips(coordinator) -> None:
     )
 
 
-@pytest.mark.parametrize("model", list(models.InverterModel))
+@pytest.mark.parametrize("model", list(device_models.InverterModel))
 def test_state_saved_at_the_current_revision_is_kept(coordinator, model) -> None:
     coordinator.inverter_model = model
     coordinator._last_checked_data = {"grid_import_total": 12.5}
@@ -351,7 +363,7 @@ def test_state_saved_at_the_current_revision_is_kept(coordinator, model) -> None
     "model",
     [
         model
-        for model in models.InverterModel
+        for model in device_models.InverterModel
         if model.traits.energy_state_revision == 0
     ],
 )
@@ -373,7 +385,7 @@ def test_ocean_2_plus_energy_state_from_beta_2_is_dropped(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Counters 1000x too large would read as a decrease and be held forever."""
-    coordinator.inverter_model = models.InverterModel.OCEAN_2_PLUS_SINGLE_PHASE
+    coordinator.inverter_model = device_models.InverterModel.OCEAN_2_PLUS_SINGLE_PHASE
     coordinator.control._battery_saver = True
     stored = {
         **coordinator._persisted_state(),
@@ -436,7 +448,7 @@ def test_a_failed_cap_write_still_leaves_the_feed_mode_as_an_enum(
     with pytest.raises(HomeAssistantError):
         asyncio.run(coordinator.control.async_set_grid_feed(False))
 
-    assert coordinator.data["grid_feed_mode"] is models.GridFeedMode.LIMITED
+    assert coordinator.data["grid_feed_mode"] is device_models.GridFeedMode.LIMITED
 
 
 def _accept_updates(coordinator, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -815,7 +827,7 @@ def test_a_refresh_within_a_second_of_a_poll_keeps_the_grid_feed_mode(
     run_update(coordinator, frame, first, monkeypatch)
     result = run_update(coordinator, frame, first + timedelta(seconds=0.5), monkeypatch)
 
-    assert result["grid_feed_mode"] is models.GridFeedMode.LIMITED
+    assert result["grid_feed_mode"] is device_models.GridFeedMode.LIMITED
 
 
 def test_clamps_derived_house_energy_rounding_jitter(
@@ -1047,10 +1059,14 @@ def test_floors_derived_house_energy_at_zero_without_baseline(
 def test_gets_and_decodes_raw_data(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    block = models.RegisterBlock(
+    block = register_map.RegisterBlock(
         (
-            models.RegisterDef("battery_count", 100, models.RegisterType.UINT16),
-            models.RegisterDef("grid_power", 101, models.RegisterType.UINT16),
+            register_map.RegisterDef(
+                "battery_count", 100, register_map.RegisterType.UINT16
+            ),
+            register_map.RegisterDef(
+                "grid_power", 101, register_map.RegisterType.UINT16
+            ),
         )
     )
     coordinator._register_blocks = (block,)
@@ -1070,13 +1086,15 @@ def _float_words(value: float, high_word_first: bool) -> list[int]:
     return [high, low] if high_word_first else [low, high]
 
 
-def _read_energy_and_power(coordinator, model: models.InverterModel, energy, power):
+def _read_energy_and_power(
+    coordinator, model: device_models.InverterModel, energy, power
+):
     coordinator.inverter_model = model
     coordinator._register_blocks = (
-        models.RegisterBlock(
+        register_map.RegisterBlock(
             (
-                models.RegisterDef("solar_today", 100),
-                models.RegisterDef("grid_power", 102),
+                register_map.RegisterDef("solar_today", 100),
+                register_map.RegisterDef("grid_power", 102),
             )
         ),
     )
@@ -1094,7 +1112,7 @@ def _read_energy_and_power(coordinator, model: models.InverterModel, energy, pow
 def test_reads_ocean_2_energy_counters_as_kilowatt_hours(coordinator) -> None:
     """The three-phase Ocean 2 reports its energy counters in Wh."""
     result = _read_energy_and_power(
-        coordinator, models.InverterModel.OCEAN_2_THREE_PHASE, 11840.0, 517.0
+        coordinator, device_models.InverterModel.OCEAN_2_THREE_PHASE, 11840.0, 517.0
     )
 
     assert result == {"solar_today": 11.84, "grid_power": 517.0}
@@ -1102,7 +1120,7 @@ def test_reads_ocean_2_energy_counters_as_kilowatt_hours(coordinator) -> None:
 
 def test_other_models_report_energy_counters_in_kilowatt_hours(coordinator) -> None:
     result = _read_energy_and_power(
-        coordinator, models.InverterModel.POWEROCEAN_PLUS, 11.84, 517.0
+        coordinator, device_models.InverterModel.POWEROCEAN_PLUS, 11.84, 517.0
     )
 
     assert result == {"solar_today": 11.84, "grid_power": 517.0}
@@ -1112,17 +1130,23 @@ def test_every_device_energy_counter_is_read_from_a_register() -> None:
     """The Wh conversion applies to what the coordinator reads, so each counter
     the device reports has to be a register."""
     assert const.DEVICE_ENERGY_KEYS
-    assert const.REGISTERS_BY_KEY.keys() >= const.DEVICE_ENERGY_KEYS
+    assert register_map.REGISTERS_BY_KEY.keys() >= const.DEVICE_ENERGY_KEYS
 
 
 def test_modbus_disabled_recovers_when_telemetry_returns(
     coordinator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    block = models.RegisterBlock(
+    block = register_map.RegisterBlock(
         (
-            models.RegisterDef("battery_count", 100, models.RegisterType.UINT16),
-            models.RegisterDef("inverter_rated_power", 101, models.RegisterType.UINT16),
-            models.RegisterDef("limit_inv_max", 102, models.RegisterType.UINT16),
+            register_map.RegisterDef(
+                "battery_count", 100, register_map.RegisterType.UINT16
+            ),
+            register_map.RegisterDef(
+                "inverter_rated_power", 101, register_map.RegisterType.UINT16
+            ),
+            register_map.RegisterDef(
+                "limit_inv_max", 102, register_map.RegisterType.UINT16
+            ),
         )
     )
     coordinator._register_blocks = (block,)
@@ -1162,16 +1186,18 @@ def test_modbus_disabled_recovers_when_telemetry_returns(
         *(
             tuple(
                 register
-                for block in const.register_blocks_for(inverter_model)
+                for block in register_map.register_blocks_for(inverter_model)
                 for register in block.registers
             )
-            for inverter_model in models.InverterModel
+            for inverter_model in device_models.InverterModel
         ),
-        const.DEVICE_INFO_BLOCK.registers,
+        register_map.DEVICE_INFO_BLOCK.registers,
     ),
-    ids=(*models.InverterModel, "device-info"),
+    ids=(*device_models.InverterModel, "device-info"),
 )
-def test_registers_do_not_overlap(registers: tuple[models.RegisterDef, ...]) -> None:
+def test_registers_do_not_overlap(
+    registers: tuple[register_map.RegisterDef, ...],
+) -> None:
     """A multi-word register must not extend into the next register's address."""
     ordered = sorted(registers, key=lambda register: register.address)
 
@@ -1182,12 +1208,12 @@ def test_registers_do_not_overlap(registers: tuple[models.RegisterDef, ...]) -> 
         )
 
 
-@pytest.mark.parametrize("inverter_model", models.InverterModel)
+@pytest.mark.parametrize("inverter_model", device_models.InverterModel)
 def test_blocks_cover_every_register_word_they_map(
-    inverter_model: models.InverterModel,
+    inverter_model: device_models.InverterModel,
 ) -> None:
     """Every register must decode from inside the block that was read for it."""
-    for block in const.register_blocks_for(inverter_model):
+    for block in register_map.register_blocks_for(inverter_model):
         for register in block.registers:
             index = block.index_of(register)
 
@@ -1201,39 +1227,39 @@ def test_blocks_cover_every_register_word_they_map(
             )
 
 
-@pytest.mark.parametrize("inverter_model", models.InverterModel)
+@pytest.mark.parametrize("inverter_model", device_models.InverterModel)
 def test_both_feed_in_caps_are_read_on_every_model(
-    inverter_model: models.InverterModel,
+    inverter_model: device_models.InverterModel,
 ) -> None:
     """40538 is the configured cap and 40609 the effective one."""
     addresses = {
         register.key: register.address
-        for block in const.register_blocks_for(inverter_model)
+        for block in register_map.register_blocks_for(inverter_model)
         for register in block.registers
     }
 
-    assert addresses[const.FEED_IN_POWER_MAX_SETTING_KEY] == 40538
-    assert addresses[const.FEED_IN_POWER_MAX_EFFECTIVE_KEY] == 40609
+    assert addresses[device_const.FEED_IN_POWER_MAX_SETTING_KEY] == 40538
+    assert addresses[device_const.FEED_IN_POWER_MAX_EFFECTIVE_KEY] == 40609
 
 
 def test_the_plus_gets_no_feed_in_sensor_that_reads_zero_on_it() -> None:
-    plus = models.InverterModel.POWEROCEAN_PLUS
+    plus = device_models.InverterModel.POWEROCEAN_PLUS
     hidden = {
         sensor.key for sensor in const.SENSOR_MAP if plus in sensor.unsupported_models
     }
 
     assert {
-        const.FEED_IN_POWER_MAX_EFFECTIVE_KEY,
+        device_const.FEED_IN_POWER_MAX_EFFECTIVE_KEY,
         "feed_in_power_max_percent",
     } <= hidden
-    assert const.FEED_IN_POWER_MAX_SETTING_KEY not in hidden
+    assert device_const.FEED_IN_POWER_MAX_SETTING_KEY not in hidden
 
 
 def test_the_feed_in_cap_is_written_to_the_configured_register(coordinator) -> None:
     """The PowerOcean refuses writes to 40609, and 40538 is the one configured."""
     coordinator.async_set_updated_data = Mock()
     coordinator._modbus_client.async_read = AsyncMock(return_value=[0, 0])
-    register = coordinator._registers_by_key[const.FEED_IN_POWER_MAX_SETTING_KEY]
+    register = coordinator._registers_by_key[device_const.FEED_IN_POWER_MAX_SETTING_KEY]
 
     asyncio.run(coordinator._async_write_register(register, 0))
 
@@ -1243,7 +1269,7 @@ def test_the_feed_in_cap_is_written_to_the_configured_register(coordinator) -> N
 
 def test_writable_numbers_write_to_the_register_they_read() -> None:
     for number in const.WRITABLE_NUMBERS_MAP:
-        expected = const.REGISTERS_BY_KEY[number.read_key].address
+        expected = register_map.REGISTERS_BY_KEY[number.read_key].address
 
         assert number.register == expected, (
             f"{number.key} writes to {number.register} but reads "
@@ -1274,30 +1300,34 @@ def _device_info_registers(
     product_category: int = 1,
     firmware: int = 0x03001313,
 ) -> list[int]:
-    registers = [0] * const.DEVICE_INFO_BLOCK.count
-    registers[const.DEVICE_INFO_BLOCK.index_of(const.PRODUCT_CATEGORY)] = (
-        product_category
+    registers = [0] * register_map.DEVICE_INFO_BLOCK.count
+    registers[
+        register_map.DEVICE_INFO_BLOCK.index_of(register_map.PRODUCT_CATEGORY)
+    ] = product_category
+    registers[register_map.DEVICE_INFO_BLOCK.index_of(register_map.PRODUCT_NUMBER)] = (
+        product_number
     )
-    registers[const.DEVICE_INFO_BLOCK.index_of(const.PRODUCT_NUMBER)] = product_number
-    serial_index = const.DEVICE_INFO_BLOCK.index_of(const.SERIAL_NUMBER)
-    for offset in range(const.SERIAL_NUMBER.size):
+    serial_index = register_map.DEVICE_INFO_BLOCK.index_of(register_map.SERIAL_NUMBER)
+    for offset in range(register_map.SERIAL_NUMBER.size):
         high, low = serial[offset * 2], serial[offset * 2 + 1]
         registers[serial_index + offset] = (ord(high) << 8) | ord(low)
-    firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
+    firmware_index = register_map.DEVICE_INFO_BLOCK.index_of(
+        register_map.FIRMWARE_VERSION
+    )
     registers[firmware_index] = firmware & 0xFFFF
     registers[firmware_index + 1] = firmware >> 16
     return registers
 
 
 def test_reads_the_device_info_block_then_the_extra_registers(coordinator) -> None:
-    coordinator.inverter_model = models.InverterModel.POWEROCEAN_PLUS
+    coordinator.inverter_model = device_models.InverterModel.POWEROCEAN_PLUS
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=[_device_info_registers(), [0x0001], [1]]
     )
 
     asyncio.run(coordinator.async_read_device_info())
 
-    assert coordinator.identity == models.DeviceIdentity(
+    assert coordinator.identity == device_models.DeviceIdentity(
         serial_number="R371ZD1AZH3X0450",
         firmware_version="3.0.19.19",
         product_number=3,
@@ -1313,9 +1343,11 @@ def test_reads_the_device_info_block_then_the_extra_registers(coordinator) -> No
 def test_reads_device_info_of_a_three_phase_ocean_2(coordinator) -> None:
     """A configured Ocean 2 is read high word first."""
     registers = _device_info_registers(product_number=4, product_category=1)
-    firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
+    firmware_index = register_map.DEVICE_INFO_BLOCK.index_of(
+        register_map.FIRMWARE_VERSION
+    )
     registers[firmware_index], registers[firmware_index + 1] = 0x0100, 0x034F
-    coordinator.inverter_model = models.InverterModel.OCEAN_2_THREE_PHASE
+    coordinator.inverter_model = device_models.InverterModel.OCEAN_2_THREE_PHASE
     coordinator._modbus_client.async_read = AsyncMock(return_value=registers)
 
     asyncio.run(coordinator.async_read_device_info())
@@ -1330,9 +1362,11 @@ def test_the_configured_model_decides_how_the_device_is_read(coordinator) -> Non
     registers say Ocean 2, so its words are still read low word first.
     """
     registers = _device_info_registers(product_number=4, product_category=1)
-    firmware_index = const.DEVICE_INFO_BLOCK.index_of(const.FIRMWARE_VERSION)
+    firmware_index = register_map.DEVICE_INFO_BLOCK.index_of(
+        register_map.FIRMWARE_VERSION
+    )
     registers[firmware_index], registers[firmware_index + 1] = 0x034F, 0x0100
-    coordinator.inverter_model = models.InverterModel.POWEROCEAN_PLUS
+    coordinator.inverter_model = device_models.InverterModel.POWEROCEAN_PLUS
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=[registers, [0x0100], [1]]
     )
@@ -1399,12 +1433,14 @@ def test_a_reconnect_reads_the_device_info_again(coordinator) -> None:
     coordinator.async_read_device_info.assert_awaited_once()
 
 
-@pytest.mark.parametrize("inverter_model", models.InverterModel)
+@pytest.mark.parametrize("inverter_model", device_models.InverterModel)
 def test_read_plan_is_not_split_more_than_necessary(
-    inverter_model: models.InverterModel,
+    inverter_model: device_models.InverterModel,
 ) -> None:
     """Neighbouring blocks must be unmergeable, so no poll wastes a round trip."""
-    blocks = sorted(const.register_blocks_for(inverter_model), key=lambda b: b.start)
+    blocks = sorted(
+        register_map.register_blocks_for(inverter_model), key=lambda b: b.start
+    )
     for block, following in itertools.pairwise(blocks):
         end = block.start + block.count
         gap = following.start - end
@@ -1416,8 +1452,8 @@ def test_read_plan_is_not_split_more_than_necessary(
         isolated = block.optional != following.optional
         assert (
             gap > inverter_model.traits.max_register_gap
-            or merged > models.MAX_REGISTERS_PER_READ
-            or end <= const.HEARTBEAT_REGISTER < following.start
+            or merged > device_models.MAX_REGISTERS_PER_READ
+            or end <= device_const.HEARTBEAT_REGISTER < following.start
             or isolated
         ), (
             f"blocks at {block.start} and {following.start} are only {gap} words "
@@ -1425,24 +1461,24 @@ def test_read_plan_is_not_split_more_than_necessary(
         )
 
 
-@pytest.mark.parametrize("inverter_model", models.InverterModel)
+@pytest.mark.parametrize("inverter_model", device_models.InverterModel)
 def test_the_heartbeat_register_is_never_read_by_a_poll(
-    inverter_model: models.InverterModel,
+    inverter_model: device_models.InverterModel,
 ) -> None:
     """The effective feed-in cap sits one register past it, and the inverter answers
     a write to a register it is serving a read for with "busy"."""
-    for block in const.register_blocks_for(inverter_model):
+    for block in register_map.register_blocks_for(inverter_model):
         assert not (
-            block.start <= const.HEARTBEAT_REGISTER < block.start + block.count
-        ), f"the block at {block.start} reads {const.HEARTBEAT_REGISTER}"
+            block.start <= device_const.HEARTBEAT_REGISTER < block.start + block.count
+        ), f"the block at {block.start} reads {device_const.HEARTBEAT_REGISTER}"
 
 
-@pytest.mark.parametrize("inverter_model", models.InverterModel)
+@pytest.mark.parametrize("inverter_model", device_models.InverterModel)
 def test_read_plan_never_reaches_further_than_the_model_allows(
-    inverter_model: models.InverterModel,
+    inverter_model: device_models.InverterModel,
 ) -> None:
     """A read must not reach over more unmapped addresses than the device tolerates."""
-    for block in const.register_blocks_for(inverter_model):
+    for block in register_map.register_blocks_for(inverter_model):
         end = block.start
         for register in block.registers:
             gap = register.address - end
@@ -1456,10 +1492,14 @@ def test_read_plan_never_reaches_further_than_the_model_allows(
 
 def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
     with pytest.raises(ValueError, match="more than the 125"):
-        models.RegisterBlock(
+        register_map.RegisterBlock(
             (
-                models.RegisterDef("first", 40000, models.RegisterType.UINT16),
-                models.RegisterDef("last", 40200, models.RegisterType.UINT16),
+                register_map.RegisterDef(
+                    "first", 40000, register_map.RegisterType.UINT16
+                ),
+                register_map.RegisterDef(
+                    "last", 40200, register_map.RegisterType.UINT16
+                ),
             )
         )
 
@@ -1467,13 +1507,13 @@ def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
 @pytest.mark.parametrize(
     ("product_number", "product_category", "expected"),
     (
-        (1, 1, models.InverterModel.POWEROCEAN_THREE_PHASE),
-        (1, 2, models.InverterModel.POWEROCEAN_SINGLE_PHASE),
+        (1, 1, device_models.InverterModel.POWEROCEAN_THREE_PHASE),
+        (1, 2, device_models.InverterModel.POWEROCEAN_SINGLE_PHASE),
         # The single-phase Ocean 2 reports the same 2 as the PowerOcean single phase.
-        (2, 2, models.InverterModel.POWEROCEAN_SINGLE_PHASE),
-        (3, 1, models.InverterModel.POWEROCEAN_PLUS),
-        (4, 1, models.InverterModel.OCEAN_2_THREE_PHASE),
-        (4, 2, models.InverterModel.OCEAN_2_SINGLE_PHASE),
+        (2, 2, device_models.InverterModel.POWEROCEAN_SINGLE_PHASE),
+        (3, 1, device_models.InverterModel.POWEROCEAN_PLUS),
+        (4, 1, device_models.InverterModel.OCEAN_2_THREE_PHASE),
+        (4, 2, device_models.InverterModel.OCEAN_2_SINGLE_PHASE),
         (0, 1, None),
         (None, None, None),
     ),
@@ -1481,10 +1521,10 @@ def test_block_rejects_more_registers_than_a_modbus_read_allows() -> None:
 def test_detects_inverter_model_from_product_info(
     product_number: int | None,
     product_category: int | None,
-    expected: models.InverterModel | None,
+    expected: device_models.InverterModel | None,
 ) -> None:
     assert (
-        models.InverterModel.from_product_info(product_number, product_category)
+        device_models.InverterModel.from_product_info(product_number, product_category)
         == expected
     )
 
@@ -1502,24 +1542,28 @@ def test_raw_data_raises_when_reconnect_fails(coordinator) -> None:
 
 def _optional_block_coordinator(coordinator):
     """A coordinator on an Ocean 2, with one required and one optional block."""
-    coordinator.inverter_model = models.InverterModel.OCEAN_2_THREE_PHASE
+    coordinator.inverter_model = device_models.InverterModel.OCEAN_2_THREE_PHASE
     coordinator._modbus_client.connected = True
     coordinator._register_blocks = (
-        models.RegisterBlock(
-            (models.RegisterDef("battery_soc", 40527, models.RegisterType.UINT16),)
-        ),
-        models.RegisterBlock(
+        register_map.RegisterBlock(
             (
-                models.RegisterDef(
+                register_map.RegisterDef(
+                    "battery_soc", 40527, register_map.RegisterType.UINT16
+                ),
+            )
+        ),
+        register_map.RegisterBlock(
+            (
+                register_map.RegisterDef(
                     "feed_in_power_max_percent",
                     40573,
-                    models.RegisterType.UINT16,
+                    register_map.RegisterType.UINT16,
                     optional=True,
                 ),
-                models.RegisterDef(
+                register_map.RegisterDef(
                     "battery_voltage_probe",
                     40574,
-                    models.RegisterType.UINT16,
+                    register_map.RegisterType.UINT16,
                     optional=True,
                 ),
             )
@@ -1580,11 +1624,11 @@ def test_a_refused_required_block_still_fails_the_poll(coordinator) -> None:
     coordinator._modbus_client.close.assert_called_once()
 
 
-@pytest.mark.parametrize("inverter_model", models.InverterModel)
+@pytest.mark.parametrize("inverter_model", device_models.InverterModel)
 def test_optional_registers_share_no_read_where_the_model_rejects_them(
-    inverter_model: models.InverterModel,
+    inverter_model: device_models.InverterModel,
 ) -> None:
-    for block in const.register_blocks_for(inverter_model):
+    for block in register_map.register_blocks_for(inverter_model):
         kinds = {register.optional for register in block.registers}
         if inverter_model.traits.rejects_unimplemented:
             assert len(kinds) == 1, f"block at {block.start} mixes optional registers"
@@ -1597,12 +1641,12 @@ def test_the_powerocean_reads_optional_registers_without_extra_requests() -> Non
     gets a read of its own rather than widening the one the poll depends on.
     """
     optional_keys = {
-        register.key for register in const.MODBUS_REGISTERS if register.optional
+        register.key for register in register_map.MODBUS_REGISTERS if register.optional
     }
-    model = models.InverterModel.POWEROCEAN_PLUS
+    model = device_models.InverterModel.POWEROCEAN_PLUS
 
-    assert len(const.register_blocks_for(model)) == 2 + len(
-        const.register_blocks_for(model, exclude=optional_keys)
+    assert len(register_map.register_blocks_for(model)) == 2 + len(
+        register_map.register_blocks_for(model, exclude=optional_keys)
     )
 
 
@@ -1610,7 +1654,9 @@ def test_the_powerocean_reads_the_new_diagnostic_registers_in_its_live_block() -
     """They sit inside reads the PowerOcean already makes."""
     keys = {
         register.key
-        for block in const.register_blocks_for(models.InverterModel.POWEROCEAN_PLUS)
+        for block in register_map.register_blocks_for(
+            device_models.InverterModel.POWEROCEAN_PLUS
+        )
         for register in block.registers
     }
 
@@ -2058,7 +2104,7 @@ def _grid_frame(power: float, **registers: float) -> dict[str, float]:
     """A poll of an inverter whose grid energy registers read 0, as in #218."""
     return {
         "grid_power": power,
-        **dict.fromkeys(const.GRID_ENERGY_REGISTER_KEYS, 0.0),
+        **dict.fromkeys(device_const.GRID_ENERGY_REGISTER_KEYS, 0.0),
         **registers,
     }
 
@@ -2264,7 +2310,7 @@ def _poll(coordinator, monkeypatch: pytest.MonkeyPatch, raw: dict[str, Any]) -> 
     asyncio.run(coordinator._async_update_data())
 
 
-NO_METER = dict.fromkeys(const.EXTERNAL_METER_KEYS, 0.0)
+NO_METER = dict.fromkeys(device_const.EXTERNAL_METER_KEYS, 0.0)
 
 
 def test_meter_readings_of_zero_show_no_external_meter(
@@ -2277,7 +2323,7 @@ def test_meter_readings_of_zero_show_no_external_meter(
     coordinator.async_sync_external_meter_entities.assert_not_called()
 
 
-@pytest.mark.parametrize("key", const.EXTERNAL_METER_KEYS)
+@pytest.mark.parametrize("key", device_const.EXTERNAL_METER_KEYS)
 def test_any_meter_reading_shows_an_external_meter(
     coordinator, monkeypatch: pytest.MonkeyPatch, key: str
 ) -> None:
@@ -2312,4 +2358,4 @@ def test_an_external_meter_survives_a_restart(
 
 def test_the_meter_readings_are_polled_with_no_sensor_asking(coordinator) -> None:
     """So a meter is noticed while its sensors are disabled."""
-    assert set(const.EXTERNAL_METER_KEYS) <= coordinator._own_keys
+    assert set(device_const.EXTERNAL_METER_KEYS) <= coordinator._own_keys

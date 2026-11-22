@@ -27,7 +27,7 @@ from .const import (
     EVENT_READING_CHECK_CLEARED,
     EVENT_READING_CHECK_FAILED,
 )
-from .reading_checks import CHECKS, Finding
+from .powerocean.reading_checks import CHECKS, Finding
 
 _LOGGER = logging.getLogger(__name__)
 

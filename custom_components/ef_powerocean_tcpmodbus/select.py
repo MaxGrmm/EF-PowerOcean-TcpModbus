@@ -12,7 +12,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import BATTERY_MODE_SELECT
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
-from .models import ControlEntityDef, ControlFeature
+from .models import ControlEntityDef
+from .powerocean.models import ControlFeature
 
 # One write to the inverter at a time.
 PARALLEL_UPDATES = 1

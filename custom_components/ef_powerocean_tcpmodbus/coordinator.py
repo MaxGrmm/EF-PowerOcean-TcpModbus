@@ -28,10 +28,7 @@ from .const import (
     ATTR_FROM,
     ATTR_MODE,
     ATTR_TO,
-    BATTERY_CHARGE_W_PER_WH,
-    BATTERY_DISCHARGE_W_PER_WH,
     BATTERY_MODE_SELECT,
-    BATTERY_MODULES,
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
     CONF_CALC_GRID_ENERGY,
@@ -39,10 +36,6 @@ from .const import (
     CONF_ENERGY_OFFSETS,
     CONF_HOST,
     CONF_INVERTER_MODEL,
-    CONF_MAX_BATTERY_CHARGED_POWER,
-    CONF_MAX_BATTERY_DISCHARGED_POWER,
-    CONF_MAX_GRID_POWER,
-    CONF_MAX_SOLAR_POWER,
     CONF_MODBUS_CONTROL,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
@@ -53,28 +46,16 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL_S,
     DEVICE_ENERGY_KEYS,
-    DEVICE_INFO_BLOCK,
-    DEVICE_INFO_EXTRA,
     DOMAIN,
-    ECOFLOW_PORTAL_TOTALS,
     ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
     EVENT_FIRMWARE_CHANGED,
-    EXTERNAL_METER_KEYS,
-    FIRMWARE_VERSION,
-    HELD_TOTAL_ISSUE_AFTER_S,
-    MAX_BATTERY_CAPACITY_WH,
     MODBUS_DISABLED_READ_THRESHOLD,
     MODBUS_POLL_BUDGET_S,
     OPTIONAL_STALLS_TO_DROP,
-    PRODUCT_CATEGORY,
-    PRODUCT_NUMBER,
     READING_CHECK_SNAPSHOTS,
-    REGISTERS_BY_KEY,
-    SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
-    register_blocks_for,
 )
 from .control import ControlManager
 from .control_test import ControlTest
@@ -85,23 +66,44 @@ from .energy_processor import (
     HeldTotal,
     offsets_from,
 )
-from .grid_energy import GridEnergyIntegrator
 from .modbus import ModbusClient, ModbusReadRejected, create_client, retries_until
-from .models import (
+from .models import CoordinatorStatus, NumberWritableDef
+from .powerocean.const import (
+    BATTERY_CHARGE_W_PER_WH,
+    BATTERY_DISCHARGE_W_PER_WH,
+    BATTERY_MODULES,
+    CONF_MAX_BATTERY_CHARGED_POWER,
+    CONF_MAX_BATTERY_DISCHARGED_POWER,
+    CONF_MAX_GRID_POWER,
+    CONF_MAX_SOLAR_POWER,
+    ECOFLOW_PORTAL_TOTALS,
+    EXTERNAL_METER_KEYS,
+    HELD_TOTAL_ISSUE_AFTER_S,
+    MAX_BATTERY_CAPACITY_WH,
+)
+from .powerocean.grid_energy import GridEnergyIntegrator
+from .powerocean.models import (
     ControlFeature,
-    CoordinatorStatus,
     DeviceIdentity,
     InverterModel,
-    NumberWritableDef,
+    battery_reserve_for,
+)
+from .powerocean.reading_checks import KEYS_BY_CHECK
+from .powerocean.reading_checks import REPORTED as READING_CHECKS_REPORTED
+from .powerocean.registers import (
+    DEVICE_INFO_BLOCK,
+    DEVICE_INFO_EXTRA,
+    FIRMWARE_VERSION,
+    PRODUCT_CATEGORY,
+    PRODUCT_NUMBER,
+    REGISTERS_BY_KEY,
+    SERIAL_NUMBER,
     RegisterBlock,
     RegisterDef,
-    battery_reserve_for,
     encode_register,
+    register_blocks_for,
 )
-from .reading_checks import KEYS_BY_CHECK
-from .reading_checks import REPORTED as READING_CHECKS_REPORTED
-from .register_scan import RegisterScan
-from .telemetry import (
+from .powerocean.telemetry import (
     TelemetryData,
     calculate_derived_values,
     decode_firmware_version,
@@ -109,7 +111,8 @@ from .telemetry import (
     decode_serial_number,
     is_modbus_disabled,
 )
-from .util import parse_datetime
+from .powerocean.util import parse_datetime
+from .register_scan import RegisterScan
 
 _LOGGER = logging.getLogger(__name__)
 

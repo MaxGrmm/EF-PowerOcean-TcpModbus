@@ -14,12 +14,13 @@ from custom_components.ef_powerocean_tcpmodbus.energy_processor import (
     HeldTotal,
     offsets_from,
 )
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
 
 LIMITS = {
-    const.CONF_MAX_GRID_POWER: 15_000,
-    const.CONF_MAX_SOLAR_POWER: 12_000,
-    const.CONF_MAX_BATTERY_CHARGED_POWER: 5_000,
-    const.CONF_MAX_BATTERY_DISCHARGED_POWER: 6_600,
+    device_const.CONF_MAX_GRID_POWER: 15_000,
+    device_const.CONF_MAX_SOLAR_POWER: 12_000,
+    device_const.CONF_MAX_BATTERY_CHARGED_POWER: 5_000,
+    device_const.CONF_MAX_BATTERY_DISCHARGED_POWER: 6_600,
 }
 
 

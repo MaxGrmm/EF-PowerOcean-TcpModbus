@@ -23,13 +23,9 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, Final
 
-from .const import (
-    BATTERY_SOC_KEYS,
-    CONTROL_STATUS_DAMPING_POLLS,
-    DERIVED_FROM,
-    MODBUS_REGISTERS,
-)
-from .models import ControlStatus, DeviceReport, Signal
+from .const import BATTERY_SOC_KEYS, CONTROL_STATUS_DAMPING_POLLS, DERIVED_FROM
+from .models import ControlStatus, DeviceReport
+from .registers import MODBUS_REGISTERS, Signal
 
 _LOGGER = logging.getLogger(__name__)
 

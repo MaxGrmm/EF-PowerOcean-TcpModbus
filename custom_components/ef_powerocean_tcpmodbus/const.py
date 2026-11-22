@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
 from typing import Final
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
@@ -19,28 +18,35 @@ from homeassistant.const import (
 )
 
 from .models import (
-    UNKNOWN_STATE,
-    BatteryModule,
     BinarySensorDef,
     ControlEntityDef,
-    ControlFeature,
-    ControlFeatureDef,
-    ControlMode,
-    ControlStatus,
     CoordinatorStatus,
     EnergySensorDef,
+    NumberWritableDef,
+    SensorDef,
+)
+from .powerocean.const import (
+    BATTERY_SOC_KEYS,
+    CONF_MAX_BATTERY_CHARGED_POWER,
+    CONF_MAX_BATTERY_DISCHARGED_POWER,
+    CONF_MAX_GRID_POWER,
+    CONF_MAX_SOLAR_POWER,
+    FEED_IN_POWER_MAX_EFFECTIVE_KEY,
+    FEED_IN_POWER_MAX_KEY,
+    FEED_IN_POWER_MAX_SETTING_KEY,
+)
+from .powerocean.models import (
+    UNKNOWN_STATE,
+    ControlMode,
+    ControlStatus,
     GridFeedMode,
     GridMode,
     InverterModel,
-    NumberWritableDef,
     OperatingMode,
-    RegisterBlock,
-    RegisterDef,
-    RegisterType,
-    SensorDef,
-    Signal,
-    plan_blocks_for_model,
     requires_modbus_control,
+)
+from .powerocean.registers import (
+    REGISTERS_BY_KEY,
 )
 
 DOMAIN: Final = "ef_powerocean_tcpmodbus"
@@ -64,15 +70,10 @@ DEFAULT_SCAN_INTERVAL_S: Final = 5
 DEFAULT_BATTERY_COUNT: Final = 0
 DEFAULT_MAX_SOLAR_POWER: Final = 12000
 DEFAULT_MAX_GRID_POWER: Final = 15000
-DEFAULT_MAX_POWER: Final = 30000
 
 CONF_HOST: Final = "host"
 CONF_PORT: Final = "port"
 CONF_BATTERY_COUNT: Final = "battery_count"
-CONF_MAX_SOLAR_POWER: Final = "solar_power_max"
-CONF_MAX_GRID_POWER: Final = "grid_power_max"
-CONF_MAX_BATTERY_CHARGED_POWER: Final = "battery_charged_power_max"
-CONF_MAX_BATTERY_DISCHARGED_POWER: Final = "battery_discharged_power_max"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_CALC_SOLAR_POWER: Final = "calc_solar_power"
 CONF_CALC_GRID_ENERGY: Final = "calc_grid_energy"
@@ -84,25 +85,6 @@ CONF_INVERTER_MODEL: Final = "inverter_model"
 # user for a counter the inverter reset, so the total continues as in EcoFlow's portal.
 CONF_ENERGY_OFFSETS: Final = "energy_offsets"
 
-MAX_BATTERY_COUNT: Final = 12
-# At most 12 of the 8 kWh modules, with some margin.
-MAX_BATTERY_CAPACITY_WH: Final = 100_000
-
-# Old and new 5 kWh modules. They are similar enough to not affect the behaviour.
-BATTERY_5KWH: Final = BatteryModule(5000, charge_w=2500, discharge_w=4080)
-BATTERY_8KWH: Final = BatteryModule(8030, charge_w=4100, discharge_w=6400)
-BATTERY_MODULES: Final = (BATTERY_5KWH, BATTERY_8KWH)
-# Modules can be mixed in any way and the capacity does not show the mix, so take
-# the highest rate of any module to never set a limit too low.
-BATTERY_CHARGE_W_PER_WH: Final = max(
-    module.charge_w / module.reported_wh for module in BATTERY_MODULES
-)
-BATTERY_DISCHARGE_W_PER_WH: Final = max(
-    module.discharge_w / module.reported_wh for module in BATTERY_MODULES
-)
-
-MAX_FAULT_EVENTS: Final = 20
-
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 
 # Inverters on Wi-Fi can answer slowly (#42). A request and its resend hold the
@@ -111,101 +93,11 @@ MODBUS_REQUEST_TIMEOUT_S: Final = 10
 # Room for a request that times out and its retry, and well under the sum of all
 # request timeouts, which could pass minutes.
 MODBUS_POLL_BUDGET_S: Final = 25
-
-# The inverter runs on its app settings and merely stores the commands it is sent,
-# until this register is written; each write buys it a minute of obeying them. Every
-# constant below is seconds measured against that one deadline.
-HEARTBEAT_REGISTER: Final = 40608
-HEARTBEAT_VALUE: Final = 1
-# The inverter's deadline: it stops obeying once the last accepted write is older.
-HEARTBEAT_WINDOW_S: Final = 60
-# How often to write, so a missed write still leaves two more before the deadline.
-HEARTBEAT_INTERVAL_S: Final = 20
-# Offsets the write from the poll tick, so the two rarely land on the same second.
-HEARTBEAT_JITTER_S: Final = 2
-# A write this recent still holds the deadline off, so a command rides on it rather
-# than sending one of its own.
-HEARTBEAT_REUSE_S: Final = 10
-# How long one write may spend waiting between its retries. Below
-# HEARTBEAT_INTERVAL_S, so the retries are over before the next write is due. A
-# write that times out takes longer, but only while the inverter is not answering,
-# when control is lost anyway.
-HEARTBEAT_RETRY_TOTAL_S: Final = 15
-# The shortest gap between two writes. Only reached after a failed one, where the
-# deadline has kept running and waiting a full interval would risk passing it.
-HEARTBEAT_MIN_GAP_S: Final = 5
-# How long to leave the register alone once the inverter has called the request
-# invalid rather than ill-timed, which is what firmware without it answers.
-HEARTBEAT_UNSUPPORTED_RETRY_S: Final = 900
-
-# 40534, write-only. Bit 0 forces the system off-grid and bit 1 shuts it down, so a
-# command touching either is refused before it reaches the wire. Bit 3 is the
-# battery saver switch and bits 4-7 select the control method; the setpoint registers
-# only take effect while their control method is selected here.
-CONTROL_COMMAND_REGISTER: Final = 40534
-CONTROL_COMMAND_UNSAFE_BITS: Final = 0b11
-CONTROL_COMMAND_BATTERY_SAVER_BIT: Final = 3
-CONTROL_COMMAND_METHOD_SHIFT: Final = 4
-CONTROL_COMMAND_METHOD_MASK: Final = 0xF
-
-# The export cap as configured (40538) and as in force (40609). feed_in_power_max
-# is the one the export ceiling follows: the effective cap where the model reports
-# it, the configured one elsewhere. Only the configured cap is ever written.
-FEED_IN_POWER_MAX_SETTING_KEY: Final = "feed_in_power_max_setting"
-FEED_IN_POWER_MAX_EFFECTIVE_KEY: Final = "feed_in_power_max_effective"
-FEED_IN_POWER_MAX_KEY: Final = "feed_in_power_max"
-
-# 40546 and 40548, the most the inverter converts from DC to AC and from AC to DC.
-# The keys predate these names and stay as they are to keep the entities' ids.
-INVERTER_CAPACITY_KEY: Final = "limit_inv_power"
-RECTIFIER_CAPACITY_KEY: Final = "limit_inv_max"
-
-# How far under the device's export cap Export Solar First pins the meter. The inverter
-# holds the meter there by itself, and keeping a little under the cap stops its own
-# overshoot from being curtailed. A Solar Export Limit set lower is used as it is.
-SOLAR_EXPORT_CAP_MARGIN_W: Final = 100.0
-
-ENERGY_RESOLUTION_KWH: Final = 0.01
 STORAGE_VERSION: Final = 1
 STATE_SAVE_DELAY_S: Final = 30
-# A lifetime total held this long while the inverter reports another value raises
-# a repairs issue offering to take the inverter's value. Longer than any glitch on
-# record, a bogus 0 that lasted hours.
-HELD_TOTAL_ISSUE_AFTER_S: Final = 24 * 3600
-# The grid energy registers, which some inverters leave at 0 while Grid Power reads
-# right (#218). Grid energy can then be integrated from Grid Power instead.
-GRID_ENERGY_REGISTER_KEYS: Final = (
-    "grid_import_total",
-    "grid_import_today",
-    "grid_export_total",
-    "grid_export_today",
-)
-# Grid Power is not integrated across a longer gap between two readings, so an
-# outage adds no made-up energy.
-GRID_ENERGY_MAX_GAP_S: Final = 120
-# The grid energy registers reading 0 this long, while this much energy flowed
-# through the grid, raises a repairs issue offering to integrate Grid Power. As long
-# as a held total, since a bogus 0 has lasted hours.
-GRID_ENERGY_ISSUE_AFTER_S: Final = HELD_TOTAL_ISSUE_AFTER_S
-GRID_ENERGY_ISSUE_MIN_KWH: Final = 1.0
 # Where a user reports a held total they believe is wrong, with the bug form's
 # fields filled in from the device.
 BUG_REPORT_URL: Final = "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues/new"
-# EcoFlow's portal page with the lifetime energy totals, in one of the languages
-# below. The first is used for any other language.
-ECOFLOW_PORTAL_LANGUAGES: Final = ("en", "de")
-ECOFLOW_PORTAL_HISTORY_URL: Final = "https://user-portal.ecoflow.com/user/eu/{language}/main/home/dashboard/historicalData"
-# The lifetime totals EcoFlow's portal shows, so the ones a user can correct to it.
-# The inverter's AC input and output totals are not among them.
-ECOFLOW_PORTAL_TOTALS: Final = frozenset(
-    {
-        "solar_total",
-        "bat_discharged_total",
-        "bat_charged_total",
-        "grid_import_total",
-        "grid_export_total",
-    }
-)
 MODBUS_DISABLED_READ_THRESHOLD: Final = 3
 
 
@@ -215,248 +107,9 @@ UNIT_OF_RATIO: Final = "%"
 
 DEFAULT_INVERTER_MODEL: Final = InverterModel.POWEROCEAN_THREE_PHASE
 
-
-PROTOCOL_VERSION: Final = RegisterDef("protocol_version", 40001, RegisterType.UINT16)
-PRODUCT_CATEGORY: Final = RegisterDef("product_category", 40002, RegisterType.UINT16)
-PRODUCT_NUMBER: Final = RegisterDef("product_number", 40003, RegisterType.UINT16)
-SERIAL_NUMBER: Final = RegisterDef("serial_number", 40004, RegisterType.SERIAL)
-FIRMWARE_VERSION: Final = RegisterDef("firmware_version", 40012, RegisterType.UINT32)
-
-DEVICE_ADDRESS: Final = RegisterDef("device_address", 40014, RegisterType.UINT16)
-
-# Read on every connect, not on every poll.
-DEVICE_INFO_BLOCK: Final = RegisterBlock(
-    (PRODUCT_CATEGORY, PRODUCT_NUMBER, SERIAL_NUMBER, FIRMWARE_VERSION)
-)
-# Read one at a time, so a model that refuses one still reports the other.
-DEVICE_INFO_EXTRA: Final = (PROTOCOL_VERSION, DEVICE_ADDRESS)
-
-FAULT_KEYS: Final = tuple(
-    f"fault_{fault_number}" for fault_number in range(1, MAX_FAULT_EVENTS + 1)
-)
-
-# Read from an external EcoFlow Smart Meter at the grid connection. Without one the
-# device reads 0 in all of them, as on a PowerOcean Plus that relies on its built-in
-# meter, whose readings show as the inverter's voltage and current (#240).
-EXTERNAL_METER_KEYS: Final = (
-    "grid_voltage_l1",
-    "grid_voltage_l2",
-    "grid_voltage_l3",
-    "grid_current_l1",
-    "grid_current_l2",
-    "grid_current_l3",
-)
-
-BATTERY_SOC_KEYS: Final = tuple(
-    f"soc_battery_{battery_number}"
-    for battery_number in range(1, MAX_BATTERY_COUNT + 1)
-)
-
 # Polls in a row an optional read may time out or lose the link before it is no
 # longer polled.
 OPTIONAL_STALLS_TO_DROP: Final = 3
-
-# Every polled register, by absolute Modbus address. Order is for readability only;
-# the reads are worked out by plan_blocks().
-MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
-    RegisterDef("grid_connection_code", 40513, RegisterType.UINT16, optional=True),
-    RegisterDef("house_power", 40519, signal=Signal.MEASURE),
-    RegisterDef("grid_power", 40521, signal=Signal.MEASURE),
-    RegisterDef("solar_power", 40523, signal=Signal.MEASURE),
-    RegisterDef("battery_power", 40525, signal=Signal.MEASURE),
-    RegisterDef("battery_soc", 40527, RegisterType.UINT16, signal=Signal.LEVEL),
-    RegisterDef("inverter_rated_power", 40528, RegisterType.UINT32),
-    RegisterDef("system_modes", 40530, RegisterType.UINT32, signal=Signal.STATUS),
-    RegisterDef(
-        "system_state_2",
-        40532,
-        RegisterType.UINT32,
-        optional=True,
-        signal=Signal.STATUS,
-    ),
-    RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
-    RegisterDef("grid_feed_mode", 40537, RegisterType.UINT16),
-    # The two export caps: 40538 is the one configured, and the only one that takes
-    # a write; 40609 is the one in force after the internal safety rules.
-    # feed_in_power_max is derived from them per model.
-    RegisterDef(
-        FEED_IN_POWER_MAX_SETTING_KEY, 40538, RegisterType.UINT32, optional=True
-    ),
-    RegisterDef("breaker_capacity", 40540, RegisterType.UINT16, optional=True),
-    RegisterDef("device_led_brightness", 40541, RegisterType.UINT16),
-    # Setpoints that take effect the moment the matching control method is engaged.
-    RegisterDef("system_power_setpoint", 40542, RegisterType.INT32),
-    RegisterDef("inverter_power_setpoint", 40544, RegisterType.INT32),
-    RegisterDef(INVERTER_CAPACITY_KEY, 40546, RegisterType.UINT32),
-    RegisterDef(RECTIFIER_CAPACITY_KEY, 40548, RegisterType.UINT32),
-    # Rectifying positive, inverting negative.
-    RegisterDef(
-        "inverter_output_power",
-        40550,
-        RegisterType.INT32,
-        optional=True,
-        signal=Signal.MEASURE,
-    ),
-    RegisterDef("battery_capacity", 40552, RegisterType.UINT32),
-    RegisterDef("battery_discharge_power_limit", 40554, RegisterType.UINT32),
-    RegisterDef("battery_charge_power_limit", 40556, RegisterType.UINT32),
-    # Read from an external meter (EXTERNAL_METER_KEYS), unlike voltage_l1 and
-    # current_l1 below, which the inverter measures itself. On a PowerOcean Plus
-    # those come from its built-in meter at the GRID terminals.
-    RegisterDef("grid_current_l1", 40559, optional=True, signal=Signal.MEASURE),
-    RegisterDef("grid_current_l2", 40561, optional=True, signal=Signal.MEASURE),
-    RegisterDef("grid_current_l3", 40563, optional=True, signal=Signal.MEASURE),
-    RegisterDef("grid_voltage_l1", 40565, optional=True, signal=Signal.JITTER),
-    RegisterDef("grid_voltage_l2", 40567, optional=True, signal=Signal.JITTER),
-    RegisterDef("grid_voltage_l3", 40569, optional=True, signal=Signal.JITTER),
-    RegisterDef("battery_power_setpoint", 40571, RegisterType.INT32),
-    RegisterDef("feed_in_power_max_percent", 40573, RegisterType.UINT16, optional=True),
-    RegisterDef("battery_voltage", 40574, signal=Signal.JITTER),
-    RegisterDef("battery_current", 40576, signal=Signal.MEASURE),
-    RegisterDef("battery_temperature", 40578, signal=Signal.MEASURE),
-    RegisterDef("voltage_l1", 40580, signal=Signal.JITTER),
-    RegisterDef("voltage_l2", 40582, signal=Signal.JITTER),
-    RegisterDef("voltage_l3", 40584, signal=Signal.JITTER),
-    RegisterDef("current_l1", 40586, signal=Signal.MEASURE),
-    RegisterDef("current_l2", 40588, signal=Signal.MEASURE),
-    RegisterDef("current_l3", 40590, signal=Signal.MEASURE),
-    RegisterDef("inverter_temperature", 40592, signal=Signal.MEASURE),
-    RegisterDef("frequency", 40594, signal=Signal.JITTER),
-    RegisterDef("pv1_voltage", 40596, signal=Signal.MEASURE),
-    RegisterDef("pv2_voltage", 40598, signal=Signal.MEASURE),
-    RegisterDef("pv3_voltage", 40600, signal=Signal.MEASURE),
-    RegisterDef("pv1_current", 40602, signal=Signal.MEASURE),
-    RegisterDef("pv2_current", 40604, signal=Signal.MEASURE),
-    RegisterDef("pv3_current", 40606, signal=Signal.MEASURE),
-    # 40609 refuses writes (exception 2 on a PowerOcean Three Phase, issue #89).
-    RegisterDef(FEED_IN_POWER_MAX_EFFECTIVE_KEY, 40609, RegisterType.UINT32),
-    RegisterDef("fault_count", 42049, RegisterType.UINT16, signal=Signal.STATUS),
-    *(
-        RegisterDef(
-            key, 42049 + fault_number, RegisterType.UINT16, signal=Signal.STATUS
-        )
-        for fault_number, key in enumerate(FAULT_KEYS, start=1)
-    ),
-    RegisterDef("battery_count", 42081, RegisterType.UINT16),
-    *(
-        RegisterDef(
-            key, 42081 + battery_number, RegisterType.UINT16, signal=Signal.LEVEL
-        )
-        for battery_number, key in enumerate(BATTERY_SOC_KEYS, start=1)
-    ),
-    RegisterDef("grid_import_total", 42161, signal=Signal.COUNTER),
-    RegisterDef("grid_import_today", 42163, signal=Signal.COUNTER),
-    RegisterDef("grid_export_total", 42177, signal=Signal.COUNTER),
-    RegisterDef("grid_export_today", 42179, signal=Signal.COUNTER),
-    RegisterDef("inverter_ac_in_total", 42193, optional=True, signal=Signal.COUNTER),
-    RegisterDef("inverter_ac_in_today", 42195, optional=True, signal=Signal.COUNTER),
-    RegisterDef("inverter_ac_out_total", 42209, optional=True, signal=Signal.COUNTER),
-    RegisterDef("inverter_ac_out_today", 42211, optional=True, signal=Signal.COUNTER),
-    RegisterDef("bat_charged_total", 42225, signal=Signal.COUNTER),
-    RegisterDef("bat_charged_today", 42227, signal=Signal.COUNTER),
-    RegisterDef("bat_discharged_total", 42241, signal=Signal.COUNTER),
-    RegisterDef("bat_discharged_today", 42243, signal=Signal.COUNTER),
-    RegisterDef("solar_total", 42257, signal=Signal.COUNTER),
-    RegisterDef("solar_today", 42259, signal=Signal.COUNTER),
-    # In var. Only in EcoFlow's register schema, confirmed on a PowerOcean Plus, where
-    # it follows the built-in meter like inverter_output_power. Read on its own, far
-    # from the other registers, so a model without it only drops this read. Listed
-    # last, as the tests fill each register with a value from its place here.
-    RegisterDef(
-        "inverter_reactive_power",
-        40024,
-        RegisterType.INT16,
-        optional=True,
-        signal=Signal.MEASURE,
-    ),
-)
-
-REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTERS}
-
-# Registers listed for the PowerOcean in EcoFlow's register schema, or in the V1.0
-# protocol, that are not polled. The schema:
-# https://github.com/ecoflow-oasis-official/ha-ecoflow-official/blob/main/custom_components/ha_ecoflow_official/registers_schema.py
-# They are only candidates: most are
-# missing from the V1.0 protocol, which leaves 0x0262 (40611) to 0x07FF reserved,
-# and the rest read constant, redundant or unclear values on the hardware so far.
-# Only the register scan reads them, so each can be checked on a live inverter
-# before it is polled or gets an entity. The comment by each says what we think it
-# holds, with its address in the specification.
-CANDIDATE_REGISTERS: Final[tuple[RegisterDef, ...]] = (
-    # 0x0016, total active power at the inverter; reads 0 on a PowerOcean Plus.
-    RegisterDef("inverter_total_active_power", 40023, RegisterType.INT16),
-    # 0x0205, the time zone times 4, signed; the V1.0 protocol calls it unused.
-    RegisterDef("time_zone", 40518, RegisterType.INT16),
-    # 0x0262, an unknown battery state enum; read 3 both idle and charging.
-    RegisterDef("battery_state", 40611, RegisterType.INT16),
-    # 0x0263, read-write, 0 remote, 1 local; read 1 with Modbus control on too.
-    RegisterDef("battery_control_mode", 40612, RegisterType.UINT16),
-    # 0x0264, reactive power of the whole system in var; reads 0 under load.
-    RegisterDef("system_reactive_power", 40613),
-    # 0x0266, the rated active power, the same as inverter_rated_power.
-    RegisterDef("rated_max_active_power", 40615, RegisterType.UINT16),
-    # 0x0267, the apparent power rating in VA.
-    RegisterDef("max_apparent_power", 40616, RegisterType.UINT16),
-    # 0x0268 and 0x0269, the reactive power the inverter may supply and absorb.
-    RegisterDef("max_reactive_output_power", 40617, RegisterType.UINT16),
-    RegisterDef("max_reactive_input_power", 40618, RegisterType.UINT16),
-    # 0x0270 and 0x0271, the power factor limits, likely in 0.001 (800 = 0.8).
-    RegisterDef("pf_limit_supplying_reactive", 40625, RegisterType.UINT16),
-    RegisterDef("pf_limit_absorbing_reactive", 40626, RegisterType.UINT16),
-    # 0x0272 and 0x0273, named battery limits, but they read the inverter rating.
-    RegisterDef("battery_max_charge_capability", 40627, RegisterType.UINT16),
-    RegisterDef("battery_max_discharge_capability", 40628, RegisterType.UINT16),
-    # 0x0274, read-write, a cap on the inverter's output in 0.1 %; reads 0.
-    RegisterDef("inverter_active_output_percent", 40629, RegisterType.UINT16),
-    # 0x0275 to 0x0278, write-only switches meant for Australia; they read 0.
-    RegisterDef("vpp_control_mode", 40630, RegisterType.UINT16),
-    RegisterDef("soft_start_switch", 40631, RegisterType.UINT16),
-    RegisterDef("battery_power_switch", 40632, RegisterType.UINT16),
-    RegisterDef("force_off_grid", 40633, RegisterType.UINT16),
-    # 0x0840, 0x0850 and 0x0860, net energy since midnight at the meter (+ drawn),
-    # the inverter (+ rectified) and the battery (+ charged). Each equals the
-    # difference of two daily counters that are polled.
-    RegisterDef("meter_energy_today", 42113),
-    RegisterDef("inverter_energy_today", 42129),
-    RegisterDef("battery_energy_today", 42145),
-    # 0x1200 and 0x1202, house consumption; refused, past the 44096 address window.
-    RegisterDef("house_consumption_total", 44609),
-    RegisterDef("house_consumption_today", 44611),
-)
-
-# The address ranges the register scan reads beyond the map, first and last address.
-REGISTER_SCAN_RANGES: Final[tuple[tuple[int, int], ...]] = (
-    (40000, 40700),
-    (42000, 42300),
-)
-
-# Values calculated from polled readings, by the readings they come from. A value
-# from a reading the checks distrust is not shown either.
-DERIVED_FROM: Final[dict[str, frozenset[str]]] = {
-    "bat_remaining": frozenset({"battery_soc"}),
-    **{
-        f"pv{number}_power": frozenset({f"pv{number}_voltage", f"pv{number}_current"})
-        for number in (1, 2, 3)
-    },
-}
-
-
-def register_blocks_for(
-    inverter_model: InverterModel, *, exclude: Collection[str] = ()
-) -> tuple[RegisterBlock, ...]:
-    """Return register blocks resolved for an inverter model.
-
-    The heartbeat register is kept out of them, at the cost of one more read for the
-    effective feed-in cap next to it. The inverter answers a write to a register it
-    is serving a read for with "device busy", and losing the heartbeat that way
-    costs a minute of control. Keys in exclude are not read at all.
-    """
-    return plan_blocks_for_model(
-        MODBUS_REGISTERS,
-        inverter_model,
-        avoid=(HEARTBEAT_REGISTER,),
-        exclude=exclude,
-    )
 
 
 # The control method the device reports in bits 7-10 of the System Status (40530),
@@ -1020,66 +673,6 @@ READING_CHECK_BINARY_SENSOR: Final = BinarySensorDef(
     entity_category=EntityCategory.DIAGNOSTIC,
 )
 
-CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {
-    ControlFeature.AUTOMATIC: ControlFeatureDef(method=ControlMode.DEFAULT),
-    ControlFeature.HOLD_BATTERY: ControlFeatureDef(
-        method=ControlMode.BATTERY_LIMITS,
-        setpoint_key="battery_power_setpoint",
-        measure_key="battery_power",
-    ),
-    ControlFeature.CHARGE_BATTERY: ControlFeatureDef(
-        method=ControlMode.BATTERY_LIMITS,
-        setpoint_key="battery_power_setpoint",
-        sign=1,
-        measure_key="battery_power",
-        config_limit_key=CONF_MAX_BATTERY_CHARGED_POWER,
-        default_power=2000.0,
-    ),
-    # Charging has no converter capacity to respect: PV on the DC side can charge
-    # the battery alongside the rectifier, so its capacity alone is no ceiling.
-    ControlFeature.DISCHARGE_BATTERY: ControlFeatureDef(
-        method=ControlMode.BATTERY_LIMITS,
-        setpoint_key="battery_power_setpoint",
-        sign=-1,
-        measure_key="battery_power",
-        config_limit_key=CONF_MAX_BATTERY_DISCHARGED_POWER,
-        capacity_key=INVERTER_CAPACITY_KEY,
-        default_power=2000.0,
-    ),
-    ControlFeature.EXPORT_TO_GRID: ControlFeatureDef(
-        method=ControlMode.SYSTEM_FEED,
-        setpoint_key="system_power_setpoint",
-        sign=-1,
-        measure_key="grid_power",
-        limit_key=FEED_IN_POWER_MAX_KEY,
-        capacity_key=INVERTER_CAPACITY_KEY,
-        default_power=3000.0,
-    ),
-    # The target is the meter reading, so the house counts towards it: bounded by
-    # the grid connection rather than by what the inverter can convert.
-    ControlFeature.IMPORT_FROM_GRID: ControlFeatureDef(
-        method=ControlMode.SYSTEM_FEED,
-        setpoint_key="system_power_setpoint",
-        sign=1,
-        measure_key="grid_power",
-        config_limit_key=CONF_MAX_GRID_POWER,
-        bounded_by_rating=False,
-        default_power=3000.0,
-    ),
-    # Never commanded as such: it runs Automatic, Hold or Export to Grid, whichever
-    # suits the surplus, so the method and setpoint here are those of its hold. Its
-    # power, the Solar Export Limit, goes up to the export cap, or to the most the
-    # inverter can put out without one, and left alone it reads that.
-    ControlFeature.EXPORT_SOLAR_FIRST: ControlFeatureDef(
-        method=ControlMode.BATTERY_LIMITS,
-        setpoint_key="battery_power_setpoint",
-        measure_key="battery_power",
-        capacity_key=INVERTER_CAPACITY_KEY,
-        default_power=float(DEFAULT_MAX_POWER),
-        power_optional=True,
-    ),
-}
-
 # No entity category, so Home Assistant shows the mode and its power next to each
 # other under Controls rather than mixed in with the settings that always apply.
 BATTERY_MODE_SELECT: Final = ControlEntityDef(
@@ -1097,47 +690,12 @@ BATTERY_RESERVE_SOC_NUMBER: Final = ControlEntityDef(
     entity_category=EntityCategory.CONFIG,
     availability=requires_modbus_control,
 )
-# The inverter's own reserve, the backup reserve the EcoFlow app sets. Written by the
-# Battery Reserve on models that act on it, shown as the App Backup Reserve on the rest.
-BATTERY_RESERVE_REGISTER_KEY: Final = "min_soc_limit"
 # The number that wrote it before the Battery Reserve took over, removed on setup.
 RETIRED_MIN_SOC_NUMBER_KEY: Final = "min_soc_limit_control"
 # Options: native or emulated Battery Reserve, prefilled with the model's.
 CONF_BATTERY_RESERVE: Final = "battery_reserve"
-DEFAULT_CHARGE_LIMIT_SOC: Final = 100.0
-DEFAULT_BATTERY_RESERVE_SOC: Final = 0.0
-
-GUARD_SOC_HYSTERESIS: Final = 5.0
-# How far a battery stopped at a guard's limit must move away before it may move
-# back towards it, so a state of charge flickering by a percent stays stopped.
-GUARD_RETURN_SOC: Final = 2.0
-GUARD_POWER_DEADBAND_W: Final = 200.0
-# Resolution of a guard's tracked setpoint, so an ordinary load does not rewrite it
-# every poll. Always rounded towards zero, which leaves the remainder to the grid.
-GUARD_TRACKING_STEP_W: Final = 100.0
-# Seconds to wait for the battery to reach a new setpoint before correcting it again.
-GUARD_SETTLE_S: Final = 30.0
-# Minimum power in the direction a guard allows before it hands control back.
-GUARD_HANDBACK_W: Final = 500.0
-# On models whose guards do not track a setpoint, the power in the allowed direction
-# that hands control back. Control is taken back once that power reaches zero, so
-# this is also the width of the hysteresis band.
-GUARD_DIRECT_HANDBACK_W: Final = 20.0
-# How long that power must last before a guard hands control back.
-GUARD_HANDBACK_S: Final = 60.0
-# Longest hand-back wait; the wait doubles each time a hand-back ends early.
-GUARD_HANDBACK_MAX_S: Final = 900.0
-MIN_CONTROL_DWELL_S: Final = 60.0
-CONTROL_STATUS_DAMPING_POLLS: Final = 3
 # How many failed reading checks keep a snapshot of the readings for diagnostics.
 READING_CHECK_SNAPSHOTS: Final = 5
-# How long the inverter gets to report a command it was sent, and how often it is
-# sent again when it does not, before the status says it is not accepted.
-FOLLOW_GRACE_S: Final = 15.0
-FOLLOW_RESENDS: Final = 2
-# 0 means "no limit" to the inverter, not "hold at zero", so hold at the lowest
-# power instead.
-HOLD_SETPOINT_W: Final = 1.0
 
 # Not a device register: whether the selected mode is doing anything, and why not.
 CONTROL_STATUS_SENSOR: Final = SensorDef(
@@ -1162,9 +720,6 @@ CONTROL_TEST_SENSOR: Final = SensorDef(
     entity_category=EntityCategory.DIAGNOSTIC,
     options=("idle", "running", "done", "aborted", "failed"),
 )
-
-# Ceiling for a mode whose limit registers are all missing or read zero.
-CONTROL_POWER_FALLBACK_MAX: Final = DEFAULT_MAX_POWER
 
 
 # Map of all modbus registers available for writing operations.

@@ -15,7 +15,8 @@ import pytest
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util.yaml import parse_yaml
 
-from custom_components.ef_powerocean_tcpmodbus import const, models, repairs, watchdog
+from custom_components.ef_powerocean_tcpmodbus import const, repairs, watchdog
+from custom_components.ef_powerocean_tcpmodbus.powerocean import models as device_models
 from custom_components.ef_powerocean_tcpmodbus.repairs import (
     AlertRepairFlow,
     GridEnergyRepairFlow,
@@ -67,8 +68,8 @@ def _held_coordinator() -> SimpleNamespace:
         describe_held_totals=lambda: HELD,
         async_take_device_totals=AsyncMock(return_value={"grid_export_total": 507.5}),
         async_keep_shown_totals=Mock(),
-        inverter_model=models.InverterModel.POWEROCEAN_PLUS,
-        identity=models.DeviceIdentity(firmware_version="V3.0.20.54"),
+        inverter_model=device_models.InverterModel.POWEROCEAN_PLUS,
+        identity=device_models.DeviceIdentity(firmware_version="V3.0.20.54"),
     )
 
 
@@ -106,7 +107,7 @@ def test_every_model_name_is_an_option_of_the_bug_form() -> None:
     fields = {block.get("id"): block for block in form["body"]}
     options = fields["device_type"]["attributes"]["options"]
 
-    for model in models.InverterModel:
+    for model in device_models.InverterModel:
         assert model.traits.display_name in options
     for key in ("ha_version", "integration_version", "device_firmware", "steps"):
         assert key in fields

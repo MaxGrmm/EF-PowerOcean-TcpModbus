@@ -16,14 +16,13 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
 from custom_components.ef_powerocean_tcpmodbus import const, repairs, watchdog
-from custom_components.ef_powerocean_tcpmodbus.models import (
-    AlertVerbosity,
-    ControlStatus,
-)
-from custom_components.ef_powerocean_tcpmodbus.reading_checks import Finding
+from custom_components.ef_powerocean_tcpmodbus.models import AlertVerbosity
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import ControlStatus
+from custom_components.ef_powerocean_tcpmodbus.powerocean.reading_checks import Finding
 
 T0 = datetime(2026, 11, 19, 12, 0, tzinfo=UTC)
-CONTROL = const.CONTROL_COMMAND_REGISTER
+CONTROL = device_const.CONTROL_COMMAND_REGISTER
 
 
 def _view(seconds: float = 0, **changes: Any) -> watchdog.PollView:

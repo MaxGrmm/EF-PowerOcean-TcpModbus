@@ -14,7 +14,7 @@ from homeassistant.util.yaml import load_yaml_dict
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const
-from custom_components.ef_powerocean_tcpmodbus.models import InverterModel
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import InverterModel
 from custom_components.ef_powerocean_tcpmodbus.switch import (
     BATTERY_SAVER_SWITCH,
     MODBUS_CONTROL_SWITCH,
