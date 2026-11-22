@@ -12,7 +12,7 @@
 > This integration communicates directly with your device over your local network via
 > Modbus TCP. No cloud connection required. Modbus is disabled on the inverter by
 > default, so your EcoFlow partner or installer has to enable it before setup, see
-> [Prerequisites](#prerequisites).
+> [Prerequisites](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus#prerequisites).
 
 <!-- ha-marketplace:exclude-start -->
 <!-- toc depth=3 -->
@@ -102,7 +102,7 @@
 - **No automatic discovery.** The inverter doesn't announce itself on the network, so it
   is added by IP address. Give it a reserved address in your router so it can't move.
 - **One inverter per entry.** Add each inverter as its own entry.
-- **Not every model is tested.** See [Supported Devices](#supported-devices); the
+- **Not every model is tested.** See [Supported Devices](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus#supported-devices); the
   PowerOcean DC Fit is untested, and controls are untested on several models.
 - **Some registers read a constant 0 on some models.** Sensors for those are left out
   on the models concerned rather than showing a value that misleads.
