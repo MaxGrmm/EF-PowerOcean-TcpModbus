@@ -14,6 +14,7 @@
 > default, so your EcoFlow partner or installer has to enable it before setup, see
 > [Prerequisites](#prerequisites).
 
+<!-- ha-marketplace:exclude-start -->
 <!-- toc depth=3 -->
 
 ## Contents
@@ -43,6 +44,7 @@
   - [License](#license)
 
 <!-- tocstop -->
+<!-- ha-marketplace:exclude-end -->
 
 ---
 

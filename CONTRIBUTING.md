@@ -36,7 +36,7 @@ uv run pytest
 uv run pre-commit run --all-files
 ```
 
-Pre-commit runs Ruff checks and formatting, Prettier for Markdown, the contents lists between `<!-- toc -->` markers (`<!-- toc depth=3 -->` nests third-level headings), and basic YAML, JSON, whitespace, and line-ending checks. It's recommended to have pre-commit installed (see above) so that it runs automatically on commit. This is a required step in CI and it will fail on any deviaton. Pull requests are also validated by HACS and hassfest.
+Pre-commit runs Ruff checks and formatting, Prettier for Markdown, the contents lists between `<!-- toc -->` markers (`<!-- toc depth=3 -->` nests third-level headings; the README's list sits between `ha-marketplace:exclude` markers, since the Home Assistant Marketplace can't follow links within a page), and basic YAML, JSON, whitespace, and line-ending checks. It's recommended to have pre-commit installed (see above) so that it runs automatically on commit. This is a required step in CI and it will fail on any deviaton. Pull requests are also validated by HACS and hassfest.
 
 All checks should pass before requesting review.
 
