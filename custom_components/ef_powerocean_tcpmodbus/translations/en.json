@@ -768,7 +768,7 @@
     },
     "run_register_scan": {
       "name": "Run register scan",
-      "description": "Reads, without writing anything, every register this integration maps, the registers from EcoFlow's newer point table it does not poll yet, and the address ranges around them, as scripts/register_scan.py does. Takes a minute or two between the polls. The action returns at once; a notification says when the report is in the diagnostics download, ready to attach to a GitHub issue.",
+      "description": "Reads, without writing anything, every register this integration maps, the registers from EcoFlow's register schema it does not poll yet, and the address ranges around them, as scripts/register_scan.py does. Takes a minute or two between the polls. The action returns at once; a notification says when the report is in the diagnostics download, ready to attach to a GitHub issue.",
       "fields": {
         "device_id": {
           "name": "Inverter",

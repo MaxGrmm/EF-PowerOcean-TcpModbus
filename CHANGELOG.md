@@ -4,7 +4,7 @@
 
 ### Added
 
-- The register scan reads the registers EcoFlow's newer point table lists for the PowerOcean that the integration does not poll yet, such as the battery control mode, the battery's charge and discharge capability and the house consumption counters, so they can be confirmed on a live inverter first.
+- The register scan reads the registers EcoFlow's register schema lists for the PowerOcean that the integration does not poll yet, such as the battery control mode, the reactive power limits and the house consumption counters, so they can be confirmed on a live inverter first.
 - A **Run register scan** action that reads, without writing anything, the register map, those candidate registers and the address ranges around them from Home Assistant, and puts the report in the diagnostics download, so an untested model can be reported without running the script.
 
 ### Changed

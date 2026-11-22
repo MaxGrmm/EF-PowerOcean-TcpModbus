@@ -33,10 +33,14 @@ this integration's register handling.
    Where it disagrees with the hardware, the hardware wins, see
    [Where the specification and the hardware disagree](#where-the-specification-and-the-hardware-disagree).
    A copy is kept in [docs/EcoFlow_Open_Modbus_Protocol_V1.0_June_2026.pdf](EcoFlow_Open_Modbus_Protocol_V1.0_June_2026.pdf).
-2. **Cross-checks against the EcoFlow web portal.** Live values read over Modbus,
+2. **[EcoFlow's register schema](https://github.com/ecoflow-oasis-official/ha-ecoflow-official/blob/main/custom_components/ha_ecoflow_official/registers_schema.py)**, from EcoFlow's official Home Assistant
+   integration. It lists registers the V1.0 protocol leaves out or marks reserved.
+   Those are read by the register scan as `CANDIDATE_REGISTERS` until the hardware
+   confirms what they hold.
+3. **Cross-checks against the EcoFlow web portal.** Live values read over Modbus,
    compared against what the portal reported for the same system at the same
    moment. This is what settles any disagreement about what a register holds.
-3. **Community reverse engineering.** The original version of this document was
+4. **Community reverse engineering.** The original version of this document was
    produced by scanning 40001–44096 on a PowerOcean Plus and matching values
    against the Cloud API, before the specification was published. It has since
    confirmed every region the integration reads.

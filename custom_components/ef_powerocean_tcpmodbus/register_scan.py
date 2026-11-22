@@ -1,7 +1,7 @@
 """The register scan, run from Home Assistant when the user asks for it.
 
 It reads what scripts/register_scan.py reads, once: every register the model's map
-declares, the candidate registers from EcoFlow's newer point table, and the address
+declares, the candidate registers from EcoFlow's register schema, and the address
 ranges around them. Nothing is written. The words are kept as the device sent them,
 so the report can be read the same way as a run of the script, and the diagnostics
 download carries it. The script's repeated sampling and its --watch mode stay in the

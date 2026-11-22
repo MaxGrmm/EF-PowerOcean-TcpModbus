@@ -361,37 +361,55 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
 
 REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTERS}
 
-# Listed for the PowerOcean in EcoFlow's newer point table, but not confirmed on any
-# model yet. Only scripts/register_scan.py reads them, so each one can be checked
-# against a live inverter before it is polled or gets an entity.
+# Registers listed for the PowerOcean in EcoFlow's register schema, or in the V1.0
+# protocol, that are not polled. The schema:
+# https://github.com/ecoflow-oasis-official/ha-ecoflow-official/blob/main/custom_components/ha_ecoflow_official/registers_schema.py
+# They are only candidates: most are
+# missing from the V1.0 protocol, which leaves 0x0262 (40611) to 0x07FF reserved,
+# and the rest read constant, redundant or unclear values on the hardware so far.
+# Only the register scan reads them, so each can be checked on a live inverter
+# before it is polled or gets an entity. The comment by each says what we think it
+# holds, with its address in the specification.
 CANDIDATE_REGISTERS: Final[tuple[RegisterDef, ...]] = (
+    # 0x0016, total active power at the inverter; reads 0 on a PowerOcean Plus.
     RegisterDef("inverter_total_active_power", 40023, RegisterType.INT16),
+    # 0x0017, total reactive power at the inverter in var; follows the meter.
     RegisterDef("inverter_total_reactive_power", 40024, RegisterType.INT16),
+    # 0x0205, the time zone times 4, signed; the V1.0 protocol calls it unused.
     RegisterDef("time_zone", 40518, RegisterType.INT16),
+    # 0x0262, an unknown battery state enum; read 3 both idle and charging.
     RegisterDef("battery_state", 40611, RegisterType.INT16),
-    # 0 remote, 1 local, documented as read-write.
+    # 0x0263, read-write, 0 remote, 1 local; read 1 with Modbus control on too.
     RegisterDef("battery_control_mode", 40612, RegisterType.UINT16),
+    # 0x0264, reactive power of the whole system in var; reads 0 under load.
     RegisterDef("system_reactive_power", 40613),
+    # 0x0266, the rated active power, the same as inverter_rated_power.
     RegisterDef("rated_max_active_power", 40615, RegisterType.UINT16),
+    # 0x0267, the apparent power rating in VA.
     RegisterDef("max_apparent_power", 40616, RegisterType.UINT16),
+    # 0x0268 and 0x0269, the reactive power the inverter may supply and absorb.
     RegisterDef("max_reactive_output_power", 40617, RegisterType.UINT16),
     RegisterDef("max_reactive_input_power", 40618, RegisterType.UINT16),
+    # 0x0270 and 0x0271, the power factor limits, likely in 0.001 (800 = 0.8).
     RegisterDef("pf_limit_supplying_reactive", 40625, RegisterType.UINT16),
     RegisterDef("pf_limit_absorbing_reactive", 40626, RegisterType.UINT16),
+    # 0x0272 and 0x0273, named battery limits, but they read the inverter rating.
     RegisterDef("battery_max_charge_capability", 40627, RegisterType.UINT16),
     RegisterDef("battery_max_discharge_capability", 40628, RegisterType.UINT16),
-    # In 0.1 %, documented as read-write.
+    # 0x0274, read-write, a cap on the inverter's output in 0.1 %; reads 0.
     RegisterDef("inverter_active_output_percent", 40629, RegisterType.UINT16),
-    # Documented as write-only and for Australia only; a read shows whether the
-    # PowerOcean answers them at all.
+    # 0x0275 to 0x0278, write-only switches meant for Australia; they read 0.
     RegisterDef("vpp_control_mode", 40630, RegisterType.UINT16),
     RegisterDef("soft_start_switch", 40631, RegisterType.UINT16),
     RegisterDef("battery_power_switch", 40632, RegisterType.UINT16),
     RegisterDef("force_off_grid", 40633, RegisterType.UINT16),
-    # Each named only "total energy (today)", with no direction given.
+    # 0x0840, 0x0850 and 0x0860, net energy since midnight at the meter (+ drawn),
+    # the inverter (+ rectified) and the battery (+ charged). Each equals the
+    # difference of two daily counters that are polled.
     RegisterDef("meter_energy_today", 42113),
     RegisterDef("inverter_energy_today", 42129),
     RegisterDef("battery_energy_today", 42145),
+    # 0x1200 and 0x1202, house consumption; refused, past the 44096 address window.
     RegisterDef("house_consumption_total", 44609),
     RegisterDef("house_consumption_today", 44611),
 )

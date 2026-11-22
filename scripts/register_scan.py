@@ -196,9 +196,9 @@ def report_mapped_registers(
 
 
 def report_candidate_registers(reader: RegisterReader) -> None:
-    """Read the registers in EcoFlow's point table that are not mapped yet."""
+    """Read the registers in EcoFlow's register schema that are not mapped yet."""
     print("== Candidate registers not mapped yet ==")
-    print("  From EcoFlow's newer point table; types and meanings are unconfirmed")
+    print("  From EcoFlow's register schema; types and meanings are unconfirmed")
     print(f"  {'key':<34} {'address':>16} {'type':<8} {'value':>14}  raw")
     for register in const.CANDIDATE_REGISTERS:
         row = (

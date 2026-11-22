@@ -779,7 +779,7 @@
     },
     "run_register_scan": {
       "name": "Registerscan ausführen",
-      "description": "Liest, ohne etwas zu schreiben, jedes Register, das diese Integration abbildet, die Register aus EcoFlows neuerer Punkttabelle, die sie noch nicht abfragt, und die Adressbereiche um sie herum, wie scripts/register_scan.py. Dauert zwischen den Abfragen ein bis zwei Minuten. Die Aktion kehrt sofort zurück; eine Benachrichtigung meldet, wenn der Bericht im Diagnosedownload liegt, bereit zum Anhängen an ein GitHub-Issue.",
+      "description": "Liest, ohne etwas zu schreiben, jedes Register, das diese Integration abbildet, die Register aus EcoFlows Register-Schema, die sie noch nicht abfragt, und die Adressbereiche um sie herum, wie scripts/register_scan.py. Dauert zwischen den Abfragen ein bis zwei Minuten. Die Aktion kehrt sofort zurück; eine Benachrichtigung meldet, wenn der Bericht im Diagnosedownload liegt, bereit zum Anhängen an ein GitHub-Issue.",
       "fields": {
         "device_id": {
           "name": "Wechselrichter",
