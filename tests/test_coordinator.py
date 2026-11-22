@@ -45,6 +45,11 @@ from custom_components.ef_powerocean_tcpmodbus.powerocean.grid_energy import (
 from custom_components.ef_powerocean_tcpmodbus.powerocean.telemetry import TelemetryData
 
 
+def _set_verified(coordinator: Any, verified: bool) -> None:
+    """Set whether the device showed its serial, without the writes that unlock."""
+    coordinator.identity_guard._verified = verified
+
+
 @pytest.fixture
 def coordinator():
     instance = coordinator_module.EcoflowCoordinator.__new__(
@@ -75,7 +80,7 @@ def coordinator():
     instance.identity_guard = IdentityGuard(
         instance.hass, instance.config_entry, instance._modbus_client, instance.host
     )
-    instance.identity_guard._verified = True
+    _set_verified(instance, True)
     instance._status = None
     instance._store = None
     instance.identity = device_models.DeviceIdentity()
@@ -1685,7 +1690,7 @@ def _device_info_reads(serial: str) -> AsyncMock:
 def test_the_expected_serial_verifies_the_device_and_allows_writes(
     coordinator, issues
 ) -> None:
-    coordinator.identity_guard._verified = False
+    _set_verified(coordinator, False)
     coordinator._modbus_client.async_read = _device_info_reads("R371ZD1AZH3X0450")
 
     asyncio.run(coordinator.async_read_device_info())
@@ -1717,7 +1722,7 @@ def test_another_serial_blocks_writes_and_keeps_the_known_identity(
 def test_a_poll_against_another_device_fails_without_reading_telemetry(
     coordinator,
 ) -> None:
-    coordinator.identity_guard._verified = False
+    _set_verified(coordinator, False)
     coordinator._modbus_client.async_read = _device_info_reads("R371ZD1AZH3X9999")
 
     with pytest.raises(coordinator_module.IdentityMismatch):
@@ -1981,7 +1986,7 @@ def test_an_optional_read_that_stalls_the_poll_is_dropped_after_a_few(
 
     for _ in range(stalls):
         # A failed poll has the serial number checked again before the next.
-        coordinator.identity_guard._verified = True
+        _set_verified(coordinator, True)
         assert asyncio.run(coordinator.async_get_raw_data()) is None
     assert coordinator.unsupported_registers == {
         "feed_in_power_max_percent",
@@ -2005,7 +2010,7 @@ def test_a_lost_link_on_a_required_read_does_not_count_against_optional_ones(
     coordinator._modbus_client.async_read = AsyncMock(side_effect=TimeoutError())
 
     for _ in range(const.OPTIONAL_STALLS_TO_DROP + 1):
-        coordinator.identity_guard._verified = True
+        _set_verified(coordinator, True)
         asyncio.run(coordinator.async_get_raw_data())
 
     assert coordinator.unsupported_registers == frozenset()
@@ -2019,7 +2024,7 @@ def test_an_optional_read_that_recovers_starts_counting_again(coordinator) -> No
     coordinator._modbus_client.async_read = AsyncMock(side_effect=reads)
 
     for _ in range(2 * const.OPTIONAL_STALLS_TO_DROP - 1):
-        coordinator.identity_guard._verified = True
+        _set_verified(coordinator, True)
         asyncio.run(coordinator.async_get_raw_data())
 
     assert coordinator.unsupported_registers == frozenset()
