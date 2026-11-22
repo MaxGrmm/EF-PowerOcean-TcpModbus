@@ -10,6 +10,10 @@
 
 > ⚠️ This integration communicates directly with your device over your local network via Modbus TCP. No cloud connection required.
 
+> [!IMPORTANT]
+> Modbus is disabled on the inverter by default. Your EcoFlow partner or installer has
+> to enable it before setup, see [Prerequisites](#prerequisites).
+
 <!-- toc -->
 
 ## Contents
@@ -86,6 +90,12 @@
 
 ## Requirements
 
+### Prerequisites
+
+> [!IMPORTANT]
+> Modbus must be enabled by your EcoFlow partner or installer. It is disabled by
+> default!
+
 ### Supported Devices
 
 | Device                       | Read         | Control      |
@@ -103,10 +113,6 @@ Running an untested model? [scripts/register_scan.py](https://github.com/MaxGrmm
 ### Home Assistant Versions
 
 Home Assistant **2025.12.0** is the earliest supported version. HACS blocks installing it on older releases, and CI tests every change against both 2025.12.0 and a recent release.
-
-### Prerequisites
-
-The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled by default!
 
 ---
 
