@@ -36,7 +36,7 @@ uv run pytest
 uv run pre-commit run --all-files
 ```
 
-Pre-commit runs Ruff checks and formatting, Prettier for Markdown, and basic YAML, JSON, whitespace, and line-ending checks. It's recommended to have pre-commit installed (see above) so that it runs automatically on commit. This is a required step in CI and it will fail on any deviaton. Pull requests are also validated by HACS and hassfest.
+Pre-commit runs Ruff checks and formatting, Prettier for Markdown, the contents lists between `<!-- toc -->` markers (`<!-- toc depth=3 -->` nests third-level headings; the README's list sits between `ha-marketplace:exclude` markers, since the Home Assistant Marketplace can't follow links within a page), and basic YAML, JSON, whitespace, and line-ending checks. It's recommended to have pre-commit installed (see above) so that it runs automatically on commit. This is a required step in CI and it will fail on any deviaton. Pull requests are also validated by HACS and hassfest.
 
 All checks should pass before requesting review.
 
@@ -74,7 +74,7 @@ Keep changes within the layer that owns the behavior and place tests alongside t
 
 Register changes need stronger evidence than a field name or a successful read:
 
-- Read the [technical details](README.md#technical-details) and [protocol notes](EcoFlow_PowerOcean_Modbus.md) before changing register handling.
+- Read the [technical details](README.md#technical-details) and [protocol notes](docs/ecoflow-modbus-protocol-implementation.md) before changing register handling.
 - Add decoding and block-planning tests where the change affects either behavior.
 - Treat missing or invalid telemetry as unavailable. Do not replace it with zero, especially for `total_increasing` energy sensors, because that can corrupt Home Assistant long-term statistics.
 - Use synthetic values and placeholder identifiers in tests and fixtures.
@@ -122,7 +122,7 @@ Reading the result:
 
 - Every register reading zero usually means Modbus TCP is switched off in the EcoFlow app, not that the map differs.
 - A refused register that is readable elsewhere means the address moved on that model. Add an `address_overrides` entry to its `RegisterDef` rather than changing the shared address.
-- A `maybe ...` in the `looks like` column is only a guess from the value's magnitude. It's an educated guess, but can be wrong. Use it as a reference together with the [protocol notes](EcoFlow_PowerOcean_Modbus.md).
+- A `maybe ...` in the `looks like` column is only a guess from the value's magnitude. It's an educated guess, but can be wrong. Use it as a reference together with the [protocol notes](docs/ecoflow-modbus-protocol-implementation.md).
 
 To find where a setting in the EcoFlow app lives on Modbus, run it with `--watch` instead. It reads everything a few times to learn which registers move by themselves, then asks you to make one change in the app at a time, waits for it to reach Modbus (`--settle`, default 20 s) and lists the registers that followed. Mapped measurements are left out of that list, as they drift on their own; the ones that show what the inverter did (battery, grid, inverter and house power, and the status word) are shown decoded after each change instead. It ends with a table of both after every step, and stays read-only.
 
@@ -152,7 +152,7 @@ It takes 5 to 10 minutes. `--power` sets the test power (default 1500 W), `--ski
 
 `--reserve-probe` runs a different path for one question: does writing the backup reserve (40536) do what setting it in the app does? Set in the app, a reserve above the SOC makes the inverter charge from the grid up to it, and one at the SOC stops it discharging. The probe tests both effects by writing the register under each control state: without a session, in a session on the default method, with the control word re-sent after the write, and under a battery hold. Before and after the register cases it asks you to set the reserve in the app, without and with a session, as the reference the register is judged against, and it ends by checking whether a value written in a session survives its end. Each case watches for two minutes and puts the reserve back. Run it while the battery is covering the house, as the floor cases are skipped otherwise; `--skip-manual` leaves out the app cases. A model whose register floor case passes can have its `battery_reserve` trait set to native, which makes the Battery Reserve write the inverter's own reserve.
 
-The control methods can also be tested from Home Assistant with the `run_control_test` action, which is what users run after a firmware update (see the README). Both run the tests in [control_test_core.py](custom_components/ef_powerocean_tcpmodbus/control_test_core.py): the same plans, the same verdicts and the same JSON report. The action covers the control methods and the hand-back only; the write order, the app checks, the grid feed switch and the reserve probe stay in the script and show as `not_tested` in its reports. A verdict is one of `followed`, `not_followed`, `unreachable` (battery full or at its reserve), `inconclusive` (already at the target before the command), `skipped`, `write_refused` and `not_tested`.
+The control methods can also be tested from Home Assistant with the `run_control_test` action, which is what users run after a firmware update (see [Testing the controls after a firmware update](docs/battery-control.md#testing-the-controls-after-a-firmware-update)). Both run the tests in [control_test_core.py](custom_components/ef_powerocean_tcpmodbus/control_test_core.py): the same plans, the same verdicts and the same JSON report. The action covers the control methods and the hand-back only; the write order, the app checks, the grid feed switch and the reserve probe stay in the script and show as `not_tested` in its reports. A verdict is one of `followed`, `not_followed`, `unreachable` (battery full or at its reserve), `inconclusive` (already at the target before the command), `skipped`, `write_refused` and `not_tested`.
 
 ### Comparing Firmware
 
@@ -187,7 +187,7 @@ When adding or changing an entity:
 - Update the entity definition and its platform implementation as needed.
 - Add new strings to [translations/en.json](custom_components/ef_powerocean_tcpmodbus/translations/en.json), the English source, and keep [translations/de.json](custom_components/ef_powerocean_tcpmodbus/translations/de.json) in sync with it. Home Assistant loads only the `translations/` folder, so there is no `strings.json` to maintain.
 - Add state translations for enum entities.
-- Update the entity tables or behavior documentation in [README.md](README.md).
+- Update the entity tables in [docs/sensors.md](docs/sensors.md), and the behavior documentation in [README.md](README.md) or [docs/battery-control.md](docs/battery-control.md).
 - Preserve entity keys and unique IDs unless a migration is included. Changing them can orphan existing entities and dashboard references.
 
 ## Pull Requests
@@ -199,7 +199,7 @@ Push your branch to your fork and open a pull request against this repository's 
 - Link the related issue.
 - Include tests for changed behavior.
 - Update [CHANGELOG.md](CHANGELOG.md) under the appropriate category.
-- Update [README.md](README.md) when setup, entities, or user-visible behavior changes.
+- Update [README.md](README.md) when setup changes, [docs/sensors.md](docs/sensors.md) when entities change, and [docs/battery-control.md](docs/battery-control.md) when battery control behavior changes.
 - Ensure all required GitHub Actions checks pass, including tests, pre-commit,
   HACS validation, and hassfest.
 

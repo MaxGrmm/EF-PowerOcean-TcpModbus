@@ -5,7 +5,8 @@
 ### Changed
 
 - The Grid-side Voltage and Current sensors are disabled by the integration while no external EcoFlow Smart Meter has reported, since all six read 0 without one, as on a PowerOcean Plus that uses its built-in meter (#240). They are enabled again once a meter reports, and one you disabled yourself stays disabled. The log says why at each start, and the diagnostics download shows `has_external_meter`.
-- The README explains which AC readings the inverter measures itself and which come from an external EcoFlow Smart Meter, and that on a PowerOcean Plus the Inverter sensors show its built-in meter at the grid connection.
+- The README has a contents list and is ordered by setup. The sensor tables moved to [docs/sensors.md](docs/sensors.md) and the battery control details to [docs/battery-control.md](docs/battery-control.md) and the protocol notes to [docs/ecoflow-modbus-protocol-implementation.md](docs/ecoflow-modbus-protocol-implementation.md), and the README links to both from absolute URLs, so they also work where HACS or the Marketplace shows it, and the contents list is left out of the Marketplace.
+- The sensor documentation explains which AC readings the inverter measures itself and which come from an external EcoFlow Smart Meter, and that on a PowerOcean Plus the Inverter sensors show its built-in meter at the grid connection.
 
 ## [2.10.1] - 2026-11-21
 

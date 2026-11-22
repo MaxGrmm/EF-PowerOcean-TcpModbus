@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for testing. The report shows which control methods your inverter's firmware follows, and it is compared against earlier reports for the same model to find what a firmware update changed. See [Testing the controls after a firmware update](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus#testing-the-controls-after-a-firmware-update) for how to run it.
+        Thank you for testing. The report shows which control methods your inverter's firmware follows, and it is compared against earlier reports for the same model to find what a firmware update changed. See [Testing the controls after a firmware update](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#testing-the-controls-after-a-firmware-update) for how to run it.
 
   - type: dropdown
     id: device_type
