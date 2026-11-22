@@ -4,7 +4,7 @@
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.12.0%2B-18BCF2?style=flat-square&logo=homeassistant&logoColor=white)](https://www.home-assistant.io/)
 [![Release](https://img.shields.io/github/v/release/MaxGrmm/EF-PowerOcean-TcpModbus?style=flat-square&logo=github&color=blue)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases)
 [![Validate](https://img.shields.io/github/actions/workflow/status/MaxGrmm/EF-PowerOcean-TcpModbus/validate.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=validate)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/actions/workflows/validate.yml)
-[![License: MIT](https://img.shields.io/github/license/MaxGrmm/EF-PowerOcean-TcpModbus?style=flat-square&color=lightgrey)](LICENSE)
+[![License: MIT](https://img.shields.io/github/license/MaxGrmm/EF-PowerOcean-TcpModbus?style=flat-square&color=lightgrey)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/LICENSE)
 
 **Local Modbus TCP integration for the EcoFlow PowerOcean home battery system.**
 
@@ -61,7 +61,7 @@
   Assistant's Energy dashboard directly, without the EcoFlow cloud.
 - **Cheap-tariff charging:** an automation charges the battery from the grid while
   electricity is cheap and returns it to Automatic afterwards, using the
-  [Set battery command](docs/battery-control.md#commanding-the-battery-from-automations) action.
+  [Set battery command](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#commanding-the-battery-from-automations) action.
 - **Holding the battery for later:** Hold battery keeps the charge for the evening peak
   while surplus solar is exported.
 - **Watching the system:** faults, grid outages and a disconnected battery show up as
@@ -98,7 +98,7 @@
 | EcoFlow Ocean 2 1-phase      | ✅ Confirmed | ✅ Confirmed |
 | EcoFlow Ocean 2 Plus 1-phase | ✅ Confirmed | ✅ Confirmed |
 
-Running an untested model? [scripts/register_scan.py](scripts/register_scan.py) produces a read-only report comparing your inverter against the register map this integration expects. Attaching its output to an issue is what makes a device supportable, see [Register Scan](CONTRIBUTING.md#register-scan).
+Running an untested model? [scripts/register_scan.py](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/scripts/register_scan.py) produces a read-only report comparing your inverter against the register map this integration expects. Attaching its output to an issue is what makes a device supportable, see [Register Scan](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/CONTRIBUTING.md#register-scan).
 
 ### Home Assistant Versions
 
@@ -137,19 +137,19 @@ Or install it from within HACS:
 2. Search for **EF-PowerOcean-TcpModbus**
 3. Fill in the setup form:
 
-| Field                      | Default                | Description                                                                                                                                                                                                                                                |
-| -------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| IP Address                 | –                      | Local IP of your PowerOcean inverter                                                                                                                                                                                                                       |
-| Port                       | 502                    | Modbus TCP port                                                                                                                                                                                                                                            |
-| Inverter model             | PowerOcean Three Phase |                                                                                                                                                                                                                                                            |
-| Number of Batteries        | 0                      | Number of installed battery modules (0–12), of any size. Sets the battery power limits until the inverter reports its total capacity                                                                                                                       |
-| Maximum solar power        | 12 kW                  | Installed solar power (1–60 kW)                                                                                                                                                                                                                            |
-| Maximum grid power         | 15 kW                  | Your grid connection (main fuse), not the inverter rating. Rejects implausible readings and caps Import from Grid (1–60 kW)                                                                                                                                |
-| Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.                                                                                           |
-| Calculation of grid energy | false                  | In some inverters, the grid import and export registers stay at 0 while Grid Power reads right. This switch integrates them from Grid Power instead, see [Grid energy calculated from Grid Power](docs/sensors.md#grid-energy-calculated-from-grid-power). |
-| Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                                                                                                               |
+| Field                      | Default                | Description                                                                                                                                                                                                                                                                                                             |
+| -------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| IP Address                 | –                      | Local IP of your PowerOcean inverter                                                                                                                                                                                                                                                                                    |
+| Port                       | 502                    | Modbus TCP port                                                                                                                                                                                                                                                                                                         |
+| Inverter model             | PowerOcean Three Phase |                                                                                                                                                                                                                                                                                                                         |
+| Number of Batteries        | 0                      | Number of installed battery modules (0–12), of any size. Sets the battery power limits until the inverter reports its total capacity                                                                                                                                                                                    |
+| Maximum solar power        | 12 kW                  | Installed solar power (1–60 kW)                                                                                                                                                                                                                                                                                         |
+| Maximum grid power         | 15 kW                  | Your grid connection (main fuse), not the inverter rating. Rejects implausible readings and caps Import from Grid (1–60 kW)                                                                                                                                                                                             |
+| Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.                                                                                                                                                        |
+| Calculation of grid energy | false                  | In some inverters, the grid import and export registers stay at 0 while Grid Power reads right. This switch integrates them from Grid Power instead, see [Grid energy calculated from Grid Power](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#grid-energy-calculated-from-grid-power). |
+| Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                                                                                                                                                                            |
 
-To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**. The collapsed **Correct energy totals** section there is for a lifetime counter the inverter reset; see [Correcting a lifetime total](docs/sensors.md#correcting-a-lifetime-total).
+To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**. The collapsed **Correct energy totals** section there is for a lifetime counter the inverter reset; see [Correcting a lifetime total](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#correcting-a-lifetime-total).
 
 To change the IP address or port, for example after the inverter got a new address: open the entry's **⋮** menu on the same page and choose **Reconfigure**. The new address is tested before it is saved, and refused if a different inverter answers on it.
 
@@ -189,15 +189,15 @@ on its own.
 
 ### More on battery control
 
-[docs/battery-control.md](docs/battery-control.md) covers:
+[docs/battery-control.md](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md) covers:
 
-- [Guards](docs/battery-control.md#guards): when they release, native and emulated
+- [Guards](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#guards): when they release, native and emulated
   reserve, and Charge to Battery Reserve
-- [Control Status](docs/battery-control.md#control-status): what each status means,
+- [Control Status](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#control-status): what each status means,
   and the reading checks that make control step aside
-- [Commanding the battery from automations](docs/battery-control.md#commanding-the-battery-from-automations)
+- [Commanding the battery from automations](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#commanding-the-battery-from-automations)
   with the Set battery command action
-- [Testing the controls after a firmware update](docs/battery-control.md#testing-the-controls-after-a-firmware-update)
+- [Testing the controls after a firmware update](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#testing-the-controls-after-a-firmware-update)
   with the Run control test action
 
 ---
@@ -210,12 +210,12 @@ today and in total. The lifetime totals feed Home Assistant's Energy dashboard
 directly.
 
 The full list, and how the energy totals are checked and corrected, is in
-[docs/sensors.md](docs/sensors.md):
+[docs/sensors.md](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md):
 
-- [Sensor groups](docs/sensors.md#contents)
-- [Inverter side and grid side](docs/sensors.md#inverter-side-and-grid-side)
-- [Grid energy calculated from Grid Power](docs/sensors.md#grid-energy-calculated-from-grid-power)
-- [Correcting a lifetime total](docs/sensors.md#correcting-a-lifetime-total)
+- [Sensor groups](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#contents)
+- [Inverter side and grid side](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#inverter-side-and-grid-side)
+- [Grid energy calculated from Grid Power](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#grid-energy-calculated-from-grid-power)
+- [Correcting a lifetime total](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#correcting-a-lifetime-total)
 
 ---
 
@@ -292,7 +292,7 @@ Coordinator Status shows why the last poll failed.
 
 Check **Control Status**: it says when a guard, a full or empty battery, or the export
 limit stops a command, and when Modbus Control is off. After a firmware update, run the
-[control test](docs/battery-control.md#testing-the-controls-after-a-firmware-update) to see which methods the
+[control test](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#testing-the-controls-after-a-firmware-update) to see which methods the
 inverter still follows.
 
 </details>
@@ -359,10 +359,10 @@ configuration directory; delete it if you no longer need them.
 - **Some registers read a constant 0 on some models.** Sensors for those are left out
   on the models concerned rather than showing a value that misleads.
 - **The Grid-side sensors need an external EcoFlow Smart Meter.** Without one they are
-  disabled; see [Inverter side and grid side](docs/sensors.md#inverter-side-and-grid-side).
+  disabled; see [Inverter side and grid side](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#inverter-side-and-grid-side).
 - **The protocol is EcoFlow's trial version.** A firmware update can change which
   controls the inverter follows; see
-  [Testing the controls after a firmware update](docs/battery-control.md#testing-the-controls-after-a-firmware-update).
+  [Testing the controls after a firmware update](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#testing-the-controls-after-a-firmware-update).
 
 ---
 
@@ -393,14 +393,14 @@ polls, to keep control from passing back to the EcoFlow app.
 - **Tested firmware:** 3.0.19.19 + 3.0.20.54(PO+)
 - **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 
-The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. Word order, decoding, how reads are grouped into blocks and known gaps are in the [protocol notes](EcoFlow_PowerOcean_Modbus.md).
+The register map lives in [`const.py`](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. Word order, decoding, how reads are grouped into blocks and known gaps are in the [protocol notes](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/EcoFlow_PowerOcean_Modbus.md).
 
 ---
 
 ## Contributing
 
 Contributions use personal forks and pull requests. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, safety requirements, and the
+[CONTRIBUTING.md](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/CONTRIBUTING.md) for setup, testing, safety requirements, and the
 review checklist.
 
 ---
@@ -431,7 +431,7 @@ Special thanks to all contributors for the massive amount of time and effort tha
 
 This integration follows EcoFlow's Open Modbus Protocol V1.0, a trial version,
 corrected by community measurements where the hardware differs from it. See the
-[protocol notes](EcoFlow_PowerOcean_Modbus.md#where-the-specification-and-the-hardware-disagree).
+[protocol notes](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/EcoFlow_PowerOcean_Modbus.md#where-the-specification-and-the-hardware-disagree).
 Use at your own risk. Not affiliated with EcoFlow Technology Co., Ltd.
 
 ---
