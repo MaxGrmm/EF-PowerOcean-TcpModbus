@@ -36,7 +36,7 @@ uv run pytest
 uv run pre-commit run --all-files
 ```
 
-Pre-commit runs Ruff checks and formatting, Prettier for Markdown, and basic YAML, JSON, whitespace, and line-ending checks. It's recommended to have pre-commit installed (see above) so that it runs automatically on commit. This is a required step in CI and it will fail on any deviaton. Pull requests are also validated by HACS and hassfest.
+Pre-commit runs Ruff checks and formatting, Prettier for Markdown, the contents lists between `<!-- toc -->` markers, and basic YAML, JSON, whitespace, and line-ending checks. It's recommended to have pre-commit installed (see above) so that it runs automatically on commit. This is a required step in CI and it will fail on any deviaton. Pull requests are also validated by HACS and hassfest.
 
 All checks should pass before requesting review.
 
@@ -187,7 +187,7 @@ When adding or changing an entity:
 - Update the entity definition and its platform implementation as needed.
 - Add new strings to [translations/en.json](custom_components/ef_powerocean_tcpmodbus/translations/en.json), the English source, and keep [translations/de.json](custom_components/ef_powerocean_tcpmodbus/translations/de.json) in sync with it. Home Assistant loads only the `translations/` folder, so there is no `strings.json` to maintain.
 - Add state translations for enum entities.
-- Update the entity tables or behavior documentation in [README.md](README.md).
+- Update the entity tables in [docs/sensors.md](docs/sensors.md), and the behavior documentation in [README.md](README.md) or [docs/battery-control.md](docs/battery-control.md).
 - Preserve entity keys and unique IDs unless a migration is included. Changing them can orphan existing entities and dashboard references.
 
 ## Pull Requests
@@ -199,7 +199,7 @@ Push your branch to your fork and open a pull request against this repository's 
 - Link the related issue.
 - Include tests for changed behavior.
 - Update [CHANGELOG.md](CHANGELOG.md) under the appropriate category.
-- Update [README.md](README.md) when setup, entities, or user-visible behavior changes.
+- Update [README.md](README.md) when setup changes, [docs/sensors.md](docs/sensors.md) when entities change, and [docs/battery-control.md](docs/battery-control.md) when battery control behavior changes.
 - Ensure all required GitHub Actions checks pass, including tests, pre-commit,
   HACS validation, and hassfest.
 

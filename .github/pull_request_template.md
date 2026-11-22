@@ -15,4 +15,4 @@ Closes #<!-- issue number -->
 - [ ] Tests pass (`pytest`)
 - [ ] Tests added or updated for changed behavior
 - [ ] `Unreleased` in CHANGELOG.md is updated
-- [ ] README updated (if new sensors, features or behavior changes)
+- [ ] README or docs/ updated (if new sensors, features or behavior changes)
