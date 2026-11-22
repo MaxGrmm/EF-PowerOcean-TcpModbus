@@ -192,6 +192,9 @@ def decode_register(
         return None
     if data_type is RegisterType.UINT16:
         return round(float(registers[0]), 2)
+    if data_type is RegisterType.INT16:
+        word = registers[0]
+        return float(word - 0x10000 if word & 0x8000 else word)
 
     try:
         raw = struct.pack("<HH", *_order_words(registers, high_word_first))

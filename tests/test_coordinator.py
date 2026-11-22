@@ -1593,18 +1593,15 @@ def test_optional_registers_share_no_read_where_the_model_rejects_them(
 def test_the_powerocean_reads_optional_registers_without_extra_requests() -> None:
     """They sit inside the live block, which reads through unmapped addresses.
 
-    The Grid Connection Code lies before it, so it gets a read of its own rather
-    than widening the one the poll depends on.
+    The Grid Connection Code and Inverter Reactive Power lie outside it, so each
+    gets a read of its own rather than widening the one the poll depends on.
     """
     optional_keys = {
-        register.key
-        for register in const.MODBUS_REGISTERS
-        if register.optional and register.key != "grid_connection_code"
+        register.key for register in const.MODBUS_REGISTERS if register.optional
     }
-    optional_keys.add("grid_connection_code")
     model = models.InverterModel.POWEROCEAN_PLUS
 
-    assert len(const.register_blocks_for(model)) == 1 + len(
+    assert len(const.register_blocks_for(model)) == 2 + len(
         const.register_blocks_for(model, exclude=optional_keys)
     )
 

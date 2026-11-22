@@ -34,10 +34,16 @@ def inverter(hass: HomeAssistant) -> SimpleNamespace:
         async_start=Mock(),
         async_cancel=AsyncMock(),
     )
-    entry.runtime_data = SimpleNamespace(control=control, control_test=control_test)
+    register_scan = SimpleNamespace(async_start=Mock())
+    entry.runtime_data = SimpleNamespace(
+        control=control, control_test=control_test, register_scan=register_scan
+    )
     services.async_setup_services(hass)
     return SimpleNamespace(
-        device_id=device.id, control=control, control_test=control_test
+        device_id=device.id,
+        control=control,
+        control_test=control_test,
+        register_scan=register_scan,
     )
 
 
@@ -64,6 +70,7 @@ async def test_setting_up_the_integration_offers_the_action(
     for name, schema in (
         (services.SERVICE_RUN_CONTROL_TEST, services.RUN_CONTROL_TEST_SCHEMA),
         (services.SERVICE_CANCEL_CONTROL_TEST, services.CANCEL_CONTROL_TEST_SCHEMA),
+        (services.SERVICE_RUN_REGISTER_SCAN, services.RUN_REGISTER_SCAN_SCHEMA),
     ):
         fields = (await async_get_all_descriptions(hass))[DOMAIN][name]["fields"]
         assert set(fields) == {str(key) for key in schema.schema}
@@ -205,6 +212,20 @@ async def test_the_control_test_can_be_cancelled(
     )
 
     inverter.control_test.async_cancel.assert_awaited_once()
+
+
+async def test_the_register_scan_returns_as_soon_as_it_has_started(
+    hass: HomeAssistant, inverter: SimpleNamespace
+) -> None:
+    """Read-only, so it needs no confirmation."""
+    await hass.services.async_call(
+        DOMAIN,
+        services.SERVICE_RUN_REGISTER_SCAN,
+        {"device_id": inverter.device_id},
+        blocking=True,
+    )
+
+    inverter.register_scan.async_start.assert_called_once_with()
 
 
 async def test_a_device_is_found_by_its_config_entry(

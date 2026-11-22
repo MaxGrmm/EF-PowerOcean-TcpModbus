@@ -241,3 +241,37 @@ def test_the_grid_code_leaves_every_existing_read_unchanged() -> None:
             (40513, 1, True)
         ], model
         assert [block for block in without if block not in with_code] == [], model
+
+
+def test_reactive_power_is_read_on_its_own() -> None:
+    """Far from the rest, it adds one optional read and changes no other one."""
+
+    def plan(**kwargs) -> list[tuple[int, int, bool]]:
+        return [
+            (block.start, block.count, block.optional)
+            for block in const.register_blocks_for(model, **kwargs)
+        ]
+
+    for model in models.InverterModel:
+        with_reactive = plan()
+        without = plan(exclude=("inverter_reactive_power",))
+        assert [block for block in with_reactive if block not in without] == [
+            (40024, 1, True)
+        ], model
+        assert [block for block in without if block not in with_reactive] == [], model
+
+
+def test_candidate_registers_stay_out_of_the_poll() -> None:
+    """Only the register scan reads them, until one is confirmed and moved over."""
+    polled = {
+        address
+        for register in const.MODBUS_REGISTERS
+        for address in range(register.address, register.end)
+    }
+    keys = [register.key for register in const.CANDIDATE_REGISTERS]
+
+    assert len(keys) == len(set(keys))
+    assert not set(keys) & set(const.REGISTERS_BY_KEY)
+    for register in const.CANDIDATE_REGISTERS:
+        assert not set(range(register.address, register.end)) & polled, register.key
+        assert register.address != const.HEARTBEAT_REGISTER, register.key

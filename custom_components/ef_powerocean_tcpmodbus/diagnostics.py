@@ -99,6 +99,11 @@ async def async_get_config_entry_diagnostics(
                 "state": str(coordinator.control_test.state),
                 "last_report": coordinator.control_test.last_report,
             },
+            # The last register scan run here, the report to attach to an issue.
+            "register_scan": {
+                "state": str(coordinator.register_scan.state),
+                "last_report": coordinator.register_scan.last_report,
+            },
             # The readings each time a reading check started failing, kept across
             # restarts, so a report filed later still shows what the inverter sent.
             "reading_check_snapshots": [

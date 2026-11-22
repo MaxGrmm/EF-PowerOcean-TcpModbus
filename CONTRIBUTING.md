@@ -109,7 +109,7 @@ Use the portal's `errorName` as the name, and leave out serial numbers.
 
 [scripts/register_scan.py](scripts/register_scan.py) compares a live inverter against the register map in [const.py](custom_components/ef_powerocean_tcpmodbus/const.py) and prints a report to attach to an issue. It is read-only: it never writes a register and never takes Modbus control away from the EcoFlow app. The map, the decoding and the block planning are imported from the integration, so the report cannot drift from the code.
 
-When requesting support for a new inverter model, this is the script that should be run to compare the registers.
+When requesting support for a new inverter model, this is the script that should be run to compare the registers. Users without a computer at hand can run the **Run register scan** action instead: it reads the same map, candidates and ranges once from Home Assistant and puts the raw words in the diagnostics download, under `register_scan`. The repeated sampling and `--watch` stay in the script.
 
 To run it:
 
@@ -122,6 +122,7 @@ Reading the result:
 
 - Every register reading zero usually means Modbus TCP is switched off in the EcoFlow app, not that the map differs.
 - A refused register that is readable elsewhere means the address moved on that model. Add an `address_overrides` entry to its `RegisterDef` rather than changing the shared address.
+- The candidate section reads `CANDIDATE_REGISTERS` from const.py: registers in [EcoFlow's register schema](https://github.com/ecoflow-oasis-official/ha-ecoflow-official/blob/main/custom_components/ha_ecoflow_official/registers_schema.py) or the protocol that the integration does not poll yet, as they are undocumented or what they hold is not clear. The comment by each says what we think it is. A plausible value there is the evidence for moving one into `MODBUS_REGISTERS`, and the raw words show whether the assumed type and word order fit.
 - A `maybe ...` in the `looks like` column is only a guess from the value's magnitude. It's an educated guess, but can be wrong. Use it as a reference together with the [protocol notes](docs/ecoflow-modbus-protocol-implementation.md).
 
 To find where a setting in the EcoFlow app lives on Modbus, run it with `--watch` instead. It reads everything a few times to learn which registers move by themselves, then asks you to make one change in the app at a time, waits for it to reach Modbus (`--settle`, default 20 s) and lists the registers that followed. Mapped measurements are left out of that list, as they drift on their own; the ones that show what the inverter did (battery, grid, inverter and house power, and the status word) are shown decoded after each change instead. It ends with a table of both after every step, and stays read-only.

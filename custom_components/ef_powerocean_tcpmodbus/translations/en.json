@@ -372,6 +372,9 @@
       "inverter_output_power": {
         "name": "Inverter AC Power"
       },
+      "inverter_reactive_power": {
+        "name": "Inverter Reactive Power"
+      },
       "grid_voltage_l1": {
         "name": "Grid-side Voltage L1"
       },
@@ -765,6 +768,16 @@
           "description": "The inverter whose test to stop."
         }
       }
+    },
+    "run_register_scan": {
+      "name": "Run register scan",
+      "description": "Reads, without writing anything, every register this integration maps, the registers from EcoFlow's register schema it does not poll yet, and the address ranges around them, as scripts/register_scan.py does. Takes a minute or two between the polls. The action returns at once; a notification says when the report is in the diagnostics download, ready to attach to a GitHub issue.",
+      "fields": {
+        "device_id": {
+          "name": "Inverter",
+          "description": "The inverter to scan."
+        }
+      }
     }
   },
   "exceptions": {
@@ -842,6 +855,15 @@
     },
     "cannot_connect": {
       "message": "Could not connect to the inverter at {host}:{port}."
+    },
+    "register_scan_running": {
+      "message": "A register scan is already running on this inverter."
+    },
+    "register_scan_no_data": {
+      "message": "The inverter is not connected or has not been read yet."
+    },
+    "register_scan_control_test": {
+      "message": "A control test is running on this inverter. Start the register scan after it."
     }
   }
 }

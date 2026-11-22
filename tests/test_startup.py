@@ -245,7 +245,7 @@ def _fill_registers(inverter: FakeInverter, start: int = 1) -> None:
     for index, register in enumerate(const.MODBUS_REGISTERS):
         register = register.for_model(InverterModel.POWEROCEAN_PLUS)
         value = index + start
-        if register.data_type is RegisterType.UINT16:
+        if register.data_type in (RegisterType.UINT16, RegisterType.INT16):
             words = [value]
         else:
             # Published low word first.

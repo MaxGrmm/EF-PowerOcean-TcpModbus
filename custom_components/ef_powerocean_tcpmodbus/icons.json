@@ -111,6 +111,9 @@
     },
     "cancel_control_test": {
       "service": "mdi:test-tube-off"
+    },
+    "run_register_scan": {
+      "service": "mdi:magnify-scan"
     }
   }
 }

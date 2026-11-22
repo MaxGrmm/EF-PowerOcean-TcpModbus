@@ -66,6 +66,7 @@ checked and corrected. For setup and battery control, see the
 | Inverter Voltage L1/L2/L3  | V    | Per-phase voltage at the inverter's AC side                          |
 | Inverter Current L1/L2/L3  | A    | Per-phase current at the inverter's AC side                          |
 | Inverter AC Power          | W    | Power through the inverter's AC side (positive = drawn) (diagnostic) |
+| Inverter Reactive Power    | var  | Reactive power at the inverter's AC side (diagnostic)                |
 | Grid Frequency             | Hz   | Frequency the inverter measures                                      |
 | Grid-side Voltage L1/L2/L3 | V    | Per-phase voltage at the grid connection (diagnostic)                |
 | Grid-side Current L1/L2/L3 | A    | Per-phase current at the grid connection (diagnostic)                |
@@ -83,8 +84,13 @@ The _Inverter_ sensors and _Grid Frequency_ are measured by the inverter itself.
 On-grid, Inverter Voltage and Grid Frequency follow the grid's.
 
 On models with a built-in smart meter, like the PowerOcean Plus, the meter sits at the
-GRID terminals. Inverter Voltage, Inverter Current and Inverter AC Power then show the
-grid connection per phase.
+GRID terminals. Inverter Voltage, Inverter Current, Inverter AC Power and Inverter
+Reactive Power then show the grid connection.
+
+_Inverter Reactive Power_ comes from a register that is not in EcoFlow's V1.0
+protocol, only in their register schema. It is confirmed on a PowerOcean Plus. On a
+model that refuses it, the read is dropped and the sensor stays unknown. Its sign is
+not known yet.
 
 The _Grid-side_ sensors need an external EcoFlow Smart Meter. Without one they read 0,
 so the integration disables them, and enables them again once a meter reports.

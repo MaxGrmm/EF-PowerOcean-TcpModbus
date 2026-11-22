@@ -33,6 +33,7 @@
 - [Using the Integration](#using-the-integration)
   - [Battery Control](#battery-control)
   - [Sensors](#sensors)
+  - [Register Scan](#register-scan)
   - [Troubleshooting](#troubleshooting)
   - [Removing the Integration](#removing-the-integration)
 - [Technical Details](#technical-details)
@@ -138,7 +139,7 @@
 | EcoFlow Ocean 2 1-phase      | ✅ Confirmed | ✅ Confirmed |
 | EcoFlow Ocean 2 Plus 1-phase | ✅ Confirmed | ✅ Confirmed |
 
-Running an untested model? [scripts/register_scan.py](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/scripts/register_scan.py) produces a read-only report comparing your inverter against the register map this integration expects. Attaching its output to an issue is what makes a device supportable, see [Register Scan](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/CONTRIBUTING.md#register-scan).
+Running an untested model? The **Run register scan** action reads your inverter against the register map this integration expects, without writing anything, and puts the report in the diagnostics download. Attaching it to an issue is what makes a device supportable, see [Register Scan](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/README.md#register-scan). [scripts/register_scan.py](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/scripts/register_scan.py) does the same from a computer, see [Register Scan](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/CONTRIBUTING.md#register-scan).
 
 #### Home Assistant Versions
 
@@ -248,6 +249,26 @@ The full list, and how the energy totals are checked and corrected, is in
 - [Inverter side and grid side](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#inverter-side-and-grid-side)
 - [Grid energy calculated from Grid Power](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#grid-energy-calculated-from-grid-power)
 - [Correcting a lifetime total](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#correcting-a-lifetime-total)
+
+### Register Scan
+
+The **Run register scan** action reads, once and without writing anything, every
+register the integration maps for your model, the registers from EcoFlow's newer point
+table it does not poll yet, and the address ranges around them. It is what makes an
+untested model supportable, and shows whether the candidate registers hold data on
+yours.
+
+```yaml
+action: ef_powerocean_tcpmodbus.run_register_scan
+data:
+  device_id: <your inverter's device id>
+```
+
+It takes a minute or two, with its reads between the polls, and never touches the
+heartbeat register, so Modbus Control can stay on. It refuses to start during a
+control test. A notification says when it is done; then choose **Download
+diagnostics** on the device page and attach the file to an issue. The report is kept
+until Home Assistant restarts.
 
 ### Troubleshooting
 

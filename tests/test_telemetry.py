@@ -49,6 +49,8 @@ def test_detects_disabled_modbus_from_static_capabilities(
     ("registers", "data_type", "expected"),
     (
         ([17], RegisterType.UINT16, 17.0),
+        ([17], RegisterType.INT16, 17.0),
+        ([0xFF88], RegisterType.INT16, -120.0),
         ([0x0000, 0x42F7], RegisterType.FLOAT32, 123.5),
         ([0x0000, 0x0001], RegisterType.UINT32, 65536.0),
         # A value that fits the low word alone must decode the same as before.
@@ -59,6 +61,8 @@ def test_detects_disabled_modbus_from_static_capabilities(
     ),
     ids=(
         "single-register",
+        "int16-positive",
+        "int16-negative",
         "word-swapped-float",
         "uint32-uses-the-high-word",
         "uint32-low-word-only",
@@ -104,6 +108,7 @@ def test_decodes_firmware_version_sent_high_word_first() -> None:
     ("registers", "data_type"),
     (
         ([], RegisterType.UINT16),
+        ([], RegisterType.INT16),
         ([0], RegisterType.FLOAT32),
         ([0], RegisterType.UINT32),
         ([0, 0x7FC0], RegisterType.FLOAT32),
@@ -114,6 +119,7 @@ def test_decodes_firmware_version_sent_high_word_first() -> None:
     ),
     ids=(
         "empty",
+        "empty-int16",
         "incomplete-float",
         "incomplete-uint32",
         "nan",
