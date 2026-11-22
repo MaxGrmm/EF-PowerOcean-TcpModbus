@@ -15,7 +15,8 @@ import pytest
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util.yaml import parse_yaml
 
-from custom_components.ef_powerocean_tcpmodbus import const, repairs, watchdog
+from custom_components.ef_powerocean_tcpmodbus import const, repairs
+from custom_components.ef_powerocean_tcpmodbus.health import watchdog
 from custom_components.ef_powerocean_tcpmodbus.powerocean import models as device_models
 from custom_components.ef_powerocean_tcpmodbus.repairs import (
     AlertRepairFlow,

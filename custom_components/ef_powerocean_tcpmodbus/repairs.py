@@ -11,9 +11,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry
 from homeassistant.loader import async_get_integration
 
-from . import issues, watchdog
 from .const import BUG_REPORT_URL, DOMAIN
 from .coordinator import EcoflowCoordinator
+from .health import issues, watchdog
 
 if TYPE_CHECKING:
     # Only for annotations: Home Assistant 2025.12, the oldest supported, does not

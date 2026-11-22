@@ -16,7 +16,8 @@ from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
-from custom_components.ef_powerocean_tcpmodbus import const, repairs, watchdog
+from custom_components.ef_powerocean_tcpmodbus import const, repairs
+from custom_components.ef_powerocean_tcpmodbus.health import watchdog
 from custom_components.ef_powerocean_tcpmodbus.models import AlertVerbosity
 from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
 from custom_components.ef_powerocean_tcpmodbus.powerocean.models import ControlStatus

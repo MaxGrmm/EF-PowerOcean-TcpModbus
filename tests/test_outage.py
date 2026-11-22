@@ -15,8 +15,9 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const, outage
-from custom_components.ef_powerocean_tcpmodbus.outage import Cause
+from custom_components.ef_powerocean_tcpmodbus import const
+from custom_components.ef_powerocean_tcpmodbus.health import outage
+from custom_components.ef_powerocean_tcpmodbus.health.outage import Cause
 from tests.fake_inverter import HOST, FakeInverter
 
 

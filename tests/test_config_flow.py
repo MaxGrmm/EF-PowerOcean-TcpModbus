@@ -17,8 +17,9 @@ from homeassistant.data_entry_flow import FlowResultType
 from pymodbus.exceptions import ModbusException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import config_flow, const, watchdog
-from custom_components.ef_powerocean_tcpmodbus.outage import Cause
+from custom_components.ef_powerocean_tcpmodbus import config_flow, const
+from custom_components.ef_powerocean_tcpmodbus.health import watchdog
+from custom_components.ef_powerocean_tcpmodbus.health.outage import Cause
 from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
 from custom_components.ef_powerocean_tcpmodbus.powerocean import (
     registers as register_map,

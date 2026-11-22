@@ -8,8 +8,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 
-from . import issues
 from .const import DOMAIN
+from .health import issues
 from .modbus import ModbusClient
 
 _LOGGER = logging.getLogger(__name__)

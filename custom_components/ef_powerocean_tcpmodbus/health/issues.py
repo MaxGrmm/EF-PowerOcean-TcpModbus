@@ -13,8 +13,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 
-from .const import DOMAIN
-from .powerocean.reading_checks import CHECKS
+from ..const import DOMAIN
+from ..powerocean.reading_checks import CHECKS
 
 IDENTITY_MISMATCH: Final = "identity_mismatch"
 HELD_TOTALS: Final = "energy_totals_held"

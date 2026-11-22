@@ -20,7 +20,6 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from . import issues, outage, watchdog
 from .const import CONF_ALERT_VERBOSITY, CONF_HOST, CONF_PORT, DOMAIN
 from .control import ControlInputs
 from .coordinator import (
@@ -28,6 +27,7 @@ from .coordinator import (
     EcoflowCoordinator,
     state_store,
 )
+from .health import issues, outage, watchdog
 from .modbus import async_prepare
 from .models import AlertVerbosity
 from .powerocean.reading_checks import KEYS as READING_CHECK_KEYS

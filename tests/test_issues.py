@@ -9,8 +9,8 @@ from unittest.mock import Mock
 import pytest
 from homeassistant.helpers import issue_registry as ir
 
-from custom_components.ef_powerocean_tcpmodbus import issues
 from custom_components.ef_powerocean_tcpmodbus.const import DOMAIN
+from custom_components.ef_powerocean_tcpmodbus.health import issues
 
 ENTRY = cast(Any, SimpleNamespace(entry_id="entry"))
 
