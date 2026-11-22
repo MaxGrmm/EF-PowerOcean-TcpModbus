@@ -75,8 +75,8 @@
 
 ## Screenshots
 
-<img width="431" height="431" alt="Controls" src="https://github.com/user-attachments/assets/1c0f9217-cba7-47f4-8bc6-9a3632c1bdcd" />
-<img width="431" height="443" alt="Configuration" src="https://github.com/user-attachments/assets/320ce431-1d6b-4f3f-965c-912f9e4be31a" />
+<img width="431" height="555" alt="Controls" src="https://raw.githubusercontent.com/MaxGrmm/EF-PowerOcean-TcpModbus/main/docs/images/controls.jpg" />
+<img width="431" height="510" alt="Configuration" src="https://raw.githubusercontent.com/MaxGrmm/EF-PowerOcean-TcpModbus/main/docs/images/configuration.jpg" />
 
 <details>
 <summary>Sensor and diagnostic entities</summary>
