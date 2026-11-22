@@ -61,6 +61,8 @@ The integration separates
 
 The `powerocean` package holds what belongs to the device rather than to Home Assistant: the register map and its decoding, the device's types and constants, the Battery Mode plans, the reading checks and the control test's judgement. It must not import Home Assistant or the rest of the integration, which `tests/test_package_boundary.py` checks.
 
+Next to it, `health` holds how the integration watches itself and tells the user (repairs issues, outages, the watchdog's alerts) and `tools` the checks users run as actions (the control test and the register scan). The platforms and Home Assistant's own hooks stay at the top level, where Home Assistant looks for them.
+
 Keep changes within the layer that owns the behavior and place tests alongside the corresponding behavior in the test suite. Follow existing nearby code when deciding where new functionality belongs.
 
 ## Coding Guidelines
