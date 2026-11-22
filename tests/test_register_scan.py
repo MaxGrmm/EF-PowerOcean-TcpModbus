@@ -20,7 +20,7 @@ from custom_components.ef_powerocean_tcpmodbus.powerocean import (
     registers as register_map,
 )
 from custom_components.ef_powerocean_tcpmodbus.powerocean.models import InverterModel
-from custom_components.ef_powerocean_tcpmodbus.register_scan import (
+from custom_components.ef_powerocean_tcpmodbus.tools.register_scan import (
     RegisterScan,
     RegisterScanState,
 )
