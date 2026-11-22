@@ -1215,32 +1215,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         outage.async_answered(self.hass, self.config_entry)
 
         try:
-            if "battery_capacity" in raw_data:
-                raw_data["battery_capacity"] = self._hold_battery_capacity(
-                    raw_data["battery_capacity"]
-                )
-            self._size_battery_limits(raw_data.get("battery_capacity"))
-            result = self._energy_processor.validate_totals(
-                self._with_grid_energy(raw_data),
-                self._last_checked_data,
-                self._last_checked_time,
-            )
-            result.update(self._energy_processor.raw_daily_values(raw_data))
-            result.update(self._energy_processor.raw_total_values(raw_data))
-            result.update(self._device_info_values())
-            result, is_daily_reset = self._energy_processor.derive_daily(result)
-            calculated_results = calculate_derived_values(
-                TelemetryData.from_mapping(result),
-                calculate_solar_power=self._ena_calc_solar_power,
-                startup_voltage=self.inverter_model.traits.startup_voltage,
-                reports_effective_feed_cap=(
-                    self.inverter_model.traits.reports_effective_feed_cap
-                ),
-            )
-            result.update(calculated_results)
-            result = self._energy_processor.clamp_calculated(
-                result, self._last_checked_data, is_daily_reset=is_daily_reset
-            )
+            result = self._process_frame(raw_data)
 
             # The poll needs to happen after the derived values are calculated so that
             # the control sees the correct solar power, in case the user has configured
@@ -1278,6 +1253,40 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # entities unavailable, rather than publishing an empty frame.
             self._status = CoordinatorStatus.PROCESSING_FAILED
             raise
+
+    def _process_frame(self, raw_data: dict[str, Any]) -> dict[str, Any]:
+        """Turn the words of a poll into the values the entities show.
+
+        The totals are checked against the last frame, the daily counters derived
+        from them and the calculated values added, then clamped to what is
+        believable.
+        """
+        if "battery_capacity" in raw_data:
+            raw_data["battery_capacity"] = self._hold_battery_capacity(
+                raw_data["battery_capacity"]
+            )
+        self._size_battery_limits(raw_data.get("battery_capacity"))
+        result = self._energy_processor.validate_totals(
+            self._with_grid_energy(raw_data),
+            self._last_checked_data,
+            self._last_checked_time,
+        )
+        result.update(self._energy_processor.raw_daily_values(raw_data))
+        result.update(self._energy_processor.raw_total_values(raw_data))
+        result.update(self._device_info_values())
+        result, is_daily_reset = self._energy_processor.derive_daily(result)
+        calculated_results = calculate_derived_values(
+            TelemetryData.from_mapping(result),
+            calculate_solar_power=self._ena_calc_solar_power,
+            startup_voltage=self.inverter_model.traits.startup_voltage,
+            reports_effective_feed_cap=(
+                self.inverter_model.traits.reports_effective_feed_cap
+            ),
+        )
+        result.update(calculated_results)
+        return self._energy_processor.clamp_calculated(
+            result, self._last_checked_data, is_daily_reset=is_daily_reset
+        )
 
     def _with_grid_energy(self, raw_data: Mapping[str, Any]) -> dict[str, Any]:
         """Return the device's readings, offset, with the grid totals to validate.
