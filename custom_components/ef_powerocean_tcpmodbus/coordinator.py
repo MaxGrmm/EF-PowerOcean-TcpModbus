@@ -1349,11 +1349,13 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ── Parameter and setpoint writes ─────────────────────────────────────────
 
     async def async_write_modbus_register(
-        self, entity_def: EcoflowNumberEntityDescription, value: int
+        self, description: EcoflowNumberEntityDescription, value: int
     ) -> None:
         """Write a device setting from a number entity."""
         await self._async_write_register(
-            RegisterDef(entity_def.read_key, entity_def.register, entity_def.data_type),
+            RegisterDef(
+                description.read_key, description.register, description.data_type
+            ),
             value,
         )
 
