@@ -12,7 +12,11 @@ from .models import (
 )
 
 DEFAULT_MAX_POWER: Final = 30000
-# The power limits control works within, keyed as the options that set them.
+DEFAULT_MAX_SOLAR_POWER: Final = 12000
+DEFAULT_MAX_GRID_POWER: Final = 15000
+# The power limits control works within. ControlFeatureDef.config_limit_key names
+# them, and they are keyed as the options that set them, so the coordinator passes
+# the options on as they are.
 CONF_MAX_SOLAR_POWER: Final = "solar_power_max"
 CONF_MAX_GRID_POWER: Final = "grid_power_max"
 CONF_MAX_BATTERY_CHARGED_POWER: Final = "battery_charged_power_max"

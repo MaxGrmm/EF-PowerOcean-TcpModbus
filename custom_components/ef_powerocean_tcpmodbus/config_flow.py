@@ -38,8 +38,6 @@ from .const import (
     CONF_SCAN_INTERVAL,
     DEFAULT_BATTERY_COUNT,
     DEFAULT_INVERTER_MODEL,
-    DEFAULT_MAX_GRID_POWER,
-    DEFAULT_MAX_SOLAR_POWER,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL_S,
     DOMAIN,
@@ -50,6 +48,8 @@ from .outage import Cause, async_classify
 from .powerocean.const import (
     CONF_MAX_GRID_POWER,
     CONF_MAX_SOLAR_POWER,
+    DEFAULT_MAX_GRID_POWER,
+    DEFAULT_MAX_SOLAR_POWER,
     ENERGY_RESOLUTION_KWH,
     MAX_BATTERY_COUNT,
 )
