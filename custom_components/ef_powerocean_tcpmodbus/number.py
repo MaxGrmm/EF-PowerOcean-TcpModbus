@@ -18,17 +18,16 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import (
+from .const import DOMAIN, RETIRED_MIN_SOC_NUMBER_KEY, UNIT_OF_RATIO
+from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
+from .descriptions import (
     BATTERY_RESERVE_SOC_NUMBER,
     CHARGE_LIMIT_SOC_NUMBER,
-    DOMAIN,
-    RETIRED_MIN_SOC_NUMBER_KEY,
-    UNIT_OF_RATIO,
     WRITABLE_NUMBERS_MAP,
+    ControlNumberEntityDescription,
+    EcoflowNumberEntityDescription,
 )
-from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
 from .entity import EcoFlowBaseEntity
-from .models import ControlEntityDef, NumberWritableDef
 from .powerocean.const import CONTROL_FEATURES
 from .powerocean.models import ControlFeature, requires_modbus_control
 
@@ -92,7 +91,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class EcoFlowFeaturePowerNumber(EcoFlowBaseEntity[ControlEntityDef], NumberEntity):
+class EcoFlowFeaturePowerNumber(EcoFlowBaseEntity, NumberEntity):
     """How much power one mode asks for while it is running.
 
     Always editable, whether or not that mode is selected, so a command can be set
@@ -115,7 +114,7 @@ class EcoFlowFeaturePowerNumber(EcoFlowBaseEntity[ControlEntityDef], NumberEntit
         super().__init__(
             coordinator,
             entry,
-            ControlEntityDef(
+            ControlNumberEntityDescription(
                 key=f"{feature}_power",
                 availability=requires_modbus_control,
             ),
@@ -137,7 +136,7 @@ class EcoFlowFeaturePowerNumber(EcoFlowBaseEntity[ControlEntityDef], NumberEntit
         await self.coordinator.control.async_set_feature_power(self._feature, value)
 
 
-class EcoFlowSocLimitNumber(EcoFlowBaseEntity[ControlEntityDef], NumberEntity):
+class EcoFlowSocLimitNumber(EcoFlowBaseEntity, NumberEntity):
     """A state-of-charge guard that applies whatever mode is selected.
 
     One ceiling for charging and one floor for discharging. They are properties of
@@ -156,16 +155,15 @@ class EcoFlowSocLimitNumber(EcoFlowBaseEntity[ControlEntityDef], NumberEntity):
         self,
         coordinator: EcoflowCoordinator,
         entry: ConfigEntry,
-        definition: ControlEntityDef,
+        description: ControlNumberEntityDescription,
         setter: Callable[[float], Awaitable[None]],
         getter: Callable[[], float],
         attributes: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
-        super().__init__(coordinator, entry, definition)
+        super().__init__(coordinator, entry, description)
         self._setter = setter
         self._getter = getter
         self._attributes = attributes
-        self._attr_entity_category = definition.entity_category
 
     @property
     def native_value(self) -> float:
@@ -179,29 +177,26 @@ class EcoFlowSocLimitNumber(EcoFlowBaseEntity[ControlEntityDef], NumberEntity):
         await self._setter(value)
 
 
-class EcoFlowGenericNumber(EcoFlowBaseEntity[NumberWritableDef], NumberEntity):
+class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):
     """A writable register, read back from its register key."""
+
+    entity_description: EcoflowNumberEntityDescription
 
     def __init__(
         self,
         coordinator: EcoflowCoordinator,
         entry: ConfigEntry,
-        definition: NumberWritableDef,
+        description: EcoflowNumberEntityDescription,
     ) -> None:
-        super().__init__(coordinator, entry, definition)
+        super().__init__(coordinator, entry, description)
         self._last_written_value: float | None = None
 
         # Raw register access the control mode already covers.
-        self._attr_entity_registry_enabled_default = not definition.advanced
+        self._attr_entity_registry_enabled_default = not description.advanced
 
-        self._attr_native_min_value = definition.min_value
-        self._attr_native_max_value = definition.max_value
-        self._attr_native_step = definition.step
-        self._attr_native_unit_of_measurement = definition.unit
-        self._attr_device_class = definition.device_class
         self._attr_mode = (
             NumberMode.BOX
-            if definition.max_value - definition.min_value > SLIDER_MAX_RANGE
+            if self.native_max_value - self.native_min_value > SLIDER_MAX_RANGE
             else NumberMode.SLIDER
         )
 
@@ -221,11 +216,11 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity[NumberWritableDef], NumberEntity):
 
     @property
     def native_value(self) -> float | None:
-        value = (self.coordinator.data or {}).get(self._definition.read_key)
+        value = (self.coordinator.data or {}).get(self.entity_description.read_key)
         return float(value) if value is not None else self._last_written_value
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_write_modbus_register(
-            entity_def=self._definition,
+            entity_def=self.entity_description,
             value=round(value),
         )

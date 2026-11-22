@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from homeassistant.util import dt as dt_util
 
-from custom_components.ef_powerocean_tcpmodbus import const
+from custom_components.ef_powerocean_tcpmodbus import descriptions
 from custom_components.ef_powerocean_tcpmodbus.energy_processor import (
     EnergyProcessor,
     HeldTotal,
@@ -723,8 +723,8 @@ def test_raw_totals_echo_every_device_lifetime_counter() -> None:
     assert values["grid_export_total_raw"] is None
     assert "solar_today_raw" not in values
     assert "house_energy_total_raw" not in values
-    assert set(values) == {f"{key}_raw" for key in const.DEVICE_ENERGY_KEYS} - {
-        f"{s.key}_raw" for s in const.ENERGY_SENSOR_MAP if s.resets_daily
+    assert set(values) == {f"{key}_raw" for key in descriptions.DEVICE_ENERGY_KEYS} - {
+        f"{s.key}_raw" for s in descriptions.ENERGY_SENSOR_MAP if s.resets_daily
     }
 
 

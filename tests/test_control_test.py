@@ -24,7 +24,7 @@ from homeassistant.helpers import device_registry
 from homeassistant.util import dt
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const
+from custom_components.ef_powerocean_tcpmodbus import const, descriptions
 from custom_components.ef_powerocean_tcpmodbus import control as control_module
 from custom_components.ef_powerocean_tcpmodbus.control_test import (
     AbortTest,
@@ -606,7 +606,7 @@ async def test_commands_are_accepted_again_after_the_test() -> None:
 
 
 def test_the_sensor_offers_every_state_the_test_can_be_in() -> None:
-    assert const.CONTROL_TEST_SENSOR.options == tuple(ControlTestState)
+    assert descriptions.CONTROL_TEST_SENSOR.options == list(ControlTestState)
 
     strings = json.loads(
         (Path(const.__file__).parent / "translations" / "en.json").read_text(

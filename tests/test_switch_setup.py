@@ -39,7 +39,7 @@ def reserve_charge(entities: list):
         (
             entity
             for entity in entities
-            if entity._definition is switch.RESERVE_CHARGE_SWITCH
+            if entity.entity_description is switch.RESERVE_CHARGE_SWITCH
         ),
         None,
     )

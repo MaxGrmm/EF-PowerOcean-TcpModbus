@@ -28,7 +28,6 @@ from .const import (
     ATTR_FROM,
     ATTR_MODE,
     ATTR_TO,
-    BATTERY_MODE_SELECT,
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
     CONF_CALC_GRID_ENERGY,
@@ -43,9 +42,7 @@ from .const import (
     DEFAULT_INVERTER_MODEL,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL_S,
-    DEVICE_ENERGY_KEYS,
     DOMAIN,
-    ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
     EVENT_FIRMWARE_CHANGED,
     MODBUS_DISABLED_READ_THRESHOLD,
@@ -57,6 +54,12 @@ from .const import (
 )
 from .control import ControlManager
 from .control_test import ControlTest
+from .descriptions import (
+    BATTERY_MODE_SELECT,
+    DEVICE_ENERGY_KEYS,
+    ENERGY_SENSOR_MAP,
+    EcoflowNumberEntityDescription,
+)
 from .energy_processor import (
     DEVICE_TOTAL_KEYS,
     ENERGY_KEYS,
@@ -66,7 +69,7 @@ from .energy_processor import (
 )
 from .identity import IdentityGuard
 from .modbus import ModbusClient, ModbusReadRejected, create_client, retries_until
-from .models import CoordinatorStatus, NumberWritableDef
+from .models import CoordinatorStatus
 from .powerocean.const import (
     BATTERY_CHARGE_W_PER_WH,
     BATTERY_DISCHARGE_W_PER_WH,
@@ -1346,7 +1349,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ── Parameter and setpoint writes ─────────────────────────────────────────
 
     async def async_write_modbus_register(
-        self, entity_def: NumberWritableDef, value: int
+        self, entity_def: EcoflowNumberEntityDescription, value: int
     ) -> None:
         """Write a device setting from a number entity."""
         await self._async_write_register(

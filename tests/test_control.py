@@ -1358,7 +1358,7 @@ def test_the_grid_feed_switch_stops_the_export_and_restores_it_exactly(
 ) -> None:
     allow_writes(control, monkeypatch)
     switch = EcoFlowSwitch.__new__(EcoFlowSwitch)
-    switch._definition = GRID_FEED_SWITCH
+    switch.entity_description = GRID_FEED_SWITCH
     switch.coordinator = cast(
         EcoflowCoordinator, SimpleNamespace(control=control, data={})
     )

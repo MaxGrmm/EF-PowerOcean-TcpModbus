@@ -6,7 +6,7 @@ import unittest
 
 import pytest
 
-from custom_components.ef_powerocean_tcpmodbus.const import SENSOR_MAP
+from custom_components.ef_powerocean_tcpmodbus.descriptions import SENSOR_MAP
 from custom_components.ef_powerocean_tcpmodbus.powerocean.registers import (
     REGISTERS_BY_KEY,
     RegisterType,
