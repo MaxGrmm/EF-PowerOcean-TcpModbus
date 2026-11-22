@@ -351,12 +351,9 @@ Debug is meant for testing a release on a live inverter.
 
 This integration follows the standard removal process:
 
-1. If **Modbus Control** is on, turn it off first and wait about a minute for the
-   EcoFlow app to take over again. Removing the integration with it on also hands
-   control back, once the heartbeat stops.
-2. Go to **Settings → Devices & Services → EF-PowerOcean-TcpModbus**, open the entry's
+1. Go to **Settings → Devices & Services → EF-PowerOcean-TcpModbus**, open the entry's
    **⋮** menu and choose **Delete**.
-3. To uninstall the integration as well, remove it in HACS, or delete
+2. To uninstall the integration as well, remove it in HACS, or delete
    `custom_components/ef_powerocean_tcpmodbus` for a manual installation, then restart
    Home Assistant.
 
