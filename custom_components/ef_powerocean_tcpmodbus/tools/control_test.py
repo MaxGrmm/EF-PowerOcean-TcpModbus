@@ -37,15 +37,15 @@ from homeassistant.helpers import device_registry
 from homeassistant.loader import async_get_integration
 from homeassistant.util import dt
 
-from .const import DOMAIN, EVENT_CONTROL_TEST_FINISHED, EVENT_CONTROL_TEST_STARTED
-from .heartbeat import Heartbeat
-from .modbus import ModbusRejected
-from .powerocean.const import (
+from ..const import DOMAIN, EVENT_CONTROL_TEST_FINISHED, EVENT_CONTROL_TEST_STARTED
+from ..heartbeat import Heartbeat
+from ..modbus import ModbusRejected
+from ..powerocean.const import (
     CONTROL_COMMAND_REGISTER,
     CONTROL_COMMAND_UNSAFE_BITS,
     CONTROL_STATUS_DAMPING_POLLS,
 )
-from .powerocean.control_test_core import (
+from ..powerocean.control_test_core import (
     CONTROL_SETTLE_S,
     CORE_TESTS,
     DEFAULT_TEST_POWER_W,
@@ -66,11 +66,11 @@ from .powerocean.control_test_core import (
     plan_test,
     trace_sample,
 )
-from .powerocean.models import ControlMode, ControlStatus, GridMode, deviation_state
-from .powerocean.registers import RegisterType, encode_register
+from ..powerocean.models import ControlMode, ControlStatus, GridMode, deviation_state
+from ..powerocean.registers import RegisterType, encode_register
 
 if TYPE_CHECKING:
-    from .coordinator import EcoflowCoordinator
+    from ..coordinator import EcoflowCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 

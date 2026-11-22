@@ -28,20 +28,20 @@ from homeassistant.helpers import device_registry
 from homeassistant.loader import async_get_integration
 from homeassistant.util import dt
 
-from .const import DOMAIN, MODBUS_REQUEST_TIMEOUT_S
-from .modbus import TRANSPORT_ERRORS, ModbusReadRejected
-from .powerocean.const import HEARTBEAT_REGISTER
-from .powerocean.registers import (
+from ..const import DOMAIN, MODBUS_REQUEST_TIMEOUT_S
+from ..modbus import TRANSPORT_ERRORS, ModbusReadRejected
+from ..powerocean.const import HEARTBEAT_REGISTER
+from ..powerocean.registers import (
     CANDIDATE_REGISTERS,
     REGISTER_SCAN_RANGES,
     SERIAL_NUMBER,
     RegisterDef,
     register_blocks_for,
 )
-from .powerocean.telemetry import decode_register
+from ..powerocean.telemetry import decode_register
 
 if TYPE_CHECKING:
-    from .coordinator import EcoflowCoordinator
+    from ..coordinator import EcoflowCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 

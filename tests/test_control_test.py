@@ -26,12 +26,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const, definitions
 from custom_components.ef_powerocean_tcpmodbus import control as control_module
-from custom_components.ef_powerocean_tcpmodbus.control_test import (
-    AbortTest,
-    ControlTest,
-    ControlTestState,
-    Timing,
-)
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
 from custom_components.ef_powerocean_tcpmodbus.heartbeat import Heartbeat
 from custom_components.ef_powerocean_tcpmodbus.modbus import (
@@ -48,6 +42,12 @@ from custom_components.ef_powerocean_tcpmodbus.powerocean.models import (
     ControlStatus,
     GridFeedMode,
     GridMode,
+)
+from custom_components.ef_powerocean_tcpmodbus.tools.control_test import (
+    AbortTest,
+    ControlTest,
+    ControlTestState,
+    Timing,
 )
 
 SETPOINTS = {

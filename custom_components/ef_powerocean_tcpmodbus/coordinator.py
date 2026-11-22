@@ -53,7 +53,6 @@ from .const import (
     STORAGE_VERSION,
 )
 from .control import ControlManager
-from .control_test import ControlTest
 from .definitions import (
     BATTERY_MODE_SELECT,
     DEVICE_ENERGY_KEYS,
@@ -116,7 +115,8 @@ from .powerocean.telemetry import (
     is_modbus_disabled,
 )
 from .powerocean.util import parse_datetime
-from .register_scan import RegisterScan
+from .tools.control_test import ControlTest
+from .tools.register_scan import RegisterScan
 
 _LOGGER = logging.getLogger(__name__)
 
