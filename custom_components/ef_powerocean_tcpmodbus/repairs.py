@@ -11,9 +11,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry
 from homeassistant.loader import async_get_integration
 
-from . import watchdog
+from . import issues, watchdog
 from .const import BUG_REPORT_URL, DOMAIN
-from .coordinator import GRID_ENERGY_ISSUE_PREFIX, EcoflowCoordinator
+from .coordinator import EcoflowCoordinator
 
 if TYPE_CHECKING:
     # Only for annotations: Home Assistant 2025.12, the oldest supported, does not
@@ -242,6 +242,6 @@ async def async_create_fix_flow(
     if data.get("flow") == "alert":
         return AlertRepairFlow(data)
     entry_id = str(data.get("entry_id", ""))
-    if issue_id.startswith(GRID_ENERGY_ISSUE_PREFIX):
+    if issues.is_kind(issues.GRID_ENERGY, issue_id):
         return GridEnergyRepairFlow(entry_id)
     return HeldTotalsRepairFlow(entry_id)
