@@ -37,6 +37,7 @@ from .models import (
     RegisterDef,
     RegisterType,
     SensorDef,
+    Signal,
     plan_blocks_for_model,
     requires_modbus_control,
 )
@@ -49,6 +50,10 @@ EVENT_CONTROL_TEST_FINISHED: Final = f"{DOMAIN}_control_test_finished"
 # reading_checks.py. Control steps aside in between while it is on.
 EVENT_READING_CHECK_FAILED: Final = f"{DOMAIN}_reading_check_failed"
 EVENT_READING_CHECK_CLEARED: Final = f"{DOMAIN}_reading_check_cleared"
+# Read on a reconnect, so it often marks the end of an outage an update caused.
+EVENT_FIRMWARE_CHANGED: Final = f"{DOMAIN}_firmware_changed"
+ATTR_FROM: Final = "from"
+ATTR_TO: Final = "to"
 ATTR_STATUS: Final = "status"
 ATTR_CHECK: Final = "check"
 ATTR_MODE: Final = "mode"
@@ -69,6 +74,9 @@ CONF_MAX_BATTERY_CHARGED_POWER: Final = "battery_charged_power_max"
 CONF_MAX_BATTERY_DISCHARGED_POWER: Final = "battery_discharged_power_max"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_CALC_SOLAR_POWER: Final = "calc_solar_power"
+CONF_CALC_GRID_ENERGY: Final = "calc_grid_energy"
+# How much the integration raises in repairs, beyond what the user must act on.
+CONF_ALERT_VERBOSITY: Final = "alert_verbosity"
 CONF_MODBUS_CONTROL: Final = "modbus_control"
 CONF_INVERTER_MODEL: Final = "inverter_model"
 # kWh added to what the device reports for a lifetime total, by its key. Set by the
@@ -96,10 +104,12 @@ MAX_FAULT_EVENTS: Final = 20
 
 SLEEP_TIME_AFTER_RECONNECT_S: Final = 1
 
-# Short, so a silent inverter cannot hold the lock the heartbeat waits on.
-MODBUS_REQUEST_TIMEOUT_S: Final = 3
-# Well under the sum of all request timeouts, which could pass a minute.
-MODBUS_POLL_BUDGET_S: Final = 4 * MODBUS_REQUEST_TIMEOUT_S
+# Inverters on Wi-Fi can answer slowly (#42). A request and its resend hold the
+# client lock for up to about two of these, well inside the heartbeat's window.
+MODBUS_REQUEST_TIMEOUT_S: Final = 10
+# Room for a request that times out and its retry, and well under the sum of all
+# request timeouts, which could pass minutes.
+MODBUS_POLL_BUDGET_S: Final = 25
 
 # The inverter runs on its app settings and merely stores the commands it is sent,
 # until this register is written; each write buys it a minute of obeying them. Every
@@ -115,8 +125,10 @@ HEARTBEAT_JITTER_S: Final = 2
 # A write this recent still holds the deadline off, so a command rides on it rather
 # than sending one of its own.
 HEARTBEAT_REUSE_S: Final = 10
-# How long one write may spend being retried, all attempts together. Below
-# HEARTBEAT_INTERVAL_S, so the retries are over before the next write is due.
+# How long one write may spend waiting between its retries. Below
+# HEARTBEAT_INTERVAL_S, so the retries are over before the next write is due. A
+# write that times out takes longer, but only while the inverter is not answering,
+# when control is lost anyway.
 HEARTBEAT_RETRY_TOTAL_S: Final = 15
 # The shortest gap between two writes. Only reached after a failed one, where the
 # deadline has kept running and waiting a full interval would risk passing it.
@@ -159,6 +171,22 @@ STATE_SAVE_DELAY_S: Final = 30
 # a repairs issue offering to take the inverter's value. Longer than any glitch on
 # record, a bogus 0 that lasted hours.
 HELD_TOTAL_ISSUE_AFTER_S: Final = 24 * 3600
+# The grid energy registers, which some inverters leave at 0 while Grid Power reads
+# right (#218). Grid energy can then be integrated from Grid Power instead.
+GRID_ENERGY_REGISTER_KEYS: Final = (
+    "grid_import_total",
+    "grid_import_today",
+    "grid_export_total",
+    "grid_export_today",
+)
+# Grid Power is not integrated across a longer gap between two readings, so an
+# outage adds no made-up energy.
+GRID_ENERGY_MAX_GAP_S: Final = 120
+# The grid energy registers reading 0 this long, while this much energy flowed
+# through the grid, raises a repairs issue offering to integrate Grid Power. As long
+# as a held total, since a bogus 0 has lasted hours.
+GRID_ENERGY_ISSUE_AFTER_S: Final = HELD_TOTAL_ISSUE_AFTER_S
+GRID_ENERGY_ISSUE_MIN_KWH: Final = 1.0
 # Where a user reports a held total they believe is wrong, with the bug form's
 # fields filled in from the device.
 BUG_REPORT_URL: Final = "https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues/new"
@@ -206,6 +234,18 @@ FAULT_KEYS: Final = tuple(
     f"fault_{fault_number}" for fault_number in range(1, MAX_FAULT_EVENTS + 1)
 )
 
+# Read from an external EcoFlow Smart Meter at the grid connection. Without one the
+# device reads 0 in all of them, as on a PowerOcean Plus that relies on its built-in
+# meter, whose readings show as the inverter's voltage and current (#240).
+EXTERNAL_METER_KEYS: Final = (
+    "grid_voltage_l1",
+    "grid_voltage_l2",
+    "grid_voltage_l3",
+    "grid_current_l1",
+    "grid_current_l2",
+    "grid_current_l3",
+)
+
 BATTERY_SOC_KEYS: Final = tuple(
     f"soc_battery_{battery_number}"
     for battery_number in range(1, MAX_BATTERY_COUNT + 1)
@@ -219,14 +259,20 @@ OPTIONAL_STALLS_TO_DROP: Final = 3
 # the reads are worked out by plan_blocks().
 MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef("grid_connection_code", 40513, RegisterType.UINT16, optional=True),
-    RegisterDef("house_power", 40519),
-    RegisterDef("grid_power", 40521),
-    RegisterDef("solar_power", 40523),
-    RegisterDef("battery_power", 40525),
-    RegisterDef("battery_soc", 40527, RegisterType.UINT16),
+    RegisterDef("house_power", 40519, signal=Signal.MEASURE),
+    RegisterDef("grid_power", 40521, signal=Signal.MEASURE),
+    RegisterDef("solar_power", 40523, signal=Signal.MEASURE),
+    RegisterDef("battery_power", 40525, signal=Signal.MEASURE),
+    RegisterDef("battery_soc", 40527, RegisterType.UINT16, signal=Signal.LEVEL),
     RegisterDef("inverter_rated_power", 40528, RegisterType.UINT32),
-    RegisterDef("system_modes", 40530, RegisterType.UINT32),
-    RegisterDef("system_state_2", 40532, RegisterType.UINT32, optional=True),
+    RegisterDef("system_modes", 40530, RegisterType.UINT32, signal=Signal.STATUS),
+    RegisterDef(
+        "system_state_2",
+        40532,
+        RegisterType.UINT32,
+        optional=True,
+        signal=Signal.STATUS,
+    ),
     RegisterDef("min_soc_limit", 40536, RegisterType.UINT16),
     RegisterDef("grid_feed_mode", 40537, RegisterType.UINT16),
     # The two export caps: 40538 is the one configured, and the only one that takes
@@ -243,63 +289,74 @@ MODBUS_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef(INVERTER_CAPACITY_KEY, 40546, RegisterType.UINT32),
     RegisterDef(RECTIFIER_CAPACITY_KEY, 40548, RegisterType.UINT32),
     # Rectifying positive, inverting negative.
-    RegisterDef("inverter_output_power", 40550, RegisterType.INT32, optional=True),
+    RegisterDef(
+        "inverter_output_power",
+        40550,
+        RegisterType.INT32,
+        optional=True,
+        signal=Signal.MEASURE,
+    ),
     RegisterDef("battery_capacity", 40552, RegisterType.UINT32),
     RegisterDef("battery_discharge_power_limit", 40554, RegisterType.UINT32),
     RegisterDef("battery_charge_power_limit", 40556, RegisterType.UINT32),
-    # Measured at the grid connection, unlike voltage_l1 and current_l1 below which
-    # are the inverter's own phases.
-    RegisterDef("grid_current_l1", 40559, optional=True),
-    RegisterDef("grid_current_l2", 40561, optional=True),
-    RegisterDef("grid_current_l3", 40563, optional=True),
-    RegisterDef("grid_voltage_l1", 40565, optional=True),
-    RegisterDef("grid_voltage_l2", 40567, optional=True),
-    RegisterDef("grid_voltage_l3", 40569, optional=True),
+    # Read from an external meter (EXTERNAL_METER_KEYS), unlike voltage_l1 and
+    # current_l1 below, which the inverter measures itself. On a PowerOcean Plus
+    # those come from its built-in meter at the GRID terminals.
+    RegisterDef("grid_current_l1", 40559, optional=True, signal=Signal.MEASURE),
+    RegisterDef("grid_current_l2", 40561, optional=True, signal=Signal.MEASURE),
+    RegisterDef("grid_current_l3", 40563, optional=True, signal=Signal.MEASURE),
+    RegisterDef("grid_voltage_l1", 40565, optional=True, signal=Signal.JITTER),
+    RegisterDef("grid_voltage_l2", 40567, optional=True, signal=Signal.JITTER),
+    RegisterDef("grid_voltage_l3", 40569, optional=True, signal=Signal.JITTER),
     RegisterDef("battery_power_setpoint", 40571, RegisterType.INT32),
     RegisterDef("feed_in_power_max_percent", 40573, RegisterType.UINT16, optional=True),
-    RegisterDef("battery_voltage", 40574),
-    RegisterDef("battery_current", 40576),
-    RegisterDef("battery_temperature", 40578),
-    RegisterDef("voltage_l1", 40580),
-    RegisterDef("voltage_l2", 40582),
-    RegisterDef("voltage_l3", 40584),
-    RegisterDef("current_l1", 40586),
-    RegisterDef("current_l2", 40588),
-    RegisterDef("current_l3", 40590),
-    RegisterDef("inverter_temperature", 40592),
-    RegisterDef("frequency", 40594),
-    RegisterDef("pv1_voltage", 40596),
-    RegisterDef("pv2_voltage", 40598),
-    RegisterDef("pv3_voltage", 40600),
-    RegisterDef("pv1_current", 40602),
-    RegisterDef("pv2_current", 40604),
-    RegisterDef("pv3_current", 40606),
+    RegisterDef("battery_voltage", 40574, signal=Signal.JITTER),
+    RegisterDef("battery_current", 40576, signal=Signal.MEASURE),
+    RegisterDef("battery_temperature", 40578, signal=Signal.MEASURE),
+    RegisterDef("voltage_l1", 40580, signal=Signal.JITTER),
+    RegisterDef("voltage_l2", 40582, signal=Signal.JITTER),
+    RegisterDef("voltage_l3", 40584, signal=Signal.JITTER),
+    RegisterDef("current_l1", 40586, signal=Signal.MEASURE),
+    RegisterDef("current_l2", 40588, signal=Signal.MEASURE),
+    RegisterDef("current_l3", 40590, signal=Signal.MEASURE),
+    RegisterDef("inverter_temperature", 40592, signal=Signal.MEASURE),
+    RegisterDef("frequency", 40594, signal=Signal.JITTER),
+    RegisterDef("pv1_voltage", 40596, signal=Signal.MEASURE),
+    RegisterDef("pv2_voltage", 40598, signal=Signal.MEASURE),
+    RegisterDef("pv3_voltage", 40600, signal=Signal.MEASURE),
+    RegisterDef("pv1_current", 40602, signal=Signal.MEASURE),
+    RegisterDef("pv2_current", 40604, signal=Signal.MEASURE),
+    RegisterDef("pv3_current", 40606, signal=Signal.MEASURE),
     # 40609 refuses writes (exception 2 on a PowerOcean Three Phase, issue #89).
     RegisterDef(FEED_IN_POWER_MAX_EFFECTIVE_KEY, 40609, RegisterType.UINT32),
-    RegisterDef("fault_count", 42049, RegisterType.UINT16),
+    RegisterDef("fault_count", 42049, RegisterType.UINT16, signal=Signal.STATUS),
     *(
-        RegisterDef(key, 42049 + fault_number, RegisterType.UINT16)
+        RegisterDef(
+            key, 42049 + fault_number, RegisterType.UINT16, signal=Signal.STATUS
+        )
         for fault_number, key in enumerate(FAULT_KEYS, start=1)
     ),
     RegisterDef("battery_count", 42081, RegisterType.UINT16),
     *(
-        RegisterDef(key, 42081 + battery_number, RegisterType.UINT16)
+        RegisterDef(
+            key, 42081 + battery_number, RegisterType.UINT16, signal=Signal.LEVEL
+        )
         for battery_number, key in enumerate(BATTERY_SOC_KEYS, start=1)
     ),
-    RegisterDef("grid_import_total", 42161),
-    RegisterDef("grid_import_today", 42163),
-    RegisterDef("grid_export_total", 42177),
-    RegisterDef("grid_export_today", 42179),
-    RegisterDef("inverter_ac_in_total", 42193, optional=True),
-    RegisterDef("inverter_ac_in_today", 42195, optional=True),
-    RegisterDef("inverter_ac_out_total", 42209, optional=True),
-    RegisterDef("inverter_ac_out_today", 42211, optional=True),
-    RegisterDef("bat_charged_total", 42225),
-    RegisterDef("bat_charged_today", 42227),
-    RegisterDef("bat_discharged_total", 42241),
-    RegisterDef("bat_discharged_today", 42243),
-    RegisterDef("solar_total", 42257),
-    RegisterDef("solar_today", 42259),
+    RegisterDef("grid_import_total", 42161, signal=Signal.COUNTER),
+    RegisterDef("grid_import_today", 42163, signal=Signal.COUNTER),
+    RegisterDef("grid_export_total", 42177, signal=Signal.COUNTER),
+    RegisterDef("grid_export_today", 42179, signal=Signal.COUNTER),
+    RegisterDef("inverter_ac_in_total", 42193, optional=True, signal=Signal.COUNTER),
+    RegisterDef("inverter_ac_in_today", 42195, optional=True, signal=Signal.COUNTER),
+    RegisterDef("inverter_ac_out_total", 42209, optional=True, signal=Signal.COUNTER),
+    RegisterDef("inverter_ac_out_today", 42211, optional=True, signal=Signal.COUNTER),
+    RegisterDef("bat_charged_total", 42225, signal=Signal.COUNTER),
+    RegisterDef("bat_charged_today", 42227, signal=Signal.COUNTER),
+    RegisterDef("bat_discharged_total", 42241, signal=Signal.COUNTER),
+    RegisterDef("bat_discharged_today", 42243, signal=Signal.COUNTER),
+    RegisterDef("solar_total", 42257, signal=Signal.COUNTER),
+    RegisterDef("solar_today", 42259, signal=Signal.COUNTER),
 )
 
 REGISTERS_BY_KEY: Final = {register.key: register for register in MODBUS_REGISTERS}
@@ -344,6 +401,16 @@ REGISTER_SCAN_RANGES: Final[tuple[tuple[int, int], ...]] = (
     (40000, 40700),
     (42000, 42300),
 )
+
+# Values calculated from polled readings, by the readings they come from. A value
+# from a reading the checks distrust is not shown either.
+DERIVED_FROM: Final[dict[str, frozenset[str]]] = {
+    "bat_remaining": frozenset({"battery_soc"}),
+    **{
+        f"pv{number}_power": frozenset({f"pv{number}_voltage", f"pv{number}_current"})
+        for number in (1, 2, 3)
+    },
+}
 
 
 def register_blocks_for(
@@ -909,6 +976,13 @@ BINARY_SENSOR_MAP: list[BinarySensorDef] = [
 MODBUS_CONTROL_BINARY_SENSOR: Final = BinarySensorDef(
     key="modbus_control",
     device_class=BinarySensorDeviceClass.RUNNING,
+)
+
+# On while a check shows readings to be wrong, whether or not Modbus Control is on.
+READING_CHECK_BINARY_SENSOR: Final = BinarySensorDef(
+    key="reading_check",
+    device_class=BinarySensorDeviceClass.PROBLEM,
+    entity_category=EntityCategory.DIAGNOSTIC,
 )
 
 CONTROL_FEATURES: Final[dict[ControlFeature, ControlFeatureDef]] = {

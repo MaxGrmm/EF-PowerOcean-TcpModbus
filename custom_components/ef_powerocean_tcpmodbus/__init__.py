@@ -5,24 +5,35 @@ from __future__ import annotations
 import logging
 from typing import Final
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import (
+    SIGNAL_CONFIG_ENTRY_CHANGED,
+    ConfigEntry,
+    ConfigEntryChange,
+)
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from .const import CONF_HOST, CONF_PORT, DOMAIN
+from . import outage, watchdog
+from .announcer import issue_ids as announcer_issue_ids
+from .const import CONF_ALERT_VERBOSITY, CONF_HOST, CONF_PORT, DOMAIN
 from .control import ControlInputs
 from .coordinator import (
     EcoflowConfigEntry,
     EcoflowCoordinator,
+    grid_energy_issue_id,
     held_totals_issue_id,
     identity_mismatch_issue_id,
     state_store,
 )
 from .modbus import async_prepare
+from .models import AlertVerbosity
 from .reading_checks import KEYS as READING_CHECK_KEYS
 from .services import async_setup_services
 
@@ -50,6 +61,19 @@ async def async_setup(
 ) -> bool:
     """Register the actions, which serve every configured inverter."""
     async_setup_services(hass)
+
+    @callback
+    def _async_entry_changed(change: ConfigEntryChange, entry: ConfigEntry) -> None:
+        # Disabling an entry that retries its setup never unloads it, and an
+        # outage outlives an unload, so drop it here for an entry that stops.
+        if (
+            change is ConfigEntryChange.UPDATED
+            and entry.domain == DOMAIN
+            and entry.disabled_by is not None
+        ):
+            outage.async_forget(hass, entry)
+
+    async_dispatcher_connect(hass, SIGNAL_CONFIG_ENTRY_CHANGED, _async_entry_changed)
     return True
 
 
@@ -148,7 +172,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
     )
     # Connects and reads the device, through the coordinator's _async_setup. If
     # it fails, Home Assistant retries the setup and shuts the coordinator down.
-    await coordinator.async_config_entry_first_refresh()
+    answers = coordinator.modbus_client.answers
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except ConfigEntryNotReady:
+        # A poll that ran has counted itself; a failed connect never got that far.
+        # Either way the outage goes on across the retries. Any other error in
+        # _async_setup is a bug here, not the inverter being away.
+        if coordinator.status is None and isinstance(
+            coordinator.last_exception, UpdateFailed
+        ):
+            await coordinator.async_poll_failed(answers)
+        raise
     # Before the update listener below, which would reload the entry over it.
     _async_claim_serial_number(hass, entry, coordinator)
 
@@ -161,6 +196,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
 
     entry.runtime_data = coordinator
     _async_make_device_physical(hass, entry)
+    # Before the sensors are added, so a disabled one is never added at all.
+    coordinator.async_sync_external_meter_entities()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # The control loop reads its inputs, and what its reading checks compare,
@@ -170,6 +207,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> b
         coordinator.async_require(ControlInputs.keys() | READING_CHECK_KEYS)
     )
     coordinator.async_poll_on_demand()
+    verbosity = AlertVerbosity(
+        entry.options.get(CONF_ALERT_VERBOSITY, AlertVerbosity.ESSENTIAL)
+    )
+    if verbosity is not AlertVerbosity.ESSENTIAL:
+        entry.async_on_unload(
+            await watchdog.async_start(hass, entry, coordinator, verbosity)
+        )
 
     # Reload integration when config entry data changes
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
@@ -192,6 +236,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
     ir.async_delete_issue(hass, DOMAIN, _modbus_disabled_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, identity_mismatch_issue_id(entry))
     ir.async_delete_issue(hass, DOMAIN, held_totals_issue_id(entry))
+    for issue_id in announcer_issue_ids(entry):
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+    ir.async_delete_issue(hass, DOMAIN, grid_energy_issue_id(entry))
+    # An outage outlives a reload, so its issue stays; async_setup drops it when
+    # the entry is disabled.
     # The coordinator's async_shutdown, registered with the entry, hands control
     # back and closes the connection after this returns.
     return True
@@ -199,4 +248,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: EcoflowConfigEntry) -> 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Delete the state saved for the entry, which nothing else would read again."""
+    outage.async_forget(hass, entry)
     await state_store(hass, entry.entry_id).async_remove()

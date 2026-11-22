@@ -9,10 +9,45 @@
 
 ### Changed
 
+- The Grid-side Voltage and Current sensors are disabled by the integration while no external EcoFlow Smart Meter has reported, since all six read 0 without one, as on a PowerOcean Plus that uses its built-in meter (#240). They are enabled again once a meter reports, and one you disabled yourself stays disabled. The log says why at each start, and the diagnostics download shows `has_external_meter`.
+- The README has a contents list and is ordered by setup. The sensor tables moved to [docs/sensors.md](docs/sensors.md) and the battery control details to [docs/battery-control.md](docs/battery-control.md) and the protocol notes to [docs/ecoflow-modbus-protocol-implementation.md](docs/ecoflow-modbus-protocol-implementation.md), and the README links to both from absolute URLs, so they also work where HACS or the Marketplace shows it, and the contents list is left out of the Marketplace.
+- The sensor documentation explains which AC readings the inverter measures itself and which come from an external EcoFlow Smart Meter, and that on a PowerOcean Plus the Inverter sensors show its built-in meter at the grid connection.
+
+## [2.10.1] - 2026-11-21
+
+### Fixed
+
+- A request the connection loses, as when the inverter closes an idle connection just as a poll starts, is sent once more on a new connection instead of failing the poll (#237). A refusal from the inverter is not sent again.
+- A restart no longer counts as readings standing still, which could fail the `frozen`, `counter_stalled` or `telemetry_stalled` check right after Home Assistant was down.
+
+### Changed
+
+- Requests time out after 10 seconds instead of 3, on both connections, as inverters on Wi-Fi can answer slowly (#42). A poll gets 25 seconds, so a request that times out still leaves time to send it again.
+
+## [2.10.0] - 2026-11-20
+
+### Added
+
+- An Alert verbosity setting: Essential (the default, as before), Readings, Detailed or Debug. Each level raises more in repairs, from readings that can't be trusted, to the connection's health, to every warning and error the integration logs. Each alert can be ignored this time, for 24 hours, until the next release, or permanently.
+- A `telemetry_stalled` check for an inverter that keeps answering but stopped updating most of its readings (#227). It fails once the voltages and frequency stand still and either none of the solar, grid import and battery discharge counters, which supply the house, has moved for 20 minutes, day or night. A model that reports none of those counters is judged by most readings standing still for 30 minutes instead. Control steps aside, and every measured reading that stopped changing shows unavailable, including one that stands at 0, while those that still move, such as grid and solar power, stay shown. How long each reading has stood still survives a restart.
+- A repairs issue once `telemetry_stalled` has lasted 30 minutes, asking to restart the inverter. It goes as soon as the readings move again.
+- A Reading Check diagnostic sensor, on while a check shows readings to be wrong, with the check, since when and the distrusted readings as attributes. Unlike Control Status, it shows them while Modbus Control is off too.
+- Coordinator Status shows Readings stalled instead of Success while `telemetry_stalled` holds, since a poll that runs fine can still bring readings the inverter no longer updates.
+- A repairs issue when the inverter has not answered for 5 minutes or more, as after a firmware update that switched Modbus TCP off (#222). The inverter then stays silent instead of reading 0, which the Modbus disabled issue does not catch. The issue says whether the port still takes connections or nothing answers at all, and that in a few cases a firmware update has switched Modbus TCP off. It stays across a reload and clears with the next good read.
+- Setup and Reconfigure say when the inverter takes connections but sends no replies, instead of asking to check the address, and that a firmware update has in a few cases switched Modbus TCP off.
+- Firmware changes appear in the logbook, from an `ef_powerocean_tcpmodbus_firmware_changed` event.
+- A **Calculation of grid energy** option, for inverters whose grid import and export registers stay at 0 while Grid Power reads right (#218). Grid Import and Grid Export are then integrated from Grid Power, continuing from the totals shown, and House Consumption follows. A repairs issue offers to turn it on once the registers have read 0 for a day while at least 1 kWh went through the grid; it is never turned on by itself.
+
+### Changed
+
+- The `frozen` check judges each voltage and the frequency on its own, and fails once most of them, an AC voltage among them, haven't changed for five minutes instead of all of them for two (#227). One reading that still moved hid the others before. Each one that stopped shows unavailable while the check fails, and so does anything calculated from a distrusted reading, such as Battery Remaining Energy from the Battery SOC.
+- A lost connection is retried after 0, 5, 10 and 20 seconds, then every 30 seconds instead of every 2 minutes, so the inverter is read again soon after it is back. On the connection Home Assistant shares, requests time out after 3 seconds, as on an own connection, instead of 10.
 - Entities now show unavailable while a poll fails, and available again with the next good one, as the README describes. Before, they kept showing their last value, because a value that had not changed wrote no state (#219).
 
 ### Fixed
 
+- With Modbus Control off, a reconnect no longer makes every poll write the default control method to the inverter (#227). An inverter that left the write unanswered dropped the connection each time, so polls ran every 25 seconds instead of every 5 and never stopped writing.
+- On the connection Home Assistant shares, a request that times out now drops the connection, and the next poll opens a new one. A connection whose packets a firewall dropped stayed open without answers, and kept the inverter unreadable for minutes after it was reachable again.
 - Entities whose value had not changed could stay unavailable after a start whose first read failed, until their value next changed (#219).
 
 ## [2.9.5] - 2026-11-04

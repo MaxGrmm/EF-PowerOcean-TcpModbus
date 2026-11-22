@@ -15,12 +15,15 @@ from homeassistant.core import Event, HomeAssistant, callback
 
 from .const import (
     ATTR_CHECK,
+    ATTR_FROM,
     ATTR_MODE,
     ATTR_STATUS,
+    ATTR_TO,
     DOMAIN,
     EVENT_COMMAND_EXPIRED,
     EVENT_CONTROL_TEST_FINISHED,
     EVENT_CONTROL_TEST_STARTED,
+    EVENT_FIRMWARE_CHANGED,
     EVENT_READING_CHECK_CLEARED,
     EVENT_READING_CHECK_FAILED,
 )
@@ -104,4 +107,19 @@ def async_describe_events(
     )
     async_describe_event(
         DOMAIN, EVENT_READING_CHECK_CLEARED, async_describe_check_cleared
+    )
+
+    @callback
+    def async_describe_firmware_changed(event: Event) -> dict[str, Any]:
+        return {
+            LOGBOOK_ENTRY_NAME: INVERTER_NAME,
+            LOGBOOK_ENTRY_MESSAGE: (
+                f"firmware changed from {event.data.get(ATTR_FROM)} to "
+                f"{event.data.get(ATTR_TO)}; run the control test to see whether "
+                "control still works"
+            ),
+        }
+
+    async_describe_event(
+        DOMAIN, EVENT_FIRMWARE_CHANGED, async_describe_firmware_changed
     )

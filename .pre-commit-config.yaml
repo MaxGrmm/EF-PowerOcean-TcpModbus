@@ -17,6 +17,14 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  - repo: local
+    hooks:
+      - id: markdown-contents
+        name: Update Markdown contents
+        entry: python .github/scripts/update_toc.py
+        language: python
+        types: [markdown]
+
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v3.1.0
     hooks:

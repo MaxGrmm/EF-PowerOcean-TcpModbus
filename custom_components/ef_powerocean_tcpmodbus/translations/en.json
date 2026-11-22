@@ -22,7 +22,8 @@
           "solar_power_max": "Maximum solar power [W]",
           "grid_power_max": "Maximum grid power [W]",
           "scan_interval": "Poll Interval [s]",
-          "calc_solar_power": "Calculation of solar power"
+          "calc_solar_power": "Calculation of solar power",
+          "calc_grid_energy": "Calculation of grid energy"
         },
         "data_description": {
           "inverter_model": "Select the inverter model.",
@@ -30,7 +31,8 @@
           "solar_power_max": "Maximum solar power",
           "grid_power_max": "Most your grid connection can import or export, set by your main fuse. Not the inverter rating: the house alone can draw more than that.",
           "scan_interval": "How often values are polled (2-30 seconds)",
-          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string."
+          "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
+          "calc_grid_energy": "In some inverters, the grid import and export registers stay at 0 while Grid Power reads right. This switch calculates grid import and export from Grid Power instead. An estimate: it can differ from your meter by a few percent."
         }
       },
       "reconfigure": {
@@ -47,7 +49,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Connection failed - please check IP address and port"
+      "cannot_connect": "Connection failed - please check IP address and port",
+      "modbus_silent": "The inverter takes connections on this port but sends no Modbus replies. In a few cases, a firmware update has switched Modbus TCP off: if the inverter updated recently, ask your installer to enable it again in the EcoFlow Pro app, then try again."
     },
     "abort": {
       "already_configured": "This device is already configured",
@@ -67,6 +70,8 @@
           "grid_power_max": "Maximum grid power [W]",
           "scan_interval": "Poll Interval [s]",
           "calc_solar_power": "Calculation of solar power",
+          "calc_grid_energy": "Calculation of grid energy",
+          "alert_verbosity": "Alert verbosity",
           "battery_reserve": "Battery Reserve"
         },
         "data_description": {
@@ -76,6 +81,8 @@
           "grid_power_max": "Most your grid connection can import or export, set by your main fuse. Not the inverter rating: the house alone can draw more than that.",
           "scan_interval": "How often values are polled (2-30 seconds)",
           "calc_solar_power": "In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.",
+          "calc_grid_energy": "In some inverters, the grid import and export registers stay at 0 while Grid Power reads right. This switch calculates grid import and export from Grid Power instead. An estimate: it can differ from your meter by a few percent.",
+          "alert_verbosity": "How much the integration raises in Settings \u2192 Repairs. Essential: only what you must act on, such as an inverter that stopped updating. Readings: also readings that cannot be trusted. Detailed: also the connection's health, such as frequent reconnects or late polls. Debug: also every warning and error the integration logs. Each alert can be ignored. Setting it back to Essential forgets the ignored alerts.",
           "battery_reserve": "Native: the inverter enforces the reserve itself, like the one set in the EcoFlow app, but not every model accepts a change to it over Modbus. Emulated: the integration imitates the app's reserve with its own logic, while Modbus Control is on. Set for your model; change it only to test a model."
         },
         "sections": {
@@ -116,6 +123,14 @@
       "title": "Modbus is disabled on the inverter at {host}",
       "description": "The integration requires Modbus TCP to be enabled in the EcoFlow Pro app. Ask your installer to enable it and the integration will automatically start working."
     },
+    "not_answering_unreachable": {
+      "title": "The inverter at {host} is not reachable",
+      "description": "Nothing has answered on the inverter's Modbus port since {since}. Check that the inverter is powered and still has the IP address {host}, for example in your router. In a few cases, a firmware update has also switched Modbus TCP off: if the inverter updated recently, ask your installer to enable it again in the EcoFlow Pro app. The entities stay unavailable until it answers again, and this message then disappears by itself."
+    },
+    "not_answering_modbus_silent": {
+      "title": "The inverter at {host} stopped answering Modbus",
+      "description": "Since {since} the inverter takes connections on its Modbus port but sends no replies. In a few cases, a firmware update has switched Modbus TCP off: if the inverter updated recently, ask your installer to enable it again in the EcoFlow Pro app. The integration recovers by itself once the inverter answers, and this message then disappears."
+    },
     "energy_totals_held": {
       "title": "Energy totals of the inverter at {host} have been held for over a day",
       "fix_flow": {
@@ -131,6 +146,44 @@
         },
         "abort": {
           "not_held": "These energy totals are no longer held."
+        }
+      }
+    },
+    "grid_energy_not_counted": {
+      "title": "Grid energy of the inverter at {host} is not counted",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Calculate grid energy from Grid Power",
+            "description": "For more than a day, the inverter has reported 0 for grid import and export, while Grid Power showed energy flowing through the grid. Grid Import, Grid Export and House Consumption therefore stay wrong.\n\nSubmit to calculate grid import and export from Grid Power instead. The totals continue from their current values, so the Energy dashboard records no jump. The calculation is an estimate: it can differ from your meter by a few percent, and energy is not counted while the inverter cannot be read. The (Device) sensors keep showing what the inverter reports.\n\nYou can turn this off again under the integration's [settings]({settings_page}): choose Configure and switch off Calculation of grid energy."
+          }
+        },
+        "abort": {
+          "not_needed": "The grid energy registers are counting again, or grid energy is already calculated."
+        }
+      }
+    },
+    "telemetry_stalled": {
+      "title": "The inverter at {host} stopped updating its readings",
+      "description": "The inverter still answers, but most of its readings haven't changed since at least {since}. Readings that stand still show as unavailable, and Modbus Control, if on, leaves the inverter to its own logic. Restart the inverter according to its manual. This issue goes away once the readings move again. If it keeps coming back, report it with the integration's diagnostics and the inverter's firmware version."
+    },
+    "alert": {
+      "title": "Alert: {title}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Alert: {title}",
+            "description": "{message}\n\nSeen {count} times, first {first}, last {last}.\n\nIgnore this alert this time, until it goes away and comes back; for 24 hours; until the next release of the integration; or permanently. Setting the alert verbosity back to Essential forgets every alert you ignored.",
+            "menu_options": {
+              "ignore_once": "Ignore this time",
+              "ignore_day": "Ignore for 24 hours",
+              "ignore_release": "Ignore until the next release",
+              "ignore_forever": "Ignore permanently"
+            }
+          }
+        },
+        "abort": {
+          "not_watching": "Alerts beyond Essential are no longer on for this inverter."
         }
       }
     }
@@ -171,6 +224,14 @@
         "700": "Device off-grid event",
         "702": "Low power mode",
         "703": "EMS module power-on notification"
+      }
+    },
+    "alert_verbosity": {
+      "options": {
+        "essential": "Essential",
+        "readings": "Readings",
+        "detailed": "Detailed",
+        "debug": "Debug"
       }
     }
   },
@@ -376,7 +437,8 @@
           "read_failed": "Read failed",
           "reconnect_failed": "Reconnect failed",
           "processing_failed": "Processing failed",
-          "identity_mismatch": "Different device"
+          "identity_mismatch": "Different device",
+          "readings_stalled": "Readings stalled"
         }
       },
       "protocol_version": {
@@ -571,6 +633,9 @@
     "binary_sensor": {
       "modbus_control": {
         "name": "Modbus Control"
+      },
+      "reading_check": {
+        "name": "Reading Check"
       },
       "self_use_mode_ena": {
         "name": "Self-powered Mode"

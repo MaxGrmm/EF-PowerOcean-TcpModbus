@@ -24,6 +24,14 @@ def reset_shared_modbus(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(modbus, "_shared", None)
 
 
+@pytest.fixture(autouse=True)
+def reset_outages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start each test with no outage, which would otherwise outlive its entry."""
+    from custom_components.ef_powerocean_tcpmodbus import outage
+
+    monkeypatch.setattr(outage, "_outages", {})
+
+
 @pytest.fixture
 async def inverter(
     socket_enabled: None,  # noqa: ARG001 - lets the fake inverter listen

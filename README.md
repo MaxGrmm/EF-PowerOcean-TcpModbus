@@ -4,15 +4,56 @@
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.12.0%2B-18BCF2?style=flat-square&logo=homeassistant&logoColor=white)](https://www.home-assistant.io/)
 [![Release](https://img.shields.io/github/v/release/MaxGrmm/EF-PowerOcean-TcpModbus?style=flat-square&logo=github&color=blue)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/releases)
 [![Validate](https://img.shields.io/github/actions/workflow/status/MaxGrmm/EF-PowerOcean-TcpModbus/validate.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=validate)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/actions/workflows/validate.yml)
-[![License: MIT](https://img.shields.io/github/license/MaxGrmm/EF-PowerOcean-TcpModbus?style=flat-square&color=lightgrey)](LICENSE)
+[![License: MIT](https://img.shields.io/github/license/MaxGrmm/EF-PowerOcean-TcpModbus?style=flat-square&color=lightgrey)](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/LICENSE)
 
 **Local Modbus TCP integration for the EcoFlow PowerOcean home battery system.**
 
-> ⚠️ This integration communicates directly with your device over your local network via Modbus TCP. No cloud connection required.
+> [!IMPORTANT]
+> This integration communicates directly with your device over your local network via
+> Modbus TCP. No cloud connection required.
+>
+> Modbus is disabled on the inverter by
+> default, so your EcoFlow partner or installer has to enable it before setup, see
+> [Prerequisites](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus#prerequisites).
+
+<!-- ha-marketplace:exclude-start -->
+<!-- toc depth=3 -->
+
+## Contents
+
+- [Overview](#overview)
+  - [Features](#features)
+  - [Use Cases](#use-cases)
+  - [Screenshots](#screenshots)
+  - [Known Limitations](#known-limitations)
+- [Getting Started](#getting-started)
+  - [Requirements](#requirements)
+  - [Installation](#installation)
+  - [Configuration](#configuration)
+- [Using the Integration](#using-the-integration)
+  - [Battery Control](#battery-control)
+  - [Sensors](#sensors)
+  - [Register Scan](#register-scan)
+  - [Troubleshooting](#troubleshooting)
+  - [Removing the Integration](#removing-the-integration)
+- [Technical Details](#technical-details)
+  - [How Data Is Updated](#how-data-is-updated)
+  - [Protocol](#protocol)
+  - [Protocol Implementation](#protocol-implementation)
+- [Project](#project)
+  - [Contributing](#contributing)
+  - [Credits](#credits)
+  - [Disclaimer](#disclaimer)
+  - [License](#license)
+
+<!-- tocstop -->
+<!-- ha-marketplace:exclude-end -->
 
 ---
 
-## Features
+## Overview
+
+### Features
 
 - **Local polling** – no EcoFlow cloud account needed
 - **Configurable poll interval** (2–30 seconds, default 5 s)
@@ -30,53 +71,83 @@
 - Debug logging toggle directly in the HA UI
 - German and English translations
 
----
-
-## Use Cases
+### Use Cases
 
 - **Energy dashboard:** the lifetime totals for grid, solar and battery feed Home
   Assistant's Energy dashboard directly, without the EcoFlow cloud.
 - **Cheap-tariff charging:** an automation charges the battery from the grid while
   electricity is cheap and returns it to Automatic afterwards, using the
-  [Set battery command](#commanding-the-battery-from-automations) action.
+  [Set battery command](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#commanding-the-battery-from-automations) action.
 - **Holding the battery for later:** Hold battery keeps the charge for the evening peak
   while surplus solar is exported.
 - **Watching the system:** faults, grid outages and a disconnected battery show up as
   sensors, logbook entries and events, ready to trigger a notification.
 
+### Screenshots
+
+<img width="431" height="555" alt="Controls" src="https://raw.githubusercontent.com/MaxGrmm/EF-PowerOcean-TcpModbus/main/docs/images/controls.jpg" />
+<img width="431" height="510" alt="Configuration" src="https://raw.githubusercontent.com/MaxGrmm/EF-PowerOcean-TcpModbus/main/docs/images/configuration.jpg" />
+
+<details>
+<summary>Sensor and diagnostic entities</summary>
+
+<img width="431" height="1539" alt="Sensor_Entities" src="https://github.com/user-attachments/assets/dca4b3c8-a56d-4d8d-ad13-6499f2cfd63c" />
+<img width="431" height="2075" alt="Diagnostics" src="https://github.com/user-attachments/assets/4380c0bb-a5f9-4a7d-8225-af3c5f2d3ab2" />
+
+</details>
+
+### Known Limitations
+
+- **Modbus has to be enabled by your installer.** It is off by default and can't be
+  switched on from Home Assistant or the regular EcoFlow app.
+- **Modbus Control locks out the EcoFlow app** while it is on. Turning it off hands
+  control back within about 60 seconds.
+- **No automatic discovery.** The inverter doesn't announce itself on the network, so it
+  is added by IP address. Give it a reserved address in your router so it can't move.
+- **One inverter per entry.** Add each inverter as its own entry.
+- **Not every model is tested.** See [Supported Devices](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus#supported-devices); the
+  PowerOcean DC Fit is untested, and controls are untested on several models.
+- **Some registers read a constant 0 on some models.** Sensors for those are left out
+  on the models concerned rather than showing a value that misleads.
+- **The Grid-side sensors need an external EcoFlow Smart Meter.** Without one they are
+  disabled; see [Inverter side and grid side](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#inverter-side-and-grid-side).
+- **The protocol is EcoFlow's trial version.** A firmware update can change which
+  controls the inverter follows; see
+  [Testing the controls after a firmware update](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#testing-the-controls-after-a-firmware-update).
+
 ---
 
-## Supported Devices
+## Getting Started
+
+### Requirements
+
+#### Prerequisites
+
+> [!IMPORTANT]
+> Modbus must be enabled by your EcoFlow partner or installer. It is disabled by
+> default!
+
+#### Supported Devices
 
 | Device                       | Read         | Control      |
 | ---------------------------- | ------------ | ------------ |
 | EcoFlow PowerOcean Plus      | ✅ Confirmed | ✅ Confirmed |
 | EcoFlow PowerOcean 3-phase   | ✅ Confirmed | ✅ Confirmed |
-| EcoFlow PowerOcean 1-phase   | ✅ Confirmed | ❓ Untested  |
+| EcoFlow PowerOcean 1-phase   | ✅ Confirmed | ✅ Confirmed |
 | EcoFlow PowerOcean DC Fit    | ❓ Untested  | ❓ Untested  |
-| EcoFlow Ocean 2 3-phase      | ✅ Confirmed | ❓ Untested  |
-| EcoFlow Ocean 2 1-phase      | ✅ Confirmed | ❓ Untested  |
+| EcoFlow Ocean 2 3-phase      | ✅ Confirmed | ✅ Confirmed |
+| EcoFlow Ocean 2 1-phase      | ✅ Confirmed | ✅ Confirmed |
 | EcoFlow Ocean 2 Plus 1-phase | ✅ Confirmed | ✅ Confirmed |
 
-Running an untested model? The **Run register scan** action reads your inverter against the register map this integration expects, without writing anything, and puts the report in the diagnostics download. Attaching it to an issue is what makes a device supportable, see [Scanning the registers](#scanning-the-registers). [scripts/register_scan.py](scripts/register_scan.py) does the same from a computer, see [Register Scan](CONTRIBUTING.md#register-scan).
+Running an untested model? The **Run register scan** action reads your inverter against the register map this integration expects, without writing anything, and puts the report in the diagnostics download. Attaching it to an issue is what makes a device supportable, see [Register Scan](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/README.md#register-scan). [scripts/register_scan.py](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/scripts/register_scan.py) does the same from a computer, see [Register Scan](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/CONTRIBUTING.md#register-scan).
 
----
-
-## Supported Home Assistant Versions
+#### Home Assistant Versions
 
 Home Assistant **2025.12.0** is the earliest supported version. HACS blocks installing it on older releases, and CI tests every change against both 2025.12.0 and a recent release.
 
----
+### Installation
 
-## Prerequisites
-
-The ModBus must be enabled by your EcoFlow Partner / Installer, it is disabled by default!
-
----
-
-## Installation
-
-### Via HACS (recommended)
+#### Via HACS (recommended)
 
 [![Open your Home Assistant instance and open the repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MaxGrmm&repository=EF-PowerOcean-TcpModbus&category=integration)
 
@@ -87,38 +158,39 @@ Or install it from within HACS:
 3. Open it and click **Download**
 4. Restart Home Assistant
 
-### Manual
+#### Manual
 
 1. Download the latest release
 2. Copy the `custom_components/ef_powerocean_tcpmodbus` folder to your HA `config/custom_components/` directory
 3. Restart Home Assistant
 
----
-
-## Configuration
+### Configuration
 
 1. Go to **Settings → Devices & Services → Add Integration**
 2. Search for **EF-PowerOcean-TcpModbus**
 3. Fill in the setup form:
 
-| Field                      | Default                | Description                                                                                                                                                      |
-| -------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| IP Address                 | –                      | Local IP of your PowerOcean inverter                                                                                                                             |
-| Port                       | 502                    | Modbus TCP port                                                                                                                                                  |
-| Inverter model             | PowerOcean Three Phase |                                                                                                                                                                  |
-| Number of Batteries        | 0                      | Number of installed battery modules (0–12), of any size. Sets the battery power limits until the inverter reports its total capacity                             |
-| Maximum solar power        | 12 kW                  | Installed solar power (1–60 kW)                                                                                                                                  |
-| Maximum grid power         | 15 kW                  | Your grid connection (main fuse), not the inverter rating. Rejects implausible readings and caps Import from Grid (1–60 kW)                                      |
-| Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string. |
-| Poll Interval (seconds)    | 5                      | How often values are fetched                                                                                                                                     |
+| Field                      | Default                | Description                                                                                                                                                                                                                                                                                                             |
+| -------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| IP Address                 | –                      | Local IP of your PowerOcean inverter                                                                                                                                                                                                                                                                                    |
+| Port                       | 502                    | Modbus TCP port                                                                                                                                                                                                                                                                                                         |
+| Inverter model             | PowerOcean Three Phase |                                                                                                                                                                                                                                                                                                                         |
+| Number of Batteries        | 0                      | Number of installed battery modules (0–12), of any size. Sets the battery power limits until the inverter reports its total capacity                                                                                                                                                                                    |
+| Maximum solar power        | 12 kW                  | Installed solar power (1–60 kW)                                                                                                                                                                                                                                                                                         |
+| Maximum grid power         | 15 kW                  | Your grid connection (main fuse), not the inverter rating. Rejects implausible readings and caps Import from Grid (1–60 kW)                                                                                                                                                                                             |
+| Calculation of solar power | false                  | In some inverters, the modbus register delivers 0W of solar power. This switch allows the solar power to be calculated from the individual powers of the string.                                                                                                                                                        |
+| Calculation of grid energy | false                  | In some inverters, the grid import and export registers stay at 0 while Grid Power reads right. This switch integrates them from Grid Power instead, see [Grid energy calculated from Grid Power](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#grid-energy-calculated-from-grid-power). |
+| Poll Interval (seconds)    | 5                      | How often values are fetched. Some models have been seen not to keep up with very short intervals; if polls fail or time out, increase it                                                                                                                                                                               |
 
-To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**. The collapsed **Correct energy totals** section there is for a lifetime counter the inverter reset; see [Correcting a lifetime total](#correcting-a-lifetime-total).
+To change settings after setup: **Settings → Devices & Services → EF-PowerOcean-TcpModbus → Configure**. The collapsed **Correct energy totals** section there is for a lifetime counter the inverter reset; see [Correcting a lifetime total](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#correcting-a-lifetime-total).
 
 To change the IP address or port, for example after the inverter got a new address: open the entry's **⋮** menu on the same page and choose **Reconfigure**. The new address is tested before it is saved, and refused if a different inverter answers on it.
 
 ---
 
-## Battery Control
+## Using the Integration
+
+### Battery Control
 
 Off by default. Turn on **Modbus Control** (in the Configuration section) to let the
 integration control the inverter. This **locks out the EcoFlow app** until you turn it
@@ -141,217 +213,44 @@ Discharge at 0 W holds the battery. For Export solar first, **Active Control Met
 shows what it is running, and its limit stays 100 W under your export limit so the
 inverter never has to curtail solar.
 
-### Guards
+#### Guards
 
-| Guard           | Stops the battery from       | Off at |
-| --------------- | ---------------------------- | ------ |
-| Charge Limit    | charging above this level    | 100 %  |
-| Battery Reserve | discharging below this level | 0 %    |
-
-The guards apply in every mode and only ever stop the battery, never reverse it. In
-Automatic, the battery can still power the house under the Charge Limit, and still
-charge from solar under the Battery Reserve. A guard releases once the charge has moved
-5 % back, and stays on across a restart until then. Until it does, the battery can
-still use that band: charge it took above the reserve can be discharged again down to
-the reserve, and a battery a little below the Charge Limit can refill up to it. Once
-stopped at a limit, it has to move 2 % away first, so a state of charge flickering by a
-percent does not charge and discharge it in turn. Both are off by default.
-
-The Battery Reserve is **native** or **emulated**, shown in its `implementation`
-attribute:
-
-- **Native** (PowerOcean Three Phase): it is the backup reserve in the EcoFlow app,
-  written to the inverter, which keeps it whatever runs it, even with Home Assistant
-  down. A change in the app shows here too, and it can be set with Modbus Control off.
-  The integration still holds the battery at it under a manual command, which outranks
-  the inverter's own reserve.
-- **Emulated** (every other model): the integration keeps it while Modbus Control is
-  on. The PowerOcean Plus takes a write to its reserve register but keeps acting on the
-  app's value, and the other models are unproven. The app's own reserve still applies
-  whenever the integration is not in control, and shows as _App Backup Reserve_. Once
-  the battery is at the app's reserve, the inverter stops discharging there by itself,
-  so in Automatic the integration leaves it to the inverter as with a native reserve.
-  That is whenever the Battery Reserve is at or below the app's.
-
-_Effective Battery Reserve_ shows which of these holds right now. Its `source` is `app`
-while the inverter keeps its own reserve, and `battery_reserve` while the integration
-keeps the Battery Reserve, which under a manual command can be below the app's.
-
-The integration options are set to the model's; change them only to test a model, and
-`scripts/control_feature_scan.py --reserve-probe` shows whether one acts on a written
-reserve.
-
-With an emulated reserve, turn on **Charge to Battery Reserve** to also charge from the
-grid up to it, as the app's backup reserve does. Below the reserve the battery then
-charges at the Charge Battery power, whatever mode is selected, and the reserve holds it
-from there. The Charge Limit still applies, and a Charge Battery power of 0 W leaves the
-reserve a floor only. A native reserve does this in the inverter, so it has no such
-switch.
-
-While the battery is below the backup reserve set in the EcoFlow app, the inverter
-charges up to that reserve by itself, so the switch shows on and cannot be turned off
-until the battery gets there; its `set_by_app_backup_reserve` attribute says so. In
-Automatic, an app reserve at or above the Battery Reserve is left to the inverter to
-charge to.
+**Charge Limit** stops the battery charging above a level, and **Battery Reserve** stops
+it discharging below one. The guards apply in every mode and only ever stop the battery,
+never reverse it. Both are off by default.
 
 Turn off schedules in the EcoFlow app, since the inverter follows them whenever it runs
 on its own.
 
-<details>
-<summary>How the guards work</summary>
+#### More on battery control
 
-The inverter has no charge limit setting, so while a guard is on, the integration runs
-self-consumption itself and blocks the forbidden direction. When the battery only needs
-to move the allowed way, it hands control back to the inverter, which reacts faster, and
-takes over again when the power flow turns. Single-phase models hand back immediately.
-Loads that cycle on and off, like an oven, make it wait longer each time.
+[docs/battery-control.md](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md) covers:
 
-The guards are soft limits: the battery may move the wrong way for a few seconds before
-it is caught. While held, it drifts a few hundred watts as clouds pass, because EcoFlow
-doesn't expose a hard power limit over Modbus. See
-[Battery power limits](EcoFlow_PowerOcean_Modbus.md#battery-power-limits).
+- [Guards](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#guards): when they release, native and emulated
+  reserve, and Charge to Battery Reserve
+- [Control Status](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#control-status): what each status means,
+  and the reading checks that make control step aside
+- [Commanding the battery from automations](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#commanding-the-battery-from-automations)
+  with the Set battery command action
+- [Testing the controls after a firmware update](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#testing-the-controls-after-a-firmware-update)
+  with the Run control test action
 
-</details>
+### Sensors
 
-### Control Status
+The integration creates sensors for power flow, the battery and each module, the PV
+strings, the AC side per phase, the inverter's status, faults and limits, and energy
+today and in total. The lifetime totals feed Home Assistant's Energy dashboard
+directly.
 
-| Control Status              | Meaning                                                          |
-| --------------------------- | ---------------------------------------------------------------- |
-| No Modbus control           | Modbus Control is off, or control was lost                       |
-| Handing back to the app     | Modbus Control was turned off; the app takes over                |
-| Automatic                   | The inverter runs normal self-consumption                        |
-| Active                      | The selected mode is working                                     |
-| Ramping                     | The inverter hasn't reached the target yet                       |
-| Limited by inverter         | The inverter goes the other way or past the target               |
-| Charge limit reached        | The Charge Limit is stopping the battery                         |
-| Reserve reached             | The Battery Reserve is stopping the battery                      |
-| Charging to battery reserve | Charge to Battery Reserve is charging up to it                   |
-| Below solar export limit    | Export solar first is exporting the whole surplus                |
-| Unreachable: battery full   | The target needs the battery to charge, but it's full            |
-| Unreachable: battery empty  | The target needs the battery to discharge, but it's empty        |
-| Unreachable: export limit   | The target needs more export than the export limit lets out      |
-| Not accepted by inverter    | The inverter doesn't report the command, even after resending it |
-| Off-grid                    | Grid outage; control steps aside until the grid is back          |
-| Battery disconnected        | The battery dropped off; control steps aside until it's back     |
-| Readings inconsistent       | The readings contradict each other; control steps aside          |
-| Inverter fault              | The inverter reports a fault or a stop                           |
-| Control test                | The control test has the inverter; the mode resumes after it     |
+The full list, and how the energy totals are checked and corrected, is in
+[docs/sensors.md](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md):
 
-If the inverter misses a guard's target, the status shows Ramping or Unreachable; the
-guard is still in the `guard` attribute.
+- [Sensor groups](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#contents)
+- [Inverter side and grid side](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#inverter-side-and-grid-side)
+- [Grid energy calculated from Grid Power](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#grid-energy-calculated-from-grid-power)
+- [Correcting a lifetime total](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/sensors.md#correcting-a-lifetime-total)
 
-**Limited by inverter** means something in the inverter outranks the command, such as a
-firmware limit or its own protection: asked to charge, the battery discharges, or it
-discharges more than asked. A command is given 30 seconds to turn the battery around
-before it counts.
-
-The inverter reports which control method it follows. Once it has shown that it does,
-a mismatch for three polls sends the command again, which recovers from an inverter
-restart or Modbus mode being toggled in the installer app. After two resends the status
-shows **Not accepted by inverter**. A model that doesn't report these is controlled as
-before.
-
-Every poll is also checked for conditions in which the inverter is best left to
-itself:
-
-| Check          | Fails when                                                               | Control Status        |
-| -------------- | ------------------------------------------------------------------------ | --------------------- |
-| `off_grid`     | The inverter reports running off-grid                                    | Off-grid              |
-| `grid_voltage` | The grid-side voltage is gone while the inverter still reports on-grid   | Off-grid              |
-| `bms`          | The inverter reports its battery disconnected, after it reported one     | Battery disconnected  |
-| `battery_soc`  | The system Battery SOC drops to 0 % from a level no battery empties from | Readings inconsistent |
-| `frozen`       | The voltages and frequency haven't changed at all for two minutes        | Readings inconsistent |
-
-A check counts once it fails three polls in a row. While one does, control hands the
-inverter its own self-consumption and resumes the selected mode once it passes again.
-A frame whose readings contradict each other never moves the Charge Limit or Battery
-Reserve, so one bad read can't set them off.
-
-The checks run whether or not Modbus Control is on, since a bad reading also misleads
-the sensors. The `ef_powerocean_tcpmodbus_reading_check_failed` and
-`ef_powerocean_tcpmodbus_reading_check_cleared` events, also shown in the logbook,
-carry the `check` and the `status` it stands for; use them to be notified. A failed
-check is not raised in repairs, since it reflects the inverter's state, such as an
-outage or the battery saver turning the battery off, not something to fix.
-
-While `battery_soc` fails, the **Battery SOC** sensor shows unavailable rather than
-0 %, so history, automations and the Energy dashboard don't take it for an empty
-battery. Each time a check starts failing, the readings of that poll and the one before
-are kept, also across restarts, and included in the diagnostics download. If a check
-fails unexpectedly, download diagnostics from the device page whenever you notice and
-attach them to a bug report.
-
-### Commanding the battery from automations
-
-The **Set battery command** action sets the Battery Mode, its power and the Charge
-Limit in one step:
-
-```yaml
-action: ef_powerocean_tcpmodbus.set_battery_command
-data:
-  device_id: <your inverter's device id>
-  mode: charge_battery
-  power: 3000
-  charge_limit_soc: 80
-  expire_in: 900
-```
-
-- `power` is required for Charge, Discharge, Export and Import, and optional for Export
-  solar first, where it sets the Solar Export Limit. It must be above 0 W and is capped
-  at the inverter's maximum.
-- `charge_limit_soc` is optional and applied together with the mode.
-- With `expire_in` (60 to 86400 s), the mode returns to Automatic unless the command is
-  sent again in time. Control Status shows the deadline as `expires_at`, and the
-  `ef_powerocean_tcpmodbus_command_expired` event fires when it passes. Choosing a mode
-  by hand cancels it.
-- Only `mode: automatic` works while Modbus Control is off.
-
-Run one controller at a time; the action doesn't arbitrate between them.
-
-### Testing the controls after a firmware update
-
-EcoFlow firmware updates can change which control methods the inverter follows. The
-**Run control test** action checks each method in both directions and writes a report
-you can attach to an issue, so a change in behaviour shows up before it surprises an
-automation.
-
-1. Run the action, with **Confirm** on:
-
-   ```yaml
-   action: ef_powerocean_tcpmodbus.run_control_test
-   data:
-     device_id: <your inverter's device id>
-     confirm: true
-     power: 1500
-   ```
-
-2. Follow the **Control Test** sensor (diagnostic), or wait for the notification. It
-   takes about 10 minutes. The
-   battery charges and discharges briefly at the test power and power flows to and
-   from the grid. At the end the inverter is handed back to the EcoFlow app for a
-   minute, which the report times, and then to Modbus Control if it was on.
-3. When it shows **Done**, open a
-   [Control test report](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/issues/new?template=control_test_report.yml) issue and
-   attach the report: either **Download diagnostics** on the device page, or the file
-   named in the sensor's `report_file` attribute, under
-   `config/ef_powerocean_tcpmodbus/`.
-
-Modbus Control can stay on: a selected battery mode pauses for the test, Control
-Status shows **Control test**, and the mode is sent again when the test ends. The
-test refuses to start only while another Modbus controller holds the inverter;
-nothing is written in that case. While it runs, battery modes, switching Modbus
-Control on and Battery Saver are refused.
-
-The action returns as soon as the test has started, so the page can be closed; a
-notification says when the report is ready. **Cancel control test** stops a run and
-hands control back.
-
-A run is most useful with the battery well above its reserve and below 94 %: a test
-the battery cannot take part in is reported as skipped rather than failed. The checks
-that need the EcoFlow app open, or that change device settings, are left to
-[scripts/control_feature_scan.py](CONTRIBUTING.md#control-test).
-
-### Scanning the registers
+### Register Scan
 
 The **Run register scan** action reads, once and without writing anything, every
 register the integration maps for your model, the registers from EcoFlow's newer point
@@ -371,181 +270,7 @@ control test. A notification says when it is done; then choose **Download
 diagnostics** on the device page and attach the file to an issue. The report is kept
 until Home Assistant restarts.
 
----
-
-## Available Sensors
-
-### Power (real-time)
-
-| Sensor        | Unit | Description                                 |
-| ------------- | ---- | ------------------------------------------- |
-| House Power   | W    | Current house consumption                   |
-| Grid Power    | W    | Grid exchange (negative = export)           |
-| Solar Power   | W    | Total PV generation (sum of active strings) |
-| Battery Power | W    | Battery charge/discharge power              |
-
-### Battery
-
-| Sensor                            | Unit | Description                                                      |
-| --------------------------------- | ---- | ---------------------------------------------------------------- |
-| Battery SOC                       | %    | System state of charge                                           |
-| Battery 1–12 SOC                  | %    | Per-module state of charge (diagnostic)                          |
-| Battery Module Count              | –    | Modules reported online by the device (diagnostic)               |
-| Battery Remaining Energy          | kWh  | Estimated: Battery Nominal Capacity × SOC                        |
-| Battery Voltage                   | V    | Pack voltage                                                     |
-| Battery Current                   | A    | Positive = charging, negative = discharging                      |
-| Battery Temperature               | °C   | Mean module temperature                                          |
-| Battery Nominal Capacity          | Wh   | Pack capacity; the last one kept while the device reads 0        |
-| Available Battery Charge Power    | W    | Charge power limit reported from the EcoFlow app (diagnostic)    |
-| Available Battery Discharge Power | W    | Discharge power limit reported from the EcoFlow app (diagnostic) |
-| App Backup Reserve                | %    | Backup reserve set in the EcoFlow app (emulated reserve only)    |
-| Effective Battery Reserve         | %    | Reserve the battery is held at now; `source` says by what        |
-
-> ⚠️ _Available Battery Charge/Discharge Power_ reflect limits configured in the
-> EcoFlow app, but **battery control over Modbus ignores those limits**. For example,
-> a 500 W app limit will not stop a Modbus charge command from running at the
-> configured battery-control ceiling.
-
-### Solar
-
-| Sensor                  | Unit | Description                                     |
-| ----------------------- | ---- | ----------------------------------------------- |
-| PV String 1/2/3 Power   | W    | Per-string power (current × own string voltage) |
-| PV String 1/2/3 Current | A    | MPPT string current                             |
-| PV String 1/2/3 Voltage | V    | Per-string DC voltage                           |
-
-### AC Grid
-
-| Sensor                | Unit | Description                                          |
-| --------------------- | ---- | ---------------------------------------------------- |
-| Grid Voltage L1/L2/L3 | V    | Per-phase voltage                                    |
-| Grid Current L1/L2/L3 | A    | Per-phase current                                    |
-| Grid Frequency        | Hz   | Grid frequency                                       |
-| Inverter Temperature  | °C   | Inverter temperature                                 |
-| Grid Connection Code  | –    | Grid standard code set by the installer (diagnostic) |
-
-The _Grid Connection Code_ is the grid standard the inverter was commissioned with, as a
-raw number. EcoFlow doesn't document which standard each number stands for and (in my testing)
-the mapping used by other EcoFlow products doesn't full match the PowerOcean series.
-
-, so ask your
-installer if you need to know.
-
-### Status
-
-| Sensor            | Values                          | Description                                   |
-| ----------------- | ------------------------------- | --------------------------------------------- |
-| Grid Mode         | Grid-connected / Islanded       | On-grid or off-grid operation                 |
-| Operating Mode    | Standby / Self-consumption / AI | Working mode reported by the inverter         |
-| Self-powered Mode | Active / Inactive               | Self-consumption mode                         |
-| Intelligent Mode  | Active / Inactive               | AI mode                                       |
-| System Fault      |                                 | Device reports an abnormal system state       |
-| System Powered On |                                 | Device is powered on (diagnostic)             |
-| Modbus Control    |                                 | The device is accepting our commands          |
-| Control Status    |                                 | What the selected battery mode is achieving   |
-| Control Test      | Idle / Running / Done / Aborted | The last run of the control test (diagnostic) |
-
-### Faults (Diagnostic)
-
-| Sensor             | Description                                               |
-| ------------------ | --------------------------------------------------------- |
-| Active Fault Count | Number of faults the device is currently reporting (0–20) |
-| Active Fault Codes | Comma-separated fault codes, in decimal                   |
-
-The fault codes are shown in decimal, as the EcoFlow app and web portal show them.
-The `faults` attribute of Active Fault Codes lists each code with its name in Home
-Assistant's language, or `null` for a code nobody has named yet. EcoFlow's protocol
-does not include its fault definitions, so the names are collected from the event
-history in the EcoFlow portal. To add one, see
-[CONTRIBUTING.md](CONTRIBUTING.md#fault-names).
-
-### Inverter Limits (Diagnostic)
-
-| Sensor                             | Unit | Description                                                     |
-| ---------------------------------- | ---- | --------------------------------------------------------------- |
-| Inverter Rated Power               | W    | Nameplate system power                                          |
-| Maximum Inverter Power (DC to AC)  | W    | Nameplate inverter (discharge direction) capacity               |
-| Maximum Rectifier Power (AC to DC) | W    | Nameplate rectifier (charge direction) capacity                 |
-| Maximum feed-in Power              | W    | The export cap in force, which bounds Export to Grid            |
-| Maximum feed-in Power (Configured) | W    | Export cap as configured (40538)                                |
-| Maximum feed-in Power (Effective)  | W    | Export cap after the safety rules (40609), not on the PO Plus   |
-| Maximum feed-in Power (Percent)    | %    | Export cap as a share of the rated power, not on the PO Plus    |
-| Grid Feed-in Mode                  | –    | Whether the export is limited in watts, in percent or unlimited |
-| System Modes                       | –    | Raw system status                                               |
-| Coordinator Status                 | –    | Integration polling state                                       |
-
-The inverter keeps its own copy of settings such as the export cap for Modbus
-mode. It takes the app's values the first time Modbus mode is turned on, and
-after that the two copies are no longer kept in step.
-
-### Energy – Today
-
-| Sensor                   | Unit | Description                        |
-| ------------------------ | ---- | ---------------------------------- |
-| House Consumption Today  | kWh  | Calculated from energy balance     |
-| Solar Yield Today        | kWh  | Total solar energy generated today |
-| Grid Import Today        | kWh  | Energy imported from grid today    |
-| Grid Export Today        | kWh  | Energy exported to grid today      |
-| Battery Charged Today    | kWh  | Energy charged today               |
-| Battery Discharged Today | kWh  | Energy discharged today            |
-
-#### Energy - Today (Diagnostic)
-
-Daily energy values are calculated from the corresponding lifetime counters because device-reported daily values have been shown to not reliably reset. The original device values remain available through these diagnostic sensors.
-
-| Sensor                            | Entity key                 | Unit |
-| --------------------------------- | -------------------------- | ---- |
-| Solar Yield Today (Device)        | `solar_today_raw`          | kWh  |
-| Grid Import Today (Device)        | `grid_import_today_raw`    | kWh  |
-| Grid Export Today (Device)        | `grid_export_today_raw`    | kWh  |
-| Battery Charged Today (Device)    | `bat_charged_today_raw`    | kWh  |
-| Battery Discharged Today (Device) | `bat_discharged_today_raw` | kWh  |
-
-### Energy – Lifetime
-
-| Sensor                   | Unit | Description                           |
-| ------------------------ | ---- | ------------------------------------- |
-| House Consumption Total  | kWh  | Calculated from energy balance        |
-| Solar Yield Total        | kWh  | Lifetime solar generation             |
-| Grid Import Total        | kWh  | Lifetime grid import                  |
-| Grid Export Total        | kWh  | Lifetime grid export                  |
-| Battery Charged Total    | kWh  | Lifetime energy charged               |
-| Battery Discharged Total | kWh  | Lifetime energy discharged            |
-| Battery Energy Loss      | kWh  | Charged minus discharged (diagnostic) |
-
-#### Energy - Lifetime (Diagnostic)
-
-The lifetime totals above are checked before they are published: a value that drops, or rises faster than the configured maximum power allows, is held. These diagnostic sensors show what the device itself reports, so a held total can be told apart from a device that reports the same. They have no state class, so they never feed the Energy dashboard or long-term statistics.
-
-| Sensor                            | Entity key                  | Unit |
-| --------------------------------- | --------------------------- | ---- |
-| Solar Yield Total (Device)        | `solar_total_raw`           | kWh  |
-| Grid Import Total (Device)        | `grid_import_total_raw`     | kWh  |
-| Grid Export Total (Device)        | `grid_export_total_raw`     | kWh  |
-| Battery Charged Total (Device)    | `bat_charged_total_raw`     | kWh  |
-| Battery Discharged Total (Device) | `bat_discharged_total_raw`  | kWh  |
-| Inverter AC Input Total (Device)  | `inverter_ac_in_total_raw`  | kWh  |
-| Inverter AC Output Total (Device) | `inverter_ac_out_total_raw` | kWh  |
-
-If a total has been held for more than 24 hours while the device reports a value above 0, a repairs issue lists it with both values. It offers to keep Home Assistant's total, or to switch to the inverter's. If the values look wrong instead, it links to a filled-in bug report and to the device page for the diagnostics download. This happens when the inverter resets a counter or a wrong value was accepted earlier. A total held at 0 while the device's total rises in step with its own daily counter is corrected automatically.
-
-#### Correcting a lifetime total
-
-Some inverters reset a lifetime counter, while EcoFlow's portal keeps counting. A total can be corrected so it continues as before, by adding an offset to what the device reports:
-
-- **Keep Home Assistant's totals** in the repairs issue keeps each held total at its value in Home Assistant and works the offset out from it, so the Energy dashboard continues without a jump.
-- **Correct energy totals**, a collapsed section in **Configure**, sets a total to a value you enter, such as the one under historical data in [EcoFlow's portal](https://user-portal.ecoflow.com/user/eu/en/main/home/dashboard/historicalData). Leave the totals that are right as they are. Decimals can be typed with a comma or a point. Each field names the matching total in the portal, such as "From solar" for Solar Yield Total. The inverter's AC input and output totals are not in the portal, so they are never corrected: a held AC total takes the inverter's value after 24 hours instead of raising the repairs issue. To remove a correction, enter the value of the total's (Device) sensor. While any correction is set, the section also has a **Reset all totals to the inverter's values** toggle that removes them all.
-
-Today's values are not changed by a correction, and the (Device) sensors keep showing what the inverter reports. A value lower than the total shown asks for confirmation first: Home Assistant records a drop as negative energy, or, if it is more than 10%, as a new meter that adds the whole value to the Energy dashboard. Developer tools → Statistics → Adjust sum corrects that history. House Consumption Total is calculated from the corrected totals, so it moves with a correction: up in one step, or held until it has caught up if the correction lowers it. The offsets are in the diagnostics download under `energy_offsets`.
-
-The diagnostics download has an `energy` section with every counter as published, as the device reports it (totals and today), the time each total was last accepted, which totals are held, the daily snapshots and the maximum powers the totals are checked against.
-Its `raw_registers` section holds every word the last poll read, undecoded, by the
-address each read started at, so a report shows exactly what the inverter sent.
-The serial number is never included.
-
----
-
-## Troubleshooting
+### Troubleshooting
 
 <details>
 <summary><b>Setup fails with “Connection failed - please check IP address and port”</b></summary>
@@ -557,6 +282,28 @@ Home Assistant can't open a Modbus TCP connection to the address entered.
 2. Make sure Home Assistant and the inverter are on the same network, or that the
    networks between them allow port 502.
 3. Ask your installer to confirm that Modbus TCP is enabled; it is off by default.
+
+If the form says the inverter takes connections but sends no Modbus replies, the
+address is right. In a few cases a firmware update has switched Modbus TCP off: ask your
+installer to enable it again.
+
+</details>
+
+<details>
+<summary><b>Repairs shows “The inverter stopped answering Modbus” or “is not reachable”</b></summary>
+
+The inverter has not answered for at least 5 minutes. The entities stay unavailable,
+and the issue clears by itself with the next good read.
+
+- **Stopped answering Modbus:** the inverter takes connections on its Modbus port but
+  sends no replies.
+- **Not reachable:** nothing answers on the port. Check that the inverter is powered and
+  still has the same IP address, and use **Reconfigure** if it moved.
+
+In a few cases a firmware update has switched Modbus TCP off. If the inverter updated
+recently, ask your installer to enable it again in the EcoFlow Pro app. That is
+different from Modbus never having been enabled: the inverter then still answers, and
+Repairs shows "Modbus is disabled on the inverter" instead.
 
 </details>
 
@@ -587,6 +334,7 @@ address from your router. Nothing is read or written until this is fixed.
 The connection to the inverter was lost. It is retried automatically and the entities
 come back with the next successful poll. If they stay unavailable, check that the
 inverter is powered and reachable, and look at the log with debug logging enabled.
+Coordinator Status shows why the last poll failed.
 
 </details>
 
@@ -595,12 +343,12 @@ inverter is powered and reachable, and look at the log with debug logging enable
 
 Check **Control Status**: it says when a guard, a full or empty battery, or the export
 limit stops a command, and when Modbus Control is off. After a firmware update, run the
-[control test](#testing-the-controls-after-a-firmware-update) to see which methods the
+[control test](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/battery-control.md#testing-the-controls-after-a-firmware-update) to see which methods the
 inverter still follows.
 
 </details>
 
-### Debug logging and diagnostics
+#### Debug logging and diagnostics
 
 To enable debug logging without editing `configuration.yaml`:
 
@@ -609,18 +357,31 @@ To enable debug logging without editing `configuration.yaml`:
 When reporting a problem, attach the log and the diagnostics download from the device
 page, after checking it for anything you would rather not share.
 
----
+#### Alert verbosity
 
-## Removing the Integration
+**Alert verbosity** in the integration's settings sets how much the integration
+raises under Settings → Repairs. Each level raises everything the one before it does:
+
+| Level         | Also raises                                                                                                    |
+| ------------- | -------------------------------------------------------------------------------------------------------------- |
+| **Essential** | Only what you must act on: readings that stopped updating, Modbus off, no answer, held totals (the default)    |
+| **Readings**  | A reading check failing, a lifetime counter going back, readings unavailable unexplained, control not accepted |
+| **Detailed**  | Frequent reconnects, late polls, repeated control writes with Modbus Control off, power that doesn't add up    |
+| **Debug**     | Every warning and error the integration logs                                                                   |
+
+Each kind of alert is one issue, updated at most every 10 minutes with how often and
+when it was seen. Open it to ignore it this time, until it goes away and comes back;
+for 24 hours; until the next release of the integration; or permanently. Setting the verbosity back to Essential forgets every alert
+you ignored. The alerts only watch: they never change what the integration does.
+Debug is meant for testing a release on a live inverter.
+
+### Removing the Integration
 
 This integration follows the standard removal process:
 
-1. If **Modbus Control** is on, turn it off first and wait about a minute for the
-   EcoFlow app to take over again. Removing the integration with it on also hands
-   control back, once the heartbeat stops.
-2. Go to **Settings → Devices & Services → EF-PowerOcean-TcpModbus**, open the entry's
+1. Go to **Settings → Devices & Services → EF-PowerOcean-TcpModbus**, open the entry's
    **⋮** menu and choose **Delete**.
-3. To uninstall the integration as well, remove it in HACS, or delete
+2. To uninstall the integration as well, remove it in HACS, or delete
    `custom_components/ef_powerocean_tcpmodbus` for a manual installation, then restart
    Home Assistant.
 
@@ -630,16 +391,9 @@ configuration directory; delete it if you no longer need them.
 
 ---
 
-## Screenshots
+## Technical Details
 
-<img width="431" height="431" alt="Controls" src="https://github.com/user-attachments/assets/1c0f9217-cba7-47f4-8bc6-9a3632c1bdcd" />
-<img width="431" height="443" alt="Configuration" src="https://github.com/user-attachments/assets/320ce431-1d6b-4f3f-965c-912f9e4be31a" />
-<img width="431" height="1539" alt="Sensor_Entities" src="https://github.com/user-attachments/assets/dca4b3c8-a56d-4d8d-ad13-6499f2cfd63c" />
-<img width="431" height="2075" alt="Diagnostics" src="https://github.com/user-attachments/assets/4380c0bb-a5f9-4a7d-8225-af3c5f2d3ab2" />
-
----
-
-## How Data Is Updated
+### How Data Is Updated
 
 The integration polls the inverter over your local network every **Poll Interval**
 (5 seconds by default, 2–30 configurable). Each poll reads only the registers that
@@ -647,63 +401,48 @@ enabled entities, the control loop and the reading checks need, so disabling sen
 you don't use makes polls lighter. The serial number and firmware are read again each
 time the connection opens.
 
-If a poll fails, the entities become unavailable until the next one succeeds. A lost
-connection is retried within the poll after 0, 5, 30 and 120 seconds, then again at
-the next poll. If the inverter can't be reached when Home Assistant starts, the setup
-is retried automatically in the background.
+A request the connection loses, such as when the inverter closes an idle connection, is
+sent once more on a new connection. If a poll still fails, the entities become
+unavailable until the next one succeeds. A lost connection is retried within the poll
+after 0, 5, 10 and 20 seconds, then again 30 seconds later. If the inverter can't be
+reached when Home Assistant starts, the setup is retried automatically in the
+background.
 
 With Modbus Control on, a heartbeat is written to the inverter independently of the
 polls, to keep control from passing back to the EcoFlow app.
 
----
+### Protocol
 
-## Technical Details
-
-- **Protocol:** Modbus TCP (port 502)
-- **Reads:** Holding Registers (Function Code 3); multi-register values are decoded
-  low word first (word-swapped)
-- **Writes:** Function Code 6 for one register and Function Code 16 for multiple
-  registers; multi-register values are encoded high word first
-- **Float encoding:** 32-bit IEEE 754
-- **Read strategy:** block reads grouped automatically from the register
-  addresses (five per poll cycle on a PowerOcean Plus), plus one
-  device-information read when the connection opens. The write-only heartbeat
-  (40608) is never read. Registers only disabled sensors would show are left out
+- **Protocol:** Modbus TCP (port 502), reading holding registers and writing single
+  or multiple registers
 - **Tested firmware:** 3.0.19.19 + 3.0.20.54(PO+)
 - **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 
-The register map lives in [`const.py`](custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. For address numbering, word order, decoding and known gaps, see [EcoFlow_PowerOcean_Modbus.md](EcoFlow_PowerOcean_Modbus.md).
+The register map lives in [`const.py`](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses.
+
+### Protocol Implementation
+
+**[EcoFlow Modbus protocol implementation](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md)** explains how the integration talks to
+the inverter, and why:
+
+- [Connection](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#connection) and the address window
+- [Data types and word order](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#data-types-and-word-order)
+- [How the integration reads](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#how-the-integration-reads), grouped into blocks
+- [Writing registers](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#writing-registers) and [battery power limits](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#battery-power-limits)
+- [Where the specification and the hardware disagree](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#where-the-specification-and-the-hardware-disagree)
+- [Registers not yet mapped](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#not-yet-mapped)
 
 ---
 
-## Known Limitations
+## Project
 
-- **Modbus has to be enabled by your installer.** It is off by default and can't be
-  switched on from Home Assistant or the regular EcoFlow app.
-- **Modbus Control locks out the EcoFlow app** while it is on. Turning it off hands
-  control back within about 60 seconds.
-- **No automatic discovery.** The inverter doesn't announce itself on the network, so it
-  is added by IP address. Give it a reserved address in your router so it can't move.
-- **One inverter per entry.** Add each inverter as its own entry.
-- **Not every model is tested.** See [Supported Devices](#supported-devices); the
-  PowerOcean DC Fit is untested, and controls are untested on several models.
-- **Some registers read a constant 0 on some models.** Sensors for those are left out
-  on the models concerned rather than showing a value that misleads.
-- **The protocol is EcoFlow's trial version.** A firmware update can change which
-  controls the inverter follows; see
-  [Testing the controls after a firmware update](#testing-the-controls-after-a-firmware-update).
-
----
-
-## Contributing
+### Contributing
 
 Contributions use personal forks and pull requests. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, safety requirements, and the
+[CONTRIBUTING.md](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/CONTRIBUTING.md) for setup, testing, safety requirements, and the
 review checklist.
 
----
-
-## Credits
+### Credits
 
 Special thanks to all contributors for the massive amount of time and effort that helped this project grow so fast!
 
@@ -723,17 +462,13 @@ Special thanks to all contributors for the massive amount of time and effort tha
   Kater Carlo
 </p>
 
----
-
-## Disclaimer
+### Disclaimer
 
 This integration follows EcoFlow's Open Modbus Protocol V1.0, a trial version,
 corrected by community measurements where the hardware differs from it. See the
-[protocol notes](EcoFlow_PowerOcean_Modbus.md#where-the-specification-and-the-hardware-disagree).
+[protocol notes](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#where-the-specification-and-the-hardware-disagree).
 Use at your own risk. Not affiliated with EcoFlow Technology Co., Ltd.
 
----
-
-## License
+### License
 
 MIT License – free to use, modify and distribute with attribution.

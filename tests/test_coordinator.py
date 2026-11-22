@@ -22,11 +22,14 @@ from homeassistant.util import dt as dt_util
 from pymodbus.exceptions import ModbusException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const, models
+from custom_components.ef_powerocean_tcpmodbus import const, models, outage
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
+from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
+from custom_components.ef_powerocean_tcpmodbus.announcer import Announcer
 from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowConfigEntry
 from custom_components.ef_powerocean_tcpmodbus.energy_processor import EnergyProcessor
+from custom_components.ef_powerocean_tcpmodbus.grid_energy import GridEnergyIntegrator
 from custom_components.ef_powerocean_tcpmodbus.modbus import (
     ModbusClient,
     ModbusReadRejected,
@@ -46,6 +49,7 @@ def coordinator():
         ModbusClient,
         SimpleNamespace(
             connected=True,
+            answers=0,
             async_read=AsyncMock(),
             async_write=AsyncMock(),
             close=Mock(),
@@ -55,6 +59,7 @@ def coordinator():
     )
     instance.hass = Mock()
     instance.host = "192.0.2.10"
+    instance.port = 502
     instance.config_entry = cast(
         EcoflowConfigEntry,
         SimpleNamespace(entry_id="entry", unique_id="R371ZD1AZH3X0450"),
@@ -64,11 +69,14 @@ def coordinator():
     instance._store = None
     instance.identity = models.DeviceIdentity()
     instance._consecutive_modbus_disabled_reads = 0
+    instance._announcer = Announcer()
     instance._optional_stalls = {}
     instance._battery_capacity_wh = None
     instance._raw_blocks = {}
     instance._check_snapshots = deque(maxlen=const.READING_CHECK_SNAPSHOTS)
     instance._ena_calc_solar_power = False
+    instance._ena_calc_grid_energy = False
+    instance._grid_energy = GridEnergyIntegrator()
     instance.inverter_model = const.DEFAULT_INVERTER_MODEL
     instance._register_blocks = const.register_blocks_for(instance.inverter_model)
     instance._registers_by_key = {
@@ -431,9 +439,8 @@ def test_a_failed_cap_write_still_leaves_the_feed_mode_as_an_enum(
     assert coordinator.data["grid_feed_mode"] is models.GridFeedMode.LIMITED
 
 
-def test_accepted_update_publishes_successful_coordinator_status(
-    coordinator, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _accept_updates(coordinator, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let every update through, with the energy processing out of the way."""
     now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
     coordinator.async_get_raw_data = AsyncMock(return_value={"grid_import_total": 10.0})
     coordinator._energy_processor.validate_totals = Mock(
@@ -457,10 +464,30 @@ def test_accepted_update_publishes_successful_coordinator_status(
         coordinator_module, "calculate_derived_values", Mock(return_value={})
     )
 
+
+def test_accepted_update_publishes_successful_coordinator_status(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _accept_updates(coordinator, monkeypatch)
+
     asyncio.run(coordinator._async_update_data())
 
     assert coordinator.status == models.CoordinatorStatus.SUCCESS
     assert "coordinator_status" not in coordinator._last_checked_data
+
+
+def test_a_poll_of_readings_the_inverter_stopped_updating_is_not_a_success(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In #227 every poll ran fine for a week while the readings stood still."""
+    _accept_updates(coordinator, monkeypatch)
+    monkeypatch.setattr(
+        type(coordinator.control.reading_checks), "stale", property(lambda _: True)
+    )
+
+    asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.status == models.CoordinatorStatus.READINGS_STALLED
 
 
 def test_control_sees_the_derived_solar_power_not_the_raw_register(
@@ -550,6 +577,25 @@ def test_a_poll_over_its_budget_fails_and_drops_the_connection(
     assert not coordinator.identity_verified
 
 
+def test_a_poll_bounds_its_retries_by_its_budget(coordinator) -> None:
+    left: list[float] = []
+
+    async def read(*_args: Any) -> list[int]:
+        deadline = modbus_module._retry_deadline.get()
+        assert deadline is not None
+        left.append(deadline - asyncio.get_running_loop().time())
+        raise ConnectionResetError("reset")
+
+    coordinator._modbus_client.async_read = read
+
+    with pytest.raises(UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert 0 < left[0] <= const.MODBUS_POLL_BUDGET_S
+    # Requests outside a poll, such as the heartbeat's, are not bounded by it.
+    assert modbus_module._retry_deadline.get() is None
+
+
 def test_a_lost_socket_is_a_read_failure(coordinator) -> None:
     coordinator._modbus_client.async_read = AsyncMock(
         side_effect=ConnectionResetError("reset")
@@ -560,6 +606,65 @@ def test_a_lost_socket_is_a_read_failure(coordinator) -> None:
 
     assert coordinator.status == models.CoordinatorStatus.READ_FAILED
     coordinator._modbus_client.close.assert_called_once()
+
+
+def test_a_read_without_an_answer_counts_toward_an_outage(coordinator) -> None:
+    coordinator._modbus_client.async_read = AsyncMock(
+        side_effect=ConnectionResetError("reset")
+    )
+
+    with pytest.raises(UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert "entry" in outage._outages
+
+
+def test_a_failed_reconnect_counts_toward_an_outage(coordinator) -> None:
+    coordinator.async_get_raw_data = AsyncMock(
+        side_effect=UpdateFailed("Reconnect failed")
+    )
+
+    with pytest.raises(UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert "entry" in outage._outages
+
+
+def test_a_failed_poll_the_inverter_answered_in_ends_the_outage(
+    coordinator,
+) -> None:
+    """A refusal, or blocks that came back before the poll ran out of time."""
+    outage._outages["entry"] = outage.Outage(
+        since=dt_util.utcnow(), host=coordinator.host, port=coordinator.port
+    )
+    client = coordinator._modbus_client
+
+    async def answer_then_fail() -> None:
+        client.answers += 1
+        return
+
+    coordinator.async_get_raw_data = answer_then_fail
+
+    with pytest.raises(UpdateFailed):
+        asyncio.run(coordinator._async_update_data())
+
+    assert coordinator.status == models.CoordinatorStatus.READ_FAILED
+    assert "entry" not in outage._outages
+
+
+def test_a_reading_that_fails_to_process_still_ends_the_outage(coordinator) -> None:
+    outage._outages["entry"] = outage.Outage(
+        since=dt_util.utcnow(), host=coordinator.host, port=coordinator.port
+    )
+    coordinator.async_get_raw_data = AsyncMock(return_value={})
+    coordinator._energy_processor.validate_totals = Mock(
+        side_effect=ValueError("Invalid data")
+    )
+
+    with pytest.raises(ValueError, match="Invalid data"):
+        asyncio.run(coordinator._async_update_data())
+
+    assert "entry" not in outage._outages
 
 
 def test_a_bug_while_reading_is_raised_not_published_as_partial_data(
@@ -1947,3 +2052,267 @@ def test_offsets_for_entered_totals_are_worked_out_from_the_device(
     assert coordinator.energy_offsets_for({"solar_total": 4296.8}) == {
         "grid_export_total": 1041.23
     }
+
+
+# ── Grid energy calculated from Grid Power ────────────────────────────────────
+
+
+def _grid_frame(power: float, **registers: float) -> dict[str, float]:
+    """A poll of an inverter whose grid energy registers read 0, as in #218."""
+    return {
+        "grid_power": power,
+        **dict.fromkeys(const.GRID_ENERGY_REGISTER_KEYS, 0.0),
+        **registers,
+    }
+
+
+def test_calculated_grid_energy_continues_from_the_totals_shown(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = datetime(2026, 11, 19, 10, tzinfo=UTC)
+    coordinator._ena_calc_grid_energy = True
+    coordinator._energy_offsets = {"grid_import_total": 100.0}
+    coordinator._energy_processor.offsets = {"grid_import_total": 100.0}
+    coordinator._last_checked_data = {
+        "grid_import_total": 12.0,
+        "grid_export_total": 3.0,
+    }
+    coordinator._last_checked_time = start - timedelta(seconds=5)
+    coordinator._energy_processor.accepted_at = dict.fromkeys(
+        ("grid_import_total", "grid_export_total"), start - timedelta(seconds=5)
+    )
+
+    # 3.6 kW for a minute, polled every 5 s.
+    for poll in range(13):
+        result = run_update(
+            coordinator,
+            _grid_frame(3600.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    assert result["grid_import_total"] == 12.06
+    assert result["grid_import_today"] == 0.06
+    assert result["grid_export_total"] == 3.0
+    assert result["grid_import_total_raw"] == 0.0
+
+
+def test_a_distrusted_grid_power_counts_no_grid_energy(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stalled inverter can show a Grid Power frozen at some value (#227)."""
+    start = datetime(2026, 11, 19, 10, tzinfo=UTC)
+    coordinator._ena_calc_grid_energy = True
+    coordinator._last_checked_data = {
+        "grid_import_total": 12.0,
+        "grid_export_total": 3.0,
+    }
+    coordinator._last_checked_time = start - timedelta(seconds=5)
+    coordinator._energy_processor.accepted_at = dict.fromkeys(
+        ("grid_import_total", "grid_export_total"), start - timedelta(seconds=5)
+    )
+    # Held there, rather than worked out again from these frames by the checks,
+    # which every poll runs.
+    checks = coordinator.control.reading_checks
+    checks.distrusted = frozenset({"grid_power"})
+    monkeypatch.setattr(checks, "run", Mock())
+
+    for poll in range(13):
+        result = run_update(
+            coordinator,
+            _grid_frame(3600.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    assert result["grid_import_total"] == 12.0
+
+
+def test_grid_energy_is_left_to_the_inverter_unless_calculated(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = datetime(2026, 11, 19, 10, tzinfo=UTC)
+    for poll in range(3):
+        result = run_update(
+            coordinator,
+            _grid_frame(3600.0, grid_import_total=8.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    assert result["grid_import_total"] == 8.0
+
+
+def _zero_for_a_day(coordinator) -> datetime:
+    """Grid registers at 0 for a day, just short of the energy that raises it."""
+    start = datetime(2026, 11, 19, 10, tzinfo=UTC)
+    coordinator._grid_energy.zero_since = start - timedelta(days=1)
+    coordinator._grid_energy.kwh_while_zero = 0.998
+    return start
+
+
+def test_grid_registers_that_do_not_count_offer_the_calculation_once(
+    coordinator, issues, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = _zero_for_a_day(coordinator)
+
+    run_update(coordinator, _grid_frame(3600.0), start, monkeypatch)
+    issues.created.assert_not_called()
+    for poll in (1, 2):
+        run_update(
+            coordinator,
+            _grid_frame(3600.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    issues.created.assert_called_once()
+    args, kwargs = issues.created.call_args
+    assert args[2] == "grid_energy_not_counted_entry"
+    assert kwargs["is_fixable"] is True
+    assert kwargs["translation_key"] == "grid_energy_not_counted"
+    assert kwargs["data"] == {"entry_id": "entry"}
+
+
+def test_a_grid_register_that_counts_again_clears_the_offer(
+    coordinator, issues, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = _zero_for_a_day(coordinator)
+    for poll in (0, 1):
+        run_update(
+            coordinator,
+            _grid_frame(3600.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    run_update(
+        coordinator,
+        _grid_frame(3600.0, grid_import_today=0.2),
+        start + timedelta(seconds=10),
+        monkeypatch,
+    )
+
+    assert "grid_energy_not_counted_entry" in {
+        call.args[2] for call in issues.deleted.call_args_list
+    }
+    assert not coordinator.grid_energy_not_counted
+
+
+def test_nothing_is_offered_while_grid_energy_is_calculated(
+    coordinator, issues, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = _zero_for_a_day(coordinator)
+    coordinator._ena_calc_grid_energy = True
+    for poll in range(3):
+        run_update(
+            coordinator,
+            _grid_frame(3600.0),
+            start + poll * timedelta(seconds=5),
+            monkeypatch,
+        )
+
+    issues.created.assert_not_called()
+
+
+def test_enabling_the_calculation_saves_it_to_the_entry(coordinator) -> None:
+    coordinator.config_entry = cast(
+        EcoflowConfigEntry,
+        SimpleNamespace(entry_id="entry", options={const.CONF_SCAN_INTERVAL: 5}),
+    )
+
+    coordinator.async_enable_grid_energy_calculation()
+
+    coordinator.hass.config_entries.async_update_entry.assert_called_once_with(
+        coordinator.config_entry,
+        options={const.CONF_SCAN_INTERVAL: 5, const.CONF_CALC_GRID_ENERGY: True},
+    )
+
+
+def test_calculated_grid_energy_survives_a_restart(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start = datetime(2026, 11, 19, 10, tzinfo=UTC)
+    coordinator._ena_calc_grid_energy = True
+    for poll in range(3):
+        run_update(
+            coordinator,
+            _grid_frame(-1800.0),
+            start + poll * timedelta(seconds=10),
+            monkeypatch,
+        )
+    saved = coordinator._persisted_state()
+
+    coordinator._grid_energy = GridEnergyIntegrator()
+    coordinator._load_stored_state(saved)
+
+    assert coordinator._grid_energy.active
+    assert coordinator._grid_energy.totals() == {
+        "grid_import_total": 0.0,
+        "grid_export_total": 0.01,
+    }
+
+
+# ── External meter ────────────────────────────────────────────────────────────
+
+
+def _poll(coordinator, monkeypatch: pytest.MonkeyPatch, raw: dict[str, Any]) -> None:
+    """Run one accepted poll that publishes *raw* as read."""
+    _accept_updates(coordinator, monkeypatch)
+    coordinator.async_get_raw_data = AsyncMock(return_value=dict(raw))
+    coordinator._energy_processor.validate_totals = Mock(
+        side_effect=lambda data, *_: dict(data)
+    )
+    coordinator.async_sync_external_meter_entities = Mock()
+    asyncio.run(coordinator._async_update_data())
+
+
+NO_METER = dict.fromkeys(const.EXTERNAL_METER_KEYS, 0.0)
+
+
+def test_meter_readings_of_zero_show_no_external_meter(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PowerOcean Plus on its built-in meter reads 0 in all six (#240)."""
+    _poll(coordinator, monkeypatch, NO_METER)
+
+    assert not coordinator.has_external_meter
+    coordinator.async_sync_external_meter_entities.assert_not_called()
+
+
+@pytest.mark.parametrize("key", const.EXTERNAL_METER_KEYS)
+def test_any_meter_reading_shows_an_external_meter(
+    coordinator, monkeypatch: pytest.MonkeyPatch, key: str
+) -> None:
+    _poll(coordinator, monkeypatch, {**NO_METER, key: 0.12})
+
+    assert coordinator.has_external_meter
+    coordinator.async_sync_external_meter_entities.assert_called_once()
+
+
+def test_an_external_meter_stays_known_when_it_reads_zero(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A grid that goes down reads 0 V, which is then a real reading."""
+    _poll(coordinator, monkeypatch, {**NO_METER, "grid_voltage_l1": 231.2})
+    _poll(coordinator, monkeypatch, NO_METER)
+
+    assert coordinator.has_external_meter
+
+
+def test_an_external_meter_survives_a_restart(
+    coordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _poll(coordinator, monkeypatch, {**NO_METER, "grid_current_l2": 3.4})
+    stored = coordinator._persisted_state()
+
+    coordinator._has_external_meter = False
+    coordinator._store = SimpleNamespace(async_load=AsyncMock(return_value=stored))
+    asyncio.run(coordinator.async_load_persisted_state())
+
+    assert coordinator.has_external_meter
+
+
+def test_the_meter_readings_are_polled_with_no_sensor_asking(coordinator) -> None:
+    """So a meter is noticed while its sensors are disabled."""
+    assert set(const.EXTERNAL_METER_KEYS) <= coordinator._own_keys

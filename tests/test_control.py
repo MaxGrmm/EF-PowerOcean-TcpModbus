@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -195,6 +195,23 @@ def test_a_reconnect_keeps_control_unless_the_window_lapsed(
 
     assert control.in_control is False
     assert control._control_stale is True
+
+
+def test_a_reconnect_writes_nothing_while_modbus_control_is_off(
+    control, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With control off the heartbeat never holds the inverter, so every reconnect
+    looked like a lapsed window and re-sent the default method (#227). A write the
+    inverter left unanswered dropped the link, and the next poll did it again."""
+    write = allow_writes(control, monkeypatch)
+    asyncio.run(control.async_set_enabled(False))
+    control._heartbeat._last_success = None
+
+    control.mark_stale()
+    asyncio.run(control.async_poll({"battery_soc": 50.0}))
+
+    assert control._control_stale is False
+    write.assert_not_awaited()
 
 
 def test_a_failed_beat_is_retried_before_the_deadline_not_after_it(
@@ -1843,6 +1860,32 @@ def test_the_charge_limit_outranks_charging_to_the_reserve(
     )
     assert control._commanded_feature is not Feature.CHARGE_BATTERY
     assert control.status is not Status.CHARGING_TO_RESERVE
+
+
+@pytest.mark.parametrize(
+    ("saved", "kept"),
+    ((timedelta(seconds=5), True), (timedelta(minutes=10), False), (None, False)),
+    ids=("short restart", "long restart", "saved without a time"),
+)
+def test_readings_count_as_still_through_a_short_restart_only(
+    control, monkeypatch: pytest.MonkeyPatch, saved: timedelta | None, kept: bool
+) -> None:
+    then = datetime(2026, 11, 21, 12, 0, tzinfo=UTC)
+    stored: dict[str, Any] = {
+        "reading_checks": {"frozen_moved": {"frequency": [50.0, then.isoformat()]}}
+    }
+    if saved is not None:
+        monkeypatch.setattr(dt_util, "now", lambda: then)
+        stored["saved_at"] = control.dump_state()["saved_at"]
+    back = then + (saved or timedelta(hours=1))
+    monkeypatch.setattr(dt_util, "now", lambda: back)
+
+    control.load_state(stored)
+
+    since = then if kept else back
+    assert control.reading_checks.dump_state()["frozen_moved"] == {
+        "frequency": [50.0, since.isoformat()]
+    }
 
 
 def test_charge_to_reserve_survives_a_restart(control) -> None:

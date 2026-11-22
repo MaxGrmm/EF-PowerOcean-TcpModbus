@@ -71,6 +71,29 @@ class BatteryModule:
     discharge_w: int
 
 
+class AlertVerbosity(StrEnum):
+    """How much the integration raises in repairs, from least to most.
+
+    Each level raises everything the one before it does.
+    """
+
+    # What the user must act on: the inverter stopped updating, Modbus is off, it
+    # does not answer, totals are held, another inverter answers.
+    ESSENTIAL = "essential"
+    # Also readings that cannot be trusted: a failed reading check, a counter
+    # going back, sensors unavailable unexplained, control not accepted.
+    READINGS = "readings"
+    # Also the connection's health: reconnects, late polls, control writes with
+    # control off, power that does not add up.
+    DETAILED = "detailed"
+    # Also every warning and error the integration logs.
+    DEBUG = "debug"
+
+    @property
+    def rank(self) -> int:
+        return list(AlertVerbosity).index(self)
+
+
 class ReserveSupport(StrEnum):
     """Whether the inverter or the integration enforces the Battery Reserve."""
 
@@ -276,6 +299,8 @@ class CoordinatorStatus(StrEnum):
     RECONNECT_FAILED = "reconnect_failed"
     PROCESSING_FAILED = "processing_failed"
     IDENTITY_MISMATCH = "identity_mismatch"
+    # The poll succeeded, but the inverter stopped updating what it serves.
+    READINGS_STALLED = "readings_stalled"
 
 
 class OperatingMode(StrEnum):
@@ -670,11 +695,34 @@ def encode_register(value: int, data_type: RegisterType) -> list[int]:
     return [(word >> 16) & 0xFFFF, word & 0xFFFF]
 
 
+class Signal(StrEnum):
+    """What kind of signal a register carries, which says how it can go wrong.
+
+    The reading checks judge by kind, so a new register is covered by naming its kind.
+    """
+
+    # Jitters from poll to poll on a live grid, whatever the power flows do. One
+    # that does not move at all has stopped updating.
+    JITTER = "jitter"
+    # A measured power, current, voltage or temperature. It may sit still for a
+    # while, but not while the readings around it show the inverter stalled.
+    MEASURE = "measure"
+    # A state of charge.
+    LEVEL = "level"
+    # An energy counter.
+    COUNTER = "counter"
+    # A setting, limit or rating that only changes when someone changes it.
+    STATIC = "static"
+    # Status bits and fault codes: the device's own word, never judged.
+    STATUS = "status"
+
+
 @dataclass(frozen=True)
 class RegisterDef:
     key: str
     address: int
     data_type: RegisterType = RegisterType.FLOAT32
+    signal: Signal = Signal.STATIC
     address_overrides: Mapping[InverterModel, int] = field(default_factory=dict)
     # Where writes go when the register is read from somewhere else.
     write_address: int | None = None

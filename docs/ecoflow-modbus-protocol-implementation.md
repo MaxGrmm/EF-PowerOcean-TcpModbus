@@ -5,7 +5,9 @@ this integration's register handling.
 
 **This file deliberately does not list registers.** The register map is code:
 
-> [`custom_components/ef_powerocean_tcpmodbus/const.py`](custom_components/ef_powerocean_tcpmodbus/const.py) → `MODBUS_REGISTERS`
+> [`custom_components/ef_powerocean_tcpmodbus/const.py`](../custom_components/ef_powerocean_tcpmodbus/const.py) → `MODBUS_REGISTERS`
+
+<!-- toc -->
 
 ## Contents
 
@@ -21,6 +23,8 @@ this integration's register handling.
 - [Battery power limits](#battery-power-limits)
 - [Disclaimer](#disclaimer)
 
+<!-- tocstop -->
+
 ## Sources
 
 1. **EcoFlow Open Modbus Protocol V1.0** (10 June 2026).
@@ -28,7 +32,7 @@ this integration's register handling.
    register the integration reads is in it, at the address it gives plus 40001.
    Where it disagrees with the hardware, the hardware wins, see
    [Where the specification and the hardware disagree](#where-the-specification-and-the-hardware-disagree).
-   A copy is kept in [docs/EcoFlow_Open_Modbus_Protocol_V1.0_June_2026.pdf](docs/EcoFlow_Open_Modbus_Protocol_V1.0_June_2026.pdf).
+   A copy is kept in [docs/EcoFlow_Open_Modbus_Protocol_V1.0_June_2026.pdf](EcoFlow_Open_Modbus_Protocol_V1.0_June_2026.pdf).
 2. **Cross-checks against the EcoFlow web portal.** Live values read over Modbus,
    compared against what the portal reported for the same system at the same
    moment. This is what settles any disagreement about what a register holds.

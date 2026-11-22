@@ -18,7 +18,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
 from homeassistant.const import MAJOR_VERSION, MINOR_VERSION, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -26,13 +26,19 @@ from homeassistant.helpers import entity_platform
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_capture_events,
+)
 
-from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const
+from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const, outage
+from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
 from custom_components.ef_powerocean_tcpmodbus.models import (
+    CoordinatorStatus,
     EnergySensorDef,
     InverterModel,
     RegisterType,
@@ -561,6 +567,76 @@ async def test_steady_entities_recover_after_a_start_whose_first_poll_fails(
     assert [e for e in shown if after[e][0] == STATE_UNAVAILABLE] == []
 
 
+# ── A request the inverter hangs up on is sent again on a new connection ──────
+
+
+async def _set_up(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> tuple[MockConfigEntry, EcoflowCoordinator]:
+    """Set up with every entity and poll once."""
+    _fill_registers(inverter)
+    entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_HOST: HOST, const.CONF_PORT: inverter.port},
+    )
+    entry.add_to_hass(hass)
+    _enable_every_entity(hass, entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator: EcoflowCoordinator = entry.runtime_data
+    link = coordinator.modbus_client._link
+    if isinstance(link, modbus_module.PymodbusLink):
+        # pymodbus waits out the timeout for a request whose connection closed.
+        link._pymodbus.comm_params.timeout_connect = 0.2
+    await _poll(hass, coordinator)
+    return entry, coordinator
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_poll_the_inverter_hangs_up_on_still_succeeds(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    """An inverter that closes idle connections, at a poll interval just as long."""
+    entry, coordinator = await _set_up(hass, inverter)
+    shown = [
+        entity_id
+        for entity_id, (state, _) in _states(hass, entry).items()
+        if entity_id in _reading_entities(hass, entry) and state != STATE_UNAVAILABLE
+    ]
+
+    inverter.hang_ups = 1
+    await _poll(hass, coordinator)
+    after = _states(hass, entry)
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert coordinator.last_update_success
+    assert coordinator.status is CoordinatorStatus.SUCCESS
+    assert len(shown) > 50
+    assert [e for e in shown if after[e][0] == STATE_UNAVAILABLE] == []
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_poll_whose_retry_is_hung_up_on_too_fails(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    entry, coordinator = await _set_up(hass, inverter)
+
+    inverter.hang_ups = 2
+    with patch.object(
+        coordinator, "async_poll_failed", wraps=coordinator.async_poll_failed
+    ) as poll_failed:
+        await _poll(hass, coordinator)
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert not coordinator.last_update_success
+    assert coordinator.status is CoordinatorStatus.READ_FAILED
+    poll_failed.assert_awaited_once()
+
+
 # ── Refused registers are retried after a firmware update ─────────────────────
 
 
@@ -615,6 +691,30 @@ async def test_a_firmware_update_retries_refused_registers(
     assert unsupported == frozenset()
     assert "breaker_capacity" in polled
     assert sw_version == "1.2.4.0"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_firmware_update_fires_an_event(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    entry, coordinator = await _set_up_refusing(hass, inverter)
+    events = async_capture_events(hass, const.EVENT_FIRMWARE_CHANGED)
+    try:
+        (device,) = dr.async_entries_for_config_entry(
+            dr.async_get(hass), entry.entry_id
+        )
+        _serve_firmware(inverter, 0x01020400)
+        await coordinator.async_read_device_info()
+        # Read again without a change, which is no event.
+        await coordinator.async_read_device_info()
+        await hass.async_block_till_done()
+    finally:
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert [event.data for event in events] == [
+        {"device_id": device.id, const.ATTR_FROM: "1.2.3.4", const.ATTR_TO: "1.2.4.0"}
+    ]
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -773,3 +873,178 @@ async def test_unloading_stops_the_heartbeat_and_closes_the_client(
 
     assert _heartbeats() == []
     assert not coordinator.connected
+
+
+# ── An outage outlives a reload ───────────────────────────────────────────────
+
+
+def _entry(port: int) -> MockConfigEntry:
+    return MockConfigEntry(
+        domain=const.DOMAIN, data={const.CONF_HOST: HOST, const.CONF_PORT: port}
+    )
+
+
+def _not_answering_issue(
+    hass: HomeAssistant, entry: MockConfigEntry
+) -> ir.IssueEntry | None:
+    return ir.async_get(hass).async_get_issue(const.DOMAIN, outage.issue_id(entry))
+
+
+def _raise_outage_issue(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    """Stand in for an outage that has gone on for an hour, with its issue."""
+    outage._outages[entry.entry_id] = outage.Outage(
+        since=dt_util.utcnow() - timedelta(hours=1),
+        host=HOST,
+        port=entry.data[const.CONF_PORT],
+        cause=outage.Cause.MODBUS_SILENT,
+    )
+    ir.async_create_issue(
+        hass,
+        const.DOMAIN,
+        outage.issue_id(entry),
+        is_fixable=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="not_answering_modbus_silent",
+        translation_placeholders={"host": HOST, "since": "2026-11-17 09:42"},
+    )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
+async def test_a_failed_setup_starts_an_outage(hass: HomeAssistant) -> None:
+    entry = _entry(_closed_port())
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert entry.entry_id in outage._outages
+    assert _not_answering_issue(hass, entry) is None
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_a_bug_in_the_setup_is_no_outage(hass: HomeAssistant) -> None:
+    entry = _entry(const.DEFAULT_PORT)
+    entry.add_to_hass(hass)
+
+    with patch.object(
+        coordinator_module.EcoflowCoordinator,
+        "_async_setup",
+        AsyncMock(side_effect=RuntimeError("bug")),
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert entry.entry_id not in outage._outages
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
+async def test_a_setup_retry_late_in_an_outage_raises_the_issue(
+    hass: HomeAssistant,
+) -> None:
+    """The setup that fails after a reload carries on the outage from before it."""
+    entry = _entry(_closed_port())
+    entry.add_to_hass(hass)
+    outage._outages[entry.entry_id] = outage.Outage(
+        since=dt_util.utcnow() - timedelta(seconds=outage.NOT_ANSWERING_AFTER_S),
+        host=HOST,
+        port=entry.data[const.CONF_PORT],
+    )
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    issue = _not_answering_issue(hass, entry)
+    assert issue is not None
+    assert issue.translation_key == "not_answering_unreachable"
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_unloading_keeps_the_issue_of_an_outage(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    _serve_serial(inverter, SERIAL)
+    entry = _entry(inverter.port)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    _raise_outage_issue(hass, entry)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert _not_answering_issue(hass, entry) is not None
+    assert entry.entry_id in outage._outages
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_the_first_good_read_after_a_reload_clears_the_issue(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    _serve_serial(inverter, SERIAL)
+    entry = _entry(inverter.port)
+    entry.add_to_hass(hass)
+    _raise_outage_issue(hass, entry)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    issue = _not_answering_issue(hass, entry)
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert issue is None
+    assert entry.entry_id not in outage._outages
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_disabling_the_entry_drops_its_outage(
+    hass: HomeAssistant, inverter: FakeInverter
+) -> None:
+    _serve_serial(inverter, SERIAL)
+    entry = _entry(inverter.port)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    _raise_outage_issue(hass, entry)
+
+    assert await hass.config_entries.async_set_disabled_by(
+        entry.entry_id, ConfigEntryDisabler.USER
+    )
+    await hass.async_block_till_done()
+
+    assert _not_answering_issue(hass, entry) is None
+    assert entry.entry_id not in outage._outages
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
+async def test_disabling_an_entry_that_retries_its_setup_drops_its_outage(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry(_closed_port())
+    entry.add_to_hass(hass)
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    _raise_outage_issue(hass, entry)
+
+    assert await hass.config_entries.async_set_disabled_by(
+        entry.entry_id, ConfigEntryDisabler.USER
+    )
+    await hass.async_block_till_done()
+
+    assert _not_answering_issue(hass, entry) is None
+    assert entry.entry_id not in outage._outages
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_removing_the_entry_drops_its_outage(hass: HomeAssistant) -> None:
+    entry = _entry(const.DEFAULT_PORT)
+    entry.add_to_hass(hass)
+    _raise_outage_issue(hass, entry)
+
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert _not_answering_issue(hass, entry) is None
+    assert entry.entry_id not in outage._outages
