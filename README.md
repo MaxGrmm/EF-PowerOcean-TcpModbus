@@ -32,8 +32,11 @@
   - [Sensors](#sensors)
   - [Troubleshooting](#troubleshooting)
   - [Removing the Integration](#removing-the-integration)
+- [Technical Details](#technical-details)
+  - [How Data Is Updated](#how-data-is-updated)
+  - [Protocol](#protocol)
+  - [Protocol Implementation](#protocol-implementation)
 - [Project](#project)
-  - [Technical Details](#technical-details)
   - [Contributing](#contributing)
   - [Credits](#credits)
   - [Disclaimer](#disclaimer)
@@ -363,11 +366,9 @@ configuration directory; delete it if you no longer need them.
 
 ---
 
-## Project
+## Technical Details
 
-### Technical Details
-
-#### How data is updated
+### How Data Is Updated
 
 The integration polls the inverter over your local network every **Poll Interval**
 (5 seconds by default, 2–30 configurable). Each poll reads only the registers that
@@ -385,14 +386,30 @@ background.
 With Modbus Control on, a heartbeat is written to the inverter independently of the
 polls, to keep control from passing back to the EcoFlow app.
 
-#### Protocol
+### Protocol
 
 - **Protocol:** Modbus TCP (port 502), reading holding registers and writing single
   or multiple registers
 - **Tested firmware:** 3.0.19.19 + 3.0.20.54(PO+)
 - **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 
-The register map lives in [`const.py`](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses. Word order, decoding, how reads are grouped into blocks and known gaps are in the [protocol notes](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md).
+The register map lives in [`const.py`](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses.
+
+### Protocol Implementation
+
+**[EcoFlow Modbus protocol implementation](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md)** explains how the integration talks to
+the inverter, and why:
+
+- [Connection](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#connection) and the address window
+- [Data types and word order](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#data-types-and-word-order)
+- [How the integration reads](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#how-the-integration-reads), grouped into blocks
+- [Writing registers](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#writing-registers) and [battery power limits](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#battery-power-limits)
+- [Where the specification and the hardware disagree](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#where-the-specification-and-the-hardware-disagree)
+- [Registers not yet mapped](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/docs/ecoflow-modbus-protocol-implementation.md#not-yet-mapped)
+
+---
+
+## Project
 
 ### Contributing
 
