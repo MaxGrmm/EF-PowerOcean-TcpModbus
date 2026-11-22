@@ -73,14 +73,14 @@ def test_telemetry_asks_for_the_fault_registers() -> None:
 
 def test_every_register_has_something_that_asks_for_it() -> None:
     """A register nothing asks for is never read, so it should not be mapped."""
-    definitions: tuple[EntityDescription, ...] = (
+    every_description: tuple[EntityDescription, ...] = (
         *descriptions.SENSOR_MAP,
         *descriptions.ENERGY_SENSOR_MAP,
         *descriptions.DAILY_ENERGY_SENSORS_DEVICE_RAW,
         *descriptions.BINARY_SENSOR_MAP,
         *descriptions.WRITABLE_NUMBERS_MAP,
     )
-    shown = frozenset().union(*(shown_keys(d) for d in definitions))
+    shown = frozenset().union(*(shown_keys(d) for d in every_description))
     assert REGISTERS - OWN - ControlInputs.keys() - shown == set()
 
 
@@ -184,7 +184,7 @@ async def test_a_refused_register_stays_out_whatever_is_asked(coordinator) -> No
 
 
 @pytest.mark.parametrize(
-    ("definition", "keys"),
+    ("description", "keys"),
     (
         (EcoflowSensorEntityDescription(key="frequency"), {"frequency"}),
         (
@@ -205,11 +205,11 @@ async def test_a_refused_register_stays_out_whatever_is_asked(coordinator) -> No
         ),
     ),
 )
-def test_an_entity_asks_for_the_keys_it_shows(definition, keys) -> None:
+def test_an_entity_asks_for_the_keys_it_shows(description, keys) -> None:
     entity = EcoFlowBaseEntity(
         cast(EcoflowCoordinator, SimpleNamespace()),
         cast(ConfigEntry, SimpleNamespace(entry_id="entry")),
-        definition,
+        description,
     )
     assert entity.coordinator_context == frozenset(keys)
 

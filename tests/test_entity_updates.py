@@ -26,11 +26,11 @@ from custom_components.ef_powerocean_tcpmodbus import (
 )
 
 
-def _definition(definitions: list[Any], key: str) -> Any:
-    return next(definition for definition in definitions if definition.key == key)
+def _description(candidates: list[Any], key: str) -> Any:
+    return next(description for description in candidates if description.key == key)
 
 
-MODES = _definition(descriptions.SENSOR_MAP, "active_control_mode")
+MODES = _description(descriptions.SENSOR_MAP, "active_control_mode")
 MODES_ATTRIBUTE = MODES.attribute_keys[0]
 
 
@@ -49,7 +49,7 @@ class Kind:
 KINDS = {
     "sensor": Kind(
         lambda coordinator, entry: sensor.EcoflowSensor(
-            coordinator, entry, _definition(descriptions.SENSOR_MAP, "battery_soc")
+            coordinator, entry, _description(descriptions.SENSOR_MAP, "battery_soc")
         ),
         key="battery_soc",
         steady=100.0,
@@ -69,7 +69,7 @@ KINDS = {
         lambda coordinator, entry: binary_sensor.EcoFlowBinarySensor(
             coordinator,
             entry,
-            _definition(descriptions.BINARY_SENSOR_MAP, "self_use_mode_ena"),
+            _description(descriptions.BINARY_SENSOR_MAP, "self_use_mode_ena"),
         ),
         key="self_use_mode_ena",
         steady=1,

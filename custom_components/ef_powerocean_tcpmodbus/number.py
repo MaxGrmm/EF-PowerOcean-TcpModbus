@@ -221,6 +221,6 @@ class EcoFlowGenericNumber(EcoFlowBaseEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_write_modbus_register(
-            entity_def=self.entity_description,
+            description=self.entity_description,
             value=round(value),
         )
