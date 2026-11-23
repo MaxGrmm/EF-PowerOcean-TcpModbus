@@ -26,7 +26,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, MODBUS_REQUEST_TIMEOUT_S
+from ..const import DOMAIN, MODBUS_REQUEST_TIMEOUT_S
 
 _LOGGER = logging.getLogger(__name__)
 

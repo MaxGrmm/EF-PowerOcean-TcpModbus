@@ -24,11 +24,15 @@ from pytest_homeassistant_custom_component.common import (
     async_capture_events,
 )
 
-from custom_components.ef_powerocean_tcpmodbus import const, logbook
+from custom_components.ef_powerocean_tcpmodbus import const, definitions, logbook
 from custom_components.ef_powerocean_tcpmodbus.diagnostics import (
     async_get_config_entry_diagnostics,
 )
-from custom_components.ef_powerocean_tcpmodbus.models import RegisterType
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
+from custom_components.ef_powerocean_tcpmodbus.powerocean.registers import RegisterType
 from custom_components.ef_powerocean_tcpmodbus.services import (
     ATTR_EXPIRE_IN,
     SERVICE_SET_BATTERY_COMMAND,
@@ -51,7 +55,7 @@ async def set_up(hass: HomeAssistant, inverter: FakeInverter) -> AsyncIterator[S
     entries: list[MockConfigEntry] = []
 
     async def set_up_entry(**options: Any) -> MockConfigEntry:
-        inverter.serve_serial(SERIAL, const.SERIAL_NUMBER.address)
+        inverter.serve_serial(SERIAL, register_map.SERIAL_NUMBER.address)
         entry = MockConfigEntry(
             domain=const.DOMAIN,
             unique_id=SERIAL,
@@ -108,7 +112,7 @@ async def test_raw_registers_in_the_diagnostics_never_hold_the_serial_number(
 ) -> None:
     """Not even from a read that covers it."""
     entry = await set_up()
-    serial = const.SERIAL_NUMBER
+    serial = register_map.SERIAL_NUMBER
     words = list(range(1, serial.end - 40001 + 3))
     entry.runtime_data._raw_blocks = {40001: words}
 
@@ -130,7 +134,7 @@ async def test_diagnostics_replay_on_the_fake_inverter(
     """A user's diagnostics download makes the same poll in a test."""
     entry = await set_up()
     coordinator = entry.runtime_data
-    _serve_float(inverter, const.REGISTERS_BY_KEY["grid_power"].address, -1234.5)
+    _serve_float(inverter, register_map.REGISTERS_BY_KEY["grid_power"].address, -1234.5)
     await coordinator.async_refresh()
     recorded = coordinator.raw_registers
     assert recorded
@@ -140,7 +144,7 @@ async def test_diagnostics_replay_on_the_fake_inverter(
         json.dumps(await async_get_config_entry_diagnostics(hass, entry), default=str)
     )
     inverter.registers.clear()
-    inverter.serve_serial(SERIAL, const.SERIAL_NUMBER.address)
+    inverter.serve_serial(SERIAL, register_map.SERIAL_NUMBER.address)
     inverter.load_diagnostics(diagnostics)
     await coordinator.async_refresh()
 
@@ -155,9 +159,9 @@ async def test_active_faults_are_named_where_the_code_is_known(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
     entry = await set_up()
-    inverter.registers[const.REGISTERS_BY_KEY["fault_count"].address] = 2
-    inverter.registers[const.REGISTERS_BY_KEY["fault_1"].address] = 521
-    inverter.registers[const.REGISTERS_BY_KEY["fault_2"].address] = 9999
+    inverter.registers[register_map.REGISTERS_BY_KEY["fault_count"].address] = 2
+    inverter.registers[register_map.REGISTERS_BY_KEY["fault_1"].address] = 521
+    inverter.registers[register_map.REGISTERS_BY_KEY["fault_2"].address] = 9999
     coordinator = entry.runtime_data
     # A poll within a second of the last one returns the last frame.
     coordinator._last_checked_time = dt_util.now() - timedelta(seconds=5)
@@ -179,7 +183,7 @@ async def test_battery_controls_are_unavailable_while_modbus_control_is_off(
     hass: HomeAssistant, set_up: SetUp
 ) -> None:
     entry = await set_up()
-    select_id = _entity_id(hass, entry, "select", const.BATTERY_MODE_SELECT.key)
+    select_id = _entity_id(hass, entry, "select", definitions.BATTERY_MODE_SELECT.key)
     assert _state(hass, select_id) == STATE_UNAVAILABLE
 
     await hass.services.async_call(
@@ -203,7 +207,7 @@ async def test_a_command_that_runs_out_returns_to_automatic_and_says_why(
 ) -> None:
     entry = await set_up(**{const.CONF_MODBUS_CONTROL: True})
     device = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)[0]
-    select_id = _entity_id(hass, entry, "select", const.BATTERY_MODE_SELECT.key)
+    select_id = _entity_id(hass, entry, "select", definitions.BATTERY_MODE_SELECT.key)
     expired = async_capture_events(hass, const.EVENT_COMMAND_EXPIRED)
 
     await hass.services.async_call(
@@ -253,7 +257,7 @@ async def test_a_setting_the_register_cannot_hold_is_never_sent(
     entry = await set_up()
     setting = next(
         number
-        for number in const.WRITABLE_NUMBERS_MAP
+        for number in definitions.WRITABLE_NUMBERS_MAP
         if number.data_type is RegisterType.UINT16
     )
 
@@ -277,7 +281,7 @@ def _serve_float(inverter: FakeInverter, address: int, value: float) -> None:
 async def test_device_totals_are_diagnostic_sensors_without_statistics(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
-    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    _serve_float(inverter, register_map.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
     entry = await set_up()
 
     entity_id = _entity_id(hass, entry, "sensor", "solar_total_raw")
@@ -295,7 +299,7 @@ async def test_device_totals_are_diagnostic_sensors_without_statistics(
 async def test_diagnostics_show_every_energy_counter_at_every_stage(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
-    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    _serve_float(inverter, register_map.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
     entry = await set_up()
 
     energy = (await async_get_config_entry_diagnostics(hass, entry))["energy"]
@@ -304,11 +308,11 @@ async def test_diagnostics_show_every_energy_counter_at_every_stage(
     assert energy["device_totals"]["solar_total_raw"] == pytest.approx(4296.8)
     assert set(energy["device_totals"]) == {
         f"{s.key}_raw"
-        for s in const.ENERGY_SENSOR_MAP
+        for s in definitions.ENERGY_SENSOR_MAP
         if not s.is_calculated and not s.resets_daily
     }
     assert "solar_today_raw" in energy["device_daily"]
-    assert energy["limits_w"][const.CONF_MAX_SOLAR_POWER] > 0
+    assert energy["limits_w"][device_const.CONF_MAX_SOLAR_POWER] > 0
     assert energy["last_checked_time"] is not None
     assert "solar_total" in energy["energy_accepted_at"]
     # The fake inverter reads 0 everywhere else: shown, but not yet accepted.
@@ -321,7 +325,9 @@ async def _held_export_issue(
 ) -> tuple[MockConfigEntry, str]:
     """Set up an entry whose export total was held at 1,548.73 kWh for a month."""
     assert await async_setup_component(hass, "repairs", {})
-    _serve_float(inverter, const.REGISTERS_BY_KEY["grid_export_total"].address, 507.5)
+    _serve_float(
+        inverter, register_map.REGISTERS_BY_KEY["grid_export_total"].address, 507.5
+    )
     entry = await set_up()
     coordinator = entry.runtime_data
     coordinator._last_checked_data["grid_export_total"] = 1548.73
@@ -397,7 +403,9 @@ async def test_a_held_total_keeps_its_value_in_home_assistant_after_the_repair(
     entry, issue_id = await _held_export_issue(hass, set_up, inverter)
 
     await _choose(hass, issue_id, "keep_shown")
-    _serve_float(inverter, const.REGISTERS_BY_KEY["grid_export_total"].address, 507.51)
+    _serve_float(
+        inverter, register_map.REGISTERS_BY_KEY["grid_export_total"].address, 507.51
+    )
     await _poll_a_minute_later(entry)
     await hass.async_block_till_done()
 
@@ -423,7 +431,7 @@ async def _parameters_form(hass: HomeAssistant, entry: MockConfigEntry) -> Any:
 async def test_a_total_set_in_the_settings_continues_from_the_value_entered(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
-    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    _serve_float(inverter, register_map.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
     entry = await set_up()
     today = entry.runtime_data.data["solar_today"]
 
@@ -451,7 +459,7 @@ async def test_only_the_totals_in_ecoflows_portal_can_be_corrected(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
     for key in ("solar_total", "inverter_ac_in_total"):
-        _serve_float(inverter, const.REGISTERS_BY_KEY[key].address, 1234.5)
+        _serve_float(inverter, register_map.REGISTERS_BY_KEY[key].address, 1234.5)
     entry = await set_up()
 
     fields = _section_fields(await _parameters_form(hass, entry))
@@ -465,7 +473,7 @@ async def test_a_total_not_in_the_portal_is_never_corrected(
     set_up: SetUp, inverter: FakeInverter
 ) -> None:
     _serve_float(
-        inverter, const.REGISTERS_BY_KEY["inverter_ac_in_total"].address, 1234.5
+        inverter, register_map.REGISTERS_BY_KEY["inverter_ac_in_total"].address, 1234.5
     )
 
     entry = await set_up(**{const.CONF_ENERGY_OFFSETS: {"inverter_ac_in_total": 50.0}})
@@ -480,7 +488,7 @@ async def test_a_total_not_in_the_portal_takes_the_inverters_value_after_a_day(
     """The user has nothing to check it against, so repairs does not ask."""
     assert await async_setup_component(hass, "repairs", {})
     _serve_float(
-        inverter, const.REGISTERS_BY_KEY["inverter_ac_in_total"].address, 1234.5
+        inverter, register_map.REGISTERS_BY_KEY["inverter_ac_in_total"].address, 1234.5
     )
     entry = await set_up()
     coordinator = entry.runtime_data
@@ -504,7 +512,7 @@ async def test_a_total_not_in_the_portal_takes_the_inverters_value_after_a_day(
 async def test_a_total_that_is_not_a_number_is_asked_for_again(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
-    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    _serve_float(inverter, register_map.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
     entry = await set_up()
 
     form = await _parameters_form(hass, entry)
@@ -527,7 +535,7 @@ async def test_a_total_that_is_not_a_number_is_asked_for_again(
 async def test_a_lower_total_is_saved_only_once_confirmed(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
-    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    _serve_float(inverter, register_map.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
     entry = await set_up()
     form = await _parameters_form(hass, entry)
 
@@ -550,7 +558,7 @@ async def test_a_lower_total_is_saved_only_once_confirmed(
 async def test_removing_the_corrections_returns_every_total_to_the_inverter(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
-    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    _serve_float(inverter, register_map.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
     entry = await set_up(**{const.CONF_ENERGY_OFFSETS: {"solar_total": 103.2}})
     assert entry.runtime_data.data["solar_total"] == pytest.approx(4400.0)
     today = entry.runtime_data.data["solar_today"]
@@ -574,12 +582,14 @@ async def test_removing_the_corrections_returns_every_total_to_the_inverter(
 async def test_a_total_left_as_shown_is_not_corrected(
     hass: HomeAssistant, set_up: SetUp, inverter: FakeInverter
 ) -> None:
-    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
+    _serve_float(inverter, register_map.REGISTERS_BY_KEY["solar_total"].address, 4296.8)
     entry = await set_up()
 
     form = await _parameters_form(hass, entry)
     # The total counts on while the form is open.
-    _serve_float(inverter, const.REGISTERS_BY_KEY["solar_total"].address, 4296.81)
+    _serve_float(
+        inverter, register_map.REGISTERS_BY_KEY["solar_total"].address, 4296.81
+    )
     await _poll_a_minute_later(entry)
     await hass.config_entries.options.async_configure(
         form["flow_id"], {"energy_totals": {"solar_total": "4296.8"}}
@@ -598,7 +608,7 @@ async def test_an_older_entry_copies_its_settings_to_the_options(
 
     An earlier release after a downgrade still finds them there.
     """
-    inverter.serve_serial(SERIAL, const.SERIAL_NUMBER.address)
+    inverter.serve_serial(SERIAL, register_map.SERIAL_NUMBER.address)
     settings = {
         const.CONF_INVERTER_MODEL: "powerocean_plus",
         const.CONF_BATTERY_COUNT: 3,

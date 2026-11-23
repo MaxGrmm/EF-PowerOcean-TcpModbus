@@ -20,8 +20,12 @@ MANIFEST: Final = INTEGRATION / "manifest.json"
 PACKAGE: Final = "ef_powerocean_registers"
 
 
-def load_integration() -> tuple[types.ModuleType, ...]:
-    """Load the register map without importing all of Home Assistant."""
+def load_integration() -> tuple[types.SimpleNamespace | types.ModuleType, ...]:
+    """Load the register map without importing all of Home Assistant.
+
+    The device's constants and types live in the powerocean package, the entity
+    definitions next to the integration; const and models offer both, as before.
+    """
     if importlib.util.find_spec("homeassistant") is None:
         stub = types.ModuleType("homeassistant.const")
         stub.__getattr__ = lambda _name: type("Any", (), {"__getattr__": str})()
@@ -31,9 +35,24 @@ def load_integration() -> tuple[types.ModuleType, ...]:
     package = types.ModuleType(PACKAGE)
     package.__path__ = [str(INTEGRATION)]
     sys.modules[PACKAGE] = package
-    return tuple(
-        importlib.import_module(f"{PACKAGE}.{module}")
-        for module in ("const", "models", "telemetry", "control_test_core")
+
+    def merged(*names: str) -> types.SimpleNamespace:
+        return types.SimpleNamespace(
+            **{
+                key: value
+                for name in names
+                for key, value in vars(
+                    importlib.import_module(f"{PACKAGE}.{name}")
+                ).items()
+                if not key.startswith("_")
+            }
+        )
+
+    return (
+        merged("powerocean.const", "powerocean.registers", "const", "definitions"),
+        merged("powerocean.models", "powerocean.registers", "models"),
+        importlib.import_module(f"{PACKAGE}.powerocean.telemetry"),
+        importlib.import_module(f"{PACKAGE}.powerocean.control_test_core"),
     )
 
 

@@ -12,10 +12,15 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
-from .const import ATTR_MODE, CONTROL_FEATURES, DOMAIN
-from .control_test_core import DEFAULT_TEST_POWER_W, MAX_TEST_POWER_W, MIN_TEST_POWER_W
+from .const import ATTR_MODE, DOMAIN
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
-from .models import ControlFeature
+from .powerocean.const import CONTROL_FEATURES
+from .powerocean.control_test_core import (
+    DEFAULT_TEST_POWER_W,
+    MAX_TEST_POWER_W,
+    MIN_TEST_POWER_W,
+)
+from .powerocean.models import ControlFeature
 
 SERVICE_SET_BATTERY_COMMAND: Final = "set_battery_command"
 SERVICE_RUN_CONTROL_TEST: Final = "run_control_test"

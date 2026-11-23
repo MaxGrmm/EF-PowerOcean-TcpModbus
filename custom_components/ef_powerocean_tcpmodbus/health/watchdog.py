@@ -31,16 +31,18 @@ from homeassistant.helpers.storage import Store
 from homeassistant.loader import async_get_integration
 from homeassistant.util import dt
 
-from .const import CONTROL_COMMAND_REGISTER, DOMAIN
-from .models import AlertVerbosity, ControlStatus
-from .reading_checks import Finding
+from ..const import DOMAIN
+from ..models import AlertVerbosity
+from ..powerocean.const import CONTROL_COMMAND_REGISTER
+from ..powerocean.models import ControlStatus
+from ..powerocean.reading_checks import Finding
 
 if TYPE_CHECKING:
-    from .coordinator import EcoflowCoordinator
+    from ..coordinator import EcoflowCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 # Every logger of the integration is a child of this one.
-_PACKAGE_LOGGER: Final = __name__.rsplit(".", 1)[0]
+_PACKAGE_LOGGER: Final = f"custom_components.{DOMAIN}"
 
 # An alert that recurs is updated at most this often, past its first.
 UPDATE_EVERY: Final = timedelta(minutes=10)
@@ -535,11 +537,25 @@ class Watchdog:
     @callback
     def log_record(self, logger: str, message: str, template: str) -> None:
         """Raise a warning or error the integration logged."""
-        # One notification per kind of message, whatever values it carried.
-        key = f"log_{zlib.crc32(f'{logger}:{template}'.encode()):08x}"
         self._notifier.notify(
-            key, f"Logged by {logger.rsplit('.', 1)[-1]}", message, dt.now()
+            log_alert(logger, template),
+            f"Logged by {logger.rsplit('.', 1)[-1]}",
+            message,
+            dt.now(),
         )
+
+
+def log_alert(logger: str, template: str) -> str:
+    """Return the alert for a kind of message, whatever values it carried.
+
+    Keyed by the module's name alone, as if it sat at the top of the package, so
+    moving a module keeps the alerts the user ignored for it. The package's own
+    logger, the one of __init__.py, keeps its name.
+    """
+    name = logger
+    if logger.startswith(f"{_PACKAGE_LOGGER}."):
+        name = f"{_PACKAGE_LOGGER}.{logger.rsplit('.', 1)[-1]}"
+    return f"log_{zlib.crc32(f'{name}:{template}'.encode()):08x}"
 
 
 class _Forwarder(logging.Handler):

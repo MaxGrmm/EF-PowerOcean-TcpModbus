@@ -1,0 +1,579 @@
+"""Types describing PowerOcean devices and how they are controlled."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import IntEnum, IntFlag, StrEnum
+from functools import lru_cache
+from typing import Any, Final, NamedTuple
+
+MAX_REGISTERS_PER_READ: Final = 125
+# Reading a few unused registers is cheaper than a second round trip, so registers
+# closer together than this share one request.
+MAX_REGISTER_GAP: Final = 48
+
+# A commanded setpoint is never met exactly. The inverter reaches a new setpoint
+# within a poll or two, but house load steps instantly and the battery takes a moment
+# to give up the difference. We therefore have some tolerance to prevent over adjusting.
+POWER_TOLERANCE_W: Final = 500.0
+POWER_TOLERANCE_FRACTION: Final = 0.15
+# SOC readings are whole percent, so leave room rather than testing for exactly 100.
+BATTERY_FULL_SOC: Final = 99.0
+BATTERY_EMPTY_MARGIN_SOC: Final = 1.0
+
+
+class ProductCategory(IntEnum):
+    """The phase count the device reports."""
+
+    THREE_PHASE = 1
+    SINGLE_PHASE = 2
+
+
+class ProductId(NamedTuple):
+    """What a model answers in the product registers.
+
+    A category of None matches whatever the device reports, which is how the
+    models that need no tiebreak are listed.
+    """
+
+    number: int
+    category: ProductCategory | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BatteryModule:
+    """One battery module's datasheet power ratings."""
+
+    # What the module adds to the capacity in 40552, not always its nominal capacity.
+    reported_wh: int
+    charge_w: int
+    # The datasheet's maximum, so energy checks and commands never sit below it.
+    discharge_w: int
+
+
+class ReserveSupport(StrEnum):
+    """Whether the inverter or the integration enforces the Battery Reserve."""
+
+    # The integration's guard, by holding the battery while it is in control. For
+    # models whose reserve register takes a write but is not acted on, or is unproven.
+    EMULATED = "emulated"
+    # The inverter, from its reserve register (40536), whatever is running it: the
+    # backup reserve the EcoFlow app sets.
+    NATIVE = "native"
+
+
+class ReserveSource(StrEnum):
+    """What holds the battery at its reserve right now."""
+
+    # The inverter, from its own reserve register (40536): the backup reserve the
+    # EcoFlow app sets, and a native Battery Reserve. It keeps it while it runs
+    # itself, in Automatic or without Modbus control.
+    APP = "app"
+    # The integration's reserve guard, at the Battery Reserve. Under a manual
+    # command it is the only one, since the command outranks the app's reserve.
+    BATTERY_RESERVE = "battery_reserve"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelTraits:
+    """What sets one model apart from the rest of the family.
+
+    The defaults describe every PowerOcean; the three-phase Ocean 2 is so far the
+    only model that speaks Modbus differently.
+    """
+
+    display_name: str
+    # Filters out phantom string power when the PV input is not producing yet.
+    startup_voltage: int
+    product_ids: tuple[ProductId, ...] = ()
+    # Whether the device publishes 32-bit values high word first. Reading them the
+    # wrong way round leaves the low word empty, which turns a 10 kW rating into
+    # 655360000 and voltages into denormals that round to zero.
+    high_word_first: bool = False
+    # How far apart two registers may be and still share one read.
+    max_register_gap: int = MAX_REGISTER_GAP
+    # Whether the lifetime and daily energy counters arrive in Wh rather than kWh.
+    energy_in_watt_hours: bool = False
+    # Whether a read over an address the firmware lacks is refused as a whole,
+    # rather than answered with zeros. Optional registers then always get reads of
+    # their own.
+    rejects_unimplemented: bool = False
+    # Whether 40609 holds the export cap in force after the internal
+    # safety rules. Where it does not, the configured cap at 40538 stands in.
+    reports_effective_feed_cap: bool = True
+    # Whether a charge limit or battery reserve is kept by tracking a battery
+    # setpoint each poll. Where it is not, the guard only holds the battery and
+    # hands back to the inverter's own self-consumption whenever power flows the
+    # way the guard allows.
+    guard_tracks_setpoints: bool = True
+    # Whether the Battery Reserve is native. Only once --reserve-probe has shown the
+    # inverter acting on a written reserve; the PowerOcean Plus does not (issue #144).
+    battery_reserve: ReserveSupport = ReserveSupport.EMULATED
+    # Raised when a fix changes how energy counters are read, which resets using the
+    # inverters own energy state.
+    energy_state_revision: int = 0
+
+    def identifies(
+        self, product_number: int | None, product_category: int | None
+    ) -> bool:
+        return any(
+            product.number == product_number
+            and product.category in (None, product_category)
+            for product in self.product_ids
+        )
+
+
+class InverterModel(StrEnum):
+    POWEROCEAN_SINGLE_PHASE = "powerocean_single_phase"
+    POWEROCEAN_THREE_PHASE = "powerocean_three_phase"
+    POWEROCEAN_PLUS = "powerocean_plus"
+    POWEROCEAN_DC_FIT = "powerocean_dc_fit"
+    # The three-phase Ocean 2 shipped as plain "ocean_2", which config entries
+    # already store, so its value stays as it is.
+    OCEAN_2_THREE_PHASE = "ocean_2"
+    OCEAN_2_SINGLE_PHASE = "ocean_2_single_phase"
+    OCEAN_2_PLUS_SINGLE_PHASE = "ocean_2_plus_single_phase"
+
+    @property
+    def traits(self) -> ModelTraits:
+        return MODEL_TRAITS[self]
+
+    @classmethod
+    def from_product_info(
+        cls, product_number: int | None, product_category: int | None
+    ) -> InverterModel | None:
+        """Map the device's product registers to a model, or None if unknown.
+
+        The first match wins, so a model that needs the category to be told apart
+        is listed before the one that takes the product number on its own.
+        """
+        return next(
+            (
+                model
+                for model, traits in MODEL_TRAITS.items()
+                if traits.identifies(product_number, product_category)
+            ),
+            None,
+        )
+
+
+# Startup voltages come from the datasheet linked above each model. The single
+# phase has no such specification, so its value is deduced from the MPPT range.
+# The DC Fit has no product id because nobody has reported one yet, so it is only
+# picked by hand.
+MODEL_TRAITS: Final[Mapping[InverterModel, ModelTraits]] = {
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/content/2024-03-27-1485da5d-eae4-4a38-830a-4e340517d968.pdf
+    InverterModel.POWEROCEAN_SINGLE_PHASE: ModelTraits(
+        "PowerOcean Single Phase",
+        startup_voltage=90,
+        product_ids=(
+            ProductId(1, ProductCategory.SINGLE_PHASE),
+            ProductId(2),
+        ),
+        guard_tracks_setpoints=False,
+    ),
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1772090325968/EcoFlow%20PowerOcean%20(Three-phase)_Datasheet_EN.pdf
+    InverterModel.POWEROCEAN_THREE_PHASE: ModelTraits(
+        "PowerOcean Three Phase",
+        startup_voltage=160,
+        product_ids=(ProductId(1, ProductCategory.THREE_PHASE),),
+        battery_reserve=ReserveSupport.NATIVE,
+    ),
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1754035729875/PowerOcean%20Plus%20(three-phase)_Brochure_20241223_EN.pdf
+    InverterModel.POWEROCEAN_PLUS: ModelTraits(
+        "PowerOcean Plus",
+        startup_voltage=160,
+        product_ids=(ProductId(3),),
+        # It reads 0 at 40609 whatever the cap (issue #44).
+        reports_effective_feed_cap=False,
+    ),
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1735192805714/EcoFlow%20PowerOcean%20DC%20Fit_Datasheet_EN_20241225.pdf
+    InverterModel.POWEROCEAN_DC_FIT: ModelTraits(
+        "PowerOcean DC Fit",
+        startup_voltage=90,
+    ),
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1779447439219/OCEAN%202%20Three-Phase_Datasheet_EN_260522.pdf
+    InverterModel.OCEAN_2_THREE_PHASE: ModelTraits(
+        "Ocean 2 Three Phase",
+        startup_voltage=120,
+        product_ids=(ProductId(4, ProductCategory.THREE_PHASE),),
+        high_word_first=True,
+        # It rejects the whole request when it reaches over an address it does not
+        # implement, so only neighbouring registers can share a read.
+        max_register_gap=0,
+        energy_in_watt_hours=True,
+        rejects_unimplemented=True,
+    ),
+    InverterModel.OCEAN_2_SINGLE_PHASE: ModelTraits(
+        "Ocean 2 Single Phase",
+        # No startup voltage is published; the PowerOcean single phase figure
+        # stands in until someone with the device reports a better one.
+        startup_voltage=90,
+        product_ids=(ProductId(4, ProductCategory.SINGLE_PHASE),),
+        high_word_first=False,
+        max_register_gap=0,
+        rejects_unimplemented=True,
+        guard_tracks_setpoints=False,
+    ),
+    # https://enterprise-service-eu-cdn.ecoflow.com/enterprise/documentation/1789469573432/EcoFlow%20OCEAN%202%20Plus%20Single-Phase_Datasheet_EN.pdf
+    InverterModel.OCEAN_2_PLUS_SINGLE_PHASE: ModelTraits(
+        "Ocean 2 Plus Single Phase",
+        startup_voltage=120,
+        product_ids=(ProductId(5, ProductCategory.SINGLE_PHASE),),
+        high_word_first=True,
+        max_register_gap=0,
+        energy_in_watt_hours=True,
+        rejects_unimplemented=True,
+        guard_tracks_setpoints=True,
+        # Fixes energy counters stored in kW before this fix
+        energy_state_revision=1,
+    ),
+}
+
+
+def battery_reserve_for(model: InverterModel, option: str | None) -> ReserveSupport:
+    """Return the Battery Reserve set in the options, else the model's."""
+    if option in tuple(ReserveSupport):
+        return ReserveSupport(option)
+    return model.traits.battery_reserve
+
+
+@dataclass(slots=True)
+class DeviceIdentity:
+    """What the device reports about itself, read again on every connect."""
+
+    serial_number: str | None = None
+    firmware_version: str | None = None
+    product_number: int | None = None
+    product_category: int | None = None
+    protocol_version: int | None = None
+    device_address: int | None = None
+
+
+class OperatingMode(StrEnum):
+    STANDBY = "standby"
+    SELF_CONSUMPTION = "self_consumption"
+    AI = "ai"
+    UNKNOWN = "unknown"
+
+
+class GridMode(StrEnum):
+    GRID = "grid"
+    ISLANDED = "islanded"
+
+
+class GridFeedMode(StrEnum):
+    """How the export is capped, per the Grid Feed Mode Setting (40537).
+
+    0 caps it at the maximum feed-in power in watts, 1 leaves it uncapped and 2
+    caps it at a percentage of the rated power (40573).
+    """
+
+    LIMITED = "limited"
+    UNLIMITED = "unlimited"
+    LIMITED_PERCENT = "limited_percent"
+
+    @property
+    def register_value(self) -> int:
+        """Return the protocol enumeration value."""
+        return _GRID_FEED_MODE_VALUES[self]
+
+    @property
+    def switchable(self) -> bool:
+        """Return whether the grid feed switch knows how to stop and restore it.
+
+        The percentage mode is left alone until it has been observed on a device:
+        stopping it would need the percentage register written, which is untested.
+        """
+        return self in (GridFeedMode.LIMITED, GridFeedMode.UNLIMITED)
+
+    @classmethod
+    def from_register(cls, value: float | str | None) -> GridFeedMode | None:
+        """Map the register to a mode, or None for a value with no known meaning."""
+        if value is None:
+            return None
+        # A frame processed a second time already holds the mode.
+        if isinstance(value, str):
+            return cls(value)
+        return next(
+            (mode for mode, raw in _GRID_FEED_MODE_VALUES.items() if raw == int(value)),
+            None,
+        )
+
+
+_GRID_FEED_MODE_VALUES: Final[Mapping[GridFeedMode, int]] = {
+    GridFeedMode.LIMITED: 0,
+    GridFeedMode.UNLIMITED: 1,
+    GridFeedMode.LIMITED_PERCENT: 2,
+}
+
+
+# What a status sensor shows for a value with no known meaning.
+UNKNOWN_STATE: Final = "unknown"
+
+
+class ControlMode(StrEnum):
+    """Control method the device follows.
+
+    Commanded through bits 4-7 of the System Control Command (40534).
+    """
+
+    DEFAULT = "default"
+    SYSTEM_FEED = "system_feed"
+    INVERTER_FEED = "inverter_feed"
+    BATTERY_LIMITS = "battery_limits"
+
+    @property
+    def command_value(self) -> int:
+        """Return the protocol enumeration value."""
+        return _CONTROL_MODE_VALUES[self]
+
+    @classmethod
+    def from_status(cls, value: int) -> ControlMode | None:
+        """Map bits 7-10 of the System Status (40530), or None if undefined."""
+        return next(
+            (mode for mode, raw in _CONTROL_MODE_VALUES.items() if raw == value),
+            None,
+        )
+
+
+_CONTROL_MODE_VALUES: Final[Mapping[ControlMode, int]] = {
+    ControlMode.DEFAULT: 0,
+    ControlMode.SYSTEM_FEED: 1,
+    ControlMode.INVERTER_FEED: 2,
+    ControlMode.BATTERY_LIMITS: 3,
+}
+
+
+class ControlFeature(StrEnum):
+    """The control that the inverter should follow.
+
+    The protocol follows a single control method, so these are the options of one
+    select rather than independent toggles.
+    """
+
+    AUTOMATIC = "automatic"
+    HOLD_BATTERY = "hold_battery"
+    CHARGE_BATTERY = "charge_battery"
+    DISCHARGE_BATTERY = "discharge_battery"
+    EXPORT_TO_GRID = "export_to_grid"
+    IMPORT_FROM_GRID = "import_from_grid"
+    EXPORT_SOLAR_FIRST = "export_solar_first"
+
+
+class ControlStatus(StrEnum):
+    """What the inverter is doing about the selected mode."""
+
+    NO_MODBUS_CONTROL = "no_modbus_control"
+    HANDING_BACK = "handing_back"
+    AUTOMATIC = "automatic"
+    CHARGE_LIMIT_REACHED = "charge_limit_reached"
+    RESERVE_REACHED = "reserve_reached"
+    # Below the Battery Reserve with Charge to Reserve on, charging up to it.
+    CHARGING_TO_RESERVE = "charging_to_reserve"
+    # Export Solar First with no surplus above its limit, so the battery takes none.
+    BELOW_SOLAR_EXPORT_LIMIT = "below_solar_export_limit"
+    HOLD_NOT_NEEDED = "hold_not_needed"
+    ACTIVE = "active"
+    RAMPING = "ramping"
+    # The battery goes the other way, or past the target: something in the inverter
+    # outranks the command, such as a firmware limit or its own protection.
+    LIMITED_BY_INVERTER = "limited_by_inverter"
+    UNREACHABLE_BATTERY_FULL = "unreachable_battery_full"
+    UNREACHABLE_BATTERY_EMPTY = "unreachable_battery_empty"
+    # The grid already takes all the export the device lets out, so the command
+    # cannot export the rest.
+    UNREACHABLE_EXPORT_LIMIT = "unreachable_export_limit"
+    # The inverter does not report the commanded method, even after re-sending it.
+    NOT_ACCEPTED = "not_accepted"
+    # Running off-grid during an outage; control steps aside until the grid is back.
+    OFF_GRID = "off_grid"
+    # The battery dropped off; control steps aside until it is back.
+    BATTERY_DISCONNECTED = "battery_disconnected"
+    # The readings contradict each other or stopped updating; control steps aside
+    # until they make sense again (see reading_checks.py).
+    INCONSISTENT_READINGS = "inconsistent_readings"
+    # The inverter reports a fault or a stop, so it may not act on anything.
+    INVERTER_FAULT = "inverter_fault"
+    # The control test has the inverter; the selected mode resumes after it.
+    CONTROL_TEST = "control_test"
+
+
+class SystemAlert(IntFlag):
+    """System State 2 (40532) bits, as the Open Modbus Protocol V1.0 documents them.
+
+    The lowercase names are the System Alerts states, so never rename one.
+    """
+
+    SYSTEM_SHUTDOWN = 1 << 0
+    UPGRADE_SHUTDOWN = 1 << 1
+    EPO_TRIGGERED = 1 << 2
+    LOW_POWER_MODE = 1 << 3
+    FAN_FAILURE = 1 << 4
+    SYSTEM_FAILURE = 1 << 5
+    BATTERY_REVERSE_CONNECTION = 1 << 6
+    BATTERY_DISCONNECTED = 1 << 7
+    AUXILIARY_POWER_FAILURE = 1 << 8
+    PCS_TIMEOUT = 1 << 9
+    PCS_FAILURE = 1 << 10
+    IGBT_SELF_TEST_FAILURE = 1 << 11
+    HIGH_TEMPERATURE_PROTECTION = 1 << 12
+    BATTERY_OVERHEATING = 1 << 13
+    NTC_CIRCUIT_FAILURE = 1 << 14
+    SYSTEM_RESET = 1 << 15
+    HARDWARE_VERSION_ERROR = 1 << 16
+    PARALLEL_SYNC_ERROR = 1 << 17
+    LOW_TEMPERATURE_PROTECTION = 1 << 18
+    PARALLEL_MASTER_SLAVE_CONFLICT = 1 << 19
+    PARALLEL_SLAVE_SETTING_ERROR = 1 << 20
+    PARALLEL_INVERTER_ERROR = 1 << 21
+    PARALLEL_METER_FAULT = 1 << 22
+
+    @property
+    def code(self) -> str:
+        return str(self.name).lower()
+
+
+# The inverter stops acting under any of these.
+STOP_ALERTS: Final = (
+    SystemAlert.SYSTEM_SHUTDOWN
+    | SystemAlert.UPGRADE_SHUTDOWN
+    | SystemAlert.EPO_TRIGGERED
+    | SystemAlert.SYSTEM_FAILURE
+    | SystemAlert.BATTERY_DISCONNECTED
+    | SystemAlert.PCS_TIMEOUT
+    | SystemAlert.PCS_FAILURE
+)
+
+
+@dataclass(frozen=True)
+class DeviceReport:
+    """What the inverter reports about itself in the System Status words."""
+
+    method: ControlMode | None
+    # Bit 11: the inverter is following Modbus rather than the app.
+    manual: bool
+    off_grid: bool
+    bms_connected: bool
+    fault: bool
+
+    @classmethod
+    def from_data(cls, data: Mapping[str, Any]) -> DeviceReport | None:
+        return cls.from_words(data.get("system_modes"), data.get("system_state_2"))
+
+    @classmethod
+    @lru_cache(maxsize=8)
+    def from_words(
+        cls, system_modes: float | None, system_state_2: float | None
+    ) -> DeviceReport | None:
+        """Decode System Status (40530) and System State 2 (40532).
+
+        Cached, as the reading checks and control decode the same words each poll.
+        """
+        if system_modes is None:
+            return None
+        modes = int(system_modes)
+        state_2 = int(system_state_2 or 0)
+        return cls(
+            method=ControlMode.from_status((modes >> 7) & 0xF),
+            manual=bool(modes >> 11 & 1),
+            off_grid=bool(modes & 1),
+            bms_connected=bool(modes >> 12 & 1),
+            fault=bool(modes >> 1 & 1) or bool(state_2 & STOP_ALERTS),
+        )
+
+
+def requires_modbus_control(status: ControlStatus) -> bool:
+    """Return whether the device is following Modbus commands at all.
+
+    Used as an entity availability rule: a control the inverter would store and
+    ignore is shown as unavailable rather than pretending to work.
+    """
+    return status not in (ControlStatus.NO_MODBUS_CONTROL, ControlStatus.HANDING_BACK)
+
+
+@dataclass(frozen=True)
+class ControlFeatureDef:
+    """A mode and the single instruction it sends."""
+
+    method: ControlMode
+    # Read key of the setpoint register the method acts on
+    setpoint_key: str | None = None
+    # +1 where a positive power charges the battery, -1 where it discharges it.
+    sign: int = 1
+    # The sensor the command is measured against, e.g. battery_power.
+    measure_key: str | None = None
+    # Sensor that stores the maximum allowed value for this mode, if available
+    limit_key: str | None = None
+    # Configuration that stores the maximum allowed value for this mode, if available
+    config_limit_key: str | None = None
+    # Sensor holding the converter capacity the power has to pass through, if any
+    capacity_key: str | None = None
+    # Whether the power has to pass the inverter, so its AC rating caps it. False
+    # for a meter target, which the house adds to and can take far beyond it.
+    bounded_by_rating: bool = True
+    # None for a mode with no power to configure, which only holds the battery.
+    default_power: float | None = None
+    # Whether the action may leave the power out, keeping the number's value. Only
+    # for a mode whose default already means something without being set.
+    power_optional: bool = False
+
+    @property
+    def commands_power(self) -> bool:
+        return self.setpoint_key is not None
+
+    @property
+    def has_power(self) -> bool:
+        return self.default_power is not None
+
+
+def deviation_state(
+    *,
+    signed_target: float,
+    measured: float | None,
+    soc: float | None,
+    min_soc: float,
+    battery: float | None = None,
+    exporting_at_limit: bool = False,
+) -> ControlStatus:
+    """Compare what we command with what the inverter reports.
+
+    exporting_at_limit is whether the grid takes all the export the device lets
+    out, which explains a command that would export more falling short.
+    """
+    if measured is None:
+        return ControlStatus.ACTIVE
+
+    error = signed_target - measured
+    tolerance = max(POWER_TOLERANCE_W, abs(signed_target) * POWER_TOLERANCE_FRACTION)
+    if abs(error) <= tolerance:
+        return ControlStatus.ACTIVE
+
+    # A full battery only explains a shortfall while it is not discharging, and an
+    # empty one while it is not charging: one still charging under a hold, below a
+    # raised reserve, is winding down, not empty.
+    if soc is not None:
+        not_discharging = battery is None or battery >= -tolerance
+        not_charging = battery is None or battery <= tolerance
+        if error > 0 and not_discharging and soc >= BATTERY_FULL_SOC:
+            return ControlStatus.UNREACHABLE_BATTERY_FULL
+        if error < 0 and not_charging and soc <= min_soc + BATTERY_EMPTY_MARGIN_SOC:
+            return ControlStatus.UNREACHABLE_BATTERY_EMPTY
+
+    # Short in the exporting direction, with nothing more allowed out: neither
+    # ramping nor overruled, but capped by the export limit.
+    short_of_export = error < 0 and signed_target < 0 and measured > signed_target
+    if short_of_export and exporting_at_limit:
+        return ControlStatus.UNREACHABLE_EXPORT_LIMIT
+
+    # Ramping lies between zero and the target. Going the other way, or past the
+    # target, is not the battery getting there but the inverter doing something
+    # else, so the command is outranked rather than slow.
+    wrong_way = measured < -tolerance if signed_target >= 0 else measured > tolerance
+    overshoot = abs(measured) > abs(signed_target) + tolerance and (
+        measured * signed_target > 0
+    )
+    if wrong_way or overshoot:
+        return ControlStatus.LIMITED_BY_INVERTER
+    return ControlStatus.RAMPING

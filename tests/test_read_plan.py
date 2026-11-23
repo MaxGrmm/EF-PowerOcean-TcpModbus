@@ -14,28 +14,33 @@ from unittest.mock import AsyncMock
 import pytest
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityDescription
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const, models
+from custom_components.ef_powerocean_tcpmodbus import const, definitions
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
-from custom_components.ef_powerocean_tcpmodbus.energy_processor import ENERGY_KEYS
-from custom_components.ef_powerocean_tcpmodbus.entity import EcoFlowBaseEntity
-from custom_components.ef_powerocean_tcpmodbus.models import (
-    EnergySensorDef,
-    EntityDef,
-    SensorDef,
+from custom_components.ef_powerocean_tcpmodbus.definitions import (
+    EcoflowEnergySensorEntityDescription,
+    EcoflowSensorEntityDescription,
     shown_keys,
 )
-from custom_components.ef_powerocean_tcpmodbus.telemetry import TelemetryData
+from custom_components.ef_powerocean_tcpmodbus.energy_processor import ENERGY_KEYS
+from custom_components.ef_powerocean_tcpmodbus.entity import EcoFlowBaseEntity
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import models as device_models
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
+from custom_components.ef_powerocean_tcpmodbus.powerocean.telemetry import TelemetryData
 
-REGISTERS = frozenset(const.REGISTERS_BY_KEY)
+REGISTERS = frozenset(register_map.REGISTERS_BY_KEY)
 # Grid Power is integrated into grid energy, so it is read whatever is shown, and
 # the external meter's readings are watched for a meter.
 OWN = (
     TelemetryData.keys(REGISTERS)
     | ENERGY_KEYS
-    | set(const.EXTERNAL_METER_KEYS)
+    | set(device_const.EXTERNAL_METER_KEYS)
     | {"grid_power"}
 ) & REGISTERS
 
@@ -44,7 +49,7 @@ def test_control_inputs_hold_every_key_the_features_read() -> None:
     """A feature looks its values up by key, which must be an input field."""
     keys = {
         key
-        for definition in const.CONTROL_FEATURES.values()
+        for definition in device_const.CONTROL_FEATURES.values()
         for key in (
             definition.measure_key,
             definition.limit_key,
@@ -52,9 +57,9 @@ def test_control_inputs_hold_every_key_the_features_read() -> None:
         )
         if key is not None
     } | {
-        const.BATTERY_RESERVE_REGISTER_KEY,
-        const.FEED_IN_POWER_MAX_KEY,
-        const.FEED_IN_POWER_MAX_SETTING_KEY,
+        device_const.BATTERY_RESERVE_REGISTER_KEY,
+        device_const.FEED_IN_POWER_MAX_KEY,
+        device_const.FEED_IN_POWER_MAX_SETTING_KEY,
     }
     assert keys <= ControlInputs.keys()
 
@@ -68,14 +73,14 @@ def test_telemetry_asks_for_the_fault_registers() -> None:
 
 def test_every_register_has_something_that_asks_for_it() -> None:
     """A register nothing asks for is never read, so it should not be mapped."""
-    definitions: tuple[EntityDef, ...] = (
-        *const.SENSOR_MAP,
-        *const.ENERGY_SENSOR_MAP,
-        *const.DAILY_ENERGY_SENSORS_DEVICE_RAW,
-        *const.BINARY_SENSOR_MAP,
-        *const.WRITABLE_NUMBERS_MAP,
+    every_description: tuple[EntityDescription, ...] = (
+        *definitions.SENSOR_MAP,
+        *definitions.ENERGY_SENSOR_MAP,
+        *definitions.DAILY_ENERGY_SENSORS_DEVICE_RAW,
+        *definitions.BINARY_SENSOR_MAP,
+        *definitions.WRITABLE_NUMBERS_MAP,
     )
-    shown = frozenset().union(*(shown_keys(d) for d in definitions))
+    shown = frozenset().union(*(shown_keys(d) for d in every_description))
     assert REGISTERS - OWN - ControlInputs.keys() - shown == set()
 
 
@@ -94,7 +99,7 @@ async def coordinator(hass: HomeAssistant) -> EcoflowCoordinator:
 def _model_registers(coordinator: EcoflowCoordinator) -> frozenset[str]:
     return frozenset(
         register.key
-        for block in const.register_blocks_for(coordinator.inverter_model)
+        for block in register_map.register_blocks_for(coordinator.inverter_model)
         for register in block.registers
     )
 
@@ -179,44 +184,50 @@ async def test_a_refused_register_stays_out_whatever_is_asked(coordinator) -> No
 
 
 @pytest.mark.parametrize(
-    ("definition", "keys"),
+    ("description", "keys"),
     (
-        (SensorDef("frequency"), {"frequency"}),
+        (EcoflowSensorEntityDescription(key="frequency"), {"frequency"}),
         (
-            SensorDef("fault_count", attribute_keys=("system_state_2_hex",)),
+            EcoflowSensorEntityDescription(
+                key="fault_count", attribute_keys=("system_state_2_hex",)
+            ),
             {"fault_count", "system_state_2_hex"},
         ),
         (
-            EnergySensorDef("solar_today", total_source="solar_total"),
+            EcoflowEnergySensorEntityDescription(
+                key="solar_today", total_source="solar_total"
+            ),
             {"solar_today", "solar_total"},
         ),
         (
-            const.WRITABLE_NUMBERS_MAP[0],
-            {const.WRITABLE_NUMBERS_MAP[0].key, "device_led_brightness"},
+            definitions.WRITABLE_NUMBERS_MAP[0],
+            {definitions.WRITABLE_NUMBERS_MAP[0].key, "device_led_brightness"},
         ),
     ),
 )
-def test_an_entity_asks_for_the_keys_it_shows(definition, keys) -> None:
+def test_an_entity_asks_for_the_keys_it_shows(description, keys) -> None:
     entity = EcoFlowBaseEntity(
         cast(EcoflowCoordinator, SimpleNamespace()),
         cast(ConfigEntry, SimpleNamespace(entry_id="entry")),
-        definition,
+        description,
     )
     assert entity.coordinator_context == frozenset(keys)
 
 
 def test_an_optional_register_never_widens_a_required_read() -> None:
     """Outside a required read it is read on its own, where a refusal drops it."""
-    required = models.RegisterDef("required", 40519, models.RegisterType.UINT16)
-    inside = models.RegisterDef(
-        "inside", 40520, models.RegisterType.UINT16, optional=True
+    required = register_map.RegisterDef(
+        "required", 40519, register_map.RegisterType.UINT16
     )
-    before = models.RegisterDef(
-        "before", 40513, models.RegisterType.UINT16, optional=True
+    inside = register_map.RegisterDef(
+        "inside", 40520, register_map.RegisterType.UINT16, optional=True
     )
-    tail = models.RegisterDef("tail", 40530, models.RegisterType.UINT16)
+    before = register_map.RegisterDef(
+        "before", 40513, register_map.RegisterType.UINT16, optional=True
+    )
+    tail = register_map.RegisterDef("tail", 40530, register_map.RegisterType.UINT16)
 
-    blocks = models.plan_blocks((before, required, inside, tail))
+    blocks = register_map.plan_blocks((before, required, inside, tail))
 
     assert [(block.start, block.count, block.optional) for block in blocks] == [
         (40519, 12, False),
@@ -231,10 +242,10 @@ def test_the_grid_code_leaves_every_existing_read_unchanged() -> None:
     def plan(**kwargs) -> list[tuple[int, int, bool]]:
         return [
             (block.start, block.count, block.optional)
-            for block in const.register_blocks_for(model, **kwargs)
+            for block in register_map.register_blocks_for(model, **kwargs)
         ]
 
-    for model in models.InverterModel:
+    for model in device_models.InverterModel:
         with_code = plan()
         without = plan(exclude=("grid_connection_code",))
         assert [block for block in with_code if block not in without] == [
@@ -249,10 +260,10 @@ def test_reactive_power_is_read_on_its_own() -> None:
     def plan(**kwargs) -> list[tuple[int, int, bool]]:
         return [
             (block.start, block.count, block.optional)
-            for block in const.register_blocks_for(model, **kwargs)
+            for block in register_map.register_blocks_for(model, **kwargs)
         ]
 
-    for model in models.InverterModel:
+    for model in device_models.InverterModel:
         with_reactive = plan()
         without = plan(exclude=("inverter_reactive_power",))
         assert [block for block in with_reactive if block not in without] == [
@@ -265,13 +276,13 @@ def test_candidate_registers_stay_out_of_the_poll() -> None:
     """Only the register scan reads them, until one is confirmed and moved over."""
     polled = {
         address
-        for register in const.MODBUS_REGISTERS
+        for register in register_map.MODBUS_REGISTERS
         for address in range(register.address, register.end)
     }
-    keys = [register.key for register in const.CANDIDATE_REGISTERS]
+    keys = [register.key for register in register_map.CANDIDATE_REGISTERS]
 
     assert len(keys) == len(set(keys))
-    assert not set(keys) & set(const.REGISTERS_BY_KEY)
-    for register in const.CANDIDATE_REGISTERS:
+    assert not set(keys) & set(register_map.REGISTERS_BY_KEY)
+    for register in register_map.CANDIDATE_REGISTERS:
         assert not set(range(register.address, register.end)) & polled, register.key
-        assert register.address != const.HEARTBEAT_REGISTER, register.key
+        assert register.address != device_const.HEARTBEAT_REGISTER, register.key

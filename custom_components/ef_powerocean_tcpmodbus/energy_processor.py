@@ -11,13 +11,9 @@ from typing import Any, Final, TypeIs
 
 from homeassistant.util import dt
 
-from .const import (
-    DEFAULT_MAX_POWER,
-    ENERGY_RESOLUTION_KWH,
-    ENERGY_SENSOR_MAP,
-)
-from .models import EnergySensorDef
-from .util import parse_datetime
+from .definitions import ENERGY_SENSOR_MAP, EcoflowEnergySensorEntityDescription
+from .powerocean.const import DEFAULT_MAX_POWER, ENERGY_RESOLUTION_KWH
+from .powerocean.util import parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -353,7 +349,7 @@ class EnergyProcessor:
 
     def _daily_confirms(
         self,
-        energy_sensor: EnergySensorDef,
+        energy_sensor: EcoflowEnergySensorEntityDescription,
         total: float,
         daily: Any,
         now: datetime,
@@ -411,7 +407,10 @@ class EnergyProcessor:
         return taken
 
     def _confirms_first_read(
-        self, energy_sensor: EnergySensorDef, value: float, now: datetime
+        self,
+        energy_sensor: EcoflowEnergySensorEntityDescription,
+        value: float,
+        now: datetime,
     ) -> bool:
         """Whether this read confirms the non-zero read before it as the counter.
 
@@ -444,7 +443,10 @@ class EnergyProcessor:
                 self.daily_snapshots.pop(energy_sensor.key, None)
 
     def _max_believable_energy_delta(
-        self, energy_sensor: EnergySensorDef, accepted_at: datetime, now: datetime
+        self,
+        energy_sensor: EcoflowEnergySensorEntityDescription,
+        accepted_at: datetime,
+        now: datetime,
     ) -> float:
         """Largest believable rise in kWh since the last accepted value."""
         limit = (

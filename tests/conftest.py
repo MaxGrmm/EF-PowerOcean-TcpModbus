@@ -27,7 +27,7 @@ def reset_shared_modbus(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def reset_outages(monkeypatch: pytest.MonkeyPatch) -> None:
     """Start each test with no outage, which would otherwise outlive its entry."""
-    from custom_components.ef_powerocean_tcpmodbus import outage
+    from custom_components.ef_powerocean_tcpmodbus.health import outage
 
     monkeypatch.setattr(outage, "_outages", {})
 

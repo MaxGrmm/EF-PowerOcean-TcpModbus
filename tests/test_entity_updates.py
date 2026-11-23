@@ -20,16 +20,17 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.ef_powerocean_tcpmodbus import (
     binary_sensor,
     const,
+    definitions,
     number,
     sensor,
 )
 
 
-def _definition(definitions: list[Any], key: str) -> Any:
-    return next(definition for definition in definitions if definition.key == key)
+def _description(candidates: list[Any], key: str) -> Any:
+    return next(description for description in candidates if description.key == key)
 
 
-MODES = _definition(const.SENSOR_MAP, "active_control_mode")
+MODES = _description(definitions.SENSOR_MAP, "active_control_mode")
 MODES_ATTRIBUTE = MODES.attribute_keys[0]
 
 
@@ -48,7 +49,7 @@ class Kind:
 KINDS = {
     "sensor": Kind(
         lambda coordinator, entry: sensor.EcoflowSensor(
-            coordinator, entry, _definition(const.SENSOR_MAP, "battery_soc")
+            coordinator, entry, _description(definitions.SENSOR_MAP, "battery_soc")
         ),
         key="battery_soc",
         steady=100.0,
@@ -68,7 +69,7 @@ KINDS = {
         lambda coordinator, entry: binary_sensor.EcoFlowBinarySensor(
             coordinator,
             entry,
-            _definition(const.BINARY_SENSOR_MAP, "self_use_mode_ena"),
+            _description(definitions.BINARY_SENSOR_MAP, "self_use_mode_ena"),
         ),
         key="self_use_mode_ena",
         steady=1,
@@ -78,9 +79,9 @@ KINDS = {
     ),
     "number": Kind(
         lambda coordinator, entry: number.EcoFlowGenericNumber(
-            coordinator, entry, const.WRITABLE_NUMBERS_MAP[0]
+            coordinator, entry, definitions.WRITABLE_NUMBERS_MAP[0]
         ),
-        key=const.WRITABLE_NUMBERS_MAP[0].read_key,
+        key=definitions.WRITABLE_NUMBERS_MAP[0].read_key,
         steady=50.0,
         steady_shown=50.0,
         changed=60.0,

@@ -418,7 +418,7 @@ polls, to keep control from passing back to the EcoFlow app.
 - **Tested firmware:** 3.0.19.19 + 3.0.20.54(PO+)
 - **Tested pymodbus version:** 3.6.9, 3.11.x and 3.13.x
 
-The register map lives in [`const.py`](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/custom_components/ef_powerocean_tcpmodbus/const.py) as absolute Modbus addresses.
+The register map lives in [`powerocean/registers.py`](https://github.com/MaxGrmm/EF-PowerOcean-TcpModbus/blob/main/custom_components/ef_powerocean_tcpmodbus/powerocean/registers.py) as absolute Modbus addresses.
 
 ### Protocol Implementation
 

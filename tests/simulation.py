@@ -23,20 +23,27 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
-from custom_components.ef_powerocean_tcpmodbus import const, models
+from custom_components.ef_powerocean_tcpmodbus import const
 from custom_components.ef_powerocean_tcpmodbus.control import ControlManager
 from custom_components.ef_powerocean_tcpmodbus.heartbeat import Heartbeat
 from custom_components.ef_powerocean_tcpmodbus.modbus import ModbusClient
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import models as device_models
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
 
 POLL_S: Final = 5.0
 START: Final = datetime(2026, 9, 21, 9, 0, tzinfo=UTC)
-SETPOINT_REGISTER: Final = const.REGISTERS_BY_KEY["battery_power_setpoint"].address
-BATTERY_LIMITS: Final = models.ControlMode.BATTERY_LIMITS.command_value
-SYSTEM_SETPOINT_REGISTER: Final = const.REGISTERS_BY_KEY[
+SETPOINT_REGISTER: Final = register_map.REGISTERS_BY_KEY[
+    "battery_power_setpoint"
+].address
+BATTERY_LIMITS: Final = device_models.ControlMode.BATTERY_LIMITS.command_value
+SYSTEM_SETPOINT_REGISTER: Final = register_map.REGISTERS_BY_KEY[
     "system_power_setpoint"
 ].address
-SYSTEM_FEED: Final = models.ControlMode.SYSTEM_FEED.command_value
-AUTOMATIC: Final = models.ControlMode.DEFAULT.command_value
+SYSTEM_FEED: Final = device_models.ControlMode.SYSTEM_FEED.command_value
+AUTOMATIC: Final = device_models.ControlMode.DEFAULT.command_value
 
 
 def at(watts: float | Sequence[float], step: int) -> float:
@@ -94,7 +101,7 @@ class FakeInverter:
         if not self.reachable:
             raise HomeAssistantError("the inverter is unreachable")
         if address not in (
-            const.CONTROL_COMMAND_REGISTER,
+            device_const.CONTROL_COMMAND_REGISTER,
             SETPOINT_REGISTER,
             SYSTEM_SETPOINT_REGISTER,
         ):
@@ -104,11 +111,11 @@ class FakeInverter:
             self.system_setpoint_writes += 1
             self.system_setpoint = value - (1 << 32) if value >> 31 else value
             return
-        if address == const.CONTROL_COMMAND_REGISTER:
+        if address == device_const.CONTROL_COMMAND_REGISTER:
             self.method_writes += 1
             self.method = (
-                value >> const.CONTROL_COMMAND_METHOD_SHIFT
-            ) & const.CONTROL_COMMAND_METHOD_MASK
+                value >> device_const.CONTROL_COMMAND_METHOD_SHIFT
+            ) & device_const.CONTROL_COMMAND_METHOD_MASK
         elif address == SETPOINT_REGISTER:
             self.setpoint_writes += 1
             self.setpoint = value - (1 << 32) if value >> 31 else value
@@ -151,9 +158,9 @@ class FakeInverter:
             max(0.0, export - self.export_cap) if self.export_cap is not None else 0.0
         )
 
-    def frame(self) -> dict[str, float | models.GridFeedMode]:
+    def frame(self) -> dict[str, float | device_models.GridFeedMode]:
         solar = self.solar - self.curtailed
-        frame: dict[str, float | models.GridFeedMode] = {
+        frame: dict[str, float | device_models.GridFeedMode] = {
             "solar_power": solar,
             "house_power": self.house,
             "battery_power": self.battery,
@@ -164,10 +171,10 @@ class FakeInverter:
         if self.app_reserve is not None:
             frame["min_soc_limit"] = self.app_reserve
         if self.export_cap is not None and math.isinf(self.export_cap):
-            frame["grid_feed_mode"] = models.GridFeedMode.UNLIMITED
+            frame["grid_feed_mode"] = device_models.GridFeedMode.UNLIMITED
         elif self.export_cap is not None:
-            frame["grid_feed_mode"] = models.GridFeedMode.LIMITED
-            frame[const.FEED_IN_POWER_MAX_KEY] = self.export_cap
+            frame["grid_feed_mode"] = device_models.GridFeedMode.LIMITED
+            frame[device_const.FEED_IN_POWER_MAX_KEY] = self.export_cap
         return frame
 
 
@@ -188,7 +195,7 @@ class FakeHeartbeat:
 
     @property
     def in_control(self) -> bool:
-        return self._age() <= const.HEARTBEAT_WINDOW_S
+        return self._age() <= device_const.HEARTBEAT_WINDOW_S
 
     def start(self) -> None:
         self.beating = True
@@ -200,11 +207,13 @@ class FakeHeartbeat:
         """Nothing to probe again: the fake inverter always takes the heartbeat."""
 
     async def async_ensure_fresh(self) -> bool:
-        if self._age() <= const.HEARTBEAT_REUSE_S:
+        if self._age() <= device_const.HEARTBEAT_REUSE_S:
             return True
         try:
             await self.inverter.async_write(
-                const.HEARTBEAT_REGISTER, [const.HEARTBEAT_VALUE], what="heartbeat"
+                device_const.HEARTBEAT_REGISTER,
+                [device_const.HEARTBEAT_VALUE],
+                what="heartbeat",
             )
         except HomeAssistantError:
             return False
@@ -229,7 +238,7 @@ class Run:
     battery: list[float] = field(default_factory=list)
     grid: list[float] = field(default_factory=list)
     soc: list[float] = field(default_factory=list)
-    status: list[models.ControlStatus] = field(default_factory=list)
+    status: list[device_models.ControlStatus] = field(default_factory=list)
     curtailed: list[float] = field(default_factory=list)
     # The method word the inverter was told after each poll.
     method: list[int] = field(default_factory=list)
@@ -247,7 +256,7 @@ class Simulation:
         reserve: float = 0.0,
         export_cap: float | None = None,
         app_reserve: float | None = None,
-        model: models.InverterModel = const.DEFAULT_INVERTER_MODEL,
+        model: device_models.InverterModel = const.DEFAULT_INVERTER_MODEL,
     ) -> None:
         self.inverter = FakeInverter(
             soc=soc, export_cap=export_cap, app_reserve=app_reserve
@@ -259,7 +268,7 @@ class Simulation:
         # Called when a command with an expiry runs out, as the integration's logbook.
         self.command_expired = Mock()
 
-        blocks = const.register_blocks_for(model)
+        blocks = register_map.register_blocks_for(model)
         self.control = ControlManager(
             cast(ModbusClient, self.inverter),
             registers_by_key={
@@ -268,8 +277,10 @@ class Simulation:
                 for register in block.registers
             },
             limits={
-                const.CONF_MAX_BATTERY_CHARGED_POWER: self.inverter.charge_max,
-                const.CONF_MAX_BATTERY_DISCHARGED_POWER: self.inverter.discharge_max,
+                device_const.CONF_MAX_BATTERY_CHARGED_POWER: self.inverter.charge_max,
+                device_const.CONF_MAX_BATTERY_DISCHARGED_POWER: (
+                    self.inverter.discharge_max
+                ),
             },
             inverter_model=model,
             enabled=True,
@@ -340,7 +351,7 @@ class Simulation:
         return run
 
 
-def select(sim: Simulation, feature: models.ControlFeature) -> None:
+def select(sim: Simulation, feature: device_models.ControlFeature) -> None:
     """Choose a mode by hand between polls, as from the Battery Mode select."""
     asyncio.run(sim.control.async_select_feature(feature))
 

@@ -13,31 +13,33 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .control import ControlManager
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
+from .definitions import EcoflowSwitchEntityDescription
 from .entity import EcoFlowBaseEntity
-from .models import SwitchDef, requires_modbus_control
+from .powerocean.models import requires_modbus_control
 
 # One write to the inverter at a time.
 PARALLEL_UPDATES = 1
 
-MODBUS_CONTROL_SWITCH: Final = SwitchDef(
+
+MODBUS_CONTROL_SWITCH: Final = EcoflowSwitchEntityDescription(
     key="modbus_control",
     # Switching off only takes effect once the inverter's heartbeat window runs out.
-    icon=lambda coordinator: (
+    icon_fn=lambda coordinator: (
         "mdi:timer-sand" if coordinator.control.handing_back else None
     ),
-    is_on=lambda coordinator: coordinator.control.enabled,
-    turn=ControlManager.async_set_enabled,
-    attributes=lambda coordinator: {
+    is_on_fn=lambda coordinator: coordinator.control.enabled,
+    turn_fn=ControlManager.async_set_enabled,
+    attributes_fn=lambda coordinator: {
         "hands_back_at": coordinator.control.hands_back_at,
     },
 )
 
-BATTERY_SAVER_SWITCH: Final = SwitchDef(
+BATTERY_SAVER_SWITCH: Final = EcoflowSwitchEntityDescription(
     key="battery_saver_mode_control",
     # The device's own bit only rises once it has gone idle, so it cannot confirm.
-    is_on=lambda coordinator: coordinator.control.battery_saver_commanded,
-    turn=ControlManager.async_set_battery_saver,
-    attributes=lambda coordinator: {
+    is_on_fn=lambda coordinator: coordinator.control.battery_saver_commanded,
+    turn_fn=ControlManager.async_set_battery_saver,
+    attributes_fn=lambda coordinator: {
         "device_reports_battery_saver": (coordinator.data or {}).get(
             "battery_saver_mode_ena"
         ),
@@ -45,12 +47,14 @@ BATTERY_SAVER_SWITCH: Final = SwitchDef(
     },
 )
 
-GRID_FEED_SWITCH: Final = SwitchDef(
+GRID_FEED_SWITCH: Final = EcoflowSwitchEntityDescription(
     key="grid_feed",
-    is_on=lambda coordinator: coordinator.control.grid_feed_allowed(coordinator.data),
-    turn=ControlManager.async_set_grid_feed,
-    attributes=lambda coordinator: coordinator.control.grid_feed_restore_attributes,
-    available=lambda coordinator: (
+    is_on_fn=lambda coordinator: coordinator.control.grid_feed_allowed(
+        coordinator.data
+    ),
+    turn_fn=ControlManager.async_set_grid_feed,
+    attributes_fn=lambda coordinator: coordinator.control.grid_feed_restore_attributes,
+    available_fn=lambda coordinator: (
         coordinator.control.grid_feed_switchable
         and requires_modbus_control(coordinator.control.status)
     ),
@@ -58,17 +62,19 @@ GRID_FEED_SWITCH: Final = SwitchDef(
     # and act on them while Modbus control is on (issue #89).
 )
 
-RESERVE_CHARGE_SWITCH: Final = SwitchDef(
+RESERVE_CHARGE_SWITCH: Final = EcoflowSwitchEntityDescription(
     key="battery_reserve_charge",
     # A Battery Reserve above the SOC then charges from the grid up to it, at the
     # Charge Battery power, as the app's backup reserve does. Below the app's own
     # reserve it is on anyway, since the inverter charges up to that by itself.
-    is_on=lambda coordinator: (
+    is_on_fn=lambda coordinator: (
         coordinator.control.reserve_charge or coordinator.control.reserve_charge_forced
     ),
-    turn=ControlManager.async_set_reserve_charge,
-    available=lambda coordinator: requires_modbus_control(coordinator.control.status),
-    attributes=lambda coordinator: {
+    turn_fn=ControlManager.async_set_reserve_charge,
+    available_fn=lambda coordinator: requires_modbus_control(
+        coordinator.control.status
+    ),
+    attributes_fn=lambda coordinator: {
         "set_by_app_backup_reserve": coordinator.control.reserve_charge_forced,
     },
 )
@@ -106,40 +112,41 @@ async def async_setup_entry(
         registry.async_remove(stale)
 
 
-class EcoFlowSwitch(EcoFlowBaseEntity[SwitchDef], SwitchEntity):
-    """A switch whose state and action come from its definition."""
+class EcoFlowSwitch(EcoFlowBaseEntity, SwitchEntity):
+    """A switch whose state and action come from its description."""
+
+    entity_description: EcoflowSwitchEntityDescription
 
     def __init__(
         self,
         coordinator: EcoflowCoordinator,
         entry: ConfigEntry,
-        definition: SwitchDef,
+        description: EcoflowSwitchEntityDescription,
     ) -> None:
-        super().__init__(coordinator, entry, definition)
-        self._attr_entity_category = definition.entity_category
+        super().__init__(coordinator, entry, description)
 
     @property
     def icon(self) -> str | None:
         """Return an override of the icon in icons.json, if the state needs one."""
-        icon = self._definition.icon
+        icon = self.entity_description.icon_fn
         return icon(self.coordinator) if icon is not None else None
 
     @property
     def available(self) -> bool:
-        rule = self._definition.available
+        rule = self.entity_description.available_fn
         return super().available and (rule is None or rule(self.coordinator))
 
     @property
     def is_on(self) -> bool:
-        return self._definition.is_on(self.coordinator)
+        return self.entity_description.is_on_fn(self.coordinator)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        attributes = self._definition.attributes
+        attributes = self.entity_description.attributes_fn
         return attributes(self.coordinator) if attributes else None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._definition.turn(self.coordinator.control, True)
+        await self.entity_description.turn_fn(self.coordinator.control, True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._definition.turn(self.coordinator.control, False)
+        await self.entity_description.turn_fn(self.coordinator.control, False)

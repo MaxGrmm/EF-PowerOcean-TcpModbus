@@ -22,16 +22,10 @@ from homeassistant.util import dt
 from pymodbus import __version__ as pyModbusVersion
 from pymodbus.exceptions import ModbusException
 
-from . import outage
-from .announcer import Announcer
 from .const import (
     ATTR_FROM,
     ATTR_MODE,
     ATTR_TO,
-    BATTERY_CHARGE_W_PER_WH,
-    BATTERY_DISCHARGE_W_PER_WH,
-    BATTERY_MODE_SELECT,
-    BATTERY_MODULES,
     CONF_BATTERY_COUNT,
     CONF_BATTERY_RESERVE,
     CONF_CALC_GRID_ENERGY,
@@ -39,45 +33,30 @@ from .const import (
     CONF_ENERGY_OFFSETS,
     CONF_HOST,
     CONF_INVERTER_MODEL,
-    CONF_MAX_BATTERY_CHARGED_POWER,
-    CONF_MAX_BATTERY_DISCHARGED_POWER,
-    CONF_MAX_GRID_POWER,
-    CONF_MAX_SOLAR_POWER,
     CONF_MODBUS_CONTROL,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
     DEFAULT_BATTERY_COUNT,
     DEFAULT_INVERTER_MODEL,
-    DEFAULT_MAX_GRID_POWER,
-    DEFAULT_MAX_SOLAR_POWER,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL_S,
-    DEVICE_ENERGY_KEYS,
-    DEVICE_INFO_BLOCK,
-    DEVICE_INFO_EXTRA,
     DOMAIN,
-    ECOFLOW_PORTAL_TOTALS,
-    ENERGY_SENSOR_MAP,
     EVENT_COMMAND_EXPIRED,
     EVENT_FIRMWARE_CHANGED,
-    EXTERNAL_METER_KEYS,
-    FIRMWARE_VERSION,
-    HELD_TOTAL_ISSUE_AFTER_S,
-    MAX_BATTERY_CAPACITY_WH,
     MODBUS_DISABLED_READ_THRESHOLD,
     MODBUS_POLL_BUDGET_S,
     OPTIONAL_STALLS_TO_DROP,
-    PRODUCT_CATEGORY,
-    PRODUCT_NUMBER,
     READING_CHECK_SNAPSHOTS,
-    REGISTERS_BY_KEY,
-    SERIAL_NUMBER,
     STATE_SAVE_DELAY_S,
     STORAGE_VERSION,
-    register_blocks_for,
 )
 from .control import ControlManager
-from .control_test import ControlTest
+from .definitions import (
+    BATTERY_MODE_SELECT,
+    DEVICE_ENERGY_KEYS,
+    ENERGY_SENSOR_MAP,
+    EcoflowNumberEntityDescription,
+)
 from .energy_processor import (
     DEVICE_TOTAL_KEYS,
     ENERGY_KEYS,
@@ -85,23 +64,49 @@ from .energy_processor import (
     HeldTotal,
     offsets_from,
 )
-from .grid_energy import GridEnergyIntegrator
+from .health import issues, outage
+from .health.announcer import Announcer
+from .identity import IdentityGuard
 from .modbus import ModbusClient, ModbusReadRejected, create_client, retries_until
-from .models import (
+from .models import CoordinatorStatus
+from .powerocean.const import (
+    BATTERY_CHARGE_W_PER_WH,
+    BATTERY_DISCHARGE_W_PER_WH,
+    BATTERY_MODULES,
+    CONF_MAX_BATTERY_CHARGED_POWER,
+    CONF_MAX_BATTERY_DISCHARGED_POWER,
+    CONF_MAX_GRID_POWER,
+    CONF_MAX_SOLAR_POWER,
+    DEFAULT_MAX_GRID_POWER,
+    DEFAULT_MAX_SOLAR_POWER,
+    ECOFLOW_PORTAL_TOTALS,
+    EXTERNAL_METER_KEYS,
+    HELD_TOTAL_ISSUE_AFTER_S,
+    MAX_BATTERY_CAPACITY_WH,
+)
+from .powerocean.grid_energy import GridEnergyIntegrator
+from .powerocean.models import (
     ControlFeature,
-    CoordinatorStatus,
     DeviceIdentity,
     InverterModel,
-    NumberWritableDef,
+    battery_reserve_for,
+)
+from .powerocean.reading_checks import KEYS_BY_CHECK
+from .powerocean.reading_checks import REPORTED as READING_CHECKS_REPORTED
+from .powerocean.registers import (
+    DEVICE_INFO_BLOCK,
+    DEVICE_INFO_EXTRA,
+    FIRMWARE_VERSION,
+    PRODUCT_CATEGORY,
+    PRODUCT_NUMBER,
+    REGISTERS_BY_KEY,
+    SERIAL_NUMBER,
     RegisterBlock,
     RegisterDef,
-    battery_reserve_for,
     encode_register,
+    register_blocks_for,
 )
-from .reading_checks import KEYS_BY_CHECK
-from .reading_checks import REPORTED as READING_CHECKS_REPORTED
-from .register_scan import RegisterScan
-from .telemetry import (
+from .powerocean.telemetry import (
     TelemetryData,
     calculate_derived_values,
     decode_firmware_version,
@@ -109,24 +114,11 @@ from .telemetry import (
     decode_serial_number,
     is_modbus_disabled,
 )
-from .util import parse_datetime
+from .powerocean.util import parse_datetime
+from .tools.control_test import ControlTest
+from .tools.register_scan import RegisterScan
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def identity_mismatch_issue_id(entry: ConfigEntry) -> str:
-    return f"identity_mismatch_{entry.entry_id}"
-
-
-def held_totals_issue_id(entry: ConfigEntry) -> str:
-    return f"energy_totals_held_{entry.entry_id}"
-
-
-GRID_ENERGY_ISSUE_PREFIX = "grid_energy_not_counted_"
-
-
-def grid_energy_issue_id(entry: ConfigEntry) -> str:
-    return f"{GRID_ENERGY_ISSUE_PREFIX}{entry.entry_id}"
 
 
 def battery_power_limits(capacity_wh: float) -> tuple[int, int]:
@@ -161,10 +153,6 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # added: a poll in between would leave out what they have yet to ask for.
     _wanted_keys: frozenset[str] | None = None
     _on_demand: bool = False
-    _identity_verified: bool = False
-    _identity_mismatch: bool = False
-    # For entries still keyed by host:port.
-    _pinned_serial: str | None = None
     # The totals the held-totals issue was last raised for.
     _held_issue_keys: frozenset[str] = frozenset()
     # Tells the user about the reading checks' findings.
@@ -240,7 +228,10 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_inverter_temperature: float | None = None
         self._consecutive_modbus_disabled_reads = 0
         self._modbus_client = create_client(hass, config_entry, self.host, self.port)
-        self._modbus_client.block_writes("identity_unverified")
+        self.identity_guard = IdentityGuard(
+            hass, config_entry, self._modbus_client, self.host
+        )
+        self.identity_guard.mark_unverified()
         self._last_checked_data: dict[str, Any] = {}
         self._last_checked_time: datetime | None = None
         self._announcer = Announcer()
@@ -310,7 +301,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def identity_verified(self) -> bool:
-        return self._identity_verified
+        return self.identity_guard.verified
 
     @property
     def has_external_meter(self) -> bool:
@@ -462,7 +453,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         identity = self.identity
         if identity.serial_number is None:
             identity.serial_number = "unknown"
-        self._mark_identity_unverified()
+        self.identity_guard.mark_unverified()
 
         try:
             raw = await self._modbus_client.async_read(
@@ -470,17 +461,17 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except ModbusException as err:
             _LOGGER.warning("Can not read device information: %s", err)
-            self._accept_unreadable_identity()
+            self.identity_guard.accept_unreadable()
             return
 
         if not raw or len(raw) < DEVICE_INFO_BLOCK.count:
-            self._accept_unreadable_identity()
+            self.identity_guard.accept_unreadable()
             return
 
         registers_for = partial(DEVICE_INFO_BLOCK.registers_for, raw)
 
         serial = decode_serial_number(registers_for(SERIAL_NUMBER))
-        if not self._check_identity(serial):
+        if not self.identity_guard.check(serial):
             return
         identity.serial_number = serial or "unknown"
         identity.product_number = registers_for(PRODUCT_NUMBER)[0]
@@ -497,77 +488,6 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_read_device_info_extra()
 
     # ── Identity ──────────────────────────────────────────────────────────────
-
-    def _expected_serial(self) -> str | None:
-        unique_id = self.config_entry.unique_id
-        if unique_id and ":" not in unique_id:
-            return unique_id
-        return self._pinned_serial
-
-    def _mark_identity_unverified(self) -> None:
-        self._identity_verified = False
-        self._modbus_client.block_writes("identity_unverified")
-
-    def _accept_unreadable_identity(self) -> None:
-        # Nothing to compare against: keep the behaviour from before the check.
-        if self._expected_serial() is None:
-            self._set_identity_verified()
-
-    def _check_identity(self, serial: str | None) -> bool:
-        """Block reads and writes to a device with another serial.
-
-        Otherwise a changed DHCP lease could hand us Modbus control of an
-        inverter nobody configured.
-        """
-        if not serial:
-            self._accept_unreadable_identity()
-            return self._identity_verified
-
-        expected = self._expected_serial()
-        if expected is not None and serial != expected:
-            reason = (
-                f"the device at {self.host} reports serial {serial}, not {expected}"
-            )
-            self._modbus_client.block_writes(
-                "identity_mismatch",
-                {"host": self.host, "found": serial, "expected": expected},
-            )
-            if not self._identity_mismatch:
-                _LOGGER.warning(
-                    "%s. Nothing is read from or written to it. Check the address, "
-                    "or remove the entry and add the new inverter",
-                    reason[0].upper() + reason[1:],
-                )
-                ir.async_create_issue(
-                    self.hass,
-                    DOMAIN,
-                    identity_mismatch_issue_id(self.config_entry),
-                    is_fixable=False,
-                    is_persistent=False,
-                    severity=ir.IssueSeverity.ERROR,
-                    translation_key="identity_mismatch",
-                    translation_placeholders={
-                        "host": str(self.host),
-                        "expected": expected,
-                        "found": serial,
-                    },
-                )
-            self._identity_mismatch = True
-            return False
-
-        self._pinned_serial = self._pinned_serial or serial
-        self._set_identity_verified()
-        return True
-
-    def _set_identity_verified(self) -> None:
-        self._identity_verified = True
-        self._modbus_client.allow_writes()
-        if self._identity_mismatch:
-            _LOGGER.info("The device at %s shows the expected serial again", self.host)
-            ir.async_delete_issue(
-                self.hass, DOMAIN, identity_mismatch_issue_id(self.config_entry)
-            )
-        self._identity_mismatch = False
 
     @callback
     def _firmware_changed(self, previous: str, firmware: str) -> None:
@@ -659,14 +579,14 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # The reconnect above has its own backoff, so it is not budgeted.
             async with asyncio.timeout(MODBUS_POLL_BUDGET_S) as budget:
                 with retries_until(budget.when()):
-                    if not self._identity_verified:
+                    if not self.identity_guard.verified:
                         await self.async_read_device_info()
-                        if self._identity_mismatch:
+                        if self.identity_guard.mismatch:
                             raise IdentityMismatch(
                                 f"The device at {self.host} is not the inverter this "
                                 "entry belongs to"
                             )
-                        if not self._identity_verified:
+                        if not self.identity_guard.verified:
                             _LOGGER.debug(
                                 "Serial number not confirmed yet; skipping this poll"
                             )
@@ -716,7 +636,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _read_failed(self) -> None:
         self._modbus_client.close()
         # A shared link can reconnect without us seeing it drop.
-        self._mark_identity_unverified()
+        self.identity_guard.mark_unverified()
 
     def _held_over_a_day(self) -> dict[str, HeldTotal]:
         now = dt.now()
@@ -819,7 +739,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not_counted == self._grid_energy_issue_raised:
             return
         self._grid_energy_issue_raised = not_counted
-        issue_id = grid_energy_issue_id(self.config_entry)
+        issue_id = issues.issue_id(issues.GRID_ENERGY, self.config_entry)
         if not not_counted:
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
@@ -909,7 +829,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if keys == self._held_issue_keys:
             return
         self._held_issue_keys = keys
-        issue_id = held_totals_issue_id(self.config_entry)
+        issue_id = issues.issue_id(issues.HELD_TOTALS, self.config_entry)
         if not keys:
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
@@ -1298,32 +1218,7 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         outage.async_answered(self.hass, self.config_entry)
 
         try:
-            if "battery_capacity" in raw_data:
-                raw_data["battery_capacity"] = self._hold_battery_capacity(
-                    raw_data["battery_capacity"]
-                )
-            self._size_battery_limits(raw_data.get("battery_capacity"))
-            result = self._energy_processor.validate_totals(
-                self._with_grid_energy(raw_data),
-                self._last_checked_data,
-                self._last_checked_time,
-            )
-            result.update(self._energy_processor.raw_daily_values(raw_data))
-            result.update(self._energy_processor.raw_total_values(raw_data))
-            result.update(self._device_info_values())
-            result, is_daily_reset = self._energy_processor.derive_daily(result)
-            calculated_results = calculate_derived_values(
-                TelemetryData.from_mapping(result),
-                calculate_solar_power=self._ena_calc_solar_power,
-                startup_voltage=self.inverter_model.traits.startup_voltage,
-                reports_effective_feed_cap=(
-                    self.inverter_model.traits.reports_effective_feed_cap
-                ),
-            )
-            result.update(calculated_results)
-            result = self._energy_processor.clamp_calculated(
-                result, self._last_checked_data, is_daily_reset=is_daily_reset
-            )
+            result = self._process_frame(raw_data)
 
             # The poll needs to happen after the derived values are calculated so that
             # the control sees the correct solar power, in case the user has configured
@@ -1361,6 +1256,40 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # entities unavailable, rather than publishing an empty frame.
             self._status = CoordinatorStatus.PROCESSING_FAILED
             raise
+
+    def _process_frame(self, raw_data: dict[str, Any]) -> dict[str, Any]:
+        """Turn the words of a poll into the values the entities show.
+
+        The totals are checked against the last frame, the daily counters derived
+        from them and the calculated values added, then clamped to what is
+        believable.
+        """
+        if "battery_capacity" in raw_data:
+            raw_data["battery_capacity"] = self._hold_battery_capacity(
+                raw_data["battery_capacity"]
+            )
+        self._size_battery_limits(raw_data.get("battery_capacity"))
+        result = self._energy_processor.validate_totals(
+            self._with_grid_energy(raw_data),
+            self._last_checked_data,
+            self._last_checked_time,
+        )
+        result.update(self._energy_processor.raw_daily_values(raw_data))
+        result.update(self._energy_processor.raw_total_values(raw_data))
+        result.update(self._device_info_values())
+        result, is_daily_reset = self._energy_processor.derive_daily(result)
+        calculated_results = calculate_derived_values(
+            TelemetryData.from_mapping(result),
+            calculate_solar_power=self._ena_calc_solar_power,
+            startup_voltage=self.inverter_model.traits.startup_voltage,
+            reports_effective_feed_cap=(
+                self.inverter_model.traits.reports_effective_feed_cap
+            ),
+        )
+        result.update(calculated_results)
+        return self._energy_processor.clamp_calculated(
+            result, self._last_checked_data, is_daily_reset=is_daily_reset
+        )
 
     def _with_grid_energy(self, raw_data: Mapping[str, Any]) -> dict[str, Any]:
         """Return the device's readings, offset, with the grid totals to validate.
@@ -1420,11 +1349,13 @@ class EcoflowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ── Parameter and setpoint writes ─────────────────────────────────────────
 
     async def async_write_modbus_register(
-        self, entity_def: NumberWritableDef, value: int
+        self, description: EcoflowNumberEntityDescription, value: int
     ) -> None:
         """Write a device setting from a number entity."""
         await self._async_write_register(
-            RegisterDef(entity_def.read_key, entity_def.register, entity_def.data_type),
+            RegisterDef(
+                description.read_key, description.register, description.data_type
+            ),
             value,
         )
 

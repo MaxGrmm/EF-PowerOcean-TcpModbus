@@ -9,8 +9,8 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const, number
-from custom_components.ef_powerocean_tcpmodbus.models import InverterModel
+from custom_components.ef_powerocean_tcpmodbus import const, definitions, number
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import InverterModel
 
 
 def fake_coordinator(*, native: bool) -> SimpleNamespace:
@@ -41,7 +41,7 @@ def reserve(entities: list):
     return next(
         entity
         for entity in entities
-        if entity._definition.key == const.BATTERY_RESERVE_SOC_NUMBER.key
+        if entity.entity_description.key == definitions.BATTERY_RESERVE_SOC_NUMBER.key
     )
 
 
@@ -59,7 +59,7 @@ async def test_the_retired_minimum_soc_number_is_removed(hass) -> None:
         "number", const.DOMAIN, f"entry_{const.RETIRED_MIN_SOC_NUMBER_KEY}"
     )
     assert not any(
-        entity._definition.key == const.RETIRED_MIN_SOC_NUMBER_KEY
+        entity.entity_description.key == const.RETIRED_MIN_SOC_NUMBER_KEY
         for entity in entities
     )
 
@@ -67,9 +67,9 @@ async def test_the_retired_minimum_soc_number_is_removed(hass) -> None:
 async def test_the_battery_reserve_says_whether_it_is_native(hass) -> None:
     emulated = reserve(await set_up(hass, native=False))
     assert emulated.extra_state_attributes == {"implementation": "emulated"}
-    assert emulated._definition.availability is not None
+    assert emulated.entity_description.availability is not None
 
     native = reserve(await set_up(hass, native=True))
     assert native.extra_state_attributes == {"implementation": "native"}
     # The inverter keeps it without us, so it needs no Modbus control.
-    assert native._definition.availability is None
+    assert native.entity_description.availability is None

@@ -24,37 +24,41 @@ from homeassistant.helpers import device_registry
 from homeassistant.util import dt
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const
+from custom_components.ef_powerocean_tcpmodbus import const, definitions
 from custom_components.ef_powerocean_tcpmodbus import control as control_module
-from custom_components.ef_powerocean_tcpmodbus.control_test import (
-    AbortTest,
-    ControlTest,
-    ControlTestState,
-    Timing,
-)
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
 from custom_components.ef_powerocean_tcpmodbus.heartbeat import Heartbeat
 from custom_components.ef_powerocean_tcpmodbus.modbus import (
     ModbusClient,
     ModbusRejected,
 )
-from custom_components.ef_powerocean_tcpmodbus.models import (
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import (
     ControlFeature,
     ControlMode,
     ControlStatus,
     GridFeedMode,
     GridMode,
 )
+from custom_components.ef_powerocean_tcpmodbus.tools.control_test import (
+    AbortTest,
+    ControlTest,
+    ControlTestState,
+    Timing,
+)
 
 SETPOINTS = {
-    key: const.REGISTERS_BY_KEY[key]
+    key: register_map.REGISTERS_BY_KEY[key]
     for key in (
         "battery_power_setpoint",
         "system_power_setpoint",
         "inverter_power_setpoint",
     )
 }
-METHOD_SHIFT = const.CONTROL_COMMAND_METHOD_SHIFT
+METHOD_SHIFT = device_const.CONTROL_COMMAND_METHOD_SHIFT
 HOUSE_W = 500.0
 FAST = Timing(
     settle_s=0.5, return_s=0.05, status_bit_s=0.3, handback_s=0.3, frame_timeout_s=1
@@ -97,9 +101,9 @@ class FakeInverter:
         if code := self.refuse.get(address):
             raise ModbusRejected("refused", exception_code=code)
         self.writes.append((address, list(words)))
-        if address == const.CONTROL_COMMAND_REGISTER:
+        if address == device_const.CONTROL_COMMAND_REGISTER:
             word = int32(words)
-            value = (word >> METHOD_SHIFT) & const.CONTROL_COMMAND_METHOD_MASK
+            value = (word >> METHOD_SHIFT) & device_const.CONTROL_COMMAND_METHOD_MASK
             self.method = next(m for m in ControlMode if m.command_value == value)
             return
         for key, register in SETPOINTS.items():
@@ -497,7 +501,7 @@ async def test_events_bracket_the_run(
 
 
 def control_manager() -> control_module.ControlManager:
-    blocks = const.register_blocks_for(const.DEFAULT_INVERTER_MODEL)
+    blocks = register_map.register_blocks_for(const.DEFAULT_INVERTER_MODEL)
     return control_module.ControlManager(
         cast(
             ModbusClient,
@@ -509,10 +513,10 @@ def control_manager() -> control_module.ControlManager:
             register.key: register for block in blocks for register in block.registers
         },
         limits={
-            const.CONF_MAX_GRID_POWER: 15_000,
-            const.CONF_MAX_SOLAR_POWER: 12_000,
-            const.CONF_MAX_BATTERY_CHARGED_POWER: 5_000,
-            const.CONF_MAX_BATTERY_DISCHARGED_POWER: 6_600,
+            device_const.CONF_MAX_GRID_POWER: 15_000,
+            device_const.CONF_MAX_SOLAR_POWER: 12_000,
+            device_const.CONF_MAX_BATTERY_CHARGED_POWER: 5_000,
+            device_const.CONF_MAX_BATTERY_DISCHARGED_POWER: 6_600,
         },
         inverter_model=const.DEFAULT_INVERTER_MODEL,
         enabled=False,
@@ -602,7 +606,7 @@ async def test_commands_are_accepted_again_after_the_test() -> None:
 
 
 def test_the_sensor_offers_every_state_the_test_can_be_in() -> None:
-    assert const.CONTROL_TEST_SENSOR.options == tuple(ControlTestState)
+    assert definitions.CONTROL_TEST_SENSOR.options == list(ControlTestState)
 
     strings = json.loads(
         (Path(const.__file__).parent / "translations" / "en.json").read_text(
@@ -716,7 +720,7 @@ async def test_an_unexpected_error_fails_the_run_and_hands_back(
     write = inverter.async_write
 
     async def broken_write(address: int, words: list[int], *, what: str) -> None:
-        if address == const.CONTROL_COMMAND_REGISTER and inverter.method is (
+        if address == device_const.CONTROL_COMMAND_REGISTER and inverter.method is (
             ControlMode.DEFAULT
         ):
             raise RuntimeError("bug")
@@ -738,7 +742,9 @@ async def test_an_unsafe_control_word_is_never_written(
     coordinator: FakeCoordinator, inverter: FakeInverter
 ) -> None:
     with pytest.raises(AbortTest, match="refused to write control word"):
-        await runner(coordinator)._write_control_word(const.CONTROL_COMMAND_UNSAFE_BITS)
+        await runner(coordinator)._write_control_word(
+            device_const.CONTROL_COMMAND_UNSAFE_BITS
+        )
 
     assert inverter.writes == []
 

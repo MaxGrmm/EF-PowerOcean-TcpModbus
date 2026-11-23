@@ -5,15 +5,20 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import EcoflowCoordinator
-from .models import ControlEntityDef, EntityDef, shown_keys
+from .definitions import (
+    ControlNumberEntityDescription,
+    ControlSelectEntityDescription,
+    shown_keys,
+)
 
 
-class EcoFlowBaseEntity[DefinitionT: EntityDef](CoordinatorEntity[EcoflowCoordinator]):
-    """An entity of the inverter's device, made from one definition."""
+class EcoFlowBaseEntity(CoordinatorEntity[EcoflowCoordinator]):
+    """An entity of the inverter's device, made from one description."""
 
     _attr_has_entity_name = True
     # What the last write through _async_write_if_changed showed. None until then,
@@ -24,14 +29,14 @@ class EcoFlowBaseEntity[DefinitionT: EntityDef](CoordinatorEntity[EcoflowCoordin
         self,
         coordinator: EcoflowCoordinator,
         entry: ConfigEntry,
-        definition: DefinitionT,
+        description: EntityDescription,
     ) -> None:
         # The keys this entity shows, which the coordinator reads on demand.
-        super().__init__(coordinator, context=shown_keys(definition))
+        super().__init__(coordinator, context=shown_keys(description))
         self._entry_id = entry.entry_id
-        self._definition = definition
-        self._attr_unique_id = f"{self._entry_id}_{definition.key}"
-        self._attr_translation_key = definition.key
+        self.entity_description = description
+        self._attr_unique_id = f"{self._entry_id}_{description.key}"
+        self._attr_translation_key = description.key
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -69,12 +74,16 @@ class EcoFlowBaseEntity[DefinitionT: EntityDef](CoordinatorEntity[EcoflowCoordin
         # A reading the checks show to be wrong, such as a system level of 0 while
         # the batteries are full (#200) or one that stopped updating (#227), is not
         # shown as if it were real.
-        if self._definition.key in self.coordinator.control.reading_checks.distrusted:
+        description = self.entity_description
+        if description.key in self.coordinator.control.reading_checks.distrusted:
             return False
         # Controls that only act while the device follows us carry a rule.
         if (
-            isinstance(self._definition, ControlEntityDef)
-            and self._definition.availability is not None
+            isinstance(
+                description,
+                ControlNumberEntityDescription | ControlSelectEntityDescription,
+            )
+            and description.availability is not None
         ):
-            return self._definition.availability(self.coordinator.control.status)
+            return description.availability(self.coordinator.control.status)
         return True

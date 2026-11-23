@@ -5,7 +5,7 @@ this integration's register handling.
 
 **This file deliberately does not list registers.** The register map is code:
 
-> [`custom_components/ef_powerocean_tcpmodbus/const.py`](../custom_components/ef_powerocean_tcpmodbus/const.py) → `MODBUS_REGISTERS`
+> [`custom_components/ef_powerocean_tcpmodbus/powerocean/registers.py`](../custom_components/ef_powerocean_tcpmodbus/powerocean/registers.py) → `MODBUS_REGISTERS`
 
 <!-- toc -->
 
@@ -110,10 +110,10 @@ word first and the register reads `500`, and the inverter follows the setpoint.
 The three-phase Ocean 2 differs on the read side: it publishes 32-bit values
 **high word first**, so a PV string voltage of 486.9 V arrives as `0x43F3`,
 `0x7333` and decodes to a denormal close to zero when read low word first. The
-model traits in `models.py` (`high_word_first`) carry this per model. How the
+model traits in `powerocean/models.py` (`high_word_first`) carry this per model. How the
 Ocean 2 orders words on writes has not been measured.
 
-Four layouts occur, modelled as `RegisterType` in `models.py`:
+Four layouts occur, modelled as `RegisterType` in `powerocean/registers.py`:
 
 | `RegisterType` | Words | Notes                                                        |
 | -------------- | ----- | ------------------------------------------------------------ |

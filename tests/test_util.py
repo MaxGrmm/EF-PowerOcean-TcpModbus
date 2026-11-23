@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from custom_components.ef_powerocean_tcpmodbus import const
-from custom_components.ef_powerocean_tcpmodbus.util import (
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean.util import (
     parse_kwh,
     portal_history_url,
 )
@@ -18,9 +18,9 @@ from custom_components.ef_powerocean_tcpmodbus.util import (
 def test_the_portal_opens_in_the_users_language_where_it_has_it(
     language: str, portal: str
 ) -> None:
-    assert portal_history_url(language) == const.ECOFLOW_PORTAL_HISTORY_URL.format(
-        language=portal
-    )
+    assert portal_history_url(
+        language
+    ) == device_const.ECOFLOW_PORTAL_HISTORY_URL.format(language=portal)
 
 
 @pytest.mark.parametrize(

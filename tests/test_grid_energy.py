@@ -6,14 +6,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from custom_components.ef_powerocean_tcpmodbus import const
-from custom_components.ef_powerocean_tcpmodbus.grid_energy import (
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean.grid_energy import (
     GridEnergyIntegrator,
     split_energy,
 )
 
 START = datetime(2026, 11, 19, 10, tzinfo=UTC)
-ZERO = dict.fromkeys(const.GRID_ENERGY_REGISTER_KEYS, 0.0)
+ZERO = dict.fromkeys(device_const.GRID_ENERGY_REGISTER_KEYS, 0.0)
 
 
 @pytest.mark.parametrize(
@@ -49,7 +49,7 @@ def test_counts_on_from_the_totals_published_last() -> None:
     "readings",
     (
         # An outage between two readings.
-        ((3600.0, 0), (3600.0, const.GRID_ENERGY_MAX_GAP_S + 1)),
+        ((3600.0, 0), (3600.0, device_const.GRID_ENERGY_MAX_GAP_S + 1)),
         # A failed read of Grid Power in between.
         ((3600.0, 0), (None, 5), (3600.0, 10)),
     ),

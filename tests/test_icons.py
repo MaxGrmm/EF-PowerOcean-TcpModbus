@@ -14,7 +14,7 @@ from homeassistant.util.yaml import load_yaml_dict
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ef_powerocean_tcpmodbus import const
-from custom_components.ef_powerocean_tcpmodbus.models import InverterModel
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import InverterModel
 from custom_components.ef_powerocean_tcpmodbus.switch import (
     BATTERY_SAVER_SWITCH,
     MODBUS_CONTROL_SWITCH,
@@ -87,10 +87,10 @@ def test_battery_mode_icons_cover_its_options() -> None:
 
 def test_modbus_control_shows_an_hourglass_only_while_handing_back() -> None:
     """Off, but the inverter still obeys until its window runs out."""
-    icon = MODBUS_CONTROL_SWITCH.icon
+    icon = MODBUS_CONTROL_SWITCH.icon_fn
     assert icon is not None
     handing_back = SimpleNamespace(control=SimpleNamespace(handing_back=True))
     in_control = SimpleNamespace(control=SimpleNamespace(handing_back=False))
     assert icon(handing_back) == "mdi:timer-sand"  # type: ignore[arg-type]
     assert icon(in_control) is None  # type: ignore[arg-type]
-    assert BATTERY_SAVER_SWITCH.icon is None
+    assert BATTERY_SAVER_SWITCH.icon_fn is None

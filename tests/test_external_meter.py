@@ -15,11 +15,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ef_powerocean_tcpmodbus import const, sensor
+from custom_components.ef_powerocean_tcpmodbus import const, definitions, sensor
 from custom_components.ef_powerocean_tcpmodbus.coordinator import (
     EcoflowConfigEntry,
     EcoflowCoordinator,
 )
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
 
 INTEGRATION = er.RegistryEntryDisabler.INTEGRATION
 USER = er.RegistryEntryDisabler.USER
@@ -72,7 +73,7 @@ def entry(hass: HomeAssistant) -> MockConfigEntry:
 async def test_meter_sensors_are_disabled_without_a_meter(
     hass: HomeAssistant, entry: MockConfigEntry
 ) -> None:
-    meter = [_register(hass, entry, key) for key in const.EXTERNAL_METER_KEYS]
+    meter = [_register(hass, entry, key) for key in device_const.EXTERNAL_METER_KEYS]
     other = _register(hass, entry, "battery_soc")
 
     _sync(hass, entry, has_external_meter=False)
@@ -109,7 +110,7 @@ async def test_a_new_meter_sensor_is_enabled_only_with_a_meter(
     coordinator = SimpleNamespace(has_external_meter=has_external_meter)
     definition = next(
         definition
-        for definition in const.SENSOR_MAP
+        for definition in definitions.SENSOR_MAP
         if definition.key == "grid_voltage_l2"
     )
 

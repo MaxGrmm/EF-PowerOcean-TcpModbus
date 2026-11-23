@@ -30,11 +30,11 @@ from pymodbus.pdu import ModbusPDU
 
 from .const import (
     DEFAULT_SLAVE,
-    DEVICE_INFO_BLOCK,
     DOMAIN,
     MODBUS_REQUEST_TIMEOUT_S,
     SLEEP_TIME_AFTER_RECONNECT_S,
 )
+from .powerocean.registers import DEVICE_INFO_BLOCK
 
 _LOGGER = logging.getLogger(__name__)
 

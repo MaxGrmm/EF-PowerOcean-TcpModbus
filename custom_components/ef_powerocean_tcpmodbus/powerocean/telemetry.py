@@ -8,15 +8,14 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields
 
 from .models import (
-    REGISTER_SIZES,
     UNKNOWN_STATE,
     ControlMode,
     GridFeedMode,
     GridMode,
     OperatingMode,
-    RegisterType,
     SystemAlert,
 )
+from .registers import REGISTER_SIZES, RegisterType
 
 # Bits 4-6 of the System Status (40530): one enumeration, not three flags.
 _OPERATING_MODE_SHIFT = 4

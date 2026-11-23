@@ -9,10 +9,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import BATTERY_MODE_SELECT
 from .coordinator import EcoflowConfigEntry, EcoflowCoordinator
+from .definitions import BATTERY_MODE_SELECT, ControlSelectEntityDescription
 from .entity import EcoFlowBaseEntity
-from .models import ControlEntityDef, ControlFeature
+from .powerocean.models import ControlFeature
 
 # One write to the inverter at a time.
 PARALLEL_UPDATES = 1
@@ -31,7 +31,7 @@ async def async_setup_entry(
     )
 
 
-class EcoFlowBatteryModeSelect(EcoFlowBaseEntity[ControlEntityDef], SelectEntity):
+class EcoFlowBatteryModeSelect(EcoFlowBaseEntity, SelectEntity):
     """What the inverter should be doing.
 
     The protocol follows one control method at a time, so this is a single choice
@@ -43,11 +43,10 @@ class EcoFlowBatteryModeSelect(EcoFlowBaseEntity[ControlEntityDef], SelectEntity
         self,
         coordinator: EcoflowCoordinator,
         entry: ConfigEntry,
-        definition: ControlEntityDef,
+        description: ControlSelectEntityDescription,
     ) -> None:
-        super().__init__(coordinator, entry, definition)
+        super().__init__(coordinator, entry, description)
         self._attr_options = [str(feature) for feature in ControlFeature]
-        self._attr_entity_category = definition.entity_category
 
     @callback
     def _handle_coordinator_update(self) -> None:

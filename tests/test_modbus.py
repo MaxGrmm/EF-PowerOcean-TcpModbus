@@ -20,6 +20,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.ef_powerocean_tcpmodbus import const
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
 
 SHARED = (MAJOR_VERSION, MINOR_VERSION) >= (2026, 9)
 
@@ -221,7 +225,7 @@ async def test_a_shared_link_tells_a_refused_write_from_a_lost_link(
 
 @shared_only
 async def test_any_answer_counts_as_a_shared_link_being_up(shared_client, unit) -> None:
-    unit.fail_read(const.DEVICE_INFO_BLOCK.start, IllegalDataAddressError())
+    unit.fail_read(register_map.DEVICE_INFO_BLOCK.start, IllegalDataAddressError())
     assert await shared_client.async_connect()
 
     unit.fail_requests(ModbusConnectionError("link down"))
@@ -618,7 +622,7 @@ def test_an_own_link_waits_a_few_seconds_not_twenty() -> None:
     link = asyncio.run(make())
 
     assert link._pymodbus.comm_params.timeout_connect == const.MODBUS_REQUEST_TIMEOUT_S
-    assert const.MODBUS_POLL_BUDGET_S < const.HEARTBEAT_WINDOW_S / 2
+    assert const.MODBUS_POLL_BUDGET_S < device_const.HEARTBEAT_WINDOW_S / 2
 
 
 def test_reconnecting_an_open_link_is_a_no_op(monkeypatch: pytest.MonkeyPatch) -> None:

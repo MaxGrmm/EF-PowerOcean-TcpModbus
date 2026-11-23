@@ -8,9 +8,11 @@ from typing import Any
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_HOST, CONTROL_FEATURES, DOMAIN, SERIAL_NUMBER
+from .const import CONF_HOST, DOMAIN
 from .coordinator import EcoflowConfigEntry
 from .modbus import is_shared
+from .powerocean.const import CONTROL_FEATURES
+from .powerocean.registers import SERIAL_NUMBER
 
 TO_REDACT = (CONF_HOST, "title", "unique_id")
 

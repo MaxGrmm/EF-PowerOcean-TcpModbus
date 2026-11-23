@@ -14,7 +14,8 @@ import math
 
 import pytest
 
-from custom_components.ef_powerocean_tcpmodbus import const, models
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import models as device_models
 from tests.simulation import (
     AUTOMATIC,
     BATTERY_LIMITS,
@@ -35,8 +36,8 @@ def test_a_charge_limit_holds_through_a_cycling_load(
 
     run = sim.run(polls=240, solar=2400, house=[700] * 8 + [2700] * 8)
 
-    assert max(run.battery) <= const.HOLD_SETPOINT_W
-    assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
+    assert max(run.battery) <= device_const.HOLD_SETPOINT_W
+    assert set(run.status) == {device_models.ControlStatus.CHARGE_LIMIT_REACHED}
     assert sim.inverter.method_writes == 1
 
 
@@ -58,15 +59,17 @@ def test_a_long_draw_is_left_to_the_inverter_until_the_sun_returns(
         house=[3600] * 40 + [1800] * 20 + ([400] * 30 + [3600] * 30) * 2,
     )
 
-    assert max(held.battery) <= const.HOLD_SETPOINT_W
+    assert max(held.battery) <= device_const.HOLD_SETPOINT_W
     # The grid imports only on the first poll of each later draw.
     assert [step for step, watts in enumerate(run.grid) if watts > 0] == [90, 150]
     # The battery charges for one poll each time the sun returns.
     charging = [
-        step for step, watts in enumerate(run.battery) if watts > const.HOLD_SETPOINT_W
+        step
+        for step, watts in enumerate(run.battery)
+        if watts > device_const.HOLD_SETPOINT_W
     ]
     assert charging == [60, 120]
-    assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
+    assert set(run.status) == {device_models.ControlStatus.CHARGE_LIMIT_REACHED}
     # Take control, then hand back and take back three times.
     assert sim.inverter.method_writes == 6
 
@@ -83,10 +86,10 @@ def test_a_cycling_load_settles_into_one_mode(
 
     run = sim.run(polls=720, solar=1000, house=[3500] * 18 + [300] * 12)
 
-    assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
+    assert set(run.status) == {device_models.ControlStatus.CHARGE_LIMIT_REACHED}
     # Take control, hand back once, take back, then no more switching.
     assert sim.inverter.method_writes == 3
-    assert sum(watts > const.HOLD_SETPOINT_W for watts in run.battery) <= 1
+    assert sum(watts > device_const.HOLD_SETPOINT_W for watts in run.battery) <= 1
 
 
 def test_a_battery_at_its_limit_is_not_held_against_the_inverter(
@@ -156,7 +159,7 @@ def test_a_guard_never_imports_what_the_battery_could_have_covered(
 
         assert max(run.grid) <= 0
         # Spilling is the lesser evil, not a licence to empty the battery to the grid.
-        assert min(run.grid) >= -const.GUARD_TRACKING_STEP_W
+        assert min(run.grid) >= -device_const.GUARD_TRACKING_STEP_W
         # A steady house is worth one setpoint, not one per poll.
         assert sim.inverter.setpoint_writes == 1
 
@@ -173,7 +176,7 @@ def test_a_guard_never_imports_across_a_hand_back(
     # Handed back: the inverter runs itself.
     assert sim.inverter.method == AUTOMATIC
     assert max(run.grid) <= 0
-    assert min(run.grid) >= -const.GUARD_TRACKING_STEP_W
+    assert min(run.grid) >= -device_const.GUARD_TRACKING_STEP_W
 
 
 def test_a_guard_only_falls_behind_the_poll_an_unexpected_load_arrives(
@@ -192,8 +195,8 @@ def test_a_guard_only_falls_behind_the_poll_an_unexpected_load_arrives(
         sim = Simulation(monkeypatch, soc=60.0, charge_limit=1.0)
         run = sim.run(polls=240, solar=400, house=house)
 
-        assert max(run.battery) <= const.HOLD_SETPOINT_W
-        assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
+        assert max(run.battery) <= device_const.HOLD_SETPOINT_W
+        assert set(run.status) == {device_models.ControlStatus.CHARGE_LIMIT_REACHED}
         late = [step for step, watts in enumerate(run.grid) if watts > 0]
         # Never two polls running: a catch-up, not a standing shortfall.
         assert len(late) == late_polls
@@ -273,7 +276,7 @@ def test_a_reached_app_reserve_is_left_to_the_inverter(
         soc=20.0,
         reserve=20.0,
         app_reserve=app_reserve,
-        model=models.InverterModel.POWEROCEAN_PLUS,
+        model=device_models.InverterModel.POWEROCEAN_PLUS,
     )
 
     dusk = sim.run(polls=60, solar=0, house=1000)
@@ -295,14 +298,14 @@ def test_an_app_reserve_below_the_battery_reserve_is_still_guarded(
         soc=20.0,
         reserve=20.0,
         app_reserve=10.0,
-        model=models.InverterModel.POWEROCEAN_PLUS,
+        model=device_models.InverterModel.POWEROCEAN_PLUS,
     )
 
     run = sim.run(polls=60, solar=0, house=1000)
 
     assert min(run.battery) >= 0
     assert sim.inverter.method == BATTERY_LIMITS
-    assert set(run.status) == {models.ControlStatus.RESERVE_REACHED}
+    assert set(run.status) == {device_models.ControlStatus.RESERVE_REACHED}
 
 
 def test_the_app_reserve_still_charges_below_a_higher_battery_reserve(
@@ -316,14 +319,14 @@ def test_the_app_reserve_still_charges_below_a_higher_battery_reserve(
         soc=22.0,
         reserve=30.0,
         app_reserve=25.0,
-        model=models.InverterModel.POWEROCEAN_PLUS,
+        model=device_models.InverterModel.POWEROCEAN_PLUS,
     )
 
     run = sim.run(polls=720, solar=0, house=800)
 
     assert run.soc[-1] == 25
-    assert models.ControlStatus.CHARGING_TO_RESERVE in run.status
-    assert run.status[-1] is models.ControlStatus.RESERVE_REACHED
+    assert device_models.ControlStatus.CHARGING_TO_RESERVE in run.status
+    assert run.status[-1] is device_models.ControlStatus.RESERVE_REACHED
 
 
 def test_charging_to_a_reserve_the_app_keeps_is_left_to_the_inverter(
@@ -337,7 +340,7 @@ def test_charging_to_a_reserve_the_app_keeps_is_left_to_the_inverter(
         soc=15.0,
         reserve=20.0,
         app_reserve=30.0,
-        model=models.InverterModel.POWEROCEAN_PLUS,
+        model=device_models.InverterModel.POWEROCEAN_PLUS,
     )
     asyncio.run(sim.control.async_set_reserve_charge(True))
     sim.inverter.method_writes = 0
@@ -360,7 +363,7 @@ def test_a_battery_inside_the_reserve_band_can_use_it_again(
         soc=20.0,
         reserve=20.0,
         app_reserve=10.0,
-        model=models.InverterModel.POWEROCEAN_PLUS,
+        model=device_models.InverterModel.POWEROCEAN_PLUS,
     )
     sim.run(polls=30, solar=0, house=800)
     morning = sim.run(polls=110, solar=2800, house=800)
@@ -384,7 +387,7 @@ def test_a_battery_inside_the_charge_limit_band_can_refill(
         monkeypatch,
         soc=80.0,
         charge_limit=80.0,
-        model=models.InverterModel.POWEROCEAN_PLUS,
+        model=device_models.InverterModel.POWEROCEAN_PLUS,
     )
     sim.run(polls=30, solar=3000, house=500)
     evening = sim.run(polls=120, solar=0, house=1500)
@@ -413,7 +416,7 @@ def test_a_guard_latched_inside_its_band_survives_a_restart(
     """A guard stays on until the state of charge has moved well clear of its
     limit. A restart inside that band used to come back with it off, so the battery
     did something else than it would have without the restart."""
-    model = models.InverterModel.POWEROCEAN_PLUS
+    model = device_models.InverterModel.POWEROCEAN_PLUS
     charging = "reserve" in guards
     # (solar, house) into the band, then for the rest of the run.
     before = (2800, 800) if charging else (0, 1500)
@@ -440,16 +443,16 @@ def test_a_discharge_the_export_limit_cuts_short_says_so(
     """With no export allowed, a discharge only covers the house. That is the
     export limit, not a battery still ramping up to the target."""
     capped = Simulation(monkeypatch, export_cap=0.0)
-    select(capped, models.ControlFeature.DISCHARGE_BATTERY)
+    select(capped, device_models.ControlFeature.DISCHARGE_BATTERY)
     run = capped.run(polls=24, solar=0, house=400)
 
     uncapped = Simulation(monkeypatch, export_cap=CAP)
-    select(uncapped, models.ControlFeature.DISCHARGE_BATTERY)
+    select(uncapped, device_models.ControlFeature.DISCHARGE_BATTERY)
     free = uncapped.run(polls=24, solar=0, house=400)
 
     assert max(run.battery) >= -400
     assert run.status[-1] == "unreachable_export_limit"
-    assert free.status[-1] is models.ControlStatus.ACTIVE
+    assert free.status[-1] is device_models.ControlStatus.ACTIVE
 
 
 def test_an_untouched_install_never_touches_the_inverter(
@@ -465,7 +468,7 @@ def test_an_untouched_install_never_touches_the_inverter(
     )
 
     assert sim.inverter.method_writes == 0
-    assert set(run.status) == {models.ControlStatus.AUTOMATIC}
+    assert set(run.status) == {device_models.ControlStatus.AUTOMATIC}
 
 
 def test_a_charge_limit_survives_an_hour_of_broken_weather(
@@ -482,7 +485,7 @@ def test_a_charge_limit_survives_an_hour_of_broken_weather(
         house=[400] * 11 + [3000] * 11,
     )
 
-    assert max(run.battery) <= const.HOLD_SETPOINT_W
+    assert max(run.battery) <= device_const.HOLD_SETPOINT_W
     assert run.soc[-1] <= run.soc[0]
     # No draw lasts long enough to hand back, so the method is written only once.
     assert sim.inverter.method_writes == 1
@@ -499,10 +502,10 @@ def test_the_guard_comes_back_after_the_link_drops(
     lost = sim.run(polls=30, solar=3000, house=800, reachable=False)
     regained = sim.run(polls=30, solar=3000, house=800)
 
-    assert max(held.battery) <= const.HOLD_SETPOINT_W
+    assert max(held.battery) <= device_const.HOLD_SETPOINT_W
     assert max(lost.battery) > 2000
-    assert lost.status[-1] is models.ControlStatus.NO_MODBUS_CONTROL
-    assert max(regained.battery) <= const.HOLD_SETPOINT_W
+    assert lost.status[-1] is device_models.ControlStatus.NO_MODBUS_CONTROL
+    assert max(regained.battery) <= device_const.HOLD_SETPOINT_W
 
 
 def test_a_reserve_above_the_charge_limit_freezes_the_battery(
@@ -514,7 +517,7 @@ def test_a_reserve_above_the_charge_limit_freezes_the_battery(
 
     run = sim.run(polls=120, solar=[0] * 13 + [4000] * 13, house=1000)
 
-    assert max(abs(watts) for watts in run.battery) <= const.HOLD_SETPOINT_W
+    assert max(abs(watts) for watts in run.battery) <= device_const.HOLD_SETPOINT_W
     assert run.soc[-1] == run.soc[0]
 
 
@@ -530,12 +533,12 @@ def test_a_frozen_battery_stays_frozen_at_the_app_reserve(
         charge_limit=50.0,
         reserve=60.0,
         app_reserve=60.0,
-        model=models.InverterModel.POWEROCEAN_PLUS,
+        model=device_models.InverterModel.POWEROCEAN_PLUS,
     )
 
     run = sim.run(polls=120, solar=[0] * 13 + [4000] * 13, house=1000)
 
-    assert max(abs(watts) for watts in run.battery) <= const.HOLD_SETPOINT_W
+    assert max(abs(watts) for watts in run.battery) <= device_const.HOLD_SETPOINT_W
     assert sim.inverter.method_writes == 1
 
 
@@ -548,14 +551,14 @@ def test_a_full_battery_leaves_the_inverter_to_balance(
 
     run = sim.run(polls=60, solar=4000, house=800)
 
-    assert set(run.status) == {models.ControlStatus.CHARGE_LIMIT_REACHED}
+    assert set(run.status) == {device_models.ControlStatus.CHARGE_LIMIT_REACHED}
     assert max(run.battery) == 0
     assert sim.inverter.method_writes == 0
 
 
 CAP = 6000.0
 # Where Export Solar First pins the meter with its limit left at a 6 kW cap.
-AT_THE_CAP = CAP - const.SOLAR_EXPORT_CAP_MARGIN_W
+AT_THE_CAP = CAP - device_const.SOLAR_EXPORT_CAP_MARGIN_W
 
 
 def test_export_solar_first_hands_the_overflow_to_export_to_grid(
@@ -565,7 +568,7 @@ def test_export_solar_first_hands_the_overflow_to_export_to_grid(
     the inverter holds it just under there by itself and the battery takes the rest,
     with one write for the meter and none after."""
     sim = Simulation(monkeypatch, soc=40.0, export_cap=CAP)
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
 
     run = sim.run(polls=120, solar=9500, house=500)
 
@@ -575,7 +578,7 @@ def test_export_solar_first_hands_the_overflow_to_export_to_grid(
     assert sim.inverter.system_setpoint_writes == 1
     assert set(run.grid[settled]) == {-AT_THE_CAP}
     assert max(run.curtailed[settled]) == 0
-    assert set(run.status[settled]) == {models.ControlStatus.ACTIVE}
+    assert set(run.status[settled]) == {device_models.ControlStatus.ACTIVE}
     # The mode at work is not a guard, so automations reading one see none.
     assert sim.control.active_guard is None
 
@@ -584,13 +587,13 @@ def test_export_solar_first_holds_the_battery_while_the_surplus_fits_under_the_c
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sim = Simulation(monkeypatch, soc=40.0, export_cap=CAP)
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
 
     run = sim.run(polls=60, solar=4500, house=500)
 
-    assert max(run.battery) <= const.HOLD_SETPOINT_W
-    assert min(run.grid) >= -4000.0 - const.HOLD_SETPOINT_W
-    assert set(run.status) == {models.ControlStatus.BELOW_SOLAR_EXPORT_LIMIT}
+    assert max(run.battery) <= device_const.HOLD_SETPOINT_W
+    assert min(run.grid) >= -4000.0 - device_const.HOLD_SETPOINT_W
+    assert set(run.status) == {device_models.ControlStatus.BELOW_SOLAR_EXPORT_LIMIT}
     assert sim.inverter.method_writes == 1
 
 
@@ -602,10 +605,10 @@ def test_export_solar_first_follows_a_limit_set_below_the_cap_exactly(
     sim = Simulation(monkeypatch, soc=40.0, export_cap=math.inf)
     asyncio.run(
         sim.control.async_set_feature_power(
-            models.ControlFeature.EXPORT_SOLAR_FIRST, 3000.0
+            device_models.ControlFeature.EXPORT_SOLAR_FIRST, 3000.0
         )
     )
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
 
     run = sim.run(polls=60, solar=6500, house=500)
 
@@ -619,12 +622,12 @@ def test_export_solar_first_exports_all_of_it_without_a_cap(
     """With the limit left at the inverter's maximum and nothing capping the export,
     solar goes to the grid first and the battery takes none of it."""
     sim = Simulation(monkeypatch, soc=40.0, export_cap=math.inf)
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
 
     run = sim.run(polls=60, solar=4500, house=500)
 
-    assert max(run.battery) <= const.HOLD_SETPOINT_W
-    assert set(run.status) == {models.ControlStatus.BELOW_SOLAR_EXPORT_LIMIT}
+    assert max(run.battery) <= device_const.HOLD_SETPOINT_W
+    assert set(run.status) == {device_models.ControlStatus.BELOW_SOLAR_EXPORT_LIMIT}
 
 
 def test_export_solar_first_holds_again_before_the_battery_exports(
@@ -633,15 +636,17 @@ def test_export_solar_first_holds_again_before_the_battery_exports(
     """Export to Grid would keep the export up from the battery once a cloud takes the
     overflow. The hold is back on the next poll, so that lasts one poll at most."""
     sim = Simulation(monkeypatch, soc=40.0, export_cap=CAP)
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
     sim.run(polls=20, solar=9500, house=500)
 
     run = sim.run(polls=24, solar=4500, house=500)
 
-    assert sum(watts < -const.GUARD_POWER_DEADBAND_W for watts in run.battery) <= 1
+    assert (
+        sum(watts < -device_const.GUARD_POWER_DEADBAND_W for watts in run.battery) <= 1
+    )
     assert sim.inverter.method == BATTERY_LIMITS
-    assert run.grid[-1] == pytest.approx(-4000.0, abs=const.HOLD_SETPOINT_W)
-    assert run.status[-1] is models.ControlStatus.BELOW_SOLAR_EXPORT_LIMIT
+    assert run.grid[-1] == pytest.approx(-4000.0, abs=device_const.HOLD_SETPOINT_W)
+    assert run.status[-1] is device_models.ControlStatus.BELOW_SOLAR_EXPORT_LIMIT
 
 
 def test_export_solar_first_leaves_the_evening_to_the_inverter(
@@ -649,7 +654,7 @@ def test_export_solar_first_leaves_the_evening_to_the_inverter(
 ) -> None:
     """Once the house draws from the grid, Automatic covers it from the battery."""
     sim = Simulation(monkeypatch, soc=70.0, export_cap=CAP)
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
     sim.run(polls=12, solar=4500, house=500)
 
     run = sim.run(polls=60, solar=0, house=1500)
@@ -657,7 +662,7 @@ def test_export_solar_first_leaves_the_evening_to_the_inverter(
     # The grid only covers the poll the load arrives on.
     assert sum(watts > 0 for watts in run.grid) <= 1
     assert sim.inverter.method == AUTOMATIC
-    assert run.status[-1] is models.ControlStatus.AUTOMATIC
+    assert run.status[-1] is device_models.ControlStatus.AUTOMATIC
 
 
 def test_the_house_is_never_left_on_the_grid_after_flapping(
@@ -667,14 +672,14 @@ def test_the_house_is_never_left_on_the_grid_after_flapping(
     the house clearly needs more, the battery covers it on the next poll, however
     often that happened before: only the departures from Automatic wait."""
     sim = Simulation(monkeypatch, soc=90.0, export_cap=CAP)
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
     sim.run(polls=60, solar=2000, house=[1700, 1700, 2300, 2300])
 
     run = sim.run(polls=24, solar=1600, house=2700)
 
-    assert max(run.grid[1:]) <= const.GUARD_POWER_DEADBAND_W
+    assert max(run.grid[1:]) <= device_const.GUARD_POWER_DEADBAND_W
     assert sim.inverter.method == AUTOMATIC
-    assert set(run.status[1:]) == {models.ControlStatus.AUTOMATIC}
+    assert set(run.status[1:]) == {device_models.ControlStatus.AUTOMATIC}
 
 
 def test_a_departure_left_early_waits_longer_each_time(
@@ -684,7 +689,7 @@ def test_a_departure_left_early_waits_longer_each_time(
     minute is not picked again for a minute, twice that the next time, and Automatic
     runs meanwhile, storing what would otherwise be curtailed."""
     sim = Simulation(monkeypatch, soc=40.0, export_cap=CAP)
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
     sim.run(polls=4, solar=9500, house=500)
     assert sim.inverter.method == SYSTEM_FEED
 
@@ -712,13 +717,15 @@ def test_export_solar_first_is_automatic_with_a_full_battery(
 ) -> None:
     """A full battery takes nothing, so there is nothing to keep it from."""
     sim = Simulation(monkeypatch, soc=99.0, export_cap=CAP)
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
 
     sunny = sim.run(polls=24, solar=9500, house=500)
     evening = sim.run(polls=24, solar=1600, house=2700)
 
     assert sim.inverter.method_writes == 0
-    assert set(sunny.status) | set(evening.status) == {models.ControlStatus.AUTOMATIC}
+    assert set(sunny.status) | set(evening.status) == {
+        device_models.ControlStatus.AUTOMATIC
+    }
     assert max(evening.grid) <= 0
 
 
@@ -728,14 +735,14 @@ def test_export_solar_first_with_the_export_off_is_left_as_automatic(
     """With the Grid Feed-in switch off there is nothing to export first, so filling
     the battery first is all there is, and the inverter does that by itself."""
     sim = Simulation(monkeypatch, soc=40.0, export_cap=0.0)
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
 
     run = sim.run(polls=60, solar=4500, house=500)
 
     assert min(run.battery) > 3000.0
     assert max(run.curtailed) == 0
     assert sim.inverter.method_writes == 0
-    assert set(run.status) == {models.ControlStatus.AUTOMATIC}
+    assert set(run.status) == {device_models.ControlStatus.AUTOMATIC}
 
 
 def test_export_solar_first_holds_at_the_charge_limit(
@@ -743,15 +750,15 @@ def test_export_solar_first_holds_at_the_charge_limit(
 ) -> None:
     """Export to Grid charges the battery, so the charge limit holds it instead."""
     sim = Simulation(monkeypatch, soc=75.0, charge_limit=80.0, export_cap=CAP)
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
     sim.run(polls=20, solar=9500, house=500)
     assert sim.inverter.method == SYSTEM_FEED
 
     run = sim.run(polls=120, solar=9500, house=500)
 
-    assert run.status[-1] is models.ControlStatus.CHARGE_LIMIT_REACHED
+    assert run.status[-1] is device_models.ControlStatus.CHARGE_LIMIT_REACHED
     assert sim.inverter.method == BATTERY_LIMITS
-    assert run.battery[-1] <= const.HOLD_SETPOINT_W
+    assert run.battery[-1] <= device_const.HOLD_SETPOINT_W
 
 
 @pytest.mark.parametrize(
@@ -776,21 +783,23 @@ def test_export_solar_first_is_automatic_under_a_reached_charge_limit(
     from there both only have to keep it from going past the limit."""
     runs = {}
     for mode in (
-        models.ControlFeature.EXPORT_SOLAR_FIRST,
-        models.ControlFeature.AUTOMATIC,
+        device_models.ControlFeature.EXPORT_SOLAR_FIRST,
+        device_models.ControlFeature.AUTOMATIC,
     ):
         sim = Simulation(monkeypatch, soc=80.0, charge_limit=80.0, export_cap=CAP)
         select(sim, mode)
         runs[mode] = (sim.run(polls=720, solar=solar, house=house), sim.inverter)
 
-    solar_first, solar_first_inverter = runs[models.ControlFeature.EXPORT_SOLAR_FIRST]
-    automatic, automatic_inverter = runs[models.ControlFeature.AUTOMATIC]
+    solar_first, solar_first_inverter = runs[
+        device_models.ControlFeature.EXPORT_SOLAR_FIRST
+    ]
+    automatic, automatic_inverter = runs[device_models.ControlFeature.AUTOMATIC]
     stopped = next(
         (step for step, soc in enumerate(automatic.soc) if soc <= 80.0 - 2.0),
         len(automatic.soc),
     )
     assert solar_first.battery[:stopped] == automatic.battery[:stopped]
-    assert max(solar_first.battery[:stopped]) <= const.HOLD_SETPOINT_W
+    assert max(solar_first.battery[:stopped]) <= device_const.HOLD_SETPOINT_W
     assert max(solar_first.soc + automatic.soc) <= 80.0
     assert solar_first_inverter.method_writes == automatic_inverter.method_writes == 1
 
@@ -800,13 +809,13 @@ def test_export_solar_first_holds_at_the_battery_reserve(
 ) -> None:
     """Automatic discharges the battery, so the reserve holds it instead."""
     sim = Simulation(monkeypatch, soc=10.0, reserve=10.0, export_cap=CAP)
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
 
     run = sim.run(polls=60, solar=0, house=1500)
 
-    assert max(-watts for watts in run.battery) <= const.HOLD_SETPOINT_W
+    assert max(-watts for watts in run.battery) <= device_const.HOLD_SETPOINT_W
     assert sim.inverter.method == BATTERY_LIMITS
-    assert set(run.status) == {models.ControlStatus.RESERVE_REACHED}
+    assert set(run.status) == {device_models.ControlStatus.RESERVE_REACHED}
 
 
 def test_export_solar_first_leaves_a_reached_app_reserve_to_the_inverter(
@@ -817,7 +826,7 @@ def test_export_solar_first_leaves_a_reached_app_reserve_to_the_inverter(
     sim = Simulation(
         monkeypatch, soc=10.0, reserve=10.0, app_reserve=10.0, export_cap=CAP
     )
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
 
     run = sim.run(polls=60, solar=0, house=1500)
 
@@ -839,7 +848,7 @@ def test_export_solar_first_saves_the_midday_solar_that_automatic_curtails(
     automatic_run = automatic.run(polls=polls, solar=solar, house=500)
 
     solar_first = Simulation(monkeypatch, soc=20.0, export_cap=CAP)
-    select(solar_first, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(solar_first, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
     solar_first_run = solar_first.run(polls=polls, solar=solar, house=500)
 
     def kwh(watts: list[float]) -> float:
@@ -875,10 +884,10 @@ def test_export_solar_first_keeps_exporting_while_export_to_grid_waits(
     sim = Simulation(monkeypatch, soc=47.0, export_cap=8000.0)
     asyncio.run(
         sim.control.async_set_feature_power(
-            models.ControlFeature.EXPORT_SOLAR_FIRST, 4000
+            device_models.ControlFeature.EXPORT_SOLAR_FIRST, 4000
         )
     )
-    select(sim, models.ControlFeature.EXPORT_SOLAR_FIRST)
+    select(sim, device_models.ControlFeature.EXPORT_SOLAR_FIRST)
 
     run = sim.run(polls=len(surplus), solar=solar, house=500)
 

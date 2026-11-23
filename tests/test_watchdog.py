@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import zlib
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -15,15 +16,15 @@ from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
-from custom_components.ef_powerocean_tcpmodbus import const, repairs, watchdog
-from custom_components.ef_powerocean_tcpmodbus.models import (
-    AlertVerbosity,
-    ControlStatus,
-)
-from custom_components.ef_powerocean_tcpmodbus.reading_checks import Finding
+from custom_components.ef_powerocean_tcpmodbus import const, repairs
+from custom_components.ef_powerocean_tcpmodbus.health import watchdog
+from custom_components.ef_powerocean_tcpmodbus.models import AlertVerbosity
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import ControlStatus
+from custom_components.ef_powerocean_tcpmodbus.powerocean.reading_checks import Finding
 
 T0 = datetime(2026, 11, 19, 12, 0, tzinfo=UTC)
-CONTROL = const.CONTROL_COMMAND_REGISTER
+CONTROL = device_const.CONTROL_COMMAND_REGISTER
 
 
 def _view(seconds: float = 0, **changes: Any) -> watchdog.PollView:
@@ -566,3 +567,32 @@ def test_the_log_is_only_watched_at_debug(
 
     assert package.handlers == before
     stop()
+
+
+def test_a_log_alert_keeps_its_id_when_its_module_moves() -> None:
+    """An alert the user ignored stays ignored after a module moves package."""
+    package = "custom_components.ef_powerocean_tcpmodbus"
+    template = "The %s reading check could not run"
+    old = watchdog.log_alert(f"{package}.reading_checks", template)
+
+    assert watchdog.log_alert(f"{package}.powerocean.reading_checks", template) == old
+    assert (
+        old == f"log_{zlib.crc32(f'{package}.reading_checks:{template}'.encode()):08x}"
+    )
+    assert watchdog.log_alert(f"{package}.outage", template) != old
+
+
+@pytest.mark.parametrize(
+    "logger",
+    (
+        "custom_components.ef_powerocean_tcpmodbus",
+        "custom_components.ef_powerocean_tcpmodbus.coordinator",
+        "custom_components.ef_powerocean_tcpmodbus.reading_checks",
+    ),
+)
+def test_a_log_alert_has_the_id_it_always_had(logger: str) -> None:
+    """The id is the one alerts were stored under before modules moved."""
+    template = "Something went wrong: %s"
+    before = f"log_{zlib.crc32(f'{logger}:{template}'.encode()):08x}"
+
+    assert watchdog.log_alert(logger, template) == before

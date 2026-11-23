@@ -32,18 +32,22 @@ from pytest_homeassistant_custom_component.common import (
     async_capture_events,
 )
 
-from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const, outage
+from custom_components.ef_powerocean_tcpmodbus import PLATFORMS, const, definitions
 from custom_components.ef_powerocean_tcpmodbus import coordinator as coordinator_module
 from custom_components.ef_powerocean_tcpmodbus import modbus as modbus_module
 from custom_components.ef_powerocean_tcpmodbus.control import ControlInputs
 from custom_components.ef_powerocean_tcpmodbus.coordinator import EcoflowCoordinator
-from custom_components.ef_powerocean_tcpmodbus.models import (
-    CoordinatorStatus,
-    EnergySensorDef,
-    InverterModel,
-    RegisterType,
-    SensorDef,
+from custom_components.ef_powerocean_tcpmodbus.definitions import (
+    EcoflowEnergySensorEntityDescription,
+    EcoflowSensorEntityDescription,
 )
+from custom_components.ef_powerocean_tcpmodbus.health import outage
+from custom_components.ef_powerocean_tcpmodbus.models import CoordinatorStatus
+from custom_components.ef_powerocean_tcpmodbus.powerocean import (
+    registers as register_map,
+)
+from custom_components.ef_powerocean_tcpmodbus.powerocean.models import InverterModel
+from custom_components.ef_powerocean_tcpmodbus.powerocean.registers import RegisterType
 from tests.fake_inverter import HOST, FakeInverter
 
 
@@ -83,7 +87,7 @@ SERIAL = "HJ31ZAS2TEST0001"
 
 
 def _serve_serial(inverter: FakeInverter, serial: str) -> None:
-    inverter.serve_serial(serial, const.SERIAL_NUMBER.address)
+    inverter.serve_serial(serial, register_map.SERIAL_NUMBER.address)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
@@ -157,7 +161,9 @@ async def test_raises_a_repairs_issue_while_modbus_is_disabled(
     assert issue is not None
     assert issue.translation_placeholders == {"host": HOST}
 
-    inverter.registers[const.REGISTERS_BY_KEY["inverter_rated_power"].address] = 1
+    inverter.registers[
+        register_map.REGISTERS_BY_KEY["inverter_rated_power"].address
+    ] = 1
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     assert registry.async_get_issue(const.DOMAIN, issue_id) is None
@@ -242,7 +248,7 @@ def _fill_registers(inverter: FakeInverter, start: int = 1) -> None:
         RegisterType.UINT32: "<I",
         RegisterType.INT32: "<i",
     }
-    for index, register in enumerate(const.MODBUS_REGISTERS):
+    for index, register in enumerate(register_map.MODBUS_REGISTERS):
         register = register.for_model(InverterModel.POWEROCEAN_PLUS)
         value = index + start
         if register.data_type in (RegisterType.UINT16, RegisterType.INT16):
@@ -291,7 +297,7 @@ class _RecordingData(dict):
 def _enable_every_entity(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     """Register the entities that start disabled as enabled, so they load too."""
     registry = er.async_get(hass)
-    for number in const.WRITABLE_NUMBERS_MAP:
+    for number in definitions.WRITABLE_NUMBERS_MAP:
         registry.async_get_or_create(
             "number",
             const.DOMAIN,
@@ -320,7 +326,7 @@ async def test_every_entity_reads_only_what_it_asks_for(
     await hass.async_block_till_done()
 
     coordinator: EcoflowCoordinator = entry.runtime_data
-    registers = frozenset(const.REGISTERS_BY_KEY)
+    registers = frozenset(register_map.REGISTERS_BY_KEY)
     always = coordinator._own_keys | ControlInputs.keys()
     data = coordinator.data
     checked = 0
@@ -434,11 +440,13 @@ async def test_entities_show_what_reading_everything_shows(
 
 def _reading_entities(hass: HomeAssistant, entry: MockConfigEntry) -> list[str]:
     """The entities that show a reading, and so are unavailable while reads fail."""
-    sensor_definitions: tuple[SensorDef | EnergySensorDef, ...] = (
-        *const.SENSOR_MAP,
-        *const.ENERGY_SENSOR_MAP,
-        *const.DAILY_ENERGY_SENSORS_DEVICE_RAW,
-        *const.TOTAL_ENERGY_SENSORS_DEVICE_RAW,
+    sensor_definitions: tuple[
+        EcoflowSensorEntityDescription | EcoflowEnergySensorEntityDescription, ...
+    ] = (
+        *definitions.SENSOR_MAP,
+        *definitions.ENERGY_SENSOR_MAP,
+        *definitions.DAILY_ENERGY_SENSORS_DEVICE_RAW,
+        *definitions.TOTAL_ENERGY_SENSORS_DEVICE_RAW,
     )
     readings = {
         *(
@@ -446,8 +454,14 @@ def _reading_entities(hass: HomeAssistant, entry: MockConfigEntry) -> list[str]:
             for definition in sensor_definitions
             if definition.key != "coordinator_status"
         ),
-        *(("binary_sensor", definition.key) for definition in const.BINARY_SENSOR_MAP),
-        *(("number", definition.key) for definition in const.WRITABLE_NUMBERS_MAP),
+        *(
+            ("binary_sensor", definition.key)
+            for definition in definitions.BINARY_SENSOR_MAP
+        ),
+        *(
+            ("number", definition.key)
+            for definition in definitions.WRITABLE_NUMBERS_MAP
+        ),
     }
     prefix = f"{entry.entry_id}_"
     return sorted(
@@ -642,8 +656,8 @@ async def test_a_poll_whose_retry_is_hung_up_on_too_fails(
 
 def _serve_firmware(inverter: FakeInverter, version: int) -> None:
     """Publish a firmware version, 0x01020304 for 1.2.3.4, low word first."""
-    inverter.registers[const.FIRMWARE_VERSION.address] = version & 0xFFFF
-    inverter.registers[const.FIRMWARE_VERSION.address + 1] = version >> 16
+    inverter.registers[register_map.FIRMWARE_VERSION.address] = version & 0xFFFF
+    inverter.registers[register_map.FIRMWARE_VERSION.address + 1] = version >> 16
 
 
 async def _set_up_refusing(

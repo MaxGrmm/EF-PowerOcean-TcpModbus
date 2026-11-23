@@ -22,7 +22,8 @@ from typing import Final, TypedDict
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.ef_powerocean_tcpmodbus import const, models
+from custom_components.ef_powerocean_tcpmodbus.powerocean import const as device_const
+from custom_components.ef_powerocean_tcpmodbus.powerocean import models as device_models
 from tests.simulation import (
     AUTOMATIC,
     BATTERY_LIMITS,
@@ -32,9 +33,9 @@ from tests.simulation import (
     select,
 )
 
-Feature = models.ControlFeature
-Status = models.ControlStatus
-Model = models.InverterModel
+Feature = device_models.ControlFeature
+Status = device_models.ControlStatus
+Model = device_models.InverterModel
 
 MODELS: Final = (Model.POWEROCEAN_PLUS, Model.POWEROCEAN_SINGLE_PHASE)
 CAP: Final = 6000.0
@@ -253,7 +254,8 @@ def test_a_guard_stops_a_command_from_the_first_watt(
     run = sim.run(polls=SETTLE_POLLS, solar=solar, house=house)
 
     assert (
-        max(abs(watts) for watts in run.battery[LAST_MINUTE]) <= const.HOLD_SETPOINT_W
+        max(abs(watts) for watts in run.battery[LAST_MINUTE])
+        <= device_const.HOLD_SETPOINT_W
     )
 
 
