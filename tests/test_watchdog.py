@@ -579,3 +579,19 @@ def test_a_log_alert_keeps_its_id_when_its_module_moves() -> None:
         old == f"log_{zlib.crc32(f'{package}.reading_checks:{template}'.encode()):08x}"
     )
     assert watchdog.log_alert(f"{package}.outage", template) != old
+
+
+@pytest.mark.parametrize(
+    "logger",
+    (
+        "custom_components.ef_powerocean_tcpmodbus",
+        "custom_components.ef_powerocean_tcpmodbus.coordinator",
+        "custom_components.ef_powerocean_tcpmodbus.reading_checks",
+    ),
+)
+def test_a_log_alert_has_the_id_it_always_had(logger: str) -> None:
+    """The id is the one alerts were stored under before modules moved."""
+    template = "Something went wrong: %s"
+    before = f"log_{zlib.crc32(f'{logger}:{template}'.encode()):08x}"
+
+    assert watchdog.log_alert(logger, template) == before

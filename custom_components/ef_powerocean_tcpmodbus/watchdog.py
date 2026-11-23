@@ -549,11 +549,13 @@ def log_alert(logger: str, template: str) -> str:
     """Return the alert for a kind of message, whatever values it carried.
 
     Keyed by the module's name alone, as if it sat at the top of the package, so
-    moving a module keeps the alerts the user ignored for it.
+    moving a module keeps the alerts the user ignored for it. The package's own
+    logger, the one of __init__.py, keeps its name.
     """
-    module = logger.rsplit(".", 1)[-1]
-    key = f"{_PACKAGE_LOGGER}.{module}:{template}"
-    return f"log_{zlib.crc32(key.encode()):08x}"
+    name = logger
+    if logger.startswith(f"{_PACKAGE_LOGGER}."):
+        name = f"{_PACKAGE_LOGGER}.{logger.rsplit('.', 1)[-1]}"
+    return f"log_{zlib.crc32(f'{name}:{template}'.encode()):08x}"
 
 
 class _Forwarder(logging.Handler):
