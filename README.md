@@ -373,7 +373,9 @@ Each kind of alert is one issue, updated at most every 10 minutes with how often
 when it was seen. Open it to ignore it this time, until it goes away and comes back;
 for 24 hours; until the next release of the integration; or permanently. Setting the verbosity back to Essential forgets every alert
 you ignored. The alerts only watch: they never change what the integration does.
-Debug is meant for testing a release on a live inverter.
+Debug is meant for testing a release on a live inverter. A failed poll is still
+logged at once, but raised only if polls keep failing for 3 minutes, since the
+inverter misses a poll now and then.
 
 ### Removing the Integration
 

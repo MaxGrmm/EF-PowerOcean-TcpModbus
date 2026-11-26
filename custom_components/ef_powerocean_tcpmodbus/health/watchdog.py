@@ -10,6 +10,10 @@ rule that breaks is switched off and logged once.
 Each rule raises one repairs issue, updated in place as it recurs, so a problem
 that repeats every poll is one issue with a count, not hundreds. Each can be
 ignored this time, permanently, until the next release, or for a day.
+
+A failed poll is logged at once but raised only if polls still fail a few
+minutes later: the inverter misses a poll now and then, as when it does its own
+work early in the morning, and a poll that recovers is nothing to act on.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.loader import async_get_integration
 from homeassistant.util import dt
@@ -48,6 +53,10 @@ _PACKAGE_LOGGER: Final = f"custom_components.{DOMAIN}"
 UPDATE_EVERY: Final = timedelta(minutes=10)
 # How long "ignore for a day" lasts.
 IGNORE_FOR: Final = timedelta(hours=24)
+# How long polls must keep failing before the logged failure is raised.
+FAILED_POLLS_GRACE: Final = timedelta(minutes=3)
+# What Home Assistant logs, once, when a poll fails after a good one.
+_POLL_FAILED_TEMPLATE: Final = "Error fetching %s data: %s"
 STORAGE_VERSION: Final = 1
 
 # The watchdog running for each entry, for the fix flows to reach.
@@ -340,6 +349,16 @@ RULES: Final[tuple[type[Rule], ...]] = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _Held:
+    """A logged poll failure, waiting to see whether polls recover."""
+
+    logger: str
+    message: str
+    template: str
+    at: datetime
+
+
 @dataclass(slots=True)
 class _Seen:
     count: int
@@ -495,6 +514,8 @@ class Watchdog:
         self._rules: list[Rule] = [
             rule() for rule in RULES if rule.level.rank <= verbosity.rank
         ]
+        self._held: _Held | None = None
+        self._cancel_held: Callable[[], None] | None = None
 
     @callback
     def async_ignore_this_time(self, alert: str) -> None:
@@ -522,6 +543,8 @@ class Watchdog:
 
     @callback
     def observe(self, view: PollView) -> None:
+        if view.ok:
+            self._drop_held()
         for rule in list(self._rules):
             try:
                 message = rule.check(view)
@@ -536,12 +559,55 @@ class Watchdog:
 
     @callback
     def log_record(self, logger: str, message: str, template: str) -> None:
-        """Raise a warning or error the integration logged."""
+        """Raise a warning or error the integration logged.
+
+        A failed poll waits FAILED_POLLS_GRACE first. Home Assistant logs it
+        once per run of failures and tells no listener while the failures go
+        on, so a timer, not the next poll, decides.
+        """
+        now = dt.now()
+        if template != _POLL_FAILED_TEMPLATE:
+            self._raise(logger, message, template, now)
+            return
+        if self._held is not None:
+            return
+        self._held = _Held(logger, message, template, now)
+        self._cancel_held = async_call_later(
+            self._notifier.hass, FAILED_POLLS_GRACE, self._raise_held
+        )
+
+    @callback
+    def _raise_held(self, _now: datetime) -> None:
+        held, self._held, self._cancel_held = self._held, None, None
+        if held is None:
+            return
+        since = f"{dt.as_local(held.at):%H:%M:%S}"
+        minutes = int(FAILED_POLLS_GRACE.total_seconds() // 60)
+        self._raise(
+            held.logger,
+            f"{held.message}\n\nPolls have failed since {since}, "
+            f"for more than {minutes} minutes.",
+            held.template,
+            dt.now(),
+        )
+
+    @callback
+    def _drop_held(self) -> None:
+        if self._cancel_held is not None:
+            self._cancel_held()
+        self._held = self._cancel_held = None
+
+    @callback
+    def async_stop(self) -> None:
+        """Forget a failed poll still waiting to be raised."""
+        self._drop_held()
+
+    def _raise(self, logger: str, message: str, template: str, at: datetime) -> None:
         self._notifier.notify(
             log_alert(logger, template),
             f"Logged by {logger.rsplit('.', 1)[-1]}",
             message,
-            dt.now(),
+            at,
         )
 
 
@@ -669,6 +735,7 @@ async def async_start(
     def _stop() -> None:
         remove_listener()
         package.removeHandler(handler)  # a no-op unless it was added
+        watchdog.async_stop()
         _RUNNING.pop(entry.entry_id, None)
         notifier.async_clear()
 
