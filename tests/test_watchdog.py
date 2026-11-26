@@ -505,6 +505,106 @@ def test_warnings_the_integration_logs_become_alerts(issues: SimpleNamespace) ->
     assert issues.created.call_args.kwargs["data"]["message"].startswith("Odd value 42")
 
 
+class _Timers:
+    """Stands in for async_call_later, firing only when the test says so."""
+
+    def __init__(self) -> None:
+        self.pending: list[Any] = []
+        self.cancelled = 0
+
+    def call_later(self, _hass: Any, delay: timedelta, action: Any) -> Any:
+        assert delay == watchdog.FAILED_POLLS_GRACE
+        self.pending.append(action)
+
+        def cancel() -> None:
+            self.cancelled += 1
+            self.pending.remove(action)
+
+        return cancel
+
+    def fire(self) -> None:
+        for action in list(self.pending):
+            self.pending.remove(action)
+            action(T0 + watchdog.FAILED_POLLS_GRACE)
+
+
+@pytest.fixture
+def timers(monkeypatch: pytest.MonkeyPatch) -> _Timers:
+    timers = _Timers()
+    monkeypatch.setattr(watchdog, "async_call_later", timers.call_later)
+    return timers
+
+
+def _log_poll_failed(dog: watchdog.Watchdog) -> None:
+    dog.log_record(
+        "custom_components.ef_powerocean_tcpmodbus.coordinator",
+        "Error fetching ef_powerocean_tcpmodbus data: Read failed",
+        "Error fetching %s data: %s",
+    )
+
+
+def test_a_failed_poll_that_recovers_in_time_raises_nothing(
+    issues: SimpleNamespace, timers: _Timers
+) -> None:
+    dog = watchdog.Watchdog(watchdog.Notifier(cast(Any, SimpleNamespace()), "entry"))
+    _log_poll_failed(dog)
+    issues.created.assert_not_called()
+
+    dog.observe(_view(60))
+
+    assert timers.cancelled == 1
+    assert not timers.pending
+    issues.created.assert_not_called()
+
+
+def test_polls_that_keep_failing_are_raised_after_the_grace(
+    issues: SimpleNamespace, timers: _Timers
+) -> None:
+    dog = watchdog.Watchdog(watchdog.Notifier(cast(Any, SimpleNamespace()), "entry"))
+    _log_poll_failed(dog)
+    # Failed polls in between do not decide, nor start a second wait.
+    dog.observe(_view(30, ok=False))
+    _log_poll_failed(dog)
+    assert len(timers.pending) == 1
+
+    timers.fire()
+
+    issues.created.assert_called_once()
+    data = issues.created.call_args.kwargs["data"]
+    assert data["message"].startswith("Error fetching")
+    assert "more than 3 minutes" in data["message"]
+    # The same alert as before, so an ignore the user chose still holds.
+    assert data["alert"] == watchdog.log_alert(
+        "custom_components.ef_powerocean_tcpmodbus.coordinator",
+        "Error fetching %s data: %s",
+    )
+
+
+def test_other_logged_errors_are_raised_at_once(
+    issues: SimpleNamespace, timers: _Timers
+) -> None:
+    dog = watchdog.Watchdog(watchdog.Notifier(cast(Any, SimpleNamespace()), "entry"))
+    dog.log_record(
+        "custom_components.ef_powerocean_tcpmodbus.coordinator",
+        "Unexpected error fetching ef_powerocean_tcpmodbus data",
+        "Unexpected error fetching %s data",
+    )
+    issues.created.assert_called_once()
+    assert not timers.pending
+
+
+def test_stopping_forgets_a_failed_poll_still_waiting(
+    issues: SimpleNamespace, timers: _Timers
+) -> None:
+    dog = watchdog.Watchdog(watchdog.Notifier(cast(Any, SimpleNamespace()), "entry"))
+    _log_poll_failed(dog)
+
+    dog.async_stop()
+
+    assert timers.cancelled == 1
+    issues.created.assert_not_called()
+
+
 def test_watching_starts_and_stops_with_the_entry(
     issues: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
