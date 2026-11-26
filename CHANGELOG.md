@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [2.11.0] - 2026-11-26
+
 ### Added
 
 - An **Inverter Reactive Power** sensor (diagnostic), from register 40024 in [EcoFlow's register schema](https://github.com/ecoflow-oasis-official/ha-ecoflow-official/blob/main/custom_components/ha_ecoflow_official/registers_schema.py). Confirmed on a PowerOcean Plus, where it follows the built-in meter like Inverter AC Power. On a model that refuses the register, the read is dropped and the sensor stays unknown.
