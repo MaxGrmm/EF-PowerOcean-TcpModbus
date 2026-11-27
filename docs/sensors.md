@@ -113,7 +113,7 @@ so the integration disables them, and enables them again once a meter reports.
 
 _Battery heating_ is not in EcoFlow's protocol. A PowerOcean Three Phase reports it
 in the System Status while it heats its batteries in the cold, around 0 °C, and
-lists a Battery temperature too low fault (256) for each pack meanwhile. The heater
+lists fault 256, Battery temperature too low, for each pack meanwhile. The heater
 takes its power through the inverter, not from the battery cells, and it blocks
 charging while it runs. _Battery Power_ and the battery charged energy count the
 heater's power as charging.
