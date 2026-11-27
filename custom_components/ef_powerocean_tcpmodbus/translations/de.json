@@ -208,6 +208,7 @@
     },
     "fault_code": {
       "options": {
+        "80": "PV3-Hardware-Überstrom",
         "100": "Stromausfall",
         "101": "Unterspannung im Netz",
         "102": "Überspannung im Netz",
@@ -222,6 +223,7 @@
         "256": "Batterie-Untertemperatur",
         "521": "Kommunikationsfehler des Energiespeichers",
         "532": "Fehler in 12-V-Hilfsspannung",
+        "583": "Energiespeichermodul-Knopf AUS",
         "700": "Netzunabhängiges Ereignis des Geräts",
         "702": "Energiesparmodus",
         "703": "Benachrichtigung beim Einschalten des EMS-Moduls"

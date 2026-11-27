@@ -208,6 +208,7 @@
     },
     "fault_code": {
       "options": {
+        "80": "PV3 hardware overcurrent",
         "100": "Power outage",
         "101": "Grid undervoltage",
         "102": "Grid overvoltage",
@@ -222,6 +223,7 @@
         "256": "Battery temperature too low",
         "521": "Energy storage communication error",
         "532": "12V auxiliary power voltage fault",
+        "583": "Energy storage module knob OFF",
         "700": "Device off-grid event",
         "702": "Low power mode",
         "703": "EMS module power-on notification"
