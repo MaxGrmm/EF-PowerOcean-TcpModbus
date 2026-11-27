@@ -208,6 +208,7 @@
     },
     "fault_code": {
       "options": {
+        "80": "PV3 hardware overcurrent",
         "100": "Power outage",
         "101": "Grid undervoltage",
         "102": "Grid overvoltage",
@@ -219,8 +220,10 @@
         "163": "12V auxiliary power fault",
         "179": "Inverter module power-on notification",
         "203": "BP module power-on notification",
+        "256": "Battery temperature too low",
         "521": "Energy storage communication error",
         "532": "12V auxiliary power voltage fault",
+        "583": "Energy storage module knob OFF",
         "700": "Device off-grid event",
         "702": "Low power mode",
         "703": "EMS module power-on notification"
@@ -552,6 +555,7 @@
           "standby": "Standby",
           "self_consumption": "Self-consumption",
           "ai": "AI",
+          "battery_heating": "Battery heating",
           "unknown": "Unknown"
         }
       },
@@ -645,6 +649,9 @@
       },
       "intelligent_mode_ena": {
         "name": "Intelligent Mode"
+      },
+      "battery_heating": {
+        "name": "Battery Heating"
       },
       "system_fault": {
         "name": "System Fault"

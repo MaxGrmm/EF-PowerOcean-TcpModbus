@@ -22,6 +22,7 @@ _OPERATING_MODE_SHIFT = 4
 _OPERATING_MODE_MASK = 0b111
 _SELF_USE_MODE = 1
 _INTELLIGENT_MODE = 2
+_BATTERY_HEATING_MODE = 7
 
 SYSTEM_ALERTS_NONE = "none"
 # Home Assistant shows a longer state as unknown; all 23 codes run to 463.
@@ -228,6 +229,7 @@ _OPERATING_MODES = {
     0: OperatingMode.STANDBY,
     1: OperatingMode.SELF_CONSUMPTION,
     2: OperatingMode.AI,
+    _BATTERY_HEATING_MODE: OperatingMode.BATTERY_HEATING,
 }
 
 
@@ -346,6 +348,7 @@ def calculate_derived_values(
         operating_mode = system_modes >> _OPERATING_MODE_SHIFT & _OPERATING_MODE_MASK
         calculated["self_use_mode_ena"] = operating_mode == _SELF_USE_MODE
         calculated["intelligent_mode_ena"] = operating_mode == _INTELLIGENT_MODE
+        calculated["battery_heating"] = operating_mode == _BATTERY_HEATING_MODE
         calculated["operating_mode"] = _OPERATING_MODES.get(
             operating_mode, OperatingMode.UNKNOWN
         )

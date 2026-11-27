@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- A **Battery Heating** binary sensor, and Battery heating as an Operating Mode, for the operating state 7 that a PowerOcean Three Phase reports while it heats its batteries. It is not in EcoFlow's protocol, so the Operating Mode showed Unknown meanwhile.
+- Fault codes 80 (PV3 hardware overcurrent) and 583 (Energy storage module knob OFF) are named, from the EcoFlow portal.
+- Fault code 256 is named Battery temperature too low, after what the EcoFlow portal calls it (Batterie-Untertemperatur). A PowerOcean Three Phase reports it once per battery pack while it heats the batteries.
+
 ## [2.11.0] - 2026-11-26
 
 ### Added

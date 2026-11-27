@@ -255,6 +255,9 @@ class OperatingMode(StrEnum):
     STANDBY = "standby"
     SELF_CONSUMPTION = "self_consumption"
     AI = "ai"
+    # Not in the protocol. A PowerOcean Three Phase reports it while it heats
+    # the batteries in the cold.
+    BATTERY_HEATING = "battery_heating"
     UNKNOWN = "unknown"
 
 

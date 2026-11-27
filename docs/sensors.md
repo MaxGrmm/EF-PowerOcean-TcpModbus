@@ -97,18 +97,26 @@ so the integration disables them, and enables them again once a meter reports.
 
 ## Status
 
-| Sensor            | Values                          | Description                                   |
-| ----------------- | ------------------------------- | --------------------------------------------- |
-| Grid Mode         | Grid-connected / Islanded       | On-grid or off-grid operation                 |
-| Operating Mode    | Standby / Self-consumption / AI | Working mode reported by the inverter         |
-| Self-powered Mode | Active / Inactive               | Self-consumption mode                         |
-| Intelligent Mode  | Active / Inactive               | AI mode                                       |
-| System Fault      |                                 | Device reports an abnormal system state       |
-| System Powered On |                                 | Device is powered on (diagnostic)             |
-| Modbus Control    |                                 | The device is accepting our commands          |
-| Control Status    |                                 | What the selected battery mode is achieving   |
-| Control Test      | Idle / Running / Done / Aborted | The last run of the control test (diagnostic) |
-| Reading Check     | Problem / OK                    | A check shows readings wrong (diagnostic)     |
+| Sensor            | Values                                            | Description                                   |
+| ----------------- | ------------------------------------------------- | --------------------------------------------- |
+| Grid Mode         | Grid-connected / Islanded                         | On-grid or off-grid operation                 |
+| Operating Mode    | Standby / Self-consumption / AI / Battery heating | Working mode reported by the inverter         |
+| Self-powered Mode | Active / Inactive                                 | Self-consumption mode                         |
+| Intelligent Mode  | Active / Inactive                                 | AI mode                                       |
+| Battery Heating   | Running / Not running                             | The inverter is heating the batteries         |
+| System Fault      |                                                   | Device reports an abnormal system state       |
+| System Powered On |                                                   | Device is powered on (diagnostic)             |
+| Modbus Control    |                                                   | The device is accepting our commands          |
+| Control Status    |                                                   | What the selected battery mode is achieving   |
+| Control Test      | Idle / Running / Done / Aborted                   | The last run of the control test (diagnostic) |
+| Reading Check     | Problem / OK                                      | A check shows readings wrong (diagnostic)     |
+
+_Battery heating_ is not in EcoFlow's protocol. A PowerOcean Three Phase reports it
+in the System Status while it heats its batteries in the cold, around 0 °C, and
+lists fault 256, Battery temperature too low, for each pack meanwhile. The heater
+takes its power through the inverter, not from the battery cells, and it blocks
+charging while it runs. _Battery Power_ and the battery charged energy count the
+heater's power as charging.
 
 ## Faults (Diagnostic)
 
