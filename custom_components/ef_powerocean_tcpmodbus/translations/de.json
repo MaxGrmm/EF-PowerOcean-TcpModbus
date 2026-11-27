@@ -553,6 +553,7 @@
           "standby": "Standby",
           "self_consumption": "Eigenverbrauch",
           "ai": "KI",
+          "battery_heating": "Batterieheizung",
           "unknown": "Unbekannt"
         }
       },
@@ -649,6 +650,9 @@
       },
       "intelligent_mode_ena": {
         "name": "Intelligenter Modus"
+      },
+      "battery_heating": {
+        "name": "Batterieheizung"
       },
       "system_fault": {
         "name": "Systemfehler",

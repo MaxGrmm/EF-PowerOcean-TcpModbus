@@ -692,6 +692,10 @@ BINARY_SENSOR_MAP: list[BinarySensorEntityDescription] = [
     BinarySensorEntityDescription(key="self_use_mode_ena"),
     BinarySensorEntityDescription(key="intelligent_mode_ena"),
     BinarySensorEntityDescription(
+        key="battery_heating",
+        device_class=BinarySensorDeviceClass.RUNNING,
+    ),
+    BinarySensorEntityDescription(
         key="system_fault",
         device_class=BinarySensorDeviceClass.PROBLEM,
     ),

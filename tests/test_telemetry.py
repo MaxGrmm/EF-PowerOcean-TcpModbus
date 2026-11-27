@@ -376,17 +376,19 @@ def test_system_alerts_fit_in_a_state_and_count_the_rest() -> None:
 
 
 @pytest.mark.parametrize(
-    ("field", "mode", "self_use", "intelligent"),
+    ("field", "mode", "self_use", "intelligent", "heating"),
     (
-        (0, "standby", False, False),
-        (1, "self_consumption", True, False),
-        (2, "ai", False, True),
-        (3, "unknown", False, False),
-        (7, "unknown", False, False),
+        (0, "standby", False, False, False),
+        (1, "self_consumption", True, False, False),
+        (2, "ai", False, True, False),
+        (3, "unknown", False, False, False),
+        # Not in the protocol: 4116 becomes 4212 on a PowerOcean Three Phase while
+        # it heats the batteries.
+        (7, "battery_heating", False, False, True),
     ),
 )
 def test_the_operating_status_is_one_enumeration_not_three_flags(
-    field: int, mode: str, self_use: bool, intelligent: bool
+    field: int, mode: str, self_use: bool, intelligent: bool, heating: bool
 ) -> None:
     calculated = calculate_derived_values(
         TelemetryData(system_modes=float(field << 4)),
@@ -397,6 +399,26 @@ def test_the_operating_status_is_one_enumeration_not_three_flags(
     assert calculated["operating_mode"] == mode
     assert calculated["self_use_mode_ena"] is self_use
     assert calculated["intelligent_mode_ena"] is intelligent
+    assert calculated["battery_heating"] is heating
+
+
+def test_reads_battery_heating_from_the_reported_system_status() -> None:
+    """The two values a PowerOcean Three Phase reported, heater off and on."""
+    off, on = (
+        calculate_derived_values(
+            TelemetryData(system_modes=float(word)),
+            calculate_solar_power=False,
+            startup_voltage=0,
+        )
+        for word in (4116, 4212)
+    )
+
+    assert off["operating_mode"] == "self_consumption"
+    assert off["battery_heating"] is False
+    assert on["operating_mode"] == "battery_heating"
+    assert on["battery_heating"] is True
+    assert on["bms_connected"] is True
+    assert on["system_power_on"] is True
 
 
 def test_lists_the_active_fault_codes_in_decimal() -> None:

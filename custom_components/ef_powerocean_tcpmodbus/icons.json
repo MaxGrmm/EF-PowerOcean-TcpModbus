@@ -1,5 +1,10 @@
 {
   "entity": {
+    "binary_sensor": {
+      "battery_heating": {
+        "default": "mdi:heating-coil"
+      }
+    },
     "number": {
       "battery_reserve_soc": {
         "default": "mdi:battery-lock"
