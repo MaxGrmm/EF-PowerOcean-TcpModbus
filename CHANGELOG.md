@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Fault code 256 is named Battery undertemperature, as the EcoFlow portal calls it. A PowerOcean Three Phase reports it once per battery pack while it heats the batteries.
+
 ## [2.11.0] - 2026-11-26
 
 ### Added
